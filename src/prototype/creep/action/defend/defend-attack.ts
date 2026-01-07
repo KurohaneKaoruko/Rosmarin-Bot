@@ -14,14 +14,13 @@ const autoDefend = function (creep: Creep) {
     });
     // 如果没有 rampart，则直接返回或执行其他逻辑
     if (ramparts.length === 0) {
-        // 可以添加日志或其他处理逻辑
         return;
     }
-    // 查找当前房间的所有敌对 creep
-    const hostileCreeps = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS);
+
+    // 使用 findHostileCreeps 方法查找敌对 creep
+    const hostileCreeps = creep.findHostileCreeps();
     // 如果没有敌对 creep，也可以考虑是否继续执行或返回
     if (hostileCreeps.length === 0) {
-        // 可以添加日志或其他处理逻辑
         return;
     }
     
@@ -46,25 +45,13 @@ const autoDefend = function (creep: Creep) {
     // 如果有找到最近的 rampart，则前往该位置
     if (closestRampart) {
         creep.moveTo(closestRampart.pos, { visualizePathStyle: { stroke: '#ff0000' } });
-    } else {
     }
-    const target = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+
+    // 使用 autoAttack 方法自动攻击最近的敌人
+    const target = creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
-        // creep.attack(target)
-            // 检查 creep 是否携带 ATTACK 部件
-        const hasAttackPart = creep.body.some(part => part.type === ATTACK);
-        // 检查 creep 是否携带 RANGED_ATTACK 部件
-        const hasRangedAttackPart = creep.body.some(part => part.type === RANGED_ATTACK);
-    
-        // 根据携带的部件类型进行攻击
-        if (hasAttackPart && !hasRangedAttackPart || // 如果有 ATTACK 且没有 RANGED_ATTACK
-            (hasAttackPart && hasRangedAttackPart && creep.pos.getRangeTo(target) <= 3)) { // 或者两者都有但距离足够近以进行近战
-            const result = creep.attack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        } else if (hasRangedAttackPart) { // 如果有 RANGED_ATTACK
-            const result = creep.rangedAttack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        }
+        const result = creep.autoAttack(target);
+        if(result == OK) creep.room.CallTowerAttack(target);
     }
 }
 
@@ -72,22 +59,15 @@ const flagDefend = function (creep: Creep, flag: Flag) {
     if(!creep.pos.isEqual(flag.pos)) {
         creep.moveTo(flag.pos, { visualizePathStyle: { stroke: '#ff0000' } });
     }
-    const target = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+
+    // 使用 findHostileCreeps 方法查找敌对 creep
+    const hostileCreeps = creep.findHostileCreeps();
+    const target = creep.pos.findClosestByRange(hostileCreeps);
+    
     if(target) {
-        // creep.attack(target)
-            // 检查 creep 是否携带 ATTACK 部件
-        const hasAttackPart = creep.body.some(part => part.type === ATTACK);
-        // 检查 creep 是否携带 RANGED_ATTACK 部件
-        const hasRangedAttackPart = creep.body.some(part => part.type === RANGED_ATTACK);
-        // 根据携带的部件类型进行攻击
-        if (hasAttackPart && !hasRangedAttackPart || // 如果有 ATTACK 且没有 RANGED_ATTACK
-            (hasAttackPart && hasRangedAttackPart && creep.pos.getRangeTo(target) <= 3)) { // 或者两者都有但距离足够近以进行近战
-            const result = creep.attack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        } else if (hasRangedAttackPart) { // 如果有 RANGED_ATTACK
-            const result = creep.rangedAttack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        }
+        // 使用 autoAttack 方法自动攻击
+        const result = creep.autoAttack(target);
+        if(result == OK) creep.room.CallTowerAttack(target);
     }
     
     if(flag && (creep.ticksToLive < 10 || creep.hits < 200)){

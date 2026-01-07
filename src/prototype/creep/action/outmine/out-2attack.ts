@@ -36,7 +36,7 @@ const out_double_attack = {
                 if (creep.pos.inRangeTo(targetEnemy, 3)) {
                     creep.rangedAttack(targetEnemy);
                 }
-                creep.doubleMoveTo(targetEnemy.pos, '#ff0000', { maxRoom: 1});
+                creep.doubleMoveTo(targetEnemy.pos, '#ff0000', { maxRooms: 1});
             }
         } else {
             if (creep.pos.x < 5 || creep.pos.x > 45 || creep.pos.y < 5 || creep.pos.y > 45) {

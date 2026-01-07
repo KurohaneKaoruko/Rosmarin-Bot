@@ -20,9 +20,9 @@ function FlagActionAttack(creep: Creep) {
         return true;
     }
 
-    const enemies = aFlag.pos.findInRange(FIND_HOSTILE_CREEPS, 5,{
-        filter: (c) => !c.my && !c.isWhiteList()
-    });
+    // 使用 findHostileCreeps 查找敌人，然后过滤在旗帜范围内的
+    const allEnemies = creep.findHostileCreeps();
+    const enemies = allEnemies.filter(c => aFlag.pos.inRangeTo(c.pos, 5));
 
     if (enemies.length > 0) {
         const targetEnemy = creep.pos.findClosestByPath(enemies);
@@ -44,14 +44,14 @@ function FlagActionAttack(creep: Creep) {
 function AutoFindTarget(creep: Creep) {
     let room = creep.room;
 
-    // 找敌方creep
-    const enemies = room.find(FIND_HOSTILE_CREEPS, {
-        filter: (c) => !c.my && !c.isWhiteList() &&
+    // 使用 findHostileCreeps 找敌方creep
+    const allEnemies = creep.findHostileCreeps();
+    const enemies = allEnemies.filter((c) =>
         c.pos.findInRange(FIND_HOSTILE_CREEPS, 8)
         .filter((c: Creep) => !c.my && !c.isWhiteList() &&
         (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 5)) ||
         (c.getActiveBodyparts(RANGED_ATTACK) >= 30)).length == 0
-    });
+    );
     if (enemies.length > 0) {
         const targetEnemy = creep.pos.findClosestByPath(enemies);
         if (targetEnemy) {
@@ -142,12 +142,14 @@ function AutoActionAttack(creep: Creep) {
     //     target = Game.getObjectById(creep.memory['targetId']) as Structure;
     // }
 
-    // 规避
-    if (creep.pos.findInRange(FIND_HOSTILE_CREEPS, 6, {
-        filter: (c) => !c.isWhiteList() &&
+    // 使用 findHostileCreeps 检测危险敌人并规避
+    const nearbyHostiles = creep.findHostileCreeps(6);
+    const dangerousHostiles = nearbyHostiles.filter((c) =>
         (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 4)) ||
         (c.getActiveBodyparts(RANGED_ATTACK) >= 30 && c.pos.inRangeTo(creep, 6))
-    }).length) {
+    );
+    
+    if (dangerousHostiles.length > 0) {
         let result = creep.doubleFlee();
         if (result === OK) return true;
     }

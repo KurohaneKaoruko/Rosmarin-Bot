@@ -34,8 +34,9 @@ const deposit_harvest = {
                 // 最大站位数
                 if (!creep.room.memory) creep.room.memory = {} as any;
                 if (!creep.room.memory['depositMine']) creep.room.memory['depositMine'] = {};
-                let maxPosCount = creep.room.memory['depositMine'][d.id];
+                let maxPosCount = creep.room.memory['depositMine'][d.id] as number;
                 if (!maxPosCount) {
+                    maxPosCount = 0;
                     const terrain = new Room.Terrain(creep.room.name);
                     [[d.pos.x-1, d.pos.y-1], [d.pos.x, d.pos.y-1], [d.pos.x+1, d.pos.y-1],
                      [d.pos.x-1, d.pos.y], [d.pos.x+1, d.pos.y],

@@ -1,5 +1,3 @@
-
-
 const outCarry = {
     withdraw: function(creep: Creep) {
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -7,6 +5,7 @@ const outCarry = {
             return;
         }
         
+        // 处理缓存的目标
         if (creep.memory.cache.targetId) {
             let target = Game.getObjectById(creep.memory.cache.targetId) as any;
             if (!target) {
@@ -39,70 +38,43 @@ const outCarry = {
             delete creep.memory.cache.targetType;
         }
 
-        let container: StructureContainer;
-        const containers = creep.room.find(FIND_STRUCTURES, {
-            filter: (s) => s.structureType === STRUCTURE_CONTAINER &&
-                    s.store.getUsedCapacity() >= 300 &&
-                    Object.values(Memory.creeps).every((m) => 
-                        (m.role != 'out-carry' && m.role != 'out-car') ||  m.cache?.targetId !== s.id)
-        }) as StructureContainer[];
-        // 先找mineral旁边的container
+        // 先找mineral旁边的container (特殊逻辑，保留原有行为)
         if (creep.room.mineral) {
-            const mineralContainer = containers.find((container) =>
-                container.pos.inRangeTo(creep.room.mineral, 2));
-            if (mineralContainer) {
-                container = mineralContainer;
-                creep.memory.cache.targetId = container.id;
-                creep.memory.cache.targetType = 'container';
-                creep.moveTo(container, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
-                return;
+            const containers = creep.room.container?.filter((container: StructureContainer) =>
+                container && container.store.getUsedCapacity() >= 300 &&
+                container.pos.inRangeTo(creep.room.mineral, 2) &&
+                Object.values(Memory.creeps).every((m) => 
+                    (m.role != 'out-carry' && m.role != 'out-car') || m.cache?.targetId !== container.id)
+            );
+            if (containers && containers.length > 0) {
+                const container = creep.pos.findClosestByRange(containers);
+                if (container) {
+                    creep.memory.cache.targetId = container.id;
+                    creep.memory.cache.targetType = 'container';
+                    creep.moveTo(container, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                    return;
+                }
             }
         }
-        // 再找能量container
-        container = creep.pos.findClosestByRange(containers||[]);
-        if (container) {
-            creep.memory.cache.targetId = container.id;
-            creep.memory.cache.targetType = 'container';
-            creep.moveTo(container, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
+
+        // 使用 collectFromContainer 收集能量容器
+        if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) {
             return;
         }
 
-        // 再找掉落资源
-        const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES, 
-            {filter: (resource) => resource.amount > 500});
-        if (droppedResources && droppedResources.length > 0) {
-            const droppedResource = droppedResources.reduce((a, b) => {
-                if (a.resourceType !== RESOURCE_ENERGY && b.resourceType === RESOURCE_ENERGY) return a;
-                if (b.resourceType !== RESOURCE_ENERGY && a.resourceType === RESOURCE_ENERGY) return b;
-                return a.amount < b.amount ? b : a
-            });
-            creep.memory.cache.targetId = droppedResource.id;
-            creep.memory.cache.targetType = 'dropped';
-            creep.moveTo(droppedResource, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
+        // 使用 collectDroppedResource 收集掉落资源
+        if (creep.collectDroppedResource(undefined, 500)) {
             return;
         }
         
-        // 最后查找墓碑，优先级最低
-        const tombstones = creep.room.find(FIND_TOMBSTONES, {
-            filter: (tombstone) => tombstone.store.getUsedCapacity() > 0
-        });
-        if (tombstones.length > 0) {
-            const target = creep.pos.findClosestByRange(tombstones);
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.targetType = 'tombstone';
-            creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
+        // 使用 collectFromTombstone 收集墓碑资源
+        if (creep.collectFromTombstone()) {
             return;
         }
 
-        // 检查有没有这两种建筑
-        if (creep.room.storage || creep.room.terminal) {
-            const storage = creep.room.storage || creep.room.terminal;
-            if (storage.store[RESOURCE_ENERGY] > 0) {
-                creep.memory.cache.targetId = storage.id;
-                creep.memory.cache.targetType = 'container';
-                creep.moveTo(storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
-                return;
-            }
+        // 使用 collectFromStorage 收集存储资源
+        if (creep.collectFromStorage(RESOURCE_ENERGY, 0)) {
+            return;
         }
 
         // 如果没有可以拿的资源，移动到最近的out-harvest身边，或者out-mineral身边
@@ -235,34 +207,36 @@ const outCarry = {
         }
     },
 
-    buildRepair: function(creep) {
+    buildRepair: function(creep: Creep) {
         if(creep.room.name == creep.memory.homeRoom) return false;
         if(creep.memory.role !== 'out-car') return false;
         if(creep.store[RESOURCE_ENERGY] == 0) return false;
-        const roads = creep.room.road.filter((r: any) => {
+
+        // 使用 repairRoad 方法维修道路
+        // 只维修范围1内的道路
+        const roads = creep.room.road?.filter((r: any) => {
             if (!r || r.hits >= r.hitsMax * 0.8) return false;
             if (!creep.pos.inRangeTo(r.pos, 1)) return false;
             return true;
         });
-        if (roads.length > 0) {
+        if (roads && roads.length > 0) {
             const road = creep.pos.findClosestByRange(roads);
-            const result = creep.repair(road)
+            const result = creep.repair(road);
             if (creep.pos.isRoomEdge()) {
                 creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
             }
             if(result == OK) return true;
             if(result == ERR_NOT_IN_RANGE) { creep.moveTo(road); return true; }
         }
-        const roadSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES)
-        if (roadSite.length > 0) {
-            const site = creep.pos.findClosestByRange(roadSite);
-            const result = creep.build(site)
+
+        // 使用 buildRoad 方法建造道路
+        if (creep.buildRoad()) {
             if (creep.pos.isRoomEdge()) {
                 creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
             }
-            if(result == OK) return true;
-            if(result == ERR_NOT_IN_RANGE) { creep.moveTo(site); return true; }
+            return true;
         }
+
         creep.memory.dontPullMe = false;
         return false;
     },

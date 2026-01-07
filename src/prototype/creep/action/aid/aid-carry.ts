@@ -1,28 +1,18 @@
 function withdraw(creep: Creep) {
     if(!creep.memory['resource']) creep.memory['resource'] = RESOURCE_ENERGY;
 
-    const drop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 5, {
-        filter: (i) => i.resourceType === creep.memory['resource']
-    })[0]
-    if (drop) {
-        if (creep.pickup(drop) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(drop);
-        }
+    // 使用新的原型方法收集掉落资源（范围5格，无最小数量限制）
+    if (creep.collectDroppedResource(creep.memory['resource'], 0, 5)) {
         return;
     }
 
-    const tombstone = creep.pos.findInRange(FIND_TOMBSTONES, 5, {
-        filter: (i) => i.store.getUsedCapacity() > 0 && (i.store.getUsedCapacity(creep.memory['resource']))
-    })[0]
-    if (tombstone) {
-        if (creep.withdraw(tombstone, creep.memory['resource']) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(tombstone);
-        }
+    // 使用新的原型方法从墓碑收集资源
+    if (creep.collectFromTombstone(creep.memory['resource'])) {
         return;
     }
 
-    if (creep.room.name != creep.memory.sourceRoom) {
-        creep.moveToRoom(creep.memory.sourceRoom);
+    // 使用新的原型方法移动到资源房间
+    if (!creep.moveToSourceRoom()) {
         return;
     }
 
@@ -39,8 +29,8 @@ function withdraw(creep: Creep) {
 }
 
 function transfer(creep: Creep) {
-    if (creep.room.name != creep.memory.targetRoom) {
-        creep.moveToRoom(creep.memory.targetRoom);
+    // 使用新的原型方法移动到目标房间
+    if (!creep.moveToTargetRoom()) {
         return;
     }
 

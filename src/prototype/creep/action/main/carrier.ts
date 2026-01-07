@@ -1,13 +1,7 @@
 const CarryEnergySource = {
     tombstone: (creep) => findClosestUnclaimedResource(creep, FIND_TOMBSTONES, 100),
     ruin: (creep) => findClosestUnclaimedResource(creep, FIND_RUINS),
-    container: (creep) => {
-        const containers = creep.room.container
-            .filter((c: StructureContainer) => c && !c.pos.inRangeTo(creep.room.controller, 1) &&
-            (creep.room.storage ? c.store.getUsedCapacity() :
-                c.store[RESOURCE_ENERGY]) > Math.min(666, creep.store.getFreeCapacity()));
-        return creep.pos.findClosestByRange(containers);
-    },
+    // container 逻辑已移至 withdraw 函数中使用 collectFromContainer 方法
     storageOrTerminal: (creep) => {
         const storage = creep.room.storage;
         const terminal = creep.room.terminal;
@@ -94,33 +88,64 @@ const withdraw = (creep) => {
     if (!creep.room.CheckSpawnAndTower() && !controllerContainer &&
         !creep.room.storage && !creep.room.terminal) return false;
 
-    // 收集掉落的资源
-    const droppedResource = pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-        filter: r => r.resourceType !== RESOURCE_ENERGY
-    }) || pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-        filter: r => r.resourceType === RESOURCE_ENERGY && r.amount > 500
-    })
-    if (droppedResource && creep.room.storage) {
-        memory.dropWithdraw = true;
-        if (pos.inRangeTo(droppedResource, 1)) {
-            const result = creep.pickup(droppedResource);
-            if (result == OK && droppedResource.amount >= store.getFreeCapacity()) {
+    // 收集掉落的资源 - 使用 collectDroppedResource 方法
+    // 优先收集非能量资源，然后收集大量能量
+    if (creep.room.storage) {
+        // 先尝试收集非能量资源
+        const nonEnergyResources = pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
+            filter: r => r.resourceType !== RESOURCE_ENERGY
+        });
+        if (nonEnergyResources) {
+            memory.dropWithdraw = true;
+            creep.goPickup(nonEnergyResources);
+            if (pos.inRangeTo(nonEnergyResources, 1) && nonEnergyResources.amount >= store.getFreeCapacity()) {
                 return true;
             }
-        } else {
-            creep.moveTo(droppedResource, { visualizePathStyle: { stroke: '#ffaa00' } });
+            return;
         }
-        return;
+        // 再尝试收集大量能量 (>500)
+        if (creep.collectDroppedResource(RESOURCE_ENERGY, 500)) {
+            memory.dropWithdraw = true;
+            return;
+        }
     }
     if (memory.dropWithdraw) memory.dropWithdraw = false;
 
     // 从建筑收集资源
     if (!memory.cache.targetId) {
-        const target = CarryEnergySource.tombstone(creep) || CarryEnergySource.ruin(creep) ||
-                       CarryEnergySource.container(creep) || CarryEnergySource.storageOrTerminal(creep);
+        // 优先从墓碑和废墟收集
+        const target = CarryEnergySource.tombstone(creep) || CarryEnergySource.ruin(creep);
         if (target) {
             memory.cache.targetId = target.id;
             memory.cache.resourceType = Object.keys(target.store)[0];
+        } else {
+            // 使用 collectFromContainer 方法收集容器资源
+            // 当没有 storage 时只收集能量，有 storage 时收集任意资源
+            const minAmount = Math.min(666, store.getFreeCapacity());
+            if (!creep.room.storage) {
+                // 没有 storage 时，使用 collectFromContainer 收集能量
+                if (creep.collectFromContainer(minAmount, RESOURCE_ENERGY, true)) {
+                    return;
+                }
+            } else {
+                // 有 storage 时，需要收集任意资源，使用原有逻辑
+                const containers = creep.room.container
+                    .filter((c: StructureContainer) => c && !c.pos.inRangeTo(creep.room.controller, 1) &&
+                    c.store.getUsedCapacity() > minAmount);
+                const containerTarget = creep.pos.findClosestByRange(containers);
+                if (containerTarget) {
+                    memory.cache.targetId = containerTarget.id;
+                    memory.cache.resourceType = Object.keys(containerTarget.store)[0];
+                }
+            }
+            // 如果没有找到容器目标，尝试从 storage 或 terminal 收集
+            if (!memory.cache.targetId) {
+                const storageTarget = CarryEnergySource.storageOrTerminal(creep);
+                if (storageTarget) {
+                    memory.cache.targetId = storageTarget.id;
+                    memory.cache.resourceType = Object.keys(storageTarget.store)[0];
+                }
+            }
         }
     }
     const target = Game.getObjectById(memory.cache.targetId) as StructureContainer | StructureStorage | StructureTerminal | StructureLink;

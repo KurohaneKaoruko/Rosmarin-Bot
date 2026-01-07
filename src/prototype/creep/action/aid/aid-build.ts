@@ -44,44 +44,26 @@ const aid_build = {
             return;
         }
 
-        let dropEnergy = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES,
-            { filter: r => r.resourceType == RESOURCE_ENERGY || r.amount >= 500});
-        if (dropEnergy) {
-            creep.goPickup(dropEnergy);
-            if (dropEnergy.amount >= creep.store.getFreeCapacity()) {
+        // 使用 smartCollect 方法收集资源
+        // 优先级: 掉落资源 > 墓碑 > 废墟 > 容器 > 存储
+        if (creep.smartCollect(RESOURCE_ENERGY, {
+            includeDropped: true,
+            includeTombstone: true,
+            includeRuin: true,
+            includeContainer: true,
+            includeStorage: true,
+            minDroppedAmount: 50,
+            minContainerAmount: 0
+        })) {
+            // 检查是否收集完成
+            const freeCapacity = creep.store.getFreeCapacity();
+            if (freeCapacity === 0) {
                 creep.memory.action = '';
             }
             return;
         }
 
-        let containers = creep.room.container.filter(c => c.store[RESOURCE_ENERGY] > 0) || [];
-        let container = creep.pos.findClosestByRange(containers);
-        if (container) {
-            creep.goWithdraw(container, RESOURCE_ENERGY);
-            if (container.store[RESOURCE_ENERGY] >= creep.store.getFreeCapacity()) {
-                creep.memory.action = '';
-            }
-            return;
-        }
-
-        let storage = creep.room.storage;
-        if (storage && storage.store[RESOURCE_ENERGY] > 0) {
-            creep.goWithdraw(storage, RESOURCE_ENERGY);
-            if (storage.store[RESOURCE_ENERGY] >= creep.store.getFreeCapacity()) {
-                creep.memory.action = '';
-            }
-            return;
-        }
-
-        let terminal = creep.room.terminal;
-        if (terminal && terminal.store[RESOURCE_ENERGY] > 0) {
-            creep.goWithdraw(terminal, RESOURCE_ENERGY);
-            if (terminal.store[RESOURCE_ENERGY] >= creep.store.getFreeCapacity()) {
-                creep.memory.action = '';
-            }
-            return;
-        }
-
+        // 如果没有找到资源，尝试从 source 采集
         if (!creep.room.source) {
             if (Game.time % 10 !== 0) return;
             creep.room.update();
@@ -125,29 +107,20 @@ const aid_build = {
             return;
         }
 
-        const site = creep.room.find(FIND_CONSTRUCTION_SITES);
-        if (site.length === 0) {
+        // 使用 findAndBuild 方法查找并建造
+        // 优先级: road > spawn > storage > terminal > extension > tower
+        if (!creep.findAndBuild({
+            priority: [
+                STRUCTURE_ROAD,
+                STRUCTURE_SPAWN,
+                STRUCTURE_STORAGE,
+                STRUCTURE_TERMINAL,
+                STRUCTURE_EXTENSION,
+                STRUCTURE_TOWER
+            ]
+        })) {
             creep.memory.action = '';
-            return;
         }
-
-        let targetSite = creep.pos.findClosestByRange(site, {
-            filter: (s) => s.structureType == STRUCTURE_ROAD || s.structureType == STRUCTURE_SPAWN ||
-            s.structureType == STRUCTURE_STORAGE || s.structureType == STRUCTURE_TERMINAL
-        });
-
-        if (!targetSite) {
-            targetSite = creep.pos.findClosestByRange(site, {
-                filter: (s) => s.structureType == STRUCTURE_EXTENSION || s.structureType == STRUCTURE_TOWER
-            });
-        }
-
-        if (!targetSite) {
-            targetSite = creep.pos.findClosestByRange(site);
-        }
-
-        if (!targetSite) return;
-        creep.goBuild(targetSite);
     },
 
     repair: function (creep: Creep) {
@@ -167,11 +140,7 @@ const aid_build = {
             return;
         }
 
-        const repair = creep.room.find(FIND_STRUCTURES, {filter: (s) => s.hits < s.hitsMax * 0.8})
-        if (repair.length === 0) {
-            creep.memory.action = '';
-        }
-
+        // 如果有缓存的维修目标，继续维修
         if (creep.memory.cache?.repairTarget) {
             const repairTarget = Game.getObjectById(creep.memory.cache.repairTarget as Id<Structure>)
             if (repairTarget) {
@@ -185,7 +154,12 @@ const aid_build = {
             }
         }
 
-        creep.memory.action = '';
+        // 使用 findAndRepair 方法查找并维修
+        if (!creep.findAndRepair({
+            maxHitsRatio: 0.8
+        })) {
+            creep.memory.action = '';
+        }
     },
 
     upgrade: function (creep: Creep) {
