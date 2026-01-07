@@ -299,4 +299,61 @@ export default class BaseFunction extends Creep {
         let whiteList = new Set<string>(Memory['whitelist'] || []);
         return whiteList.has(this.owner.username);
     }
+
+    /**
+     * 检查 boost 是否就绪（简化版）
+     * 检查 creep 是否已完成所有需要的 boost，或者不需要 boost
+     * @returns boolean - true 表示 boost 就绪或不需要 boost
+     */
+    isBoostReady(): boolean {
+        // 如果 creep 没有配置 boostmap，则不需要 boost
+        const boostmap = this.memory['boostmap'] as { [part: string]: string } | undefined;
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            return true;
+        }
+
+        // 检查所有需要 boost 的部件是否都已被 boost
+        const allBoosted = this.body.every(part => {
+            // 如果该部件类型不在 boostmap 中，则不需要 boost
+            if (!boostmap[part.type]) return true;
+            // 如果该部件已被 boost，则通过
+            return !!part.boost;
+        });
+
+        return allBoosted;
+    }
+
+    /**
+     * 切换任务状态
+     * 根据 creep 的存储容量状态返回应该切换到的状态
+     * @param resourceType 检查的资源类型，默认检查所有资源
+     * @returns 'source' | 'target' | null - 'source' 表示需要获取资源，'target' 表示需要执行任务，null 表示不需要切换
+     */
+    switchTaskState(resourceType?: ResourceConstant): 'source' | 'target' | null {
+        if (resourceType) {
+            // 检查特定资源类型
+            const usedCapacity = this.store.getUsedCapacity(resourceType);
+            const freeCapacity = this.store.getFreeCapacity(resourceType);
+            
+            if (usedCapacity === 0) {
+                return 'source';
+            }
+            if (freeCapacity === 0) {
+                return 'target';
+            }
+        } else {
+            // 检查所有资源
+            const usedCapacity = this.store.getUsedCapacity();
+            const freeCapacity = this.store.getFreeCapacity();
+            
+            if (usedCapacity === 0) {
+                return 'source';
+            }
+            if (freeCapacity === 0) {
+                return 'target';
+            }
+        }
+        
+        return null;
+    }
 }

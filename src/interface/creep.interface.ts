@@ -19,6 +19,8 @@ interface Creep {
     Boost(boostmap: any): number;
     unboost(): boolean;
     isWhiteList(): boolean;
+    isBoostReady(): boolean;
+    switchTaskState(resourceType?: ResourceConstant): 'source' | 'target' | null;
 
     goBoost(boostTypes: string[], must?: boolean, reserve?: boolean): boolean;
     goHaverst(target: Source | Mineral): boolean;
