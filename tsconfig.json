@@ -1,0 +1,28 @@
+{
+  "types": ["screeps"],
+  "compilerOptions": {
+    "target": "ES2017", // 指定 ECMAScript 目标版本
+    "module": "esnext", // 指定模块系统的类型
+    "moduleResolution": "node", // 模块解析策略
+    "lib": ["ES2018"], // 指定要包含的库文件
+    "outDir": "./dist", // 输出目录
+    "rootDir": "./src", // 根目录
+    "baseUrl": ".", // 基础目录，用于解析非相对模块名称
+    "paths": { // 路径映射
+      "@/*": ["./src/*"] // 将 @ 符号映射到 src 目录
+    },
+    "esModuleInterop": true, // 启用 ECMAScript 模块的互操作性
+    "strict": false, // 启用所有严格类型检查选项
+    "strictNullChecks": false, // 启用严格的 null 检查
+    "resolveJsonModule": true, // 允许导入 JSON 模块
+    "skipLibCheck": true, // 跳过库文件的类型检查
+    "forceConsistentCasingInFileNames": true, // 强制文件名一致性
+    "allowJs": true, // 允许 JavaScript 文件
+    "declaration": false, // 生成声明文件
+    "sourceMap": true, // 生成源映射文件
+    "noImplicitAny": false, // 是否禁止隐式的 any 类型
+    "experimentalDecorators": true // 是否启用实验性的装饰器
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

@@ -1,0 +1,7 @@
+node_modules
+.secret.json
+dist
+.vscode
+.idea
+.kiro
+package-lock.json
