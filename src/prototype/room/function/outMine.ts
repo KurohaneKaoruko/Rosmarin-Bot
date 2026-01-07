@@ -343,7 +343,8 @@ export default class OutMine extends Room {
         // 孵化任务数统计
         const SpawnMissionNum = this.getSpawnMissionNum() || {};
         for (const targetRoom in depositMines) {
-            const mineData = depositMines[targetRoom];
+            const mineData = depositMines[targetRoom] as DepositMineTaskData;
+            if (typeof mineData === 'number') continue; // 跳过位置数据
             let D_num = mineData.num;
             if (!D_num || D_num <= 0) {
                 delete this.memory['depositMine'][targetRoom];

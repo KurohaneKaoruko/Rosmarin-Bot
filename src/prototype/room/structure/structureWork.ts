@@ -188,11 +188,11 @@ export default class StructureWork extends Room {
         if (!product) return;
 
         // 原料
-        const components = COMMODITIES[product]?.components;
+        const components = COMMODITIES[product as CommodityConstant]?.components;
         // 原料不足时不处理
-        if (Object.keys(components).some((c: any) => factory.store[c] < components[c])) return;
+        if (!components || Object.keys(components).some((c: any) => factory.store[c] < components[c])) return;
 
-        let result = factory.produce(product);
+        let result = factory.produce(product as CommodityConstant);
         
         if (Game.time % 100 == 0 || result != OK){
             if(factory.store[product] > 0) {

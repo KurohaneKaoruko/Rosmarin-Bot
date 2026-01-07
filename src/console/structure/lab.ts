@@ -52,8 +52,8 @@ export default {
             const labAflag = Game.flags[`labA`] || Game.flags[`lab-A`];
             const labBflag = Game.flags[`labB`] || Game.flags[`lab-B`];
             if(labAflag && labBflag && labAflag.pos.roomName === roomName && labBflag.pos.roomName === roomName) {
-                const labA = labAflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB);
-                const labB = labBflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB);
+                const labA = labAflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab;
+                const labB = labBflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab;
                 BotMemStructures[roomName]['labA'] = labA.id;
                 BotMemStructures[roomName]['labB'] = labB.id;
                 global.log(`[${roomName}] 已设置底物lab为 ${labA.id} 和 ${labB.id}。`);
@@ -96,7 +96,7 @@ export default {
             }
             return OK;
         },
-        addboost(roomName: string, mineral: string, amount: number=3000) {
+        addboost(roomName: string, mineral: ResourceConstant, amount: number=3000) {
             const room = Game.rooms[roomName];
             if(!room || !room.my) {
                 global.log(`房间 ${roomName} 不存在或未拥有。`);

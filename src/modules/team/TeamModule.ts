@@ -85,7 +85,7 @@ const TeamModule = {
                 }
                 // 给lab分配boost任务
                 for (const m in RES_MAP) {
-                    room.AssignBoostTask(m, RES_MAP[m]);
+                    room.AssignBoostTask(m as ResourceConstant, RES_MAP[m]);
                 }
                 
             }

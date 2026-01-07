@@ -1,6 +1,11 @@
 import { compressBodyConfig } from "@/utils";
 
-const RoleBodys = {
+type BoostConfig = {
+    bodypart: [BodyPartConstant, number][];
+    boostmap: { [bodypart: string]: MineralBoostConstant };
+};
+
+const RoleBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
     'aid-build': {
         'T3': {
             bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
@@ -47,9 +52,11 @@ const AidModule = (flagName: string) => {
         // 是否BOOST
         let boost = flagName.match(/\/B-(\w+)/)?.[1] as string || undefined;
         if (boost && RoleBodys['aid-build'][boost]) {
-            bodys = RoleBodys['aid-build'][boost].bodypart || [];
-            memory['boostmap'] = RoleBodys['aid-build'][boost].boostmap || {};
-            let result = room.AssignBoostTaskByBody(bodys, memory['boostmap']);
+            const config = RoleBodys['aid-build'][boost];
+            bodys = config.bodypart || [];
+            const boostmap = config.boostmap;
+            memory['boostmap'] = boostmap;
+            let result = room.AssignBoostTaskByBody(bodys, boostmap);
             if (!result) {
                 bodys = [];
                 delete memory['boostmap'];
@@ -82,9 +89,11 @@ const AidModule = (flagName: string) => {
         // 是否BOOST
         let boost = flagName.match(/\/B-(\w+)/)?.[1] as string || undefined;
         if (boost && RoleBodys['aid-upgrade'][boost]) {
-            bodys = RoleBodys['aid-upgrade'][boost].bodypart || [];
-            memory['boostmap'] = RoleBodys['aid-upgrade'][boost].boostmap || {};
-            let result = room.AssignBoostTaskByBody(bodys, memory['boostmap']);
+            const config = RoleBodys['aid-upgrade'][boost];
+            bodys = config.bodypart || [];
+            const boostmap = config.boostmap;
+            memory['boostmap'] = boostmap;
+            let result = room.AssignBoostTaskByBody(bodys, boostmap);
             if (!result) { bodys = []; delete memory['boostmap']; }
         }
         

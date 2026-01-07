@@ -1,7 +1,25 @@
 import { RoleData } from "@/constant/CreepConstant";
 
+type BoostMap = { [bodypart: string]: MineralBoostConstant };
 
-let AIO_CONFIG = {
+type AioConfig = {
+    bodypart: [BodyPartConstant, number][];
+    boostmap: BoostMap;
+};
+
+type DoubleUnitConfig = {
+    role: string;
+    bodypart: [BodyPartConstant, number][];
+    boostmap?: BoostMap;
+};
+
+type DoubleConfig = {
+    A: DoubleUnitConfig;
+    B: DoubleUnitConfig;
+    squadType: string;
+};
+
+let AIO_CONFIG: { [key: string]: AioConfig } = {
     /** 1tower */
     '1T': {
         bodypart: [[TOUGH, 3], [RANGED_ATTACK, 32], [MOVE, 10], [HEAL, 5]],
@@ -24,7 +42,7 @@ let AIO_CONFIG = {
     }
 }
 
-let DOUBLE_CONFIG = {
+let DOUBLE_CONFIG: { [key: string]: DoubleConfig } = {
     'TEST': {
         A: {
             role: 'double-attack',
@@ -114,7 +132,7 @@ const WarModule = {
                 const targetRoom = Game.flags[flagName].pos.roomName;
 
                 let bodys = [];
-                let boostmap = RoleData['aio'].boostmap || {};
+                let boostmap: BoostMap = (RoleData['aio'].boostmap || {}) as BoostMap;
 
                 // 配置
                 const B = flagName.match(/AIO\/(\w+)/)?.[1];

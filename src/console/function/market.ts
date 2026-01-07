@@ -263,7 +263,7 @@ export default {
                 if (type === 'create') {
                     const autoOrder = autoMarket.find((item: any) => item.resourceType === resourceType && item.orderType === 'buy');
                     if(!autoOrder) {
-                        const item = {resourceType, amount, orderType: 'buy', price};
+                        const item = {resourceType, amount, orderType: 'buy' as const, price};
                         autoMarket.push(item);
                         console.log(`已在房间 ${roomName} 开启自动求购${resourceType}, 购买阈值${amount}, 价格限制:${price ?? '无'}`);
                     } else {
@@ -274,7 +274,7 @@ export default {
                 } else if (type === 'deal') {
                     const autoOrder = autoMarket.find((item: any) => item.resourceType === resourceType && item.orderType === 'dealbuy');
                     if(!autoOrder) {
-                        const item = {resourceType, amount, orderType: 'dealbuy', price};
+                        const item = {resourceType, amount, orderType: 'dealbuy' as const, price};
                         autoMarket.push(item);
                         console.log(`已在房间 ${roomName} 开启自动Deal买 ${resourceType}，购买阈值${amount}, 价格限制:${price}`);
                     } else {
@@ -293,7 +293,7 @@ export default {
                 if (type === 'create') {
                     const autoOrder = autoMarket.find((item: any) => item.resourceType === resourceType && item.orderType === 'sell')
                     if(!autoOrder) {
-                        autoMarket.push({resourceType, amount, orderType: 'sell', price});
+                        autoMarket.push({resourceType, amount, orderType: 'sell' as const, price});
                         console.log(`已在房间 ${roomName} 开启自动出售${resourceType}，出售阈值${amount}`);
                     } else {
                         autoOrder['amount'] = amount;
@@ -303,7 +303,7 @@ export default {
                 } else if (type === 'deal') {
                     const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
                     if(!autoMarket.find((item: any) => item.resourceType === resourceType && item.orderType === 'dealsell')) {
-                        autoMarket.push({resourceType, amount, orderType: 'dealsell', price});
+                        autoMarket.push({resourceType, amount, orderType: 'dealsell' as const, price});
                         console.log(`已在房间 ${roomName} 开启自动Deal卖${resourceType}，出售阈值:${amount}, 价格限制:${price ?? '无限制'}`);
                     } else {
                         const index = autoMarket.findIndex((item: any) => item.resourceType === resourceType && item.orderType === 'dealsell');
