@@ -1,4 +1,4 @@
-import { showRoomInfo } from "@/modules/utils/showFunc";
+import { showRoomInfo } from "@/modules/utils/showResInfo";
 
 export default {
     info: {

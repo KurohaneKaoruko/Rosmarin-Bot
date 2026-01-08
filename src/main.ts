@@ -38,13 +38,13 @@ App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
 
 
-// export const loop = App.run;
+export const loop = App.run;
 
 
-// 性能开销分析
-import profiler from '@/wheel/screeps-profiler';
-profiler.enable();
-export const loop = function() {
-    profiler.wrap(App.run);
-}
+// // 性能开销分析
+// import profiler from '@/wheel/screeps-profiler';
+// profiler.enable();
+// export const loop = function() {
+//     profiler.wrap(App.run);
+// }
 
