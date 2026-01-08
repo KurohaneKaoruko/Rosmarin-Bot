@@ -3,12 +3,16 @@ const COLORS = {
     good: '#06D6A0',
     warning: '#FFD166',
     danger: '#EF476F',
-    neutral: '#a0a0a0',
+    neutral: '#8892a0',
     info: '#118AB2',
-    text: '#e0e0e0',
-    levelLow: '#717171',
-    levelMid: '#5D80B2',
-    levelHigh: '#B29E6F',
+    text: '#e8eaed',
+    textMuted: '#a0aab8',
+    levelLow: '#8892a0',
+    levelMid: '#6B9FD4',
+    levelHigh: '#D4AF37',
+    border: '#3d4a5c',
+    bgDark: '#1a2332',
+    bgLight: '#242f3f',
 } as const;
 
 // 状态图标
@@ -21,15 +25,15 @@ const ICONS = {
 
 // 表格样式
 const STYLES = {
-    table: 'text-align: center; border-collapse: collapse; width: 100%; box-shadow: 0 4px 8px rgba(0,0,0,0.3); border-radius: 8px; overflow: hidden; margin-top: 10px;',
-    header: 'background: linear-gradient(135deg, #324868 0%, #1f2737 100%); color: #e0e0e0; font-weight: bold;',
-    th: 'padding: 12px 8px; text-align: center; border-bottom: 2px solid #2d3850;',
-    tr: 'border-bottom: 1px solid #2d3850;',
-    td: 'padding: 10px 8px; color: #e0e0e0;',
-    title: 'font-size: 18px; margin-bottom: 8px; display: block; color: #e0e0e0; font-weight: bold;',
-    odd: 'background-color: rgba(45, 55, 72, 0.6);',
-    even: 'background-color: rgba(39, 48, 63, 0.8);',
-    footer: 'background-color: #1f2737; font-size: 11px; color: #a0a0a0; padding: 8px; text-align: right;'
+    table: 'text-align: center; border-collapse: separate; border-spacing: 0; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.4); border-radius: 3px; overflow: hidden; margin-top: 12px; border: 1px solid #3d4a5c;',
+    header: 'background-color: #2a3a4f; color: #e8eaed; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;',
+    th: 'padding: 14px 10px; text-align: center; border-bottom: 2px solid #4a5a6f;',
+    tr: 'border-bottom: 1px solid #2d3850; transition: background-color 0.2s;',
+    td: 'padding: 12px 10px; color: #e8eaed; vertical-align: middle;',
+    title: 'font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; color: #e8eaed; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
+    odd: 'background-color: rgba(42, 58, 79, 0.5);',
+    even: 'background-color: rgba(36, 47, 63, 0.7);',
+    footer: 'background-color: #1a2332; font-size: 11px; color: #8892a0; padding: 10px 12px; text-align: right; border-top: 1px solid #3d4a5c;'
 } as const;
 
 // 等级符号
@@ -48,16 +52,16 @@ const THRESHOLDS = {
 
 // 辅助函数
 const colorText = (text: string, color: string) => 
-    `<span style="color: ${color}; font-weight: 500;">${text}</span>`;
+    `<span style="color: ${color}; font-weight: 500; text-shadow: 0 1px 1px rgba(0,0,0,0.2);">${text}</span>`;
 
 const td = (text: string) => `<td style="${STYLES.td}">${text}</td>`;
 
 const th = (text: string) => `<th style="${STYLES.th}">${text}</th>`;
 
 const headSpan = (text: string) => 
-    `<span style="display:flex;align-items:center;justify-content:center;">${text}</span>`;
+    `<span style="display:flex;align-items:center;justify-content:center;gap:4px;">${text}</span>`;
 
-const notBuilt = () => td(colorText(`${ICONS.neutral} 未建造`, COLORS.neutral));
+const notBuilt = () => td(`<span style="color: ${COLORS.neutral}; font-style: italic; opacity: 0.7;">${ICONS.neutral} 未建造</span>`);
 
 const disabled = () => td(colorText(`${ICONS.danger} 已关闭`, COLORS.danger));
 
@@ -74,13 +78,13 @@ const getStoreStatus = (ratio: number): { icon: string; color: string } => {
 
 // 生成进度条
 const progressBar = (ratio: number, color: string) => 
-    `<div style="background-color: rgba(255,255,255,0.1); height: 5px; width: 100%; margin-top: 3px; border-radius: 2px;"><div style="background-color: ${color}; height: 100%; width: ${Math.min(ratio, 1) * 100}%; border-radius: 2px;"></div></div>`;
+    `<div style="background-color: rgba(255,255,255,0.08); height: 4px; width: 100%; margin-top: 5px; border-radius: 3px; overflow: hidden;"><div style="background: linear-gradient(90deg, ${color} 0%, ${color}dd 100%); height: 100%; width: ${Math.min(ratio, 1) * 100}%; border-radius: 3px; transition: width 0.3s;"></div></div>`;
 
 // 获取房间等级图标
 const getRoomLevelIcon = (level?: number): string => {
     if (!level) return '';
     const color = level <= 3 ? COLORS.levelLow : level <= 6 ? COLORS.levelMid : COLORS.levelHigh;
-    return `<span style="color: ${color}; font-weight: bold; margin-right: 5px; font-size: 16px;">${LEVEL_SYMBOLS[level]}</span>`;
+    return `<span style="color: ${color}; font-weight: bold; margin-right: 6px; font-size: 12px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">${LEVEL_SYMBOLS[level]}</span>`;
 };
 
 // 各结构状态渲染函数
@@ -146,7 +150,7 @@ const renderNuker = (room: Room): string => {
         room.nuker.store[RESOURCE_GHODIUM] < THRESHOLDS.nukerGhodium) {
         return lowResource();
     }
-    return td(colorText(`${ICONS.good} ☢已就绪☢`, COLORS.good));
+    return td(colorText(`${ICONS.good} 已就绪`, COLORS.good));
 };
 
 const renderEnergy = (room: Room): string => {
@@ -189,5 +193,5 @@ export const showRoomInfo = (rooms: string[]): string => {
         .filter(Boolean)
         .join('');
 
-    return `<div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; padding: 15px; border-radius: 2px;"><b style="${STYLES.title}">🏠房间信息</b><table style="${STYLES.table}"><thead><tr style="${STYLES.header}">${headers.map(th).join('')}</tr></thead><tbody>${roomRows}</tbody><tfoot><tr><td colspan="${headers.length}" style="${STYLES.footer}">最后更新: ${new Date().toLocaleString()} (游戏时间: ${Game.time})</td></tr></tfoot></table></div>`;
+    return `<div style="font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; padding: 16px;"><div style="${STYLES.title}"><span style="font-size: 16px;">🏠</span><span>房间信息</span></div><table style="${STYLES.table}"><thead><tr style="${STYLES.header}">${headers.map(th).join('')}</tr></thead><tbody>${roomRows}</tbody><tfoot><tr><td colspan="${headers.length}" style="${STYLES.footer}">📅 ${new Date().toLocaleString()} &nbsp;|&nbsp; ⏱ Tick ${Game.time.toLocaleString()}</td></tr></tfoot></table></div>`;
 }
