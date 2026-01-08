@@ -12,6 +12,10 @@ import terser from '@rollup/plugin-terser'; // 压缩代码
 const secret = JSON.parse(fs.readFileSync('./.secret.json', 'utf-8'));
 const config = secret[process.env.DEST];
 
+const filePath = {
+    algo_wasm_priorityqueue: 'src/modules/utils/algo_wasm_priorityqueue.wasm'
+}
+
 // 根据指定的目标获取对应的配置项
 if (!process.env.DEST) console.log("未指定目标, 代码将被编译但不会上传")
 else if (!config) { throw new Error("无效目标，请检查 .secret.json 中是否包含对应配置") }
@@ -24,11 +28,7 @@ const runCopy = () => {
                 dest: config.copyPath
             },
             {
-                src: 'src/modules/planner/dynamic/algo_wasm_priorityqueue.wasm',
-                dest: config.copyPath
-            },
-            {
-                src: 'src/modules/planner/dynamic/autoPlanner63.js',
+                src: filePath.algo_wasm_priorityqueue,
                 dest: config.copyPath
             },
             {
@@ -75,7 +75,7 @@ export default {
         copy({
             targets: [
                 {
-                    src: 'src/modules/planner/dynamic/algo_wasm_priorityqueue.wasm',
+                    src: filePath.algo_wasm_priorityqueue,
                     dest: 'dist'
                 }
             ]
@@ -83,5 +83,5 @@ export default {
         // 执行上传或者复制
         pluginDeploy
     ],
-    external: ['src/modules/planner/dynamic/algo_wasm_priorityqueue.wasm']
+    external: [filePath.algo_wasm_priorityqueue]
 };

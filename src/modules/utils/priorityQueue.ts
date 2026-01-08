@@ -28,10 +28,15 @@ const tryRequire = (path) => {
 	}
 };
 
-const binary = tryRequire('algo_wasm_priorityqueue.wasm')
+const getWasModule = () => {
+	const binary = tryRequire('algo_wasm_priorityqueue.wasm')
 	? require('algo_wasm_priorityqueue.wasm')
 	: require('algo_wasm_priorityqueue'); // 读取二进制文件
-const wasmModule = new WebAssembly.Module(binary); // 初始化为wasm类
+	const wasmModule = new WebAssembly.Module(binary); // 初始化为wasm类
+	return wasmModule;
+}
+
+
 
 /**
  *
@@ -108,6 +113,7 @@ export class PriorityQueue extends BaseQueue {
 		};
 		// @ts-ignore
 		// eslint-disable-next-line prefer-const
+		const wasmModule = getWasModule();
 		instance = new WebAssembly.Instance(wasmModule, imports).exports; // 实例化
 		instance.init(+!!isMinRoot); // !!转化为boolean, +转为数字
 

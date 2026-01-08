@@ -312,7 +312,7 @@ const Profiler = {
   },
 };
 
-module.exports = {
+export default {
   wrap(callback) {
     if (enabled) {
       setupProfiler();
