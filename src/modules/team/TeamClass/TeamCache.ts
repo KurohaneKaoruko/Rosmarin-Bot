@@ -1,4 +1,4 @@
-import RoomArray from '../utils/roomArray'
+import RoomArray from './TeamRoomArray'
 import TeamCalc from './TeamCalc';
 import TeamVisual from './TeamVisual';
 

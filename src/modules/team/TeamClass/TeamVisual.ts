@@ -1,4 +1,4 @@
-import RoomArray from '../utils/roomArray'
+import RoomArray from './TeamRoomArray'
 
 /**
  * 战斗绘制

@@ -2,7 +2,7 @@ import TeamUtils from './TeamUtils';
 import TeamCache from './TeamCache';
 import TeamCalc from './TeamCalc';
 import TeamVisual from './TeamVisual';
-import RoomArray from '../utils/roomArray'
+import RoomArray from './TeamRoomArray'
 import { creepPosBipartiteMatch } from '@/utils'
 
 const emptyCostMatrix = new PathFinder.CostMatrix()

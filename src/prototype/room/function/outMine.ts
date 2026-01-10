@@ -80,7 +80,7 @@ export default class OutMine extends Room {
             outHarvesterSpawn(this, targetRoom, sourceNum);    // 采集
 
             // 外矿加速搬运策略 OutSpeedCarryTactics
-            if (Game.flags[`${this.name}/OSCT`]) {
+            if (Game.flags[`${this.name}/OSCT`] || Game.flags[`ALL/OSCT`]) {
                 let num = sourceNum;
                 if (this.level <= 4) {
                     num *= 2.5
