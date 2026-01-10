@@ -860,15 +860,16 @@ export class RoadBuilder {
 
                 // 检查是否已有道路或工地
                 const room = Game.rooms[pos.roomName];
-                if (room) {
-                    const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
-                    const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
-                    if (hasRoad) continue;
+                // 没有视野的房间无法创建建造工地，跳过
+                if (!room) continue;
 
-                    const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
-                    const hasSite = sites.some(s => s.structureType === STRUCTURE_ROAD);
-                    if (hasSite) continue;
-                }
+                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+                const hasRoad = structures.some(s => s.structureType === STRUCTURE_ROAD);
+                if (hasRoad) continue;
+
+                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+                const hasSite = sites.some(s => s.structureType === STRUCTURE_ROAD);
+                if (hasSite) continue;
 
                 const result = pos.createConstructionSite(STRUCTURE_ROAD);
                 if (result === OK) {
