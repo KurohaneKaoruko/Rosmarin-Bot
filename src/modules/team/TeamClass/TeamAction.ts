@@ -844,7 +844,9 @@ export default class TeamAction {
                     : 1
 
             // 调整 spawn 的范围，避免被踩死
-            if (goal instanceof StructureSpawn) {
+            if (goal instanceof StructureSpawn &&
+                !(goal.pos.x == team.flag.pos.x && goal.pos.y == team.flag.pos.y) &&
+                !(team.flag.color == COLOR_RED || team.flag.color == COLOR_PURPLE)) {
                 goal['_range'] = 2
             }
             allGoals.push({ pos: goal.pos, range: goal['_range'] })
