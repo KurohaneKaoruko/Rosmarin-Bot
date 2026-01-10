@@ -115,7 +115,8 @@ export default [
                 'outmine.power(roomName, targetRoom, num, boostLevel?, prNum?): 派出Power开采队\n' +
                 ' - boostLevel: 0/1/2 强化等级\n' +
                 'outmine.deposit(roomName, targetRoom, num): 派出Deposit开采队\n' +
-                'outmine.cancel(roomName, targetRoom, type?): 取消开采任务\n'
+                'outmine.cancel(roomName, targetRoom, type?): 取消开采任务\n' +
+                'road.help(): 外矿造路规划相关'
         }
     },
     {
