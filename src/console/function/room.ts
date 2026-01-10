@@ -3,6 +3,16 @@ import { signConstant } from "@/constant/SignConstant";
 // 房间控制
 export default {
     room: {
+        // 快速开始
+        start(roomName: string) {
+            // 添加房间
+            global.room.add(roomName);
+            // 构建布局
+            global.layout.build(roomName);
+            // 开启自动建造
+            global.layout.auto(roomName);
+            return;
+        },
         // 添加房间
         add(roomName: string, layout?: string, x?: number, y?: number) {
             if (!roomName) return Error('请输入房间名。');
