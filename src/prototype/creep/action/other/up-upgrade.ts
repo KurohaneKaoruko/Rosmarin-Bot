@@ -16,8 +16,9 @@ const upgrade = function (creep: Creep) {
     if (creep.pos.inRangeTo(creep.room.controller, 3)) {
         creep.upgradeController(creep.room.controller)
         const botMem = Memory['RoomControlData'][creep.room.name];
-        const sign = botMem?.sign ?? global.BaseConfig.DEFAULT_SIGN;
-        if(creep.room.controller && (creep.room.controller.sign?.text ?? '') != sign) {
+        const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
+        const oldSign = creep.room.controller.sign?.text ?? '';
+        if(creep.room.controller && sign && oldSign != sign) {
             if (creep.pos.inRangeTo(creep.room.controller, 1)) {
                 creep.signController(creep.room.controller, sign);
             } else {

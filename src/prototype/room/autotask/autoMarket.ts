@@ -29,7 +29,7 @@ export default class AutoMarket extends Room {
 function AutoBuy(roomName: string, item: any) {
     const amount = item.amount;   // 资源自动购买上限
     const room = Game.rooms[roomName];
-    const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备
@@ -99,7 +99,7 @@ function AutoBuy(roomName: string, item: any) {
 function AutoSell(roomName: string, item: any) {
     const amount = item.amount;
     const room = Game.rooms[roomName];
-    const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备
@@ -162,7 +162,7 @@ function AutoDealBuy(roomName: string, item: any) {
     const price = item.price;   // 限制价格
     const room = Game.rooms[roomName];
 
-    const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备
@@ -188,7 +188,7 @@ function AutoDealSell(roomName: string, item: any) {
     const price = item.price;   // 限制价格
     const room = Game.rooms[roomName];
 
-    const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备

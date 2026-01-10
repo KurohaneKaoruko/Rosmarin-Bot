@@ -9,7 +9,7 @@ export default {
                 if (!terminal || terminal.cooldown !== 0) {
                     return Error(`${room} 的终端不存在或处于冷却。`);
                 }
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 type = RESOURCE_ABBREVIATIONS[type] || type;
                 amount = Math.min(amount, terminal.store[type] || 0);
                 if(!amount) {console.log(`${room} 的终端没有足够的 ${type}。`); return;}
@@ -32,7 +32,7 @@ export default {
             }
             if(!room && target && type && amount) {
                 let total = amount;
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 type = RESOURCE_ABBREVIATIONS[type] || type;
                 for (const room of Object.values(Game.rooms)) {
                     if (room.name == target) continue;
@@ -70,7 +70,7 @@ export default {
                 if (!terminal) {
                     console.log(`${roomName} 的终端不存在。`); return;
                 };
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 const res = RESOURCE_ABBREVIATIONS[type] || type;
                 console.log(`${roomName} 的终端有 ${terminal.store[res] || 0} 单位的 ${res}`);
             }
@@ -79,7 +79,7 @@ export default {
                 for (const room of Object.values(Game.rooms)) {
                     const terminal = room.terminal;
                     if (!terminal) continue;
-                    const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                    const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                     const res = RESOURCE_ABBREVIATIONS[type] || type;
                     console.log(`${room.name} 的终端有 ${terminal.store[res] || 0} 单位的 ${res}`);
                 }

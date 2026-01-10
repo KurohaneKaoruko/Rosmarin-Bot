@@ -1,4 +1,4 @@
-import { OUT_CONFIG } from '@/constant/config';
+import { OUTMINE_CONFIG } from '@/constant/config';
 import { compress, decompress } from '@/utils';
 
 /** 外矿采集模块 */
@@ -161,7 +161,7 @@ export default class OutMine extends Room {
         const outmineDeposit = Memory['RoomControlData'][this.name]['outmineDeposit'];
         // 没开启自动挖就不找
         if (!outminePower && !outmineDeposit) return;
-        const LOOK_INTERVAL = OUT_CONFIG.LOOK_INTERVAL;
+        const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
         if (Game.time % LOOK_INTERVAL > 1) return;
         // 监控列表
         let lookList = Memory['OutMineData'][this.name]?.['highway'] || [];
@@ -218,7 +218,7 @@ export default class OutMine extends Room {
     }
 
     PowerMine() {
-        const LOOK_INTERVAL = OUT_CONFIG.LOOK_INTERVAL;
+        const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
         if (Game.time % LOOK_INTERVAL != 1) return;
         const powerMines = this.memory['powerMine'];
         if (!powerMines || Object.keys(powerMines).length == 0) return;
@@ -335,7 +335,7 @@ export default class OutMine extends Room {
     }
 
     DepositMine() {
-        const LOOK_INTERVAL = OUT_CONFIG.LOOK_INTERVAL;
+        const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
         if (Game.time % LOOK_INTERVAL != 1) return;
         const depositMines = this.memory['depositMine'];
         if (!depositMines || Object.keys(depositMines).length == 0) return;
@@ -642,7 +642,7 @@ const PowerBankCheck = function (room: Room) {
         filter: (s) => (s.hits >= s.hitsMax && s.structureType === STRUCTURE_POWER_BANK)
     })[0] as StructurePowerBank;
 
-    if (!powerBank || powerBank.power < OUT_CONFIG.POWER_MIN_AMOUNT) return 0;
+    if (!powerBank || powerBank.power < OUTMINE_CONFIG.POWER_MIN_AMOUNT) return 0;
     if (powerBank.hits < powerBank.hitsMax) return 0;
 
     const pos = powerBank.pos;
@@ -673,7 +673,7 @@ const DepositCheck = function (room: Room) {
     let D_num = 0;
 
     for (const deposit of deposits) {
-        if (deposit.lastCooldown >= OUT_CONFIG.DEPOSIT_MAX_COOLDOWN) {
+        if (deposit.lastCooldown >= OUTMINE_CONFIG.DEPOSIT_MAX_COOLDOWN) {
             continue;
         }
         const pos = deposit.pos;

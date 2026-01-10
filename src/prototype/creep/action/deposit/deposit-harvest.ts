@@ -1,4 +1,4 @@
-import { OUT_CONFIG } from '@/constant/config';
+import { OUTMINE_CONFIG } from '@/constant/config';
 
 const deposit_harvest = {
     source: function(creep: Creep) {
@@ -17,7 +17,7 @@ const deposit_harvest = {
         if (!creep.memory['targetDeposit']) {
             let deposits = creep.room.find(FIND_DEPOSITS);
             // 筛选
-            let activeDeposits = deposits.filter(d => d.lastCooldown <= OUT_CONFIG.DEPOSIT_MAX_COOLDOWN);
+            let activeDeposits = deposits.filter(d => d.lastCooldown <= OUTMINE_CONFIG.DEPOSIT_MAX_COOLDOWN);
             if (activeDeposits.length > 0) {
                 deposits = activeDeposits;
             }

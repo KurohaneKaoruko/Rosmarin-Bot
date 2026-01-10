@@ -26,7 +26,7 @@ export default {
         },
         // 设置factory生产
         set(roomName: string, product: string, amount: number = 0) {
-            const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+            const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
             const room = Game.rooms[roomName];
             const BotMemStructures =  Memory['StructControlData'];
             if(!room || !room.my || !BotMemStructures[roomName]) {
@@ -67,7 +67,7 @@ export default {
         },
         auto: {
             set(roomName: string, product: string, amount?: number) {
-                const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 product = RES[product] || product;
                 const room = Game.rooms[roomName];
                 if(!room || !room.my) {
@@ -91,7 +91,7 @@ export default {
                 return OK;
             },
             remove(roomName: string, product: string) {
-                const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 product = RES[product] || product;
                 const room = Game.rooms[roomName];
                 if(!room || !room.my) {

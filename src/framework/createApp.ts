@@ -1,11 +1,11 @@
 import { errorMapper } from './errorMapper.js'
-import { BaseConfig } from '@/constant/config.js'
+import { BASE_CONFIG } from '@/constant/config.js'
 
 /**
  * 基本框架，用于管理游戏循环，挂载各种模块
  */
 export const createApp = () => {
-    const name = BaseConfig.BOT_NAME;
+    const name = BASE_CONFIG.BOT_NAME;
     const events = {init: [], start: [], tick: [], end: []}
     
     let runRoom = () => {};

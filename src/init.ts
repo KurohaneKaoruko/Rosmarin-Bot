@@ -1,4 +1,4 @@
-import { BaseConfig } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/config';
 
 /**
  * 初始化Memory
@@ -30,8 +30,8 @@ export const MemoryInit = {
 export const GlobalInit = {
     init() {
         // 基本配置信息
-        global.BaseConfig = BaseConfig;
-        global.BOT_NAME = BaseConfig.BOT_NAME;
+        global.BASE_CONFIG = BASE_CONFIG;
+        global.BOT_NAME = BASE_CONFIG.BOT_NAME;
         global.cache = {};
     },
     start() {

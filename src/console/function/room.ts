@@ -139,7 +139,7 @@ export default {
         send(roomName: string, targetRoom: string, type: string, amount: number) {
             if (!roomName.match(/^[EW][1-9]+[NS][1-9]+$/)) return Error(`房间名格式不正确。`);
             if (!targetRoom.match(/^[EW][1-9]+[NS][1-9]+$/)) return Error(`目标房间名格式不正确。`);
-            const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+            const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
             type = RESOURCE_ABBREVIATIONS[type] || type;
             if (!RESOURCES_ALL.includes(type as ResourceConstant)) return Error(`资源类型不正确。`);
             if (typeof amount !== 'number') return Error(`数量必须是数字。`);

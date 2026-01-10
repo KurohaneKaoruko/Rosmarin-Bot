@@ -2,7 +2,7 @@ export default {
     resource: {
         manage: {
             set(roomName: string, resource: string, data: { source: number, target: number }) {
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource;
                 const source = data.source ?? Infinity;
                 const target = data.target ?? 0;
@@ -13,7 +13,7 @@ export default {
                 return OK;
             },
             remove(roomName: string, resource: string) {
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource;
                 if (!Memory['ResourceManage']) Memory['ResourceManage'] = {};
                 if (!Memory['ResourceManage'][roomName]) Memory['ResourceManage'][roomName] = {};
@@ -55,7 +55,7 @@ export default {
                 },
                 res(res: string) {
                     if (!res) return Error('必须指定资源');
-                    const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                    const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                     res = RESOURCE_ABBREVIATIONS[res] || res;
                     const botmem = Memory['ResourceManage'];
                     for (const roomName in botmem) {
@@ -71,7 +71,7 @@ export default {
         },
         transport: {
             task(roomName: string, source: string, target: string, resource: string, amount: number) {
-                const RESOURCE_ABBREVIATIONS = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource
                 const room = Game.rooms[roomName];
                 if (!room) return Error('房间不存在');

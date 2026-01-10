@@ -8,7 +8,7 @@ export default class MissionAdd extends Room {
     // 添加搬运任务
     ManageMissionAdd(source: string, target: string, resourceType: any, amount: number) {
         // 将缩写转换为全名
-        const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
         if(RES[resourceType]) resourceType = RES[resourceType];
         // 将缩写转换为全名
         const structures = {
@@ -40,7 +40,7 @@ export default class MissionAdd extends Room {
     // 添加发送任务
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
         // 将缩写转换为全名
-        const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
         if(RES[resourceType]) resourceType = RES[resourceType];
         // 检查是否有相同任务
         let existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);

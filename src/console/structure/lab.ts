@@ -82,7 +82,7 @@ export default {
                 if(!labsetMatch) continue;
                 const lab = flag.pos.lookFor(LOOK_STRUCTURES).find(structure => structure.structureType === STRUCTURE_LAB);
                 if (!lab) continue;
-                const RES = global.BaseConfig.RESOURCE_ABBREVIATIONS;
+                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 let resourceType = RES[labsetMatch[1]] || labsetMatch[1];
                 if (!resourceType || !LabMap[resourceType]) {
                     delete BotMemStructures[roomName]['boostTypes'][lab.id];

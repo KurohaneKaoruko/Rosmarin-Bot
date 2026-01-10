@@ -67,7 +67,7 @@ export default {
             return OK;
         },
         look(resType: string, orderType: string, roomName?: string, length=20) {
-            resType = global.BaseConfig.RESOURCE_ABBREVIATIONS[resType] || resType;
+            resType = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType;
             let orders = Game.market.getAllOrders({type: orderType, resourceType: resType as ResourceConstant});
             // 按照单价排序
             orders.sort((a, b) => {
@@ -195,14 +195,14 @@ export default {
             return result;
         },
         dealBuy(roomName: any, type: any, amount: any, length=20, price=0) {
-            type = global.BaseConfig.RESOURCE_ABBREVIATIONS[type] || type;
+            type = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS[type] || type;
             if (INTERSHARD_RESOURCES.includes(type)) {
                 return interShardMarket(type, amount, 'buy', price);
             }
             return handleMarketTransaction(roomName, type, amount, ORDER_SELL, length, price);
         },
         dealSell(roomName: any, type: any, amount: any, length=20, price=0) {
-            type = global.BaseConfig.RESOURCE_ABBREVIATIONS[type] || type;
+            type = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS[type] || type;
             if (INTERSHARD_RESOURCES.includes(type)) {
                 return interShardMarket(type, amount, 'sell', price);
             }

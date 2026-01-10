@@ -79,9 +79,11 @@ const RoleSpawnCheck = {
         } else if (current < 1) {
             const controller = room.controller;
             const botMem = Memory['RoomControlData'][room.name];
-            const sign = botMem?.sign ?? global.BaseConfig.DEFAULT_SIGN;
-            return controller && (controller.sign?.text ?? '') != sign
+            const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
+            const oldSign = controller.sign?.text ?? '';
+            return controller && oldSign != sign
         }
+        return false;
     },
     'UP-upgrade': (room: Room, current: number) => {
         if (room.level == 8) return false;
