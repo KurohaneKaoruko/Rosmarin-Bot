@@ -52,7 +52,7 @@ export const ROAD_CONFIG = {
     // ============================================================
     
     /** 道路建造间隔 (ticks) */
-    BUILD_INTERVAL: 100,
+    BUILD_INTERVAL: 500,
     /** 单路线最大建造工地数 */
     MAX_SITES_PER_ROUTE: 10,
     /** 能量矿道路建造最低房间等级 */
