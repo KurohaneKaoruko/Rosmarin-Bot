@@ -34,7 +34,7 @@ export const ROAD_CONFIG = {
     /** 平地代价 */
     PLAIN_COST: 2,
     /** 沼泽代价 */
-    SWAMP_COST: 5,
+    SWAMP_COST: 4,
     /** PathFinder 最大操作数 */
     MAX_OPS: 5000,
     
