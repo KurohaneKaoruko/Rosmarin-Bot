@@ -357,11 +357,169 @@ interface OutMineMemory {
     highway?: string[];
 
     /**
-     * 外矿道路数据
+     * 外矿道路数据 (旧格式，兼容用)
+     * @deprecated 请使用新格式 RoadData
      * @description 存储到各外矿房间的道路位置
      */
     Road?: {
         [targetRoom: string]: Array<[string, number]>;  // [roomName, compressedXY]
+    };
+
+    /**
+     * 外矿道路数据 (新格式)
+     * @description 按房间分组存储道路位置，减少冗余
+     */
+    RoadData?: OutMineRoadMemory;
+
+    /**
+     * 道路数据版本
+     * @description 用于判断是否需要迁移数据格式
+     */
+    RoadVersion?: number;
+}
+
+/**
+ * 外矿道路内存格式 (新格式)
+ * @description 按目标位置分组存储道路坐标
+ */
+interface OutMineRoadMemory {
+    /**
+     * 路线数据
+     * @description key 为目标房间名，value 为该房间内各目标的路线信息
+     */
+    routes: {
+        [targetRoom: string]: OutMineRoadRouteGroup;
+    };
+
+    /**
+     * 最后更新时间
+     * @description 用于判断数据是否过期
+     */
+    lastUpdate?: number;
+}
+
+/**
+ * 目标房间的路线组
+ * @description 存储到单个目标房间内所有目标的道路信息
+ */
+interface OutMineRoadRouteGroup {
+    /**
+     * 各目标的独立路径
+     * @description key 为目标位置 "x:y"，value 为该目标的路径
+     */
+    paths: {
+        [targetPos: string]: OutMineRoadPath;
+    };
+
+    /**
+     * 创建时间
+     */
+    createdAt: number;
+
+    /**
+     * 路线状态
+     */
+    status?: 'active' | 'pending' | 'damaged';
+
+    /**
+     * 最后检查时间
+     */
+    lastCheck?: number;
+}
+
+/**
+ * 单个目标的道路路径
+ * @description 存储从主房间到单个目标的完整路径（保持顺序）
+ */
+interface OutMineRoadPath {
+    /**
+     * 路径坐标（按顺序存储）
+     * @description 每个元素为 [roomName, compressedCoord]，保持路径顺序
+     */
+    path: Array<[string, number]>;
+
+    /**
+     * 路径长度
+     */
+    length: number;
+}
+
+/**
+ * 单条外矿道路路线（旧格式，保留用于兼容）
+ * @deprecated 请使用 OutMineRoadRouteGroup
+ */
+interface OutMineRoadRoute {
+    /**
+     * 道路坐标（按房间分组）
+     * @description key 为房间名，value 为该房间内的压缩坐标数组
+     * @example { "W1N1": [2525, 2526, 2527], "W1N2": [4925, 4924] }
+     */
+    positions: {
+        [roomName: string]: number[];  // 压缩坐标 x*100+y
+    };
+
+    /**
+     * 路线总长度
+     * @description 道路总格子数
+     */
+    length: number;
+
+    /**
+     * 创建时间
+     * @description Game.time
+     */
+    createdAt: number;
+
+    /**
+     * 最后检查时间
+     * @description 用于道路维护
+     */
+    lastCheck?: number;
+
+    /**
+     * 路线状态
+     * @description 'active' 正常, 'pending' 待建造, 'damaged' 需修复
+     */
+    status?: 'active' | 'pending' | 'damaged';
+}
+
+/**
+ * 外矿道路缓存（全局）
+ * @description 存储在 global 对象中的缓存数据
+ */
+interface OutMineRoadCache {
+    /**
+     * CostMatrix 缓存
+     * @description key 为房间名
+     */
+    costMatrix: {
+        [roomName: string]: {
+            /** 缓存的 CostMatrix */
+            matrix: CostMatrix;
+            /** 创建时间 (Game.time) */
+            createdAt: number;
+            /** 过期时间 (ticks) */
+            ttl: number;
+        };
+    };
+
+    /**
+     * 路径计算结果缓存
+     * @description 临时缓存，用于同一 tick 内复用
+     */
+    pathCache?: {
+        [key: string]: RoomPosition[];  // key: `${homeRoom}-${targetRoom}`
+    };
+
+    /**
+     * 修复队列
+     * @description 需要修复的道路位置
+     */
+    repairQueue?: {
+        [homeRoom: string]: Array<{
+            pos: RoomPosition;
+            priority: number;
+        }>;
     };
 }
 
@@ -594,3 +752,64 @@ interface RoomStatsMemory {
     [key: string]: any;
 }
 
+
+
+// ============================================================
+// 全局类型声明 - Global Type Declarations
+// ============================================================
+
+/**
+ * 扩展 NodeJS.Global 接口
+ * @description 声明全局变量类型
+ */
+declare namespace NodeJS {
+    interface Global {
+        /**
+         * 外矿道路缓存 (旧格式，兼容用)
+         * @deprecated 请使用 OutMineRoadCache
+         */
+        OutMineRoadPathFinderCosts?: {
+            [roomName: string]: CostMatrix;
+        };
+
+        /**
+         * 外矿道路缓存 (新格式)
+         * @description 包含 CostMatrix 缓存、路径缓存、修复队列等
+         */
+        OutMineRoadCache?: OutMineRoadCache;
+    }
+}
+
+/**
+ * 道路配置类型
+ * @description ROAD_CONFIG 常量的类型定义
+ */
+interface RoadConfigType {
+    // 路径计算配置
+    ROAD_COST: number;
+    PLAIN_COST: number;
+    SWAMP_COST: number;
+    MAX_OPS: number;
+    
+    // 缓存配置
+    COST_MATRIX_TTL: number;
+    PATH_CACHE_TTL: number;
+    
+    // 建造配置
+    BUILD_INTERVAL: number;
+    MAX_SITES_PER_ROUTE: number;
+    ENERGY_ROAD_MIN_LEVEL: number;
+    CENTER_ROAD_MIN_LEVEL: number;
+    
+    // 维护配置
+    HEALTH_CHECK_INTERVAL: number;
+    REPAIR_THRESHOLD: number;
+    CRITICAL_THRESHOLD: number;
+    
+    // CPU 保护配置
+    CPU_THRESHOLD: number;
+    MAX_PATHS_PER_TICK: number;
+    
+    // 数据格式版本
+    DATA_VERSION: number;
+}

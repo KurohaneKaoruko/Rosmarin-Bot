@@ -1,12 +1,15 @@
-import { OUTMINE_CONFIG } from '@/constant/config';
+import { OUTMINE_CONFIG, ROAD_CONFIG } from '@/constant/config';
 import { compress, decompress } from '@/utils';
+import { RoadBuilder, RoadMemory, CostMatrixCache } from '@/modules/utils/outMineRoad';
+import { RoadVisual } from '@/modules/utils/outMineRoad';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
     outMine() {
         if (this.memory.defend) return;
         if (Memory['warmode']) return;
-        
+
+        RoadVisual.run()
         this.EnergyMine();
         this.CenterMine();
         this.LookHighWay();
@@ -33,8 +36,8 @@ export default class OutMine extends Room {
 
 
             // 造路
-            if (Game.time % 1000 == 0 && this.level >= 4) {
-                createRoadSite(this, targetRoom)
+            if (Game.time % ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
+                RoadBuilder.createRoadSites(this, targetRoom)
             }
 
 
@@ -110,8 +113,8 @@ export default class OutMine extends Room {
             if (!targetRoom) continue;
 
             // 造路
-            if (Game.time % 1000 == 0 && this.level >= 6) {
-                createRoadSite(this, targetRoom)
+            if (Game.time % ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
+                RoadBuilder.createRoadSites(this, targetRoom)
             }
 
             const hostiles = targetRoom.find(FIND_HOSTILE_CREEPS, {
@@ -789,84 +792,87 @@ const getCreepByTargetRoom = function (targetRoom: string) {
     }
 }
 
-
-const createRoadSite = function (room: Room, targetRoom: Room) {
-    if (!Memory['OutMineData'][room.name]['Road'])
-        Memory['OutMineData'][room.name]['Road'] = {};
-    
-    let outMineRoadMem = Memory['OutMineData'][room.name]['Road'];
-    let roadsMem = outMineRoadMem[targetRoom.name];
-    if (roadsMem && roadsMem.length > 0) {
-        for (let road of roadsMem) {
-            let [r, xy] = road;
-            let [x, y] = decompress(xy);
-            let pos = new RoomPosition(x, y, r);
-            pos.createConstructionSite(STRUCTURE_ROAD);
-        }
-        return;
-    }
-
-    roadsMem = outMineRoadMem[targetRoom.name] = [];
-    let center = Memory['RoomControlData'][room.name].center || {x: 25, y: 25};
-    let centerPos = new RoomPosition(center.x, center.y, room.name);
-    if (!global.OutMineRoadPathFinderCosts) global.OutMineRoadPathFinderCosts = {};
-    let sources = []
-    if (/^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom.name)) {
-        sources = [...targetRoom.find(FIND_SOURCES), ...targetRoom.find(FIND_MINERALS)]
-    } else {
-        sources = targetRoom.find(FIND_SOURCES)
-    }
-    for (let s of sources) {
-        PathFinder.search(
-            centerPos,
-            { pos: s.pos, range: 1 },
-            {
-                plainCost: 2,
-                swampCost: 4,
-                maxOps: 10000,
-                roomCallback: function(roomName) {
-                    if (global.OutMineRoadPathFinderCosts[roomName]) {
-                        return global.OutMineRoadPathFinderCosts[roomName];
-                    }
-
-                    let costs = new PathFinder.CostMatrix();
-
-                    for (let r1 in Memory['OutMineData']) {
-                        for (let r2 in Memory['OutMineData'][r1]['Road']) {
-                            if (!Memory['OutMineData'][r1]['Road'][r2]) continue;
-                            for (let road of Memory['OutMineData'][r1]['Road'][r2]) {
-                                let [r, xy] = road;
-                                if (r !== roomName) continue;
-                                let [x, y] = decompress(xy);
-                                costs.set(x, y, 1)
-                            }
-                        }
-                    }
-
-                    if (Game.rooms[roomName]) {
-                        let roads = Game.rooms[roomName].find(FIND_STRUCTURES, {
-                            filter: (s) => s.structureType === STRUCTURE_ROAD
-                        });
-                        for (let road of roads) {
-                            costs.set(road.pos.x, road.pos.y, 1);
-                        };
-                    }
-
-                    global.OutMineRoadPathFinderCosts[roomName] = costs;
-                    return costs;
-                }
-            }
-        ).path.forEach((pos) => {
-            if (pos.roomName === room.name) return;
-            roadsMem.push([pos.roomName, compress(pos.x, pos.y)]);
-            let costs = null;
-            if (global.OutMineRoadPathFinderCosts[pos.roomName]) {
-                costs = global.OutMineRoadPathFinderCosts[pos.roomName];
-            } else {
-                costs = new PathFinder.CostMatrix();
-            }
-            costs.set(pos.x, pos.y, 1);
-            global.OutMineRoadPathFinderCosts[pos.roomName] = costs;
-        })
-    }
-}
+/**
+ * @deprecated 此函数已弃用，请使用 RoadBuilder.createRoadSites
+ * 保留此函数仅用于参考，将在未来版本中删除
+ */
+// const createRoadSite = function (room: Room, targetRoom: Room) {
+//     if (!Memory['OutMineData'][room.name]['Road'])
+//         Memory['OutMineData'][room.name]['Road'] = {};
+//     
+//     let outMineRoadMem = Memory['OutMineData'][room.name]['Road'];
+//     let roadsMem = outMineRoadMem[targetRoom.name];
+//     if (roadsMem && roadsMem.length > 0) {
+//         for (let road of roadsMem) {
+//             let [r, xy] = road;
+//             let [x, y] = decompress(xy);
+//             let pos = new RoomPosition(x, y, r);
+//             pos.createConstructionSite(STRUCTURE_ROAD);
+//         }
+//         return;
+//     }
+// 
+//     roadsMem = outMineRoadMem[targetRoom.name] = [];
+//     let center = Memory['RoomControlData'][room.name].center || {x: 25, y: 25};
+//     let centerPos = new RoomPosition(center.x, center.y, room.name);
+//     if (!global.OutMineRoadPathFinderCosts) global.OutMineRoadPathFinderCosts = {};
+//     let sources = []
+//     if (/^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom.name)) {
+//         sources = [...targetRoom.find(FIND_SOURCES), ...targetRoom.find(FIND_MINERALS)]
+//     } else {
+//         sources = targetRoom.find(FIND_SOURCES)
+//     }
+//     for (let s of sources) {
+//         PathFinder.search(
+//             centerPos,
+//             { pos: s.pos, range: 1 },
+//             {
+//                 plainCost: 2,
+//                 swampCost: 4,
+//                 maxOps: 10000,
+//                 roomCallback: function(roomName) {
+//                     if (global.OutMineRoadPathFinderCosts[roomName]) {
+//                         return global.OutMineRoadPathFinderCosts[roomName];
+//                     }
+// 
+//                     let costs = new PathFinder.CostMatrix();
+// 
+//                     for (let r1 in Memory['OutMineData']) {
+//                         for (let r2 in Memory['OutMineData'][r1]['Road']) {
+//                             if (!Memory['OutMineData'][r1]['Road'][r2]) continue;
+//                             for (let road of Memory['OutMineData'][r1]['Road'][r2]) {
+//                                 let [r, xy] = road;
+//                                 if (r !== roomName) continue;
+//                                 let [x, y] = decompress(xy);
+//                                 costs.set(x, y, 1)
+//                             }
+//                         }
+//                     }
+// 
+//                     if (Game.rooms[roomName]) {
+//                         let roads = Game.rooms[roomName].find(FIND_STRUCTURES, {
+//                             filter: (s) => s.structureType === STRUCTURE_ROAD
+//                         });
+//                         for (let road of roads) {
+//                             costs.set(road.pos.x, road.pos.y, 1);
+//                         };
+//                     }
+// 
+//                     global.OutMineRoadPathFinderCosts[roomName] = costs;
+//                     return costs;
+//                 }
+//             }
+//         ).path.forEach((pos) => {
+//             if (pos.roomName === room.name) return;
+//             roadsMem.push([pos.roomName, compress(pos.x, pos.y)]);
+//             let costs = null;
+//             if (global.OutMineRoadPathFinderCosts[pos.roomName]) {
+//                 costs = global.OutMineRoadPathFinderCosts[pos.roomName];
+//             } else {
+//                 costs = new PathFinder.CostMatrix();
+//             }
+//             costs.set(pos.x, pos.y, 1);
+//             global.OutMineRoadPathFinderCosts[pos.roomName] = costs;
+//         })
+//     }
+// }
