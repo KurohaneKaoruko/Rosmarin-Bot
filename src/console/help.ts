@@ -1,4 +1,4 @@
-const VERSION = '1.5.7';
+const VERSION = '1.5.8';
 
 const head = `<span style="color: #D0CAE0;"><b>
 ——————————————————————————— 迷迭香 𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓 ${VERSION} ———————————————————————————
@@ -59,6 +59,7 @@ layout.set(roomName, layout, x, y): 设置房间布局
 layout.auto(roomName): 开关房间自动建筑
 layout.remove(roomName): 删除指定房间布局Memory
 layout.build(roomName): 生成建筑位置并保存到Memory
+ - 静态布局需要用centerPos旗帜或者手动设置来定位布局中心
  - 如果没有设置布局, 则会使用自动布局(63auto)
  - 如果没有房间视野, 需要设置flag: pc(控制器), pm(矿), pa/pb(能量源)
 layout.visual(roomName, layout?): 显示布局可视化
