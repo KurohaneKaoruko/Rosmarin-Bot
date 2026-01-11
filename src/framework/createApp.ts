@@ -29,7 +29,7 @@ export const createApp = () => {
     }
 
     /** 添加模块 */
-    const on = (callbacks: any) => {
+    const on = (callbacks: Module) => {
         if (!callbacks || typeof callbacks !== 'object') return;
         Object.keys(callbacks)?.forEach(type => {
             if (!events[type]) return;
@@ -38,9 +38,9 @@ export const createApp = () => {
     };
 
     /** 运行模块 */
-    const runCall = (name: string) => {
-        if (!events[name]) return;
-        events[name].forEach((callback: () => void) => callback());
+    const runCall = (type: string) => {
+        if (!events[type]) return;
+        events[type].forEach((callback: () => void) => callback());
     }
 
     let initOK = false;
