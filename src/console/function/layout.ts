@@ -631,7 +631,10 @@ const BuildDynamicPlanner_63 = function (roomName: string) {
     if (Game.cpu.bucket < 100) {
         return Error(`CPU bucket余量过低, 暂时无法运行自动布局。`);
     }
-    let pa, pb, pc, pm;
+    let pa: RoomPosition;
+    let pb: RoomPosition;
+    let pc: RoomPosition;
+    let pm: RoomPosition;
     if (roomName) {
         let room = Game.rooms[roomName];
         if (!room) return Error(`房间 ${roomName} 的视野不存在。`);
@@ -647,12 +650,8 @@ const BuildDynamicPlanner_63 = function (roomName: string) {
         storagePos.remove();
     }
 
-    let roomStructsData = null;
-    if (global.ManagerPlanner) {
-        roomStructsData = global.ManagerPlanner.computeManor(pa.roomName, [pc, pm, pa, pb]);
-    } else {
-        autoPlanner63.ManagerPlanner.computeManor(pa.roomName, [pc, pm, pa, pb]);
-    }
+    const computeManor = autoPlanner63.ManagerPlanner.computeManor
+    let roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb]);
 
     if (!roomStructsData) {
         return Error(`房间 ${pa.roomName} 自动布局失败, 原因未知。`);
