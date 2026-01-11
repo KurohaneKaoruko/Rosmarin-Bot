@@ -670,9 +670,9 @@ const BuildDynamicPlanner_63 = function (roomName: string) {
     for (const s in structMap) {
         layoutMemory[s] = compressBatch(structMap[s]);
     }
-    console.log(`房间 ${roomName} 的布局memory已生成。`);
-    console.log('storage集群中心位置: ' + JSON.stringify(roomStructsData.storagePos));
-    console.log('lab中心位置: ' + JSON.stringify(roomStructsData.labPos));
+    global.log(`房间 ${roomName} 的布局memory已生成。`);
+    global.log('storage集群中心位置: ' + JSON.stringify(roomStructsData.storagePos));
+    global.log('lab中心位置: ' + JSON.stringify(roomStructsData.labPos));
     return OK;
 }
 
@@ -709,12 +709,8 @@ const VisualDynamicPlanner_63 = function (roomName?: string) {
         storagePos.remove();
     }
     
-    let roomStructsData = null;
-    if (global.ManagerPlanner) {
-        roomStructsData = global.ManagerPlanner.computeManor(pa.roomName, [pc, pm, pa, pb]);
-    } else {
-        autoPlanner63.ManagerPlanner.computeManor(pa.roomName, [pc, pm, pa, pb]);
-    }
+    const computeManor = autoPlanner63.ManagerPlanner.computeManor
+    let roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb]);
     
     if (!roomStructsData) {
         return Error(`房间 ${pa.roomName} 自动布局失败, 原因未知。`);

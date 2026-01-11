@@ -1171,9 +1171,6 @@ const ManagerPlanner = {
 	}
 };
 
-global.HelperVisual = HelperVisual;
-global.ManagerPlanner = ManagerPlanner;
-
 export const autoPlanner63 = {
 	ManagerPlanner: ManagerPlanner,
 	HelperVisual: HelperVisual
