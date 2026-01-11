@@ -74,8 +74,8 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/your-username/rosmarin-bot.git
-cd rosmarin-bot
+git clone https://github.com/KurohaneKaoruko/Rosmarin-Bot.git
+cd Rosmarin-Bot
 
 # 安装依赖
 npm install
