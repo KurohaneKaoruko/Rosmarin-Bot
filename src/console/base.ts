@@ -2,6 +2,26 @@ import { log } from "@/utils";
 
 // 基础与杂项
 const Base = {
+    bot: {
+        // 快速开始
+        start(roomName: string, layout?: string) {
+            // 添加房间
+            if (!layout) global.room.add(roomName);
+            else {
+                const centerPos = Game.flags['centerPos']?.pos || Game.flags['storagePos']?.pos;
+                if (!centerPos || centerPos.roomName !== roomName) {
+                    return Error('未设置中心, 请将centerPos放置需要设置的布局中心位置。')
+                } else {
+                    global.room.add(roomName, layout);
+                }
+            }
+            // 构建布局
+            global.layout.build(roomName);
+            // 开启自动建造
+            global.layout.auto(roomName);
+            return OK;
+        },
+    },
     whitelist: {
         add(id: string): OK | Error {
             if(!Memory['whitelist']) Memory['whitelist'] = [];

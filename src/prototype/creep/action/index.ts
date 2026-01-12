@@ -9,11 +9,11 @@ import mineral from './main/mineral';
 import universal from './main/universal';
 
 // Aid role imports
-import claimer from './aid/claimer';
-import aclaimer from './aid/aclaimer';
 import aidBuild from './aid/aid-build';
 import aidCarry from './aid/aid-carry';
 import aidUpgrade from './aid/aid-upgrade';
+import claimer from './aid/claimer';
+import attackClaimer from './aid/attack-claimer';
 
 // Other role imports
 import logistic from './other/logistic';
@@ -95,7 +95,7 @@ export const actionRegistry: Record<string, any> = {
     'dismantle': dismantle,
     'signer': signer,
     'claimer': claimer,
-    'aclaimer': aclaimer,
+    'attack-claimer': attackClaimer,
     'aid-build': aidBuild,
     'one-ranged': oneRanged,
     'aio': aio,

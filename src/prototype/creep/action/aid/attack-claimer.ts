@@ -1,4 +1,4 @@
-const aclaimer = {
+const attackClaimer = {
     run: function(creep: Creep) {
         if (!creep.memory.notified) {
             creep.notifyWhenAttacked(false);
@@ -42,4 +42,4 @@ const aclaimer = {
     }
 }
 
-export default aclaimer
+export default attackClaimer

@@ -85,9 +85,9 @@ export const RoleData: RoleConfig = {
         bodypart: [[MOVE, 5], [CLAIM, 1]],
         level: 10, code: 'CL', action: 'claimer'
     },
-    'aclaimer': {
+    'attack-claimer': {
         bodypart: [[MOVE, 16], [CLAIM, 16]],
-        level: 10, code: 'ACL', action: 'aclaimer'
+        level: 10, code: 'ACL', action: 'attack-claimer'
     },
 
     /* 援建 */
