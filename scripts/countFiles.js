@@ -48,9 +48,9 @@ function countFilesAndLines(basePath, excludeFiles, excludeDirs, maxFiles = 10) 
 }
 
 // 设置要排除的文件名
-const excludeFiles = ['betterMove.ts', 'autoPlanner63.ts', 'screeps-profiler.js', 'roomResource.ts'];
+const excludeFiles = [];
 // 设置要排除的文件夹名
-const excludeDirs = ['wheel', 'planner'];
+const excludeDirs = [];
 
 const maxFilesArg = process.argv[2] ? parseInt(process.argv[2], 10) : 10;
 countFilesAndLines(path.join(__dirname, '../src'), excludeFiles, excludeDirs, maxFilesArg);
