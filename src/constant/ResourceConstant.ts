@@ -1,6 +1,11 @@
 // 全局资源平衡阈值
+/**
+ * 全局资源平衡阈值
+ * 资源: [需求阈值, 供应阈值]
+ * 需求阈值: 资源需求的最小阈值，低于此值时会触发资源需求
+ * 供应阈值: 资源供应的最大阈值，高于此值时会触发资源供应
+ */
 export const RESOURCE_BALANCE = {
-    // 资源: [需求阈值, 供应阈值]
     'energy': [300e3, 400e3],
     'power': [5e3, 10e3],
     'ops': [10e3, 20e3],
@@ -210,10 +215,10 @@ export const CompoundColor = {
     'UL': '#7c8577'
 }
 
-export const BarList = [RESOURCE_BATTERY, 'lemergium_bar', 'zynthium_bar', 'keanium_bar', 'utrium_bar', 'ghodium_melt', 'oxidant', 'reductant', 'purifier']
+// export const BarList = [RESOURCE_BATTERY, 'lemergium_bar', 'zynthium_bar', 'keanium_bar', 'utrium_bar', 'ghodium_melt', 'oxidant', 'reductant', 'purifier']
 
 export const zipMap = {
-    'energy': RESOURCE_BATTERY,
+    'energy': "battery",
     'L': 'lemergium_bar',
     'Z': 'zynthium_bar',
     'K': 'keanium_bar',
@@ -235,6 +240,8 @@ export const unzipMap = {
     'reductant': RESOURCE_HYDROGEN,
     'purifier': RESOURCE_CATALYST,
 }
+
+export const BarList = [...Object.keys(unzipMap)]
 
 export const BaseGoods = [
     RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_SILICON, RESOURCE_MIST,

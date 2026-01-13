@@ -65,6 +65,8 @@ const RoleSpawnCheck = {
         // 检查storage是否有足够空间
         const store = room.storage.store;
         if (store.getUsedCapacity() > store.getCapacity() * 0.95) return false;
+        // 矿物太多时不挖
+        if (store[room.mineral.mineralType] > 1e6) return false;
         // 当前等级的最大ext能量容量
         const CS = CONTROLLER_STRUCTURES;
         const EEC = EXTENSION_ENERGY_CAPACITY;
