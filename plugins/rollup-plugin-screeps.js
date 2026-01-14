@@ -55,38 +55,100 @@ function loadConfigFile(configFile) {
     }
     return cfg;
 }
-// 上传编译后的代码到 Screeps 服务器
-function uploadSource(config, options, bundle) {
-    if (!config) {
-        console.log('screeps() needs a config e.g. screeps({configFile: \'./screeps.json\'}) or screeps({config: { ... }})');
+
+function getEndpointLabel(cfg) {
+    const protocol = cfg.protocol || 'https';
+    const hostname = cfg.hostname || 'screeps.com';
+    const port = cfg.port ? `:${cfg.port}` : '';
+    const apiPath = cfg.path || '';
+    return `${protocol}://${hostname}${port}${apiPath}`;
+}
+
+function getErrorStatus(err) {
+    return err?.status ?? err?.statusCode ?? err?.response?.status ?? err?.response?.statusCode ?? null;
+}
+
+function getErrorCode(err) {
+    return err?.code ?? err?.errno ?? null;
+}
+
+function toSingleLine(text) {
+    return String(text ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function formatScreepsUploadError(err, { endpoint, branch, usingToken }) {
+    const status = getErrorStatus(err);
+    const code = getErrorCode(err);
+    const message = toSingleLine(err?.message ?? err);
+    const lower = message.toLowerCase();
+
+    const parts = [];
+    parts.push(`Screeps 上传失败：${endpoint} (branch: ${branch})`);
+
+    const meta = [];
+    if (status) meta.push(`HTTP ${status}`);
+    if (code) meta.push(String(code));
+    if (meta.length) parts.push(meta.join(' / '));
+    if (message) parts.push(message);
+
+    const hints = [];
+    const networkCodes = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH']);
+    if (code && networkCodes.has(String(code))) {
+        hints.push('无法连接服务器：检查网络/代理/hostname/port/protocol/path');
     }
-    else {
-        if (typeof config === "string")
-            config = loadConfigFile(config);
-        let code = getFileList(options.file);
-        let branch = getBranchName(config.branch);
-        let api = new screepsApi.ScreepsAPI(config);
+    if (status === 401 || status === 403 || lower.includes('unauthorized') || lower.includes('forbidden') || lower.includes('invalid token') || lower.includes('token')) {
+        hints.push(usingToken ? '认证失败：token 可能失效/无权限，请重新生成 token' : '认证失败：账号密码可能错误，建议改用 token');
+    }
+    if (status === 404) {
+        hints.push('接口路径可能不正确：检查 config.path');
+    }
+    if (status === 429 || lower.includes('rate limit')) {
+        hints.push('请求过于频繁：稍后重试或减少 watch 推送频率');
+    }
+    if (status && status >= 500) {
+        hints.push('服务器异常：可稍后重试或检查私服状态');
+    }
+
+    if (hints.length) parts.push(`建议：${hints.join('；')}`);
+    return parts.join('\n');
+}
+// 上传编译后的代码到 Screeps 服务器
+async function uploadSource(config, options) {
+    if (!config) {
+        throw new Error('screeps() 需要提供 config/configFile，例如 screeps({configFile: \'./screeps.json\'})');
+    }
+    if (typeof config === "string")
+        config = loadConfigFile(config);
+    let code = getFileList(options.file);
+    let branch = getBranchName(config.branch);
+    let api = new screepsApi.ScreepsAPI(config);
+
+    const endpoint = getEndpointLabel(config);
+    const usingToken = Boolean(config.token);
+
+    try {
         if (!config.token) {
-            api.auth().then(() => {
-                runUpload(api, branch, code);
-            });
+            await api.auth();
         }
-        else {
-            runUpload(api, branch, code);
-        }
+        await runUpload(api, branch, code);
+    } catch (err) {
+        throw new Error(formatScreepsUploadError(err, { endpoint, branch, usingToken }));
     }
 }
 // 执行上传操作, 先检查目标分支是否存在, 存在则直接上传, 不存在则先克隆一个空分支再上传
-function runUpload(api, branch, code) {
-    api.raw.user.branches().then((data) => {
-        let branches = data.list.map((b) => b.branch);
-        if (branches.includes(branch)) {
-            api.code.set(branch, code);
-        }
-        else {
-            api.raw.user.cloneBranch('', branch, code);
-        }
-    });
+async function runUpload(api, branch, code) {
+    const data = await api.raw.user.branches();
+    if (!data || !Array.isArray(data.list)) {
+        const snippet = toSingleLine(JSON.stringify(data)).slice(0, 200);
+        throw new Error(`branches() 返回异常: ${snippet}`);
+    }
+    let branches = data.list.map((b) => b.branch);
+    if (branches.includes(branch)) {
+        await api.code.set(branch, code);
+    }
+    else {
+        await api.raw.user.cloneBranch('', branch, code);
+    }
 }
 // 从指定的输出文件中获取所有需要上传的文件列表
 function getFileList(outputFile) {
@@ -105,7 +167,7 @@ function getFileList(outputFile) {
     });
     return code;
 }
-// 获取目标分支名称, 如果指定为 'auto' 则使用当前 Git 分支
+// 获取目标分支名称, 如果指定为 'auto' 则使用main
 function getBranchName(branch) {
     if (branch === 'auto') {
         return git.branch();
@@ -122,11 +184,11 @@ function screeps(screepsOptions = {}) {
             if (options.sourcemap)
                 generateSourceMaps(bundle);
         },
-        writeBundle(options, bundle) {
+        async writeBundle(options, bundle) {
             if (options.sourcemap)
                 writeSourceMaps(options);
             if (!screepsOptions.dryRun) {
-                uploadSource((screepsOptions.configFile || screepsOptions.config), options);
+                await uploadSource((screepsOptions.configFile || screepsOptions.config), options);
             }
         }
     };
