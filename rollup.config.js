@@ -43,14 +43,9 @@ const runCopy = () => {
 }
 
 // 根据指定的配置决定是上传还是复制到文件夹
-const pluginDeploy = 
-        config && config.copyPath ?
-        // 复制到指定路径
-        runCopy() : 
-        config && config.token ?
-        // 上传到screeps
-        screeps({ config, dayRun: !config }) :
-        '';
+const pluginDeploy =
+    config?.copyPath ? runCopy() :
+    config && screeps({ config, dayRun: !config });
 
 export default {
     input: 'src/main.ts',
