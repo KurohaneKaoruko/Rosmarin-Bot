@@ -247,10 +247,8 @@ rosmarin-bot/
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | TypeScript | 5.x | 主要开发语言 |
-| Rollup | 2.x | 模块打包 |
-| Babel | 7.x | 代码转译 |
+| Rollup | 4.x | 模块打包 |
 | Terser | 5.x | 代码压缩 |
-| ESLint | 9.x | 代码检查 |
 
 ## 🎨 可用布局
 
