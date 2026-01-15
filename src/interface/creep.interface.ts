@@ -461,6 +461,18 @@ interface CreepMemory {
      * @description 简单的工作状态标记
      */
     working?: boolean;
+
+    /** 
+     * 是否已完成准备流程
+     * @description 常用于 action 模式角色（如 harvester）的一次性初始化标记
+     */
+    ready?: boolean;
+
+    /** 
+     * 当前动作
+     * @description action 模式下的状态字段，不同角色会定义不同的动作集合
+     */
+    action?: string;
     
     /** 
      * 是否已完成boost
