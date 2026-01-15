@@ -1,184 +1,160 @@
-const harvest = function (creep: Creep) {
-    const droppedEnergy = creep.pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-        filter: (resource) => resource.resourceType === RESOURCE_ENERGY && resource.amount > 200
+const selectBestSource = function (creep: Creep): Source | null {
+    const sources = creep.room.source.filter(s => s.energy > 0);
+    if (sources.length === 0) return null;
+
+    // 统计每个 Source 被多少个 Universal Creep 锁定
+    const sourceCounts = new Map<string, number>();
+    sources.forEach(s => sourceCounts.set(s.id, 0));
+
+    const myCreeps = creep.room.find(FIND_MY_CREEPS, {
+        filter: c => c.memory.role === 'universal' && c.memory.targetSourceId
     });
 
-    if (droppedEnergy) {
-        if (creep.pickup(droppedEnergy) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(droppedEnergy, { maxRooms: 1, range: 1});
+    myCreeps.forEach(c => {
+        const sid = c.memory.targetSourceId as string;
+        if (sourceCounts.has(sid)) {
+            sourceCounts.set(sid, sourceCounts.get(sid)! + 1);
         }
-        return;
-    }
-
-    const ruinedEnergy = creep.pos.findClosestByRange(FIND_RUINS, {
-        filter: (ruin) => ruin.store[RESOURCE_ENERGY] > 50
     });
 
-    if (ruinedEnergy) {
-        if (creep.withdraw(ruinedEnergy, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(ruinedEnergy, { maxRooms: 1, range: 1})
-        }
+    // 排序：优先选计数最小的；计数相同选距离最近的
+    sources.sort((a, b) => {
+        const countA = sourceCounts.get(a.id)!;
+        const countB = sourceCounts.get(b.id)!;
+        if (countA !== countB) return countA - countB;
+        return creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b);
+    });
+
+    return sources[0];
+}
+
+const getEnergy = function (creep: Creep) {
+    // 1. 优先从各种资源点（掉落、墓碑、废墟、容器、Storage/Terminal）智能收集
+    // minContainerAmount 设置低一点 (200)，以便在重启阶段能尽量利用容器里的剩余能量
+    if (creep.smartCollect(RESOURCE_ENERGY, {
+        minContainerAmount: 200,
+        minDroppedAmount: 50
+    })) {
+        // 如果正在捡垃圾，清除 Source 锁定，避免占用名额
+        delete creep.memory.targetSourceId;
         return;
     }
 
-    const container = creep.pos.findClosestByRange(FIND_STRUCTURES, {
-        filter: (structure) => structure.structureType === STRUCTURE_CONTAINER &&
-                                structure.store[RESOURCE_ENERGY] > 50
-    })
-    if (container) {
-        if (creep.withdraw(container, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(container, { maxRooms: 1, range: 1});
+    // 2. 动态选择 Source 采集
+    let sourceId = creep.memory.targetSourceId as Id<Source> | undefined;
+    let source: Source | null = null;
+
+    // 检查当前锁定的 Source 是否有效
+    if (sourceId) {
+        source = Game.getObjectById(sourceId);
+        if (!source || source.energy === 0) {
+            delete creep.memory.targetSourceId; // 无效或枯竭，清除锁定
+            source = null;
         }
-        return;
     }
 
-    // 检查spawn和tower是否需要补充能量
-    const st = creep.room.CheckSpawnAndTower();
+    // 如果没有有效 Source，重新选择
+    if (!source) {
+        source = selectBestSource(creep);
+        if (source) {
+            creep.memory.targetSourceId = source.id;
+        }
+    }
 
-    const storage = creep.room.storage;
-    const terminal = creep.room.terminal;
-
-    // 检查terminal是否存在且存储的能量大于10000
-    if (st && terminal && terminal.store[RESOURCE_ENERGY] > 10000){
-        if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(terminal, { maxRooms: 1, range: 1});
-        }
-    }
-    // 检查storage是否存在且存储的能量大于10000
-    else if (st && storage && storage.store[RESOURCE_ENERGY] > 10000) {
-        if (creep.withdraw(storage, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(storage, { maxRooms: 1, range: 1});
-        }
-    }
-    // 如果terminal能量大于storage，则从terminal中取出能量
-    else if (!st && storage && terminal && terminal.store[RESOURCE_ENERGY] > storage.store[RESOURCE_ENERGY]) {
-        if (creep.withdraw(terminal, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(terminal, { maxRooms: 1, range: 1});
-        }
-    }
-    else {
-        const targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
-        if (targetSource && targetSource.energy > 0) {
-            if (creep.harvest(targetSource) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(targetSource, { maxRooms: 1, range: 1});
-            }
-        }
+    // 执行采集
+    if (source) {
+        creep.goHaverst(source);
+    } else {
+        // 确实无矿可采，清除锁定
+        delete creep.memory.targetSourceId;
     }
 }
 
-const transfer = function (creep) {
-    let target = Game.getObjectById(creep.memory.cache.targetId) as StructureContainer | null;
+const doWork = function (creep: Creep) {
+    // 1. 尝试从缓存获取填充目标
+    let target = Game.getObjectById(creep.memory.cache.targetId) as StructureSpawn | StructureExtension | StructureTower | null;
 
+    // 验证目标有效性 (存在且未满)
     if (!target || target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
         creep.memory.cache.targetId = null;
+        target = null;
 
-        const targets = [];
-
-        // 查找未满的 spawn 和 extension
-        const spawnExtensions = (creep.room.spawn?.concat(creep.room.extension) ?? []).filter(o => o);
-        for (const spawnExtension of spawnExtensions) {
-            if (spawnExtension.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                targets.push(spawnExtension);
-            }
-        }
+        // 2. 查找新的填充目标
+        // 优先级 1: Spawn 和 Extension
+        const spawns = creep.room.spawn || [];
+        const extensions = creep.room.extension || [];
+        // 显式声明类型以避免 concat 推断错误
+        const spawnExtensions: (StructureSpawn | StructureExtension)[] = [...spawns, ...extensions];
         
+        let validTargets: (StructureSpawn | StructureExtension | StructureTower)[] = spawnExtensions.filter(s => s.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
 
-        // 找tower
-        if(targets.length === 0) {
-            const towers = creep.room.tower?.filter(o => o.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
-            if (towers && towers.length > 0) {
-                targets.push(towers[0]);
-            }
+        // 优先级 2: Tower (能量不满 900 时填充，保留一部分空间防止溢出浪费，或者直接填满)
+        if (validTargets.length === 0) {
+            const towers = creep.room.tower || [];
+            validTargets = towers.filter(t => t.store.getFreeCapacity(RESOURCE_ENERGY) > 200);
         }
 
-        // 如果没有找到未满的 spawn 和 extension，则查找 storage
-        if (targets.length === 0) {
-            if (creep.room.terminal && creep.room.terminal.store[RESOURCE_ENERGY] < 10000 &&
-                creep.room.terminal.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                targets.push(creep.room.terminal);
+        // 选择最近的目标
+        if (validTargets.length > 0) {
+            target = creep.pos.findClosestByRange(validTargets);
+            if (target) {
+                creep.memory.cache.targetId = target.id;
             }
-            else if (creep.room.storage && creep.room.storage.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                targets.push(creep.room.storage);
-            }
-        }
-
-        // 如果还是没有找到目标，则查找最近的 container
-        if (targets.length === 0) {
-            const containers = creep.room.container?.filter(o => o.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
-            if (containers && containers.length > 0) {
-                targets.push(containers[0]);
-            }
-        }
-
-        if (targets.length > 0) {
-            target = (targets.length === 1) ? targets[0] : creep.pos.findClosestByRange(targets);
-            if (target) creep.memory.cache.targetId = target.id;
         }
     }
 
+    // 3. 执行填充或建设/升级
     if (target) {
-        if (creep.transfer(target, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
-            creep.moveTo(target, { maxRooms: 1, range: 1});
-        }
+        creep.goTransfer(target, RESOURCE_ENERGY);
     } else {
-        const sites = creep.room.find(FIND_CONSTRUCTION_SITES, { filter: { structureType: STRUCTURE_CONTAINER } });
-        const site = creep.pos.findClosestByRange(sites);
-        if (site) {
-            if (creep.build(site) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(site, { maxRooms: 1, range: 1});
-            }
-        } else {
-            upgrade(creep);
+        // 无需填充时：建设 > 升级
+        // 优先建设 Container，其次是 Road 等
+        const buildResult = creep.findAndBuild({
+            priority: [STRUCTURE_CONTAINER, STRUCTURE_ROAD, STRUCTURE_RAMPART],
+            range: 3
+        });
+
+        if (!buildResult) {
+            // 如果没工地，升级控制器
+            creep.goUpgrade();
         }
     }
-}
-
-const upgrade = function (creep) {
-    const controller = creep.room.controller;
-    if (controller && controller.my && creep.pos.isNearTo(controller)) {
-        creep.upgradeController(controller)
-    } else {
-        creep.moveTo(controller, { maxRooms: 1, range: 1});
-    }
-}
-
-const sign = function (creep) {
-    const controller = creep.room.controller;
-    const botMem = Memory['RoomControlData'][creep.room.name];
-    const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
-    const oldSign = controller.sign?.text ?? '';
-    if(controller && oldSign != sign) {
-        if (creep.pos.inRangeTo(controller, 1)) {
-            creep.signController(controller, sign);
-        } else {
-            creep.moveTo(controller, { visualizePathStyle: { stroke: '#ffffff' } });
-            return true;
-        }
-    }
-    return false;
 }
 
 const UniversalFunction = {
     prepare: function (creep: Creep) {
-        const targetSource = creep.room.closestSource(creep);
-        if (!targetSource) return false;
-        creep.memory.targetSourceId = targetSource.id;
+        // 仅检查 Source 是否存在，不再进行绑定
+        if (!creep.room.source || creep.room.source.length === 0) return false;
         return true;
     },
     source: function (creep: Creep) {
         if (!creep.moveHomeRoom()) return;
-        if (sign(creep)) return;
-        harvest(creep);
-        return creep.store.getFreeCapacity() === 0;
+        if (creep.handleRoomEdge()) return;
+        
+        getEnergy(creep);
+        
+        // 满载判定
+        if (creep.store.getFreeCapacity() === 0) {
+            delete creep.memory.targetSourceId; // 采集结束，释放 Source 占用
+            return true;
+        }
+        return false;
     },
     target: function (creep: Creep) {
-        if (!creep.moveHomeRoom()) return;
-        if (sign(creep)) return;
-        if (creep.room.level < 2 || creep.room.controller?.ticksToDowngrade < 2000) {
-            upgrade(creep);
-        } else {
-            transfer(creep);
+        // 确保进入 target 状态时 Source 占用已释放
+        if (creep.memory.targetSourceId) {
+            delete creep.memory.targetSourceId;
         }
+
+        if (!creep.moveHomeRoom()) return;
+        if (creep.handleRoomEdge()) return;
+
+        // 房间降级保护：如果 RCL < 2 或 濒临降级，则强制升级
+        if (creep.room.controller?.ticksToDowngrade < 2000 || creep.room.level < 2) {
+            creep.goUpgrade();
+        }
+
+        doWork(creep);
         return creep.store.getUsedCapacity() === 0;
     }
 };
