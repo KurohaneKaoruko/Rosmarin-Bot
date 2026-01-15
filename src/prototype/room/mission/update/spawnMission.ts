@@ -6,11 +6,13 @@ const RoleSpawnCheck = {
         return current < room.source.length;
     },
     'upgrader': (room: Room, current: number) => {
-        const num = RoleLevelData['upgrader'][room.level]['num'];
+        const lv = room.level;
+        const num = RoleLevelData['upgrader'][lv]['num'];
         if (room.memory.defend) return false;
-        if (global.CreepNum[room.name]?.['UP-upgrade']) return false;
-        if (room.level == 8 && !Game.flags[`${room.name}/UPGRADE`] &&
-            room.controller.ticksToDowngrade >= 150000) return false;
+        if (!Game.flags[`${room.name}/UPGRADE`]) return false;
+        const ticksToDowngrade = room.controller?.ticksToDowngrade || 0;
+        if (lv == 8 && ticksToDowngrade > 100000) return false;
+        if (lv >= 5 && ticksToDowngrade > 10000 && room[RESOURCE_ENERGY] < 50e3) return false;
         return current < num;
     },
     'transport': (room: Room, current: number) => {
