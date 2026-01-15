@@ -157,13 +157,6 @@ interface Room {
 
     // ==================== 基础功能 ====================
     /** 
-     * 计算房间内所有结构体能量
-     * @returns 房间内storage、terminal、factory、container中的能量总和
-     * @example const totalEnergy = room.AllEnergy(); // 返回如 500000
-     */
-    AllEnergy(): number;
-    
-    /** 
      * 判断房间所有者是否在白名单中
      * @returns true表示房间所有者在白名单中，false表示不在
      * @description 检查Memory['whitelist']中是否包含房间控制器所有者
