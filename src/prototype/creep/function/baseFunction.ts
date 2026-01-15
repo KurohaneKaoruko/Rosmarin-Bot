@@ -195,11 +195,11 @@ export default class BaseFunction extends Creep {
     }
 
     /**
-     *boost creep
-     * @param {Array<string>} boostTypes - 强化的资源类型数组
-     * @param {boolean} must - 是否必须boost
-     * @param {boolean} reserve - 是否为预定的boost
-     * @returns {boolean} - 是否成功强化或结束强化
+     * boost creep
+     * @param boostTypes - 强化的资源类型数组
+     * @param must - 是否必须boost
+     * @param reserve - 是否为预定的boost
+     * @returns 是否成功强化或结束强化
      */
     goBoost(boostTypes: Array<string>, must: boolean = false, reserve: boolean = false) {
         // 检查需要强化的部件是否都已经被强化

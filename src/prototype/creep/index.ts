@@ -2,6 +2,7 @@ import { assignPrototype } from "@/utils"
 import BaseFunction from "./function/baseFunction"
 import MoveFunction from "./function/moveFuntion"
 import WorkFunction from "./function/workFunction"
+import SourceFunction from "./function/sourceFunction"
 import DoubleAction from "./function/doubleAction"
 import CollectFunction from "./function/collectFunction"
 import CombatFunction from "./function/combatFunction"
@@ -12,6 +13,7 @@ const plugins = [
     BaseFunction,
     MoveFunction,
     WorkFunction,
+    SourceFunction,
     DoubleAction,
     CollectFunction,
     CombatFunction,
