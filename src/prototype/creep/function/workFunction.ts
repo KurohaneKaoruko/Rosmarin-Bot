@@ -109,5 +109,23 @@ export default class WorkFunction extends Creep {
             return false;
         } else return true;
     }
+    /**
+     * 升级控制器
+     * @param target - 控制器 (Controller)
+     * @returns true 表示正在升级或已在范围内，false 表示正在移动中，null 表示目标不存在
+     */
+    goUpgrade() {
+        const target = this.room.controller;
+        if (!target) return null;
+        let result = this.upgradeController(target);
+        if (result === ERR_NOT_IN_RANGE) {
+            this.moveTo(target, {
+                visualizePathStyle: { stroke: '#ffaa00' },
+                maxRooms: 1,
+                range: 3
+            });
+            return false;
+        } else return true;
+    }
 }
 
