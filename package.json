@@ -8,6 +8,7 @@
     "push": "rollup -cw --environment DEST:main",
     "sim": "rollup -cw --environment DEST:sim",
     "local": "rollup -cw --environment DEST:local",
+    "test": "vitest run",
     "commit": "git add . && git-cz",
     "submit": "node ./scripts/submit.js",
     "count": "node ./scripts/countFiles.js",
@@ -36,7 +37,8 @@
     "typescript-eslint": "^8.19.1",
     "screeps-api": "^1.16.1",
     "git-rev-sync": "^3.0.2",
-    "git-cz": "^4.9.0"
+    "git-cz": "^4.9.0",
+    "vitest": "^1.6.0"
   },
   "dependencies": {
     "inquirer": "^12.2.0",
