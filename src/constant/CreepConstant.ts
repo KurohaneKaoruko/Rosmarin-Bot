@@ -66,11 +66,11 @@ export const RoleData: RoleConfig = {
         boostmap: {[WORK]: 'XZH2O', [MOVE]: 'XZHO2'},
         level: 11, code: 'DIS', action: 'dismantle'
     },  // 拆除者
-    'UP-upgrade': {
+    'up-upgrade': {
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 11, code: 'UUP', work: 'up-upgrade'
     }, // 加速升级
-    'UP-repair': {
+    'up-repair': {
         bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]],
         level: 11, code: 'URE', work: 'up-repair'
     }, // 加速维修
@@ -411,7 +411,7 @@ export const RoleLevelData = {
         7: { bodypart: [[MOVE, 18], [HEAL, 18]], num: 0 },
         8: { bodypart: [[MOVE, 25], [HEAL, 25]], num: 0 },
     },
-    "UP-upgrade": {
+    "up-upgrade": {
         1: { bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]], num: 0 },
         2: { bodypart: [[WORK, 3], [CARRY, 2], [MOVE, 2]], num: 0 },
         3: { bodypart: [[WORK, 4], [CARRY, 2], [MOVE, 6]], num: 0 },

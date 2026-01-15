@@ -114,7 +114,7 @@ function withdrawEnergy(creep) {
         creep.room.lookForAtArea(LOOK_CREEPS,
             Math.max(0, creep.pos.y - 1), Math.max(0, creep.pos.x - 1),
             Math.min(49,creep.pos.y + 1), Math.min(49,creep.pos.x + 1), true)
-            .filter(c => c.creep.memory?.role !== 'UP-upgrade')
+            .filter(c => c.creep.memory?.role !== 'up-upgrade')
             .forEach(c => {
                 c.creep.memory.dontPullMe = false
             });

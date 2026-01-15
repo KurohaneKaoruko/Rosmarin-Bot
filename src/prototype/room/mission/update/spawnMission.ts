@@ -90,7 +90,7 @@ const RoleSpawnCheck = {
         }
         return false;
     },
-    'UP-upgrade': (room: Room, current: number) => {
+    'up-upgrade': (room: Room, current: number) => {
         if (room.level == 8) return false;
         // 冲级
         let UPFlag = room.find(FIND_FLAGS).find(f => f.name.startsWith(`${room.name}/UP-UPGRADE/`));
@@ -102,7 +102,7 @@ const RoleSpawnCheck = {
         
         return current < num;
     },
-    'UP-repair': (room: Room, current: number) => {
+    'up-repair': (room: Room, current: number) => {
         // 加速刷墙
         const UPFlag = room.find(FIND_FLAGS).find(f => f.name.startsWith(`${room.name}/UP-REPAIR/`));
         if (!UPFlag) return false;
