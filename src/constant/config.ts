@@ -24,7 +24,7 @@ export const OUTMINE_CONFIG = {
 /**
  * 外矿道路配置
  */
-export const ROAD_CONFIG = {
+export const EXTERNAL_ROAD_CONFIG = {
     // ============================================================
     // 路径计算配置
     // ============================================================

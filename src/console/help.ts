@@ -80,20 +80,20 @@ info.room(roomName?): 查看房间工作状态
 info.allres(): 查看所有资源储量
 info.roomres(): 查看房间资源占用空间`,
 
-    helpOutmine: `###  外矿指令列表  ###
-outmine.add(roomName, targetRoom): 添加外矿房间
+    helpMine: `###  外矿指令列表  ###
+mine.add(roomName, targetRoom): 添加外矿房间
  - 普通房间添加到energy列表
  - 过道房间添加到highway监控列表
  - 中间房间添加到centerRoom采矿列表
-outmine.remove(roomName, targetRoom): 删除外矿房间
-outmine.list(roomName): 查看外矿列表
-outmine.clearRoad(roomName): 清空外矿Road缓存
-outmine.auto(roomName, type): 开关自动采集
+mine.remove(roomName, targetRoom): 删除外矿房间
+mine.list(roomName): 查看外矿列表
+mine.clearRoad(roomName): 清空外矿Road缓存
+mine.auto(roomName, type): 开关自动采集
  - type: power 或 deposit
-outmine.power(roomName, targetRoom, num, boostLevel?, prNum?): 派出Power开采队
+mine.power(roomName, targetRoom, num, boostLevel?, prNum?): 派出Power开采队
  - boostLevel: 0/1/2 强化等级
-outmine.deposit(roomName, targetRoom, num): 派出Deposit开采队
-outmine.cancel(roomName, targetRoom, type?): 取消开采任务
+mine.deposit(roomName, targetRoom, num): 派出Deposit开采队
+mine.cancel(roomName, targetRoom, type?): 取消开采任务
 road.help(): 外矿造路规划相关`,
 
     helpMarket: `###  市场交易指令列表  ###

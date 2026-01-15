@@ -6,7 +6,7 @@
  * @module outMineRoad
  */
 
-import { ROAD_CONFIG } from '@/constant/config';
+import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { compress, decompress } from '@/utils';
 
 // ============================================================
@@ -45,7 +45,7 @@ export class CostMatrixCache {
         global.OutMineRoadCache!.costMatrix[roomName] = {
             matrix,
             createdAt: Game.time,
-            ttl: ttl ?? ROAD_CONFIG.COST_MATRIX_TTL,
+            ttl: ttl ?? EXTERNAL_ROAD_CONFIG.COST_MATRIX_TTL,
         };
     }
 
@@ -392,7 +392,7 @@ export class RoadMemory {
         if (!outMineData?.Road) return 0;
 
         // 检查是否已迁移
-        if (outMineData.RoadVersion === ROAD_CONFIG.DATA_VERSION) return 0;
+        if (outMineData.RoadVersion === EXTERNAL_ROAD_CONFIG.DATA_VERSION) return 0;
 
         this.ensureMemory(homeRoom);
         const newMem = outMineData.RoadData!;
@@ -419,7 +419,7 @@ export class RoadMemory {
         }
 
         // 标记版本
-        outMineData.RoadVersion = ROAD_CONFIG.DATA_VERSION;
+        outMineData.RoadVersion = EXTERNAL_ROAD_CONFIG.DATA_VERSION;
         newMem.lastUpdate = Game.time;
 
         return count;
@@ -593,9 +593,9 @@ export class PathPlanner {
         const startPos = new RoomPosition(center.x, center.y, homeRoom);
 
         const result = PathFinder.search(startPos, { pos: target, range: 1 }, {
-            plainCost: ROAD_CONFIG.PLAIN_COST,
-            swampCost: ROAD_CONFIG.SWAMP_COST,
-            maxOps: ROAD_CONFIG.MAX_OPS,
+            plainCost: EXTERNAL_ROAD_CONFIG.PLAIN_COST,
+            swampCost: EXTERNAL_ROAD_CONFIG.SWAMP_COST,
+            maxOps: EXTERNAL_ROAD_CONFIG.MAX_OPS,
             roomCallback: (roomName) => this.buildCostMatrix(roomName),
         });
 
@@ -642,9 +642,9 @@ export class PathPlanner {
             }
 
             const result = PathFinder.search(startPos, { pos: target, range: 1 }, {
-                plainCost: ROAD_CONFIG.PLAIN_COST,
-                swampCost: ROAD_CONFIG.SWAMP_COST,
-                maxOps: ROAD_CONFIG.MAX_OPS,
+                plainCost: EXTERNAL_ROAD_CONFIG.PLAIN_COST,
+                swampCost: EXTERNAL_ROAD_CONFIG.SWAMP_COST,
+                maxOps: EXTERNAL_ROAD_CONFIG.MAX_OPS,
                 roomCallback: (roomName) => {
                     const matrix = this.buildCostMatrix(roomName);
                     if (!matrix) return false;
@@ -653,7 +653,7 @@ export class PathPlanner {
                     for (const posKey of allRoadPositions) {
                         const [posRoomName, x, y] = posKey.split(':');
                         if (posRoomName === roomName) {
-                            matrix.set(parseInt(x), parseInt(y), ROAD_CONFIG.ROAD_COST);
+                            matrix.set(parseInt(x), parseInt(y), EXTERNAL_ROAD_CONFIG.ROAD_COST);
                         }
                     }
 
@@ -672,7 +672,7 @@ export class PathPlanner {
                 for (const pos of result.path) {
                     allRoadPositions.add(`${pos.roomName}:${pos.x}:${pos.y}`);
                     // 更新 CostMatrix 缓存
-                    CostMatrixCache.updatePosition(pos.roomName, pos.x, pos.y, ROAD_CONFIG.ROAD_COST);
+                    CostMatrixCache.updatePosition(pos.roomName, pos.x, pos.y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
                 }
             }
         }
@@ -698,7 +698,7 @@ export class PathPlanner {
             const structures = room.find(FIND_STRUCTURES);
             for (const struct of structures) {
                 if (struct.structureType === STRUCTURE_ROAD) {
-                    costs.set(struct.pos.x, struct.pos.y, ROAD_CONFIG.ROAD_COST);
+                    costs.set(struct.pos.x, struct.pos.y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
                 } else if (
                     struct.structureType !== STRUCTURE_CONTAINER &&
                     struct.structureType !== STRUCTURE_RAMPART
@@ -719,7 +719,7 @@ export class PathPlanner {
             const sites = room.find(FIND_CONSTRUCTION_SITES);
             for (const site of sites) {
                 if (site.structureType === STRUCTURE_ROAD) {
-                    costs.set(site.pos.x, site.pos.y, ROAD_CONFIG.ROAD_COST);
+                    costs.set(site.pos.x, site.pos.y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
                 }
             }
         }
@@ -743,7 +743,7 @@ export class PathPlanner {
         // 检查 CPU 使用率（基于 tickLimit）
         const cpuUsed = Game.cpu.getUsed();
         const cpuLimit = Game.cpu.tickLimit || 500;
-        if (cpuUsed / cpuLimit > ROAD_CONFIG.CPU_THRESHOLD) {
+        if (cpuUsed / cpuLimit > EXTERNAL_ROAD_CONFIG.CPU_THRESHOLD) {
             return false;
         }
 
@@ -848,7 +848,7 @@ export class RoadBuilder {
         for (const [, positions] of paths) {
             for (const pos of positions) {
                 // 限制单路线最大工地数
-                if (created >= ROAD_CONFIG.MAX_SITES_PER_ROUTE) break;
+                if (created >= EXTERNAL_ROAD_CONFIG.MAX_SITES_PER_ROUTE) break;
 
                 // 跳过已处理的位置（去重）
                 const posKey = `${pos.roomName}:${pos.x}:${pos.y}`;
@@ -964,9 +964,9 @@ export class RoadBuilder {
         const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoomName);
 
         if (isCenterRoom) {
-            return level >= ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
+            return level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
         } else {
-            return level >= ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
+            return level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
         }
     }
 }
@@ -1031,7 +1031,7 @@ export class RoadMaintain {
             
             if (road) {
                 built++;
-                if (road.hits < road.hitsMax * ROAD_CONFIG.REPAIR_THRESHOLD) {
+                if (road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
                     damaged++;
                 }
             } else {
@@ -1078,7 +1078,7 @@ export class RoadMaintain {
                 const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
                 const road = structures.find(s => s.structureType === STRUCTURE_ROAD) as StructureRoad | undefined;
                 
-                if (road && road.hits < road.hitsMax * ROAD_CONFIG.REPAIR_THRESHOLD) {
+                if (road && road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
                     // 优先级：hits 越低优先级越高
                     const priority = 1 - (road.hits / road.hitsMax);
                     repairQueue.push({ pos, priority });
@@ -1106,7 +1106,7 @@ export class RoadMaintain {
 
         for (const pos of positions) {
             // 限制单次创建数量
-            if (created >= ROAD_CONFIG.MAX_SITES_PER_ROUTE) break;
+            if (created >= EXTERNAL_ROAD_CONFIG.MAX_SITES_PER_ROUTE) break;
 
             // 跳过房间边缘位置（x=0, x=49, y=0, y=49），无法在边缘创建建造工地
             if (pos.x === 0 || pos.x === 49 || pos.y === 0 || pos.y === 49) continue;
@@ -1148,7 +1148,7 @@ export class RoadMaintain {
         const lastCheck = this.lastCheckTime[cacheKey] || 0;
 
         // 检查是否需要执行维护（默认每 500 ticks）
-        if (Game.time - lastCheck < ROAD_CONFIG.MAINTAIN_INTERVAL) {
+        if (Game.time - lastCheck < EXTERNAL_ROAD_CONFIG.MAINTAIN_INTERVAL) {
             return { checked: 0, sitesCreated: 0, needsRepair: 0 };
         }
 
@@ -1328,7 +1328,7 @@ export class RoadVisual {
                 let radius = 0.3;
 
                 if (road) {
-                    if (road.hits < road.hitsMax * ROAD_CONFIG.REPAIR_THRESHOLD) {
+                    if (road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
                         color = this.COLORS.DAMAGED;
                         radius = 0.4;
                     } else if (isShared) {
