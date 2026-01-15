@@ -1,4 +1,5 @@
 import { LabMap, LabLevel } from '@/constant/ResourceConstant'
+import { log } from '@/utils';
 
 export default class AutoLab extends Room {
     autoLab() {
@@ -35,7 +36,7 @@ export default class AutoLab extends Room {
             botmem.labAtype = null;
             botmem.labBtype = null;
             botmem.labAmount = 0;
-            global.log(`[自动Lab合成] ${this.name}已自动关闭lab合成任务: ${labProduct}`)
+            log('AutoLab', `${this.name}已自动关闭lab合成任务: ${labProduct}`)
         }
 
         // 获取新任务
@@ -49,7 +50,7 @@ export default class AutoLab extends Room {
         botmem.labBtype = LabMap[task]['raw2'];
         botmem.labAmount = taskAmount;
 
-        global.log(`[自动Lab合成] ${this.name}已自动分配lab合成任务: ${botmem.labAtype}/${botmem.labBtype} -> ${REACTIONS[botmem.labAtype][botmem.labBtype]}, 限额: ${taskAmount || '无'}`)
+        log('AutoLab', `${this.name}已自动分配lab合成任务: ${botmem.labAtype}/${botmem.labBtype} -> ${REACTIONS[botmem.labAtype][botmem.labBtype]}, 限额: ${taskAmount || '无'}`)
         return OK;
     }
 }
@@ -97,13 +98,23 @@ const getT1Task = (room: Room) => {
     
     if (r('L') >= threshold) {
         const LO = r('LO'), LH = r('LH');
-        if (O >= 5000 && LO <= LH) return [ 'LO', LO + 10e3 ];
-        if (H >= 5000 && LH <= LO) return [ 'LH', LH + 10e3 ];
+        if (O >= 5000 && H >= 5000) {
+            if (LO <= LH) return [ 'LO', LO + 10e3 ];
+            if (LH <= LO) return [ 'LH', LH + 10e3 ];
+        } else {
+            if (O >= 10000) return [ 'LO', LO + 10e3 ];
+            if (H >= 10000) return [ 'LH', LH + 10e3 ];
+        }
     }
     if (r('Z') >= threshold) {
         const ZO = r('ZO'), ZH = r('ZH');
-        if (O >= 5000 && ZO <= ZH) return [ 'ZO', ZO + 10e3 ];
-        if (H >= 5000 && ZH <= ZO) return [ 'ZH', ZH + 10e3 ];
+        if (O >= 5000 && H >= 5000) {
+            if (ZO <= ZH) return [ 'ZO', ZO + 10e3 ];
+            if (ZH <= ZO) return [ 'ZH', ZH + 10e3 ];
+        } else {
+            if (O >= 10000) return [ 'ZO', ZO + 10e3 ];
+            if (H >= 10000) return [ 'ZH', ZH + 10e3 ];
+        }
     }
 
     if (r('ZK') >= 5000 && r('UL') >= 5000) {
