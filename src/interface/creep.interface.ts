@@ -236,6 +236,45 @@ interface Creep {
      */
     goRepair(target: Structure): boolean;
 
+    // ==================== 能量源功能 (SourceFunction) ====================
+    /**
+     * 计算采集产能
+     * @returns 每 tick 预计获得的能量值（考虑 WORK 部件与 boost）
+     */
+    calculateHarvestIncomePerTick(): number;
+    
+    /**
+     * 获取绑定的能量源
+     * @returns Source 对象或 null
+     */
+    getBoundSource(): Source | null;
+    
+    /**
+     * 绑定能量源 ID
+     * @param id - Source 的 ID
+     */
+    setBoundSourceId(id: Id<Source>): void;
+    
+    /**
+     * 获取绑定能量源附近的容器
+     * @param range - 搜索范围，默认 2
+     * @returns 附近的 StructureContainer 或 null
+     */
+    getNearbySourceContainer(range?: number): StructureContainer | null;
+    
+    /**
+     * 获取绑定能量源附近的 Link
+     * @param range - 搜索范围，默认 2
+     * @returns 附近的 StructureLink 或 null（RCL < 5 时也返回 null）
+     */
+    getNearbySourceLink(range?: number): StructureLink | null;
+    
+    /**
+     * 移动并重合到能量源附近的容器上
+     * @returns true 表示已到达或无需移动，false 表示正在移动中
+     */
+    sitOnSourceContainer(): boolean;
+
 
     // ==================== 建造功能 (BuildFunction) ====================
     /** 

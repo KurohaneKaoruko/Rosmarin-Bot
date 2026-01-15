@@ -1,22 +1,68 @@
-const GetContainer = {
-    link: function (creep: Creep) {
-        // 查找未满的 link
-        if (creep.room.level < 5) return null;
-        if (!creep.room.link) return null; // 如果没有 link，则返回 null
-        const source = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        const link = creep.room.link.find(l => l.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source?.pos.inRangeTo(l, 2));
-        return link ?? null;
-    },
-    container: function (creep: Creep) {
-        // 查找未满的container
-        if (!creep.room.container) return null;
-        const source = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        const container = creep.room.container.find(c => c.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source?.pos.inRangeTo(c, 2));
-        return container ?? null;
-    }
+const NEAR_RANGE = 2;
+const SOURCE_RANGE = 1;
+const STAY_BUILD_RANGE = 3;
+
+type ActionName = 'harvest' | 'transfer' | 'build' | '';
+
+/**
+ * 查找适合投递的 Link
+ * @description 要求房间 RCL>=5，Link 在 source 附近且未满
+ */
+function findTransferLink(creep: Creep, source: Source): StructureLink | null {
+    if (creep.room.level < 5) return null;
+    const links = creep.room.link;
+    if (!links) return null;
+    return links.find(l => l.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source.pos.inRangeTo(l, NEAR_RANGE)) ?? null;
+}
+
+/**
+ * 查找适合投递的 Container
+ * @description 要求 Container 在 source 附近且未满
+ */
+function findTransferContainer(creep: Creep, source: Source): StructureContainer | null {
+    const containers = creep.room.container;
+    if (!containers) return null;
+    return containers.find(c => c.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source.pos.inRangeTo(c, NEAR_RANGE)) ?? null;
+}
+
+/**
+ * 查找 Creep 附近的任意 Link
+ * @description 用于状态切换判断，不检查容量
+ */
+function findAnyNearbyLink(creep: Creep): StructureLink | null {
+    const links = creep.room.link;
+    if (!links) return null;
+    return links.find(l => l.pos.inRangeTo(creep.pos, NEAR_RANGE)) ?? null;
+}
+
+/**
+ * 查找 Creep 附近的任意 Container
+ * @description 用于状态切换判断，不检查容量
+ */
+function findAnyNearbyContainer(creep: Creep): StructureContainer | null {
+    const containers = creep.room.container;
+    if (!containers) return null;
+    return containers.find(c => c.pos.inRangeTo(creep.pos, NEAR_RANGE)) ?? null;
+}
+
+/**
+ * 原地尝试建造附近的工地
+ * @description 如果身上有能量且周围有工地，则进行建造；不产生移动
+ * @returns 是否进行了建造
+ */
+function stayAndBuildNearby(creep: Creep): boolean {
+    if (creep.store[RESOURCE_ENERGY] === 0) return false;
+    const constructionSites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, STAY_BUILD_RANGE);
+    const target = creep.pos.findClosestByRange(constructionSites);
+    if (!target) return false;
+    creep.build(target);
+    return true;
 }
 
 const HarvesterAction = {
+    /**
+     * Harvester 主运行逻辑
+     */
     run: function (creep: Creep) {
         if (!creep.moveHomeRoom()) return;
 
@@ -25,7 +71,8 @@ const HarvesterAction = {
             return;
         }
 
-        switch (creep.memory.action) {
+        const action = (creep.memory.action || '') as ActionName;
+        switch (action) {
             case 'harvest':
                 this.harvest(creep)
                 return;
@@ -36,66 +83,82 @@ const HarvesterAction = {
                 this.build(creep)
                 return;
             default:
-                this.switch(creep);
+                this.chooseNextAction(creep);
                 return;
         }
     },
+    /**
+     * 准备阶段：绑定 Source
+     */
     prepare: function (creep: Creep) {
-        if (!creep.room.source ||
-            creep.room.source.length == 0) return false;
-        let targetSource = creep.room.closestSource(creep);
+        if (!creep.room.source || creep.room.source.length === 0) return false;
+        const targetSource = creep.room.closestSource(creep);
         if (!targetSource) return false;
-        creep.memory.targetSourceId = targetSource.id;
+        creep.setBoundSourceId(targetSource.id);
         return true;
     },
+    /**
+     * 采集阶段
+     * @description 采集能量，自动对齐到 Container，满载前预判切换
+     */
     harvest: function (creep: Creep) {
         if (creep.store.getFreeCapacity() === 0) {
-            this.switch(creep);
+            this.chooseNextAction(creep);
             return;
         }
-        const targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source;
+        const targetSource = creep.getBoundSource();
         if (!targetSource) {
             creep.memory.ready = false;
             return;
         }
         if (targetSource.energy === 0) {
-            this.switch(creep);
+            this.chooseNextAction(creep);
             return;
         }
 
-        const sourceContainer = creep.room.container.find(c => c.pos.inRangeTo(targetSource, 1));
-        if (sourceContainer && !creep.pos.isEqualTo(sourceContainer)) {
-            if (creep.moveTo(sourceContainer)===OK) return;
-        }
-        let result = creep.goHaverst(targetSource);
-        if (!result) return;
-        if (creep.store.getCapacity() == 0) return;
+        if (!creep.sitOnSourceContainer()) return;
 
-        let energy = 0;
-        for (const part of creep.body) {
-            if (part.type !== WORK) continue;
-            if (part.hits === 0) continue;
-            if (!part.boost) energy += 2;
-            else energy += 2 * (BOOSTS.work[part.boost]['harvest'] || 1);
-        }
-        if (creep.store.getFreeCapacity() <= energy) {
-            this.switch(creep);
+        const result = creep.goHaverst(targetSource);
+        if (!result) return;
+        if (creep.store.getCapacity() === 0) return;
+
+        const energyIncome = creep.calculateHarvestIncomePerTick();
+        if (creep.store.getFreeCapacity() <= energyIncome) {
+            this.chooseNextAction(creep);
         }
     },
+    /**
+     * 转移阶段
+     * @description 将能量转移到 Link 或 Container，若无处可放则原地建造或丢弃
+     */
     transfer: function (creep: Creep) {
-        const target = GetContainer['link'](creep) || GetContainer['container'](creep);
-        if (!target) {
-            creep.drop(RESOURCE_ENERGY);
-            this.switch(creep);
+        if (creep.store[RESOURCE_ENERGY] === 0) {
+            this.chooseNextAction(creep);
             return;
         }
-        let result = creep.goTransfer(target, RESOURCE_ENERGY);
+        const source = creep.getBoundSource();
+        if (!source) {
+            creep.memory.ready = false;
+            return;
+        }
+        const target = findTransferLink(creep, source) || findTransferContainer(creep, source);
+        if (!target) {
+            if (stayAndBuildNearby(creep)) return;
+            creep.drop(RESOURCE_ENERGY);
+            this.chooseNextAction(creep);
+            return;
+        }
+        const result = creep.goTransfer(target, RESOURCE_ENERGY);
         if (!result) return;
-        this.switch(creep);
+        this.chooseNextAction(creep);
     },
+    /**
+     * 建造容器阶段
+     * @description 当 Source 旁没有 Container/Link 时，负责维护和建造 Container
+     */
     build: function (creep: Creep) {
         if (creep.store[RESOURCE_ENERGY] === 0) {
-            this.switch(creep);
+            this.chooseNextAction(creep);
             return;
         }
 
@@ -108,13 +171,13 @@ const HarvesterAction = {
             return;
         }
 
-        // 如果容器已存在，则不创建
+        // 如果容器已存在，则不建造
         const containers = creep.pos.findInRange(FIND_STRUCTURES, 2, {
             filter: s => s.structureType === STRUCTURE_CONTAINER
         });
         const container = creep.pos.findClosestByRange(containers);
         if (container) {
-            this.switch(creep);
+            this.chooseNextAction(creep);
             return;
         }
 
@@ -124,29 +187,34 @@ const HarvesterAction = {
         })
         const link = creep.pos.findClosestByRange(links);
         if (link) {
-            this.switch(creep);
+            this.chooseNextAction(creep);
             return;
         }
 
-        // 如果能量源不存在，或是不在能量源附近，则移动
-        const tsid = creep.memory.targetSourceId;
-        const targetSource = Game.getObjectById(tsid) as Source;
-        if (!targetSource || !creep.pos.inRangeTo(targetSource, 1)) {
+        const targetSource = creep.getBoundSource();
+        if (!targetSource) {
+            creep.memory.ready = false;
+            return;
+        }
+        if (!creep.pos.inRangeTo(targetSource, SOURCE_RANGE)) {
             creep.moveTo(targetSource);
-            return false;
+            return;
         }
 
-        let result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
+        const result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
         if (result !== OK) creep.drop(RESOURCE_ENERGY);
 
-        this.switch(creep);
-        return;
+        this.chooseNextAction(creep);
     },
-    switch: function (creep: Creep) {
-        creep.memory.action = '';
+    /**
+     * 决策下一动作
+     * @description 根据能量和周边设施状态，在 harvest/transfer/build 间切换
+     */
+    chooseNextAction: function (creep: Creep) {
+        creep.memory.action = '' as ActionName;
         if (creep.store[RESOURCE_ENERGY] > 0) {
-            const link = creep.room.link.find(l => l.pos.inRangeTo(creep.pos, 2));
-            const container = creep.room.container.find(c => c.pos.inRangeTo(creep.pos, 2));
+            const link = findAnyNearbyLink(creep);
+            const container = findAnyNearbyContainer(creep);
             if (!link && !container) {
                 creep.memory.action = 'build';
             } else {
@@ -154,20 +222,23 @@ const HarvesterAction = {
             }
             return;
         } else {
-            const source = Game.getObjectById(creep.memory.targetSourceId) as Source;
+            const source = creep.getBoundSource();
             if (!source) {
                 creep.memory.ready = false;
-            } else if (source.energy === 0 && creep.pos.isNearTo(source)) {
-                if(!creep.room.container || !creep.room.link) return;
-                const container = creep.room.container.find(c =>
-                    c.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && creep.pos.inRangeTo(c, 1));
-                const link = GetContainer['link'](creep);
+                return;
+            }
+
+            if (source.energy === 0 && creep.pos.isNearTo(source)) {
+                if (!creep.room.container || !creep.room.link) return;
+                const container = creep.room.container.find(c => c.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && creep.pos.inRangeTo(c, SOURCE_RANGE));
+                const link = findTransferLink(creep, source);
                 if (!container || !link) return;
                 creep.goWithdraw(container, RESOURCE_ENERGY);
+                return;
             } else {
                 creep.memory.action = 'harvest';
+                return;
             }
-            return;
         }
     }
 }
