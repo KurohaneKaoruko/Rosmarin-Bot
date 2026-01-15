@@ -117,7 +117,7 @@ const AidModule = (flagName: string) => {
 
         let bodys = [];
 
-        room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'UP-upgrade', {
+        room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'up-upgrade', {
             home: targetRoom,
         } as CreepMemory);
         return true;
