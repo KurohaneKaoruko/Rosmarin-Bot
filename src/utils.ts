@@ -232,7 +232,7 @@ export function GenCreepName(code: string) {
     const index = Math.floor(Game.time * Math.random() * 1000) % FlowerNames.length;
     let name: string;
     if (FlowerNames && FlowerNames.length) {
-        name = `〈${FlowerNames[index]}〉${code}#${number}`;
+        name = `${FlowerNames[index]} ${code}#${number}`;
     } else {
         name = `${code}#${number}`;
     }
