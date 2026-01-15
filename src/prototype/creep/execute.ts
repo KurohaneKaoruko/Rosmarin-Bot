@@ -1,6 +1,5 @@
 import { workRegistry, actionRegistry } from './action';
 import { RoleData } from '@/constant/CreepConstant';
-import { SongConstant } from '@/constant/SayConstant';
 
 export default class CreepExecute extends Creep {
     exec() {
@@ -33,21 +32,4 @@ export default class CreepExecute extends Creep {
         }
         else return;
     }
-
-    // 随机唱歌♪
-    randomSing() {
-        if (this.memory.sayText) return;
-        if (!this.room.my) return;
-        if (Math.random() > 0.007) return;
-        let index = Math.floor(Math.random() * SongConstant.length);
-        let text = SongConstant[index];
-        if(!text) return;
-        if(typeof text === "string") {
-            this.memory.sayText = [text+'♪', ''];
-        } else {
-            this.memory.sayText = text.map((t:string) => t+'♪');
-            this.memory.sayText.push('');
-        }
-    }
-
 }
