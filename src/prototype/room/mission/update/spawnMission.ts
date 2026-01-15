@@ -81,12 +81,6 @@ const RoleSpawnCheck = {
         const lv = room.level;
         if (current < 2 && lv < 3) {
             return (!room.container || room.container.length < 1);
-        } else if (current < 1) {
-            const controller = room.controller;
-            const botMem = Memory['RoomControlData'][room.name];
-            const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
-            const oldSign = controller.sign?.text ?? '';
-            return controller && oldSign != sign
         }
         return false;
     },
@@ -112,14 +106,7 @@ const RoleSpawnCheck = {
         if (room.level < 7)  return false;
         if (room[RESOURCE_ENERGY] < 100000) return false;
         return current < num;
-    },
-    // 'signer': (room: Room, current: number) => {
-    //     if (current > 0) return false;
-    //     if (Game.map.getRoomStatus(room.name).status != 'normal') return false;
-    //     if (Object.values(Game.creeps).some(c=>c.memory.role=='signer')) return false;
-    //     if (Math.random() > 0.1) return false;
-    //     return true;
-    // }
+    }
 }
 
 
