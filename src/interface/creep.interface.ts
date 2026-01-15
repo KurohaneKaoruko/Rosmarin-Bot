@@ -236,6 +236,15 @@ interface Creep {
      */
     goRepair(target: Structure): boolean;
 
+    /** 
+     * 升级控制器
+     * @param
+     * @returns true 表示正在升级或已在范围内，false 表示正在移动中，null 表示目标不存在
+     */
+    goUpgrade(): boolean;
+
+
+
     // ==================== 能量源功能 (SourceFunction) ====================
     /**
      * 计算采集产能
