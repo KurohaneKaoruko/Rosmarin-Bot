@@ -73,7 +73,7 @@ export default class RoomDefense extends Room {
                     creep.memory.role == 'defend-ranged') as any;
             const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
             let attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
-            let rangedQueueNum = SpawnMissionNum[this.name]?.['defend-ranged'] || 0;
+            let rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
             if (hostiles.some((c: Creep) => c.body.some(part => part.type == ATTACK) ||
                 hostiles.some((c: Creep) => c.body.some(part => part.type == WORK))) &&
                 (attackDefender.length + attackQueueNum) < 1) {
