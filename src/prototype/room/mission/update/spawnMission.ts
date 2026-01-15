@@ -42,10 +42,11 @@ const RoleSpawnCheck = {
         if (room.level < 6) {
             if (current < 2 && room.checkMissionInPool('build')) return true;
         } else {
+            if (room.storage?.store[RESOURCE_ENERGY] < 10e3) return false;
             if (current < 1 && room.checkMissionInPool('build')) return true;
             if (current < 2 && room.getMissionNumInPool('build') > 10) return true;
         }
-        if (current >= 1 || room[RESOURCE_ENERGY] < 100000) return false;
+        if (current >= 1 || room[RESOURCE_ENERGY] < 100e3) return false;
         if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
             let WR_Tasks = global.WallRampartRepairMission?.[room.name];
             if (WR_Tasks && Object.keys(WR_Tasks)?.length > 0) return true;
