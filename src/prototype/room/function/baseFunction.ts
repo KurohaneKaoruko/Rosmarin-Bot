@@ -4,15 +4,6 @@ import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
  * 一些基础的功能
  */
 export default class BaseFunction extends Room {
-    // 获取房间能量储备
-    AllEnergy() {
-        let Energy = 0;
-        for(const s of this.mass_stores) {
-            Energy += s.store[RESOURCE_ENERGY];
-        }
-        return Energy;
-    }
-
     // 判断是否在白名单中
     isWhiteList() {
         let whiteList = new Set<string>(Memory['whitelist'] || []);
