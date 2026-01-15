@@ -1,7 +1,5 @@
-import { OUTMINE_CONFIG, ROAD_CONFIG } from '@/constant/config';
-import { compress, decompress } from '@/utils';
-import { RoadBuilder, RoadMemory, CostMatrixCache } from '@/modules/utils/outMineRoad';
-import { RoadVisual } from '@/modules/utils/outMineRoad';
+import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { RoadBuilder, RoadVisual } from '@/modules/utils/externalRoad';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
@@ -36,7 +34,7 @@ export default class OutMine extends Room {
 
 
             // 造路
-            if (Game.time % ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
+            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
                 RoadBuilder.createRoadSites(this, targetRoom)
             }
 
@@ -113,7 +111,7 @@ export default class OutMine extends Room {
             if (!targetRoom) continue;
 
             // 造路
-            if (Game.time % ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
+            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
                 RoadBuilder.createRoadSites(this, targetRoom)
             }
 

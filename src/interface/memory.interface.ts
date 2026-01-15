@@ -782,7 +782,7 @@ declare namespace NodeJS {
 
 /**
  * 道路配置类型
- * @description ROAD_CONFIG 常量的类型定义
+ * @description EXTERNAL_ROAD_CONFIG 常量的类型定义
  */
 interface RoadConfigType {
     // 路径计算配置

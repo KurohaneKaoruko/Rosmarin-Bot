@@ -1,7 +1,7 @@
 import base from './base';
 import info from './function/info';
 import room from './function/room';
-import outMine from './function/outmine';
+import mine from './function/mine';
 import layout from './function/layout';
 import market from './function/market';
 import resource from './function/resource';
@@ -19,7 +19,7 @@ const plugins = [
     room,
     layout,
     market,
-    outMine,
+    mine,
     resource,
     lab,
     spawn,

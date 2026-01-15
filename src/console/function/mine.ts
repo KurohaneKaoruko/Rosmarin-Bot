@@ -1,8 +1,8 @@
-import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/utils/outMineRoad';
+import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/utils/externalRoad';
 
 // 外矿设置
 export default {
-    outmine: {
+    mine: {
         add(roomName: string, targetRoom: string) {
             if (!roomName || !targetRoom) return -1;
             const BotMem = Memory['OutMineData'];

@@ -187,7 +187,7 @@ lab.auto.set('W1N1', 'XGH2O', 10000)
 factory.auto.set('W1N1', 'battery', 5000)
 
 // 添加外矿
-outmine.add('W1N1', 'W2N1')
+mine.add('W1N1', 'W2N1')
 
 // 设置自动交易
 market.auto.sell('W1N1', 'deal', 'XGH2O', 10000, 50)
