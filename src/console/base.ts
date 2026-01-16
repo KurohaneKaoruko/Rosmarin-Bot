@@ -8,9 +8,9 @@ const Base = {
             // 添加房间
             if (!layout) global.room.add(roomName);
             else {
-                const centerPos = Game.flags['centerPos']?.pos || Game.flags['storagePos']?.pos;
+                const centerPos = Game.flags['centerPos']?.pos;
                 if (!centerPos || centerPos.roomName !== roomName) {
-                    return Error('未设置中心, 请将centerPos放置需要设置的布局中心位置。')
+                    return Error('未设置中心, 请将centerPos放置到需要设置的布局中心位置。')
                 } else {
                     global.room.add(roomName, layout);
                 }

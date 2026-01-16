@@ -14,7 +14,7 @@ export default {
             return showRoomInfo(roomNames);
         },
         // 查看所有资源储量
-        allres() {
+        res() {
             return global.HelperRoomResource.showAllRes();
         },
         // 查看房间资源占用空间
