@@ -6,3 +6,4 @@ dist
 .kiro
 .trae
 package-lock.json
+test
