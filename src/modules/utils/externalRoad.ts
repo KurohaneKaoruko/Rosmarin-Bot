@@ -163,49 +163,7 @@ export class RoadMemory {
     }
 
     /**
-     * 获取指定路线的道路数据（兼容旧接口）
-     * @param homeRoom 主房间名
-     * @param targetRoom 目标房间名
-     * @returns 道路路线数据或 undefined
-     * @deprecated 请使用 getRouteGroup
-     */
-    static getRoads(homeRoom: string, targetRoom: string): OutMineRoadRoute | undefined {
-        const group = this.getRouteGroup(homeRoom, targetRoom);
-        if (!group) return undefined;
-        
-        // 转换为旧格式
-        return this.groupToRoute(group);
-    }
-
-    /**
-     * 将路线组转换为旧格式路线
-     */
-    private static groupToRoute(group: OutMineRoadRouteGroup): OutMineRoadRoute {
-        const positions: { [roomName: string]: number[] } = {};
-        let totalLength = 0;
-
-        for (const targetPos in group.paths) {
-            const pathData = group.paths[targetPos];
-            for (const [roomName, compressed] of pathData.path) {
-                if (!positions[roomName]) positions[roomName] = [];
-                if (!positions[roomName].includes(compressed)) {
-                    positions[roomName].push(compressed);
-                }
-            }
-            totalLength += pathData.length;
-        }
-
-        return {
-            positions,
-            length: totalLength,
-            createdAt: group.createdAt,
-            status: group.status,
-            lastCheck: group.lastCheck,
-        };
-    }
-
-    /**
-     * 设置指定目标的路径数据（新格式）
+     * 设置指定目标的路径数据
      * @param homeRoom 主房间名
      * @param targetRoom 目标房间名
      * @param targetPos 目标位置 "x:y"
@@ -234,18 +192,6 @@ export class RoadMemory {
         };
         
         mem.lastUpdate = Game.time;
-    }
-
-    /**
-     * 设置指定路线的道路数据（兼容旧接口）
-     * @param homeRoom 主房间名
-     * @param targetRoom 目标房间名
-     * @param positions 道路位置数组
-     * @deprecated 请使用 setPath
-     */
-    static setRoads(homeRoom: string, targetRoom: string, positions: RoomPosition[]): void {
-        // 旧接口：将所有位置存储为单个路径 "legacy"
-        this.setPath(homeRoom, targetRoom, 'legacy', positions);
     }
 
     /**
@@ -319,26 +265,30 @@ export class RoadMemory {
     }
 
     /**
-     * 添加单个道路位置到路线
+     * 获取指定路线组的所有唯一道路位置
      * @param homeRoom 主房间名
      * @param targetRoom 目标房间名
-     * @param pos 道路位置
-     * @returns 是否添加成功
-     * @deprecated 新格式不支持此操作
+     * @returns 唯一道路位置数组
      */
-    static addRoad(homeRoom: string, targetRoom: string, pos: RoomPosition): boolean {
-        const route = this.getRoads(homeRoom, targetRoom);
-        if (!route) return false;
+    static getGroupPositions(homeRoom: string, targetRoom: string): RoomPosition[] {
+        const group = this.getRouteGroup(homeRoom, targetRoom);
+        if (!group?.paths) return [];
 
-        if (!route.positions[pos.roomName]) {
-            route.positions[pos.roomName] = [];
+        const positions: RoomPosition[] = [];
+        const seen = new Set<string>();
+
+        for (const targetPos in group.paths) {
+            const pathData = group.paths[targetPos];
+            for (const [roomName, compressed] of pathData.path) {
+                const key = `${roomName}:${compressed}`;
+                if (!seen.has(key)) {
+                    seen.add(key);
+                    const [x, y] = decompress(compressed);
+                    positions.push(new RoomPosition(x, y, roomName));
+                }
+            }
         }
-        const compressed = compress(pos.x, pos.y);
-        if (!route.positions[pos.roomName].includes(compressed)) {
-            route.positions[pos.roomName].push(compressed);
-            route.length++;
-        }
-        return true;
+        return positions;
     }
 
     /**
@@ -367,65 +317,6 @@ export class RoadMemory {
     }
 
     /**
-     * 将路线数据转换为 RoomPosition 数组
-     * @param route 路线数据
-     * @returns RoomPosition 数组
-     */
-    static routeToPositions(route: OutMineRoadRoute): RoomPosition[] {
-        const positions: RoomPosition[] = [];
-        for (const roomName in route.positions) {
-            for (const compressed of route.positions[roomName]) {
-                const [x, y] = decompress(compressed);
-                positions.push(new RoomPosition(x, y, roomName));
-            }
-        }
-        return positions;
-    }
-
-    /**
-     * 迁移旧格式数据到新格式
-     * @param homeRoom 主房间名
-     * @returns 迁移的路线数量
-     */
-    static migrate(homeRoom: string): number {
-        const outMineData = Memory['OutMineData']?.[homeRoom];
-        if (!outMineData?.Road) return 0;
-
-        // 检查是否已迁移
-        if (outMineData.RoadVersion === EXTERNAL_ROAD_CONFIG.DATA_VERSION) return 0;
-
-        this.ensureMemory(homeRoom);
-        const newMem = outMineData.RoadData!;
-        let count = 0;
-
-        for (const targetRoom in outMineData.Road) {
-            const oldData = outMineData.Road[targetRoom];
-            if (!oldData || oldData.length === 0) continue;
-
-            // 旧格式迁移为 legacy 路径
-            const path: Array<[string, number]> = oldData.map(([roomName, compressed]: [string, number]) => [roomName, compressed]);
-
-            newMem.routes[targetRoom] = {
-                paths: {
-                    'legacy': {
-                        path,
-                        length: oldData.length,
-                    }
-                },
-                createdAt: Game.time,
-                status: 'active',
-            };
-            count++;
-        }
-
-        // 标记版本
-        outMineData.RoadVersion = EXTERNAL_ROAD_CONFIG.DATA_VERSION;
-        newMem.lastUpdate = Game.time;
-
-        return count;
-    }
-
-    /**
      * 获取统计信息
      * @param homeRoom 主房间名
      * @returns 统计信息
@@ -435,10 +326,7 @@ export class RoadMemory {
         pathCount: number;
         totalLength: number;
         roomCount: number;
-        version: number;
-        hasOldData: boolean;
     } {
-        const outMineData = Memory['OutMineData']?.[homeRoom];
         const mem = this.getMemory(homeRoom);
         
         let totalLength = 0;
@@ -466,8 +354,6 @@ export class RoadMemory {
             pathCount,
             totalLength,
             roomCount: roomSet.size,
-            version: outMineData?.RoadVersion ?? 0,
-            hasOldData: !!outMineData?.Road && Object.keys(outMineData.Road).length > 0,
         };
     }
 
@@ -800,23 +686,12 @@ export class RoadBuilder {
         const homeRoomName = homeRoom.name;
         const targetRoomName = targetRoom.name;
 
-        // 尝试迁移旧数据
-        RoadMemory.migrate(homeRoomName);
-
         // 检查是否已有路线数据
         const existingPaths = RoadMemory.getAllPaths(homeRoomName, targetRoomName);
         
-        // 检查是否是旧的 legacy 格式（需要重新计算）
-        const isLegacyFormat = existingPaths.size === 1 && existingPaths.has('legacy');
-        
-        if (existingPaths.size > 0 && !isLegacyFormat) {
+        if (existingPaths.size > 0) {
             // 使用已有路线数据创建工地
             return this.createSitesFromPaths(homeRoomName, existingPaths);
-        }
-
-        // 如果是 legacy 格式，删除旧数据
-        if (isLegacyFormat) {
-            RoadMemory.deleteRoute(homeRoomName, targetRoomName);
         }
 
         // 计算新路径
@@ -981,7 +856,7 @@ export class RoadBuilder {
 }
 
 /**
- * 创建外矿道路工地（兼容旧接口）
+ * 创建外矿道路工地
  * @param room 主房间
  * @param targetRoom 目标房间
  * @deprecated 请使用 RoadBuilder.createRoadSites
@@ -1017,12 +892,11 @@ export class RoadMaintain {
         noVision: number;
         healthPercent: number;
     } {
-        const route = RoadMemory.getRoads(homeRoom, targetRoom);
-        if (!route) {
+        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+        if (positions.length === 0) {
             return { total: 0, built: 0, damaged: 0, missing: 0, noVision: 0, healthPercent: 100 };
         }
 
-        const positions = RoadMemory.routeToPositions(route);
         let built = 0;
         let damaged = 0;
         let missing = 0;
@@ -1076,10 +950,9 @@ export class RoadMaintain {
         const targets = RoadMemory.getRouteTargets(homeRoom);
 
         for (const targetRoom of targets) {
-            const route = RoadMemory.getRoads(homeRoom, targetRoom);
-            if (!route) continue;
+            const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+            if (positions.length === 0) continue;
 
-            const positions = RoadMemory.routeToPositions(route);
             for (const pos of positions) {
                 const room = Game.rooms[pos.roomName];
                 if (!room) continue;
@@ -1107,10 +980,9 @@ export class RoadMaintain {
      * @returns 创建的工地数量
      */
     static checkDestroyed(homeRoom: string, targetRoom: string): number {
-        const route = RoadMemory.getRoads(homeRoom, targetRoom);
-        if (!route) return 0;
+        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+        if (positions.length === 0) return 0;
 
-        const positions = RoadMemory.routeToPositions(route);
         let created = 0;
 
         for (const pos of positions) {
@@ -1261,10 +1133,9 @@ export class RoadVisual {
      * @param targetRoom 目标房间名
      */
     static visualize(homeRoom: string, targetRoom: string): void {
-        const route = RoadMemory.getRoads(homeRoom, targetRoom);
-        if (!route) return;
+        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+        if (positions.length === 0) return;
 
-        const positions = RoadMemory.routeToPositions(route);
         this.drawRoute(positions, homeRoom);
     }
 
@@ -1280,10 +1151,9 @@ export class RoadVisual {
         const allPositions: Map<string, RoomPosition[]> = new Map();
 
         for (const targetRoom of targets) {
-            const route = RoadMemory.getRoads(homeRoom, targetRoom);
-            if (!route) continue;
+            const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+            if (positions.length === 0) continue;
 
-            const positions = RoadMemory.routeToPositions(route);
             allPositions.set(targetRoom, positions);
 
             for (const pos of positions) {

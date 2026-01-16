@@ -357,15 +357,6 @@ interface OutMineMemory {
     highway?: string[];
 
     /**
-     * 外矿道路数据 (旧格式，兼容用)
-     * @deprecated 请使用新格式 RoadData
-     * @description 存储到各外矿房间的道路位置
-     */
-    Road?: {
-        [targetRoom: string]: Array<[string, number]>;  // [roomName, compressedXY]
-    };
-
-    /**
      * 外矿道路数据 (新格式)
      * @description 按房间分组存储道路位置，减少冗余
      */
@@ -442,45 +433,6 @@ interface OutMineRoadPath {
      * 路径长度
      */
     length: number;
-}
-
-/**
- * 单条外矿道路路线（旧格式，保留用于兼容）
- * @deprecated 请使用 OutMineRoadRouteGroup
- */
-interface OutMineRoadRoute {
-    /**
-     * 道路坐标（按房间分组）
-     * @description key 为房间名，value 为该房间内的压缩坐标数组
-     * @example { "W1N1": [2525, 2526, 2527], "W1N2": [4925, 4924] }
-     */
-    positions: {
-        [roomName: string]: number[];  // 压缩坐标 x*100+y
-    };
-
-    /**
-     * 路线总长度
-     * @description 道路总格子数
-     */
-    length: number;
-
-    /**
-     * 创建时间
-     * @description Game.time
-     */
-    createdAt: number;
-
-    /**
-     * 最后检查时间
-     * @description 用于道路维护
-     */
-    lastCheck?: number;
-
-    /**
-     * 路线状态
-     * @description 'active' 正常, 'pending' 待建造, 'damaged' 需修复
-     */
-    status?: 'active' | 'pending' | 'damaged';
 }
 
 /**

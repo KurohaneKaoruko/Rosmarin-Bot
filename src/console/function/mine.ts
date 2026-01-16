@@ -393,24 +393,6 @@ export default {
         },
 
         /**
-         * 迁移旧格式数据
-         * @param homeRoom 主房间名
-         */
-        migrate(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.migrate(homeRoom)');
-                return ERR_INVALID_ARGS;
-            }
-            const count = RoadMemory.migrate(homeRoom);
-            if (count > 0) {
-                console.log(`✓ 已迁移 ${count} 条路线到新格式`);
-            } else {
-                console.log(`无需迁移（已是最新格式或无数据）`);
-            }
-            return OK;
-        },
-
-        /**
          * 显示统计信息
          * @param homeRoom 主房间名
          */
@@ -428,8 +410,6 @@ export default {
             console.log(`独立路径: ${stats.pathCount}`);
             console.log(`道路总长: ${stats.totalLength}`);
             console.log(`覆盖房间: ${stats.roomCount}`);
-            console.log(`数据版本: ${stats.version}`);
-            console.log(`旧数据: ${stats.hasOldData ? '存在（可迁移）' : '无'}`);
             console.log(`\n---------- CostMatrix 缓存 ----------`);
             console.log(`缓存数量: ${cacheStats.total}`);
             console.log(`已过期: ${cacheStats.expired}`);
@@ -489,10 +469,10 @@ export default {
 
             console.log(`\n========== 道路健康检查 [${homeRoom}] ==========`);
             for (const targetRoom of targets) {
-                const route = RoadMemory.getRoads(homeRoom, targetRoom);
-                if (!route) continue;
+                const group = RoadMemory.getRouteGroup(homeRoom, targetRoom);
+                if (!group) continue;
 
-                const positions = RoadMemory.routeToPositions(route);
+                const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
                 let built = 0;
                 let damaged = 0;
                 let missing = 0;
@@ -516,7 +496,7 @@ export default {
                     }
                 }
 
-                const status = route.status || 'unknown';
+                const status = group.status || 'unknown';
                 const healthPct = positions.length > 0 ? ((built / positions.length) * 100).toFixed(1) : '0';
                 console.log(`[${targetRoom}] 状态:${status} 完成:${healthPct}% 已建:${built} 缺失:${missing} 损坏:${damaged} 无视野:${noVision}`);
             }
@@ -528,23 +508,7 @@ export default {
          * 显示帮助信息
          */
         help() {
-            console.log(`
-========== 外矿道路命令帮助 ==========
-road.recalc(homeRoom, targetRoom)  - 重新计算指定路线
-road.recalcAll([homeRoom])         - 重新计算所有外矿路线(不填则全部房间)
-road.clear(homeRoom, targetRoom)   - 清除指定路线
-road.clearAll(homeRoom)            - 清除所有路线
-road.migrate(homeRoom)             - 迁移旧格式数据
-road.stats(homeRoom)               - 显示统计信息
-road.validate(homeRoom)            - 验证数据完整性
-road.clearCache()                  - 清除CostMatrix缓存
-road.health(homeRoom)              - 检查道路健康状态
-road.show(homeRoom, [targetRoom])  - 显示道路可视化
-road.hide(homeRoom)                - 隐藏道路可视化
-road.help()                        - 显示此帮助
-==========================================
-            `);
-            return OK;
+            return global['helpRoad'];
         },
 
         /**
