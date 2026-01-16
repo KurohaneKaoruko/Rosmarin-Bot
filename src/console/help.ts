@@ -114,6 +114,23 @@ const helpTexts: Record<string, string> = {
         line(),
     ].join(br),
 
+    helpRoad: [
+        title('🛣️', '外矿道路命令帮助'),
+        line(),
+        `${cmd('road.recalc(homeRoom, targetRoom)')}：重新计算指定路线`,
+        `${cmd('road.recalcAll(homeRoom?)')}：重新计算所有外矿路线（不填则全部房间）`,
+        `${cmd('road.clear(homeRoom, targetRoom)')}：清除指定路线`,
+        `${cmd('road.clearAll(homeRoom)')}：清除所有路线`,
+        `${cmd('road.stats(homeRoom)')}：显示统计信息`,
+        `${cmd('road.validate(homeRoom)')}：验证数据完整性`,
+        `${cmd('road.clearCache()')}：清除 CostMatrix 缓存`,
+        `${cmd('road.health(homeRoom)')}：检查道路健康状态`,
+        `${cmd('road.show(homeRoom, targetRoom?)')}：显示道路可视化`,
+        `${cmd('road.hide(homeRoom)')}：隐藏道路可视化`,
+        `${cmd('road.help()')}：显示此帮助`,
+        line(),
+    ].join(br),
+
     helpMarket: [
         title('💱', '市场交易指令列表'),
         line(),

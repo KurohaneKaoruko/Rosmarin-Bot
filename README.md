@@ -124,6 +124,17 @@ npm install
 
 ### 游戏内启动
 
+**快速启动（一条指令完成下面的全部步骤）**
+```javascript
+// 使用自动布局一键完成
+bot.add('W1N1')
+// 使用静态布局
+bot.add('W1N1', 布局名)
+// 需要放置旗帜 centerPos 来指定布局中心
+```
+
+
+
 **第一步：添加房间**
 ```javascript
 room.add('W1N1', 'rosemary', 25, 25)
@@ -156,11 +167,10 @@ layout.auto('W1N1')
 
 | 指令 | 说明 |
 |------|------|
-| `help` | 显示所有帮助分类 |
-| `helpStart` | 启动流程指南 |
-| `helpInfo` | 信息查看指令 |
+| `help` | 显示帮助 |
 | `helpRoom` | 房间管理指令 |
 | `helpLayout` | 布局设置指令 |
+| `helpInfo` | 信息查看指令 |
 | `helpOutmine` | 外矿采集指令 |
 | `helpMarket` | 市场交易指令 |
 | `helpLab` | Lab 合成指令 |
@@ -178,7 +188,7 @@ layout.auto('W1N1')
 info.room('W1N1')
 
 // 查看所有资源储量
-info.allres()
+info.res()
 
 // 设置 Lab 自动合成 (合成 XGH2O，限额 10000)
 lab.auto.set('W1N1', 'XGH2O', 10000)
