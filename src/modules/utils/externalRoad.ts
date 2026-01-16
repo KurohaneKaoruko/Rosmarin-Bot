@@ -150,6 +150,10 @@ export class CostMatrixCache {
  * @description 管理道路数据的新格式存储，按目标位置独立存储路径
  */
 export class RoadMemory {
+    private static groupPositionsCache: {
+        [key: string]: { lastUpdate: number; positions: RoomPosition[] };
+    } = {};
+
     /**
      * 获取指定目标房间的路线组
      * @param homeRoom 主房间名
@@ -192,6 +196,7 @@ export class RoadMemory {
         };
         
         mem.lastUpdate = Game.time;
+        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
     }
 
     /**
@@ -221,6 +226,7 @@ export class RoadMemory {
         }
         
         mem.lastUpdate = Game.time;
+        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
     }
 
     /**
@@ -271,8 +277,17 @@ export class RoadMemory {
      * @returns 唯一道路位置数组
      */
     static getGroupPositions(homeRoom: string, targetRoom: string): RoomPosition[] {
+        const mem = this.getMemory(homeRoom);
         const group = this.getRouteGroup(homeRoom, targetRoom);
         if (!group?.paths) return [];
+
+        if (mem?.lastUpdate !== undefined) {
+            const cacheKey = `${homeRoom}:${targetRoom}`;
+            const cached = this.groupPositionsCache[cacheKey];
+            if (cached && cached.lastUpdate === mem.lastUpdate) {
+                return cached.positions;
+            }
+        }
 
         const positions: RoomPosition[] = [];
         const seen = new Set<string>();
@@ -288,6 +303,12 @@ export class RoadMemory {
                 }
             }
         }
+        if (mem?.lastUpdate !== undefined) {
+            this.groupPositionsCache[`${homeRoom}:${targetRoom}`] = {
+                lastUpdate: mem.lastUpdate,
+                positions,
+            };
+        }
         return positions;
     }
 
@@ -302,6 +323,7 @@ export class RoadMemory {
         if (!mem?.routes?.[targetRoom]) return false;
         delete mem.routes[targetRoom];
         mem.lastUpdate = Game.time;
+        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
         return true;
     }
 
@@ -518,8 +540,7 @@ export class PathPlanner {
             return distA - distB;
         });
 
-        // 收集所有已计算的道路位置，用于复用
-        const allRoadPositions = new Set<string>();
+        const reusedRoadCoordsByRoom = new Map<string, Set<number>>();
 
         for (const target of sortedTargets) {
             // CPU 保护检查
@@ -527,22 +548,31 @@ export class PathPlanner {
                 break;
             }
 
+            const perSearchMatrixCache = new Map<string, CostMatrix | false>();
             const result = PathFinder.search(startPos, { pos: target, range: 1 }, {
                 plainCost: EXTERNAL_ROAD_CONFIG.PLAIN_COST,
                 swampCost: EXTERNAL_ROAD_CONFIG.SWAMP_COST,
                 maxOps: EXTERNAL_ROAD_CONFIG.MAX_OPS,
                 roomCallback: (roomName) => {
-                    const matrix = this.buildCostMatrix(roomName);
-                    if (!matrix) return false;
+                    const cachedMatrix = perSearchMatrixCache.get(roomName);
+                    if (cachedMatrix !== undefined) return cachedMatrix;
 
-                    // 将已计算的道路位置设为低代价（复用）
-                    for (const posKey of allRoadPositions) {
-                        const [posRoomName, x, y] = posKey.split(':');
-                        if (posRoomName === roomName) {
-                            matrix.set(parseInt(x), parseInt(y), EXTERNAL_ROAD_CONFIG.ROAD_COST);
+                    const baseMatrix = this.buildCostMatrix(roomName);
+                    if (!baseMatrix) {
+                        perSearchMatrixCache.set(roomName, false);
+                        return false;
+                    }
+
+                    const matrix = baseMatrix.clone();
+                    const reused = reusedRoadCoordsByRoom.get(roomName);
+                    if (reused) {
+                        for (const compressed of reused) {
+                            const [x, y] = decompress(compressed);
+                            matrix.set(x, y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
                         }
                     }
 
+                    perSearchMatrixCache.set(roomName, matrix);
                     return matrix;
                 },
             });
@@ -556,7 +586,12 @@ export class PathPlanner {
 
                 // 将新路径加入已计算集合
                 for (const pos of result.path) {
-                    allRoadPositions.add(`${pos.roomName}:${pos.x}:${pos.y}`);
+                    let roomCoords = reusedRoadCoordsByRoom.get(pos.roomName);
+                    if (!roomCoords) {
+                        roomCoords = new Set<number>();
+                        reusedRoadCoordsByRoom.set(pos.roomName, roomCoords);
+                    }
+                    roomCoords.add(compress(pos.x, pos.y));
                     // 更新 CostMatrix 缓存
                     CostMatrixCache.updatePosition(pos.roomName, pos.x, pos.y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
                 }
@@ -634,6 +669,9 @@ export class PathPlanner {
             this.pathsThisTick = 0;
             this.lastResetTick = Game.time;
         }
+
+        const maxPathsPerTick = EXTERNAL_ROAD_CONFIG.MAX_PATHS_PER_TICK;
+        if (maxPathsPerTick && this.pathsThisTick >= maxPathsPerTick) return false;
 
         // 检查 CPU 使用率（基于 tickLimit）
         const cpuUsed = Game.cpu.getUsed();

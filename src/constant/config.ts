@@ -79,6 +79,8 @@ export const EXTERNAL_ROAD_CONFIG = {
     
     /** CPU 保护阈值 (已用 CPU 占 tickLimit 百分比) */
     CPU_THRESHOLD: 0.9,
+    /** 单 tick 最大计算路径数 */
+    MAX_PATHS_PER_TICK: 0,  // 0 表示不限制
     
     // ============================================================
     // 数据格式版本
