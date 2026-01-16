@@ -1,6 +1,6 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/utils';
-import HelperVisual from '@/modules/planner/helperVisual';
-import { autoPlanner63 } from '@/modules/planner/dynamic/autoPlanner63';
+import HelperVisual from '@/modules/feature/planner/helperVisual';
+import { autoPlanner63 } from '@/modules/feature/planner/dynamic/autoPlanner63';
 
 export default {
     layout: {
@@ -431,7 +431,7 @@ export default {
 }
 
 
-import * as Planner from '@/modules/planner/static'
+import * as Planner from '@/modules/feature/planner/static'
 
 // 构建静态布局
 const BuildStaticPlanner = function (roomName: string, layoutType: string) {

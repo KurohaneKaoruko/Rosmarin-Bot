@@ -1,4 +1,4 @@
-import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/utils/externalRoad';
+import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/feature/externalRoad';
 
 // 外矿设置
 export default {

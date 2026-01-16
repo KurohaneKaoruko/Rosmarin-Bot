@@ -1,5 +1,5 @@
-const team_role = {
-    run: function (creep: Creep) {
+export default class TeamCreep {
+    public static action(creep: Creep) {
         if (!creep.memory.notified) {
             creep.notifyWhenAttacked(false);
             creep.memory.notified = true;
@@ -26,8 +26,5 @@ const team_role = {
             team.creeps.push(creep.id);
             creep.memory['rejoin'] = true;
         }
-        
     }
 }
-
-export default team_role;

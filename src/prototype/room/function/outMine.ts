@@ -1,5 +1,5 @@
 import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
-import { RoadBuilder, RoadVisual } from '@/modules/utils/externalRoad';
+import { RoadBuilder, RoadVisual } from '@/modules/feature/externalRoad';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
