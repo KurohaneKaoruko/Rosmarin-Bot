@@ -1443,7 +1443,7 @@ export class RoadVisual {
                 // 在终点标注
                 const endpoint = positions[positions.length - 1];
                 Game.map.visual.circle(endpoint, {
-                    radius: 1.5,
+                    radius: 1.2,
                     fill: color,
                     opacity: 0.8,
                     stroke: '#ffffff',
@@ -1467,9 +1467,9 @@ export class RoadVisual {
         // 使用 poly() API 绘制整条路径，获得连续的线条效果
         Game.map.visual.poly(validPath, {
             stroke: color,
-            strokeWidth: 0.8,
+            strokeWidth: 0.7,
             opacity: 0.7,
-            lineStyle: undefined,
+            lineStyle: 'solid',
         });
 
         // 在起点绘制标记
@@ -1479,12 +1479,5 @@ export class RoadVisual {
             fill: color,
             opacity: 0.6,
         });
-    }
-
-    /**
-     * 清除世界地图可视化
-     */
-    static clearMap(): void {
-        Game.map.visual.clear();
     }
 }
