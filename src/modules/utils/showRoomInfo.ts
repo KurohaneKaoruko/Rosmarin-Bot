@@ -158,7 +158,7 @@ const renderEnergy = (room: Room): string => {
     if (!energy) return td(colorText(`${ICONS.neutral} 0`, COLORS.neutral));
     const color = energy > THRESHOLDS.energyHigh ? COLORS.info 
         : energy > THRESHOLDS.energyLow ? COLORS.warning : COLORS.danger;
-    return td(colorText(`⚡ ${energy.toLocaleString()}`, color));
+    return td(colorText(`⚡ ${energy.toFixed(0).toLocaleString()}`, color));
 };
 
 // 生成单行数据
