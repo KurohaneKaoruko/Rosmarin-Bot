@@ -693,6 +693,15 @@ export class PathPlanner {
         const room = Game.rooms[roomName];
         const costs = new PathFinder.CostMatrix();
 
+        // 将布局中的道路位置设置为 ROAD_COST
+        const layoutRoads = Memory['LayoutData']?.[roomName]?.['road'];
+        if (layoutRoads) {
+            for (const compressed of layoutRoads) {
+                const [x, y] = decompress(compressed);
+                costs.set(x, y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
+            }
+        }
+
         if (room) {
             // 有视野的房间：添加建筑和 creep 代价
             const structures = room.find(FIND_STRUCTURES);
