@@ -1163,6 +1163,25 @@ export class RoadVisual {
     /** 可视化开关状态 */
     private static enabled: { [homeRoom: string]: boolean } = {};
 
+    private static readonly DRAW_INTERVAL = 1;
+    private static readonly MAP_DRAW_INTERVAL = 1;
+    private static readonly MAX_ROOM_POSITIONS_FOR_LINES = 220;
+
+    private static lastDrawTickByHome: { [homeRoom: string]: number } = {};
+    private static lastMapDrawTickByHome: { [homeRoom: string]: number } = {};
+
+    private static roomStateCache: {
+        [roomName: string]: {
+            tick: number;
+            roadsByXy: Map<string, StructureRoad>;
+            roadSiteXy: Set<string>;
+        };
+    } = {};
+
+    private static mapPathsCache: {
+        [key: string]: { lastUpdate: number; paths: Map<string, RoomPosition[]> };
+    } = {};
+
     /**
      * 可视化指定路线
      * @param homeRoom 主房间名
@@ -1172,7 +1191,7 @@ export class RoadVisual {
         const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
         if (positions.length === 0) return;
 
-        this.drawRoute(positions, homeRoom);
+        this.drawPositions(positions, homeRoom);
     }
 
     /**
@@ -1181,143 +1200,145 @@ export class RoadVisual {
      */
     static visualizeAll(homeRoom: string): void {
         const targets = RoadMemory.getRouteTargets(homeRoom);
-        
-        // 收集所有位置并统计共享
-        const positionCount: { [key: string]: number } = {};
-        const allPositions: Map<string, RoomPosition[]> = new Map();
+        if (targets.length === 0) return;
+
+        const sharedCount: { [key: string]: number } = {};
+        const byRoom: { [roomName: string]: RoomPosition[] } = {};
+        const seenByRoom: { [roomName: string]: Set<string> } = {};
 
         for (const targetRoom of targets) {
             const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
             if (positions.length === 0) continue;
 
-            allPositions.set(targetRoom, positions);
-
             for (const pos of positions) {
-                const key = `${pos.roomName}:${pos.x}:${pos.y}`;
-                positionCount[key] = (positionCount[key] || 0) + 1;
+                const sharedKey = `${pos.roomName}:${pos.x}:${pos.y}`;
+                sharedCount[sharedKey] = (sharedCount[sharedKey] || 0) + 1;
+
+                if (!byRoom[pos.roomName]) byRoom[pos.roomName] = [];
+                if (!seenByRoom[pos.roomName]) seenByRoom[pos.roomName] = new Set();
+                const xyKey = `${pos.x}:${pos.y}`;
+                if (seenByRoom[pos.roomName].has(xyKey)) continue;
+                seenByRoom[pos.roomName].add(xyKey);
+                byRoom[pos.roomName].push(pos);
             }
         }
 
-        // 绘制所有路线
-        for (const [, positions] of allPositions) {
-            this.drawRoute(positions, homeRoom, positionCount);
+        for (const roomName in byRoom) {
+            const room = Game.rooms[roomName];
+            if (!room) continue;
+            this.drawRoomPositions(room, byRoom[roomName], sharedCount);
         }
     }
 
-    /**
-     * 绘制路线
-     * @param positions 位置数组
-     * @param homeRoom 主房间名
-     * @param sharedCount 共享计数（可选）
-     */
-    private static drawRoute(
-        positions: RoomPosition[],
-        homeRoom: string,
-        sharedCount?: { [key: string]: number }
-    ): void {
-        // 按房间分组
+    private static drawPositions(positions: RoomPosition[], homeRoom: string, sharedCount?: { [key: string]: number }): void {
         const byRoom: { [roomName: string]: RoomPosition[] } = {};
+        const seenByRoom: { [roomName: string]: Set<string> } = {};
+
         for (const pos of positions) {
             if (!byRoom[pos.roomName]) byRoom[pos.roomName] = [];
+            if (!seenByRoom[pos.roomName]) seenByRoom[pos.roomName] = new Set();
+            const xyKey = `${pos.x}:${pos.y}`;
+            if (seenByRoom[pos.roomName].has(xyKey)) continue;
+            seenByRoom[pos.roomName].add(xyKey);
             byRoom[pos.roomName].push(pos);
         }
 
         for (const roomName in byRoom) {
             const room = Game.rooms[roomName];
             if (!room) continue;
+            this.drawRoomPositions(room, byRoom[roomName], sharedCount);
+        }
+    }
 
-            const visual = room.visual;
-            const roomPositions = byRoom[roomName];
+    private static drawRoomPositions(room: Room, roomPositions: RoomPosition[], sharedCount?: { [key: string]: number }): void {
+        const visual = room.visual;
+        const plannedXy = new Set<string>();
+        for (const pos of roomPositions) plannedXy.add(`${pos.x}:${pos.y}`);
 
-            for (const pos of roomPositions) {
-                const key = `${pos.roomName}:${pos.x}:${pos.y}`;
-                const isShared = sharedCount && sharedCount[key] > 1;
+        const cache = this.roomStateCache[room.name];
+        const state =
+            cache && cache.tick === Game.time
+                ? cache
+                : (() => {
+                      const roadsByXy = new Map<string, StructureRoad>();
+                      const roads = room.find(FIND_STRUCTURES, {
+                          filter: (s) => s.structureType === STRUCTURE_ROAD
+                      }) as StructureRoad[];
+                      for (const road of roads) {
+                          const xyKey = `${road.pos.x}:${road.pos.y}`;
+                          roadsByXy.set(xyKey, road);
+                      }
 
-                // 检查实际状态
-                const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
-                const road = structures.find(s => s.structureType === STRUCTURE_ROAD) as StructureRoad | undefined;
-                const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
-                const hasSite = sites.some(s => s.structureType === STRUCTURE_ROAD);
+                      const roadSiteXy = new Set<string>();
+                      const roadSites = room.find(FIND_CONSTRUCTION_SITES, {
+                          filter: (s) => s.structureType === STRUCTURE_ROAD
+                      });
+                      for (const site of roadSites) {
+                          const xyKey = `${site.pos.x}:${site.pos.y}`;
+                          roadSiteXy.add(xyKey);
+                      }
 
-                let color: string;
-                let radius = 0.3;
+                      const next = { tick: Game.time, roadsByXy, roadSiteXy };
+                      this.roomStateCache[room.name] = next;
+                      return next;
+                  })();
 
-                if (road) {
-                    if (road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
-                        color = this.COLORS.DAMAGED;
-                        radius = 0.4;
-                    } else if (isShared) {
-                        color = this.COLORS.SHARED;
-                    } else {
-                        color = this.COLORS.BUILT;
-                    }
-                } else if (hasSite) {
-                    color = this.COLORS.SITE;
+        for (const pos of roomPositions) {
+            const sharedKey = `${pos.roomName}:${pos.x}:${pos.y}`;
+            const isShared = !!sharedCount && sharedCount[sharedKey] > 1;
+
+            const xyKey = `${pos.x}:${pos.y}`;
+            const road = state.roadsByXy.get(xyKey);
+            const hasSite = state.roadSiteXy.has(xyKey);
+
+            let color: string;
+            let radius = 0.3;
+
+            if (road) {
+                if (road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
+                    color = this.COLORS.DAMAGED;
+                    radius = 0.4;
+                } else if (isShared) {
+                    color = this.COLORS.SHARED;
                 } else {
-                    color = this.COLORS.PLANNED;
+                    color = this.COLORS.BUILT;
                 }
-
-                visual.circle(pos.x, pos.y, {
-                    radius,
-                    fill: color,
-                    opacity: 0.3,
-                });
-            }
-
-            // 绘制连接线
-            if (roomPositions.length > 1) {
-                const sortedPositions = this.sortPositionsByPath(roomPositions);
-                for (let i = 0; i < sortedPositions.length - 1; i++) {
-                    const from = sortedPositions[i];
-                    const to = sortedPositions[i + 1];
-                    // 只连接相邻的位置
-                    if (Math.abs(from.x - to.x) <= 1 && Math.abs(from.y - to.y) <= 1) {
-                        visual.line(from.x, from.y, to.x, to.y, {
-                            color: '#ffffff',
-                            opacity: 0.3,
-                            lineStyle: 'dashed',
-                        });
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * 按路径顺序排序位置
-     * @param positions 位置数组
-     * @returns 排序后的位置数组
-     */
-    private static sortPositionsByPath(positions: RoomPosition[]): RoomPosition[] {
-        if (positions.length <= 1) return positions;
-
-        // 简单的贪心排序：从第一个位置开始，每次选择最近的下一个位置
-        const sorted: RoomPosition[] = [positions[0]];
-        const remaining = new Set(positions.slice(1));
-
-        while (remaining.size > 0) {
-            const current = sorted[sorted.length - 1];
-            let nearest: RoomPosition | null = null;
-            let minDist = Infinity;
-
-            for (const pos of remaining) {
-                const dist = Math.max(Math.abs(pos.x - current.x), Math.abs(pos.y - current.y));
-                if (dist < minDist) {
-                    minDist = dist;
-                    nearest = pos;
-                }
-            }
-
-            if (nearest) {
-                sorted.push(nearest);
-                remaining.delete(nearest);
+            } else if (hasSite) {
+                color = this.COLORS.SITE;
             } else {
-                break;
+                color = this.COLORS.PLANNED;
             }
+
+            visual.circle(pos.x, pos.y, {
+                radius,
+                fill: color,
+                opacity: 0.4
+            });
         }
 
-        return sorted;
+        if (roomPositions.length <= 1 || roomPositions.length > this.MAX_ROOM_POSITIONS_FOR_LINES) return;
+
+        for (const pos of roomPositions) {
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const nx = pos.x + dx;
+                    const ny = pos.y + dy;
+                    if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+                    const neighborKey = `${nx}:${ny}`;
+                    if (!plannedXy.has(neighborKey)) continue;
+                    if (pos.x > nx || (pos.x === nx && pos.y >= ny)) continue;
+                    visual.line(pos.x, pos.y, nx, ny, {
+                        color: '#ffffff',
+                        opacity: 0.25,
+                        lineStyle: 'dashed'
+                    });
+                }
+            }
+        }
     }
+
+
 
     /**
      * 启用可视化
@@ -1359,36 +1380,40 @@ export class RoadVisual {
      * @description 检查 Flag 触发和启用状态，自动绘制房间内和世界地图可视化
      */
     static run(): void {
-        // 检查 ALL/roadVisual 旗帜，可视化所有房间
+        const homeRoomsToDraw = new Set<string>();
+
         if (Game.flags['ALL/roadVisual']) {
             const outMineData = Memory['OutMineData'];
             if (outMineData) {
                 for (const homeRoom in outMineData) {
                     const data = outMineData[homeRoom];
-                    if ((data.energy && data.energy.length > 0) || 
-                        (data.centerRoom && data.centerRoom.length > 0)) {
-                        this.visualizeAll(homeRoom);
-                        this.visualizeOnMap(homeRoom);
+                    if ((data.energy && data.energy.length > 0) || (data.centerRoom && data.centerRoom.length > 0)) {
+                        homeRoomsToDraw.add(homeRoom);
                     }
                 }
             }
-            return;
         }
 
-        // 检查 Flag 触发
         for (const flagName in Game.flags) {
             const match = flagName.match(/^(.+)\/roadVisual$/);
-            if (match) {
-                const homeRoom = match[1];
-                this.visualizeAll(homeRoom);
-                this.visualizeOnMap(homeRoom);
-            }
+            if (match) homeRoomsToDraw.add(match[1]);
         }
 
         // 检查启用状态
         for (const homeRoom in this.enabled) {
-            if (this.enabled[homeRoom]) {
+            if (this.enabled[homeRoom]) homeRoomsToDraw.add(homeRoom);
+        }
+
+        for (const homeRoom of homeRoomsToDraw) {
+            const lastDraw = this.lastDrawTickByHome[homeRoom] ?? -Infinity;
+            if (Game.time - lastDraw >= this.DRAW_INTERVAL) {
+                this.lastDrawTickByHome[homeRoom] = Game.time;
                 this.visualizeAll(homeRoom);
+            }
+
+            const lastMap = this.lastMapDrawTickByHome[homeRoom] ?? -Infinity;
+            if (Game.time - lastMap >= this.MAP_DRAW_INTERVAL) {
+                this.lastMapDrawTickByHome[homeRoom] = Game.time;
                 this.visualizeOnMap(homeRoom);
             }
         }
@@ -1461,8 +1486,7 @@ export class RoadVisual {
 
         let colorIndex = 0;
         for (const target of targets) {
-            // 使用新的 API 获取独立路径
-            const paths = RoadMemory.getAllPaths(homeRoom, target);
+            const paths = this.getAllPathsCached(homeRoom, target);
             
             if (paths.size === 0) continue;
 
@@ -1497,8 +1521,7 @@ export class RoadVisual {
     private static drawMapPath(positions: RoomPosition[], color: string): void {
         if (positions.length < 2) return;
 
-        // 重建 RoomPosition 对象（防止序列化问题）
-        const validPath = positions.map(p => new RoomPosition(p.x, p.y, p.roomName));
+        const validPath = positions.map((p: any) => (p instanceof RoomPosition ? p : new RoomPosition(p.x, p.y, p.roomName)));
 
         // 使用 poly() API 绘制整条路径，获得连续的线条效果
         Game.map.visual.poly(validPath, {
@@ -1515,5 +1538,19 @@ export class RoadVisual {
             fill: color,
             opacity: 0.6,
         });
+    }
+
+    private static getAllPathsCached(homeRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
+        const lastUpdate = Memory['OutMineData']?.[homeRoom]?.RoadData?.lastUpdate;
+        const cacheKey = `${homeRoom}:${targetRoom}`;
+        const cached = this.mapPathsCache[cacheKey];
+        if (lastUpdate !== undefined && cached && cached.lastUpdate === lastUpdate) {
+            return cached.paths;
+        }
+        const paths = RoadMemory.getAllPaths(homeRoom, targetRoom);
+        if (lastUpdate !== undefined) {
+            this.mapPathsCache[cacheKey] = { lastUpdate, paths };
+        }
+        return paths;
     }
 }
