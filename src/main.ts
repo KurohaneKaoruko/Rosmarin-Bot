@@ -42,7 +42,7 @@ export const loop = App.run;
 
 
 // // 性能开销分析
-// import profiler from '@/modules/wheel/screeps-profiler';
+// import profiler from '@/modules/infra/screeps-profiler';
 // profiler.enable();
 // export const loop = function() {
 //     profiler.wrap(App.run);
