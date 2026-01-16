@@ -2,7 +2,7 @@
  * 模块生命周期接口
  * 定义了模块在游戏循环中各阶段的钩子函数
  */
-interface Module {
+interface RuntimeModule {
     /**
      * 初始化函数
      * 在模块首次加载时调用一次，用于初始化模块状态、注册事件等

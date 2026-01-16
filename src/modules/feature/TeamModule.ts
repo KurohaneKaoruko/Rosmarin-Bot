@@ -1,7 +1,7 @@
 import {compressBodyConfig} from "@/utils";
 import {TEAM_CONFIG} from "@/constant/TeamConfig";
 import Team from "./TeamClass/Team";
-import TeamRole from "./TeamRole";
+import TeamCreep from "./TeamClass/TeamCreep";
 import TeamCalc from "./TeamClass/TeamCalc";
 
 const TeamModule = {
@@ -153,7 +153,7 @@ const TeamModule = {
             if (!creep || creep.spawning) continue;
             const role = creep.memory.role;
             if (role.startsWith('team')) {
-                TeamRole.run(creep);
+                TeamCreep.action(creep);
                 const teamID = creep.memory['teamID'];
                 if (!Memory['TeamData'][teamID]) creep.suicide();
             } else continue;

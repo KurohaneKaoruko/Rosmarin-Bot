@@ -6,17 +6,17 @@ import { roomControl } from '@/boot/RoomControl';
 import { creepControl } from '@/boot/CreepControl';
 import { powerControl } from '@/boot/PowerControl';
 import { flagControl } from '@/boot/FlagControl';
-import { EventModule } from '@/modules/event';
-import { ClearModule  } from '@/modules/function/ClearModule';
-import { GeneratePixel } from '@/modules/function/Pixel';
-import { Statistics } from '@/modules/function/Statistics'
-import { FlagSpawn } from '@/modules/flagSpawn';
-import { ResourceManage } from '@/modules/ResourceManage';
-import TeamModule from '@/modules/team/TeamModule';
+import { EventModule } from '@/modules/runtime/event';
+import { ClearModule  } from '@/modules/runtime/ClearModule';
+import { GeneratePixel } from '@/modules/runtime/Pixel';
+import { Statistics } from '@/modules/runtime/Statistics'
+import { FlagSpawn } from '@/modules/runtime/flagSpawn';
+import { ResourceManage } from '@/modules/runtime/ResourceManage';
+import TeamModule from '@/modules/feature/TeamModule';
 
-import '@/modules/wheel/betterMove';    // 超级移动优化
-import '@/modules/wheel/structureCache';  // 极致建筑缓存
-import '@/modules/wheel/roomResource'; // 资源统计
+import '@/modules/infra/betterMove';    // 超级移动优化
+import '@/modules/infra/structureCache';  // 极致建筑缓存
+import '@/modules/infra/roomResource'; // 资源统计
 
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展

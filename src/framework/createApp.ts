@@ -29,7 +29,7 @@ export const createApp = () => {
     };
 
     /** 添加模块 */
-    const on = (callbacks: Module) => {
+    const on = (callbacks: RuntimeModule) => {
         if (!callbacks) return;
         for (const type in callbacks) {
             if (type in events) {
