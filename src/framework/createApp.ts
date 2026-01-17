@@ -2,13 +2,13 @@ import { errorMapper } from './errorMapper.js'
 import { BASE_CONFIG } from '@/constant/config.js'
 
 type EventType = 'init' | 'start' | 'tick' | 'end';
-type RunnerType = 'room' | 'creep' | 'power' | 'flag';
+type RunnerType = 'room' | 'creep' | 'powerCreep' | 'flag';
 type RunnerFn = () => void;
 
 const GAME_OBJECTS: Record<RunnerType, () => Record<string, any>> = {
     room: () => Game.rooms,
     creep: () => Game.creeps,
-    power: () => Game.powerCreeps,
+    powerCreep: () => Game.powerCreeps,
     flag: () => Game.flags,
 };
 
@@ -18,7 +18,7 @@ const GAME_OBJECTS: Record<RunnerType, () => Record<string, any>> = {
 export const createApp = () => {
     const name = BASE_CONFIG.BOT_NAME;
     const events: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
-    const runners: Record<RunnerType, RunnerFn> = { room: () => {}, creep: () => {}, power: () => {}, flag: () => {} };
+    const runners: Record<RunnerType, RunnerFn> = { room: () => {}, creep: () => {}, powerCreep: () => {}, flag: () => {} };
 
     /** 设置运行器 */
     const set = <T>(type: RunnerType, runner: (obj: T) => void) => {
@@ -81,7 +81,7 @@ export const createApp = () => {
         runCall('start');
         runners.room();
         runners.creep();
-        runners.power();
+        runners.powerCreep();
         runners.flag();
         runCall('tick');
         runCall('end');

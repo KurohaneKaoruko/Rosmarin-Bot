@@ -4,7 +4,7 @@ import { ConsoleExtension } from '@/console';
 import { MemoryInit, GlobalInit } from '@/init';
 import { roomControl } from '@/boot/RoomControl';
 import { creepControl } from '@/boot/CreepControl';
-import { powerControl } from '@/boot/PowerControl';
+import { powerCreepControl } from '@/boot/PowerCreepControl';
 import { flagControl } from '@/boot/FlagControl';
 import { EventModule } from '@/modules/runtime/event';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
@@ -25,7 +25,7 @@ const App = createApp();
 
 App.set('room', roomControl);     // room控制
 App.set('creep', creepControl);   // creep控制
-App.set('power', powerControl);   // powerCreep控制
+App.set('powerCreep', powerCreepControl);   // powerCreep控制
 App.set('flag', flagControl);     // flag控制
 
 App.on(MemoryInit);     // 初始化内存
