@@ -360,13 +360,13 @@ interface Task {
      * 任务类型
      * @description 用于区分不同类型的任务处理逻辑
      */
-    type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn';
+    type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit';
     
     /** 
      * 任务数据
      * @description 根据任务类型存储不同的数据结构
      */
-    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | any;
+    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | PowerMineTask | DepositMineTask | any;
     
     /** 
      * 任务是否被锁定
@@ -541,4 +541,44 @@ interface SpawnTask {
      * @description 某些角色有多种体型配置
      */
     upbody?: boolean;
+}
+
+/**
+ * 矿场任务数据
+ * @description 用于过道采集任务（PowerBank/Deposit）
+ */
+type MineTask = PowerMineTask | DepositMineTask;
+
+/**
+ * PowerBank采集任务数据
+ */
+interface PowerMineTask {
+    /** 目标房间名 */
+    targetRoom: string;
+    /** 队伍数量 */
+    creep: number;
+    /** 最大孵化数量限制 */
+    max: number;
+    /** 强化等级 0/1/2 */
+    boostLevel: number;
+    /** Ranged数量 */
+    prNum: number;
+    /** Ranged最大孵化数 */
+    prMax: number;
+    /** 已孵化队伍计数 */
+    count?: number;
+    /** 已孵化Ranged计数 */
+    prCount?: number;
+}
+
+/**
+ * Deposit采集任务数据
+ */
+interface DepositMineTask {
+    /** 目标房间名 */
+    targetRoom: string;
+    /** 需要的工作单位数量 */
+    num: number;
+    /** 任务是否激活 */
+    active: boolean;
 }

@@ -5,6 +5,7 @@ import {UpdateTransportMission,
         TransportMissionCheck} from './update/transport/index'
 import {UpdateManageMission} from './update/manageMission'
 import {UpdateSpawnMission} from './update/spawnMission'
+import {UpdateMineMission, UpdateHighwayScan} from './update/work/mine'
 
 /** 任务更新 */
 export default class Mission extends Room {    
@@ -17,6 +18,8 @@ export default class Mission extends Room {
             { interval: 50, offset: 2, run: UpdateWallRepairMission },
             { interval: 100, offset: 2, run: TransportMissionCheck },
             { interval: 200, offset: 2, run: BuildRepairMissionCheck },
+            { interval: 1, offset: 0, run: UpdateMineMission },
+            { interval: 1, offset: 0, run: UpdateHighwayScan },
         ];
 
         for (const item of schedule) {

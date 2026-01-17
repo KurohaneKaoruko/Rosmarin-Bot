@@ -31,21 +31,25 @@ const deposit_harvest = {
                         c.memory.targetDeposit === d.id &&
                         c.ticksToLive > 150
                 }).length;
+                
                 // 最大站位数
-                if (!creep.room.memory) creep.room.memory = {} as any;
-                if (!creep.room.memory['depositMine']) creep.room.memory['depositMine'] = {};
-                let maxPosCount = creep.room.memory['depositMine'][d.id] as number;
-                if (!maxPosCount) {
-                    maxPosCount = 0;
-                    const terrain = new Room.Terrain(creep.room.name);
-                    [[d.pos.x-1, d.pos.y-1], [d.pos.x, d.pos.y-1], [d.pos.x+1, d.pos.y-1],
-                     [d.pos.x-1, d.pos.y], [d.pos.x+1, d.pos.y],
-                     [d.pos.x-1, d.pos.y+1], [d.pos.x, d.pos.y+1], [d.pos.x+1, d.pos.y+1],
-                    ].forEach((p) => {
-                        if (terrain.get(p[0], p[1]) != TERRAIN_MASK_WALL) maxPosCount++;
-                    })
-                    creep.room.memory['depositMine'][d.id] = maxPosCount;
-                }
+                // 优先尝试从 mission pool 获取 maxPos，如果没有则回退到实时计算
+                let maxPosCount = 0;
+                
+                // 尝试从 mine 任务池获取对应的任务
+                // 注意：这里需要 creep.room.name 对应的房间对象来获取任务池，但 creep.room 此时是在目标房间（过道/外矿）
+                // 任务池是存在 HomeRoom (creep.memory.homeRoom) 的 Memory 中的
+                // 所以我们无法直接通过 creep.room.getMissionFromPool 获取到 homeRoom 的任务
+                
+                // 方案 A: 实时计算（轻量级），不写 Memory
+                const terrain = new Room.Terrain(creep.room.name);
+                [[d.pos.x-1, d.pos.y-1], [d.pos.x, d.pos.y-1], [d.pos.x+1, d.pos.y-1],
+                    [d.pos.x-1, d.pos.y], [d.pos.x+1, d.pos.y],
+                    [d.pos.x-1, d.pos.y+1], [d.pos.x, d.pos.y+1], [d.pos.x+1, d.pos.y+1],
+                ].forEach((p) => {
+                    if (terrain.get(p[0], p[1]) != TERRAIN_MASK_WALL) maxPosCount++;
+                })
+
                 // 绑定满的忽略
                 if (creepCount >= maxPosCount) return;
                 if (creepCount >= 3) return;
