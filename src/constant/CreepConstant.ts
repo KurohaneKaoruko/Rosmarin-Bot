@@ -399,8 +399,7 @@ export const RoleLevelData = {
         5: { bodypart: [[ATTACK, 12], [MOVE, 12]], num: 0 },
         6: { bodypart: [[ATTACK, 15], [MOVE, 15]], num: 0 },
         7: { bodypart: [[ATTACK, 20], [MOVE, 20]], num: 0 },
-        8: { bodypart: [[ATTACK, 25] , [MOVE, 25]], num: 0,
-             upbodypart: [[ATTACK, 40], [MOVE, 10]]},
+        8: { bodypart: [[ATTACK, 25] , [MOVE, 25]], num: 0},
     },
     "out-2heal": {
         1: { bodypart: [[MOVE, 1], [HEAL, 1]], num: 0 },
@@ -410,8 +409,7 @@ export const RoleLevelData = {
         5: { bodypart: [[MOVE, 6], [HEAL, 6]], num: 0 },
         6: { bodypart: [[MOVE, 7], [HEAL, 7]], num: 0 },
         7: { bodypart: [[MOVE, 18], [HEAL, 18]], num: 0 },
-        8: { bodypart: [[MOVE, 25], [HEAL, 25]], num: 0,
-             upbodypart: [[MOVE, 40], [HEAL, 10]]},
+        8: { bodypart: [[MOVE, 25], [HEAL, 25]], num: 0 },
     },
     "up-upgrade": {
         1: { bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]], num: 0 },

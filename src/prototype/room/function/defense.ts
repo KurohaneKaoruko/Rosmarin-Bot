@@ -106,13 +106,15 @@ export default class RoomDefense extends Room {
             if (hostiles.filter((c: Creep) => c.body.some(part => part.type == RANGED_ATTACK)).length >= 2 &&
                 (d2aNum.length + d2aQueueNum < 1)) {
                 let mustBoost = false;
-                if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000 && this['XLHO2'] >= 3000) {
+                if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000 &&
+                    this['XLHO2'] >= 3000 && this['XGHO2'] >= 3000) {
                     mustBoost = true;
                 }
                 this.SpawnMissionAdd('', [], -1, 'defend-2attack', {home: this.name, mustBoost} as any, true);
                 this.SpawnMissionAdd('', [], -1, 'defend-2heal', {home: this.name, mustBoost} as any, true);
                 if (mustBoost) {
-                    this.AssignBoostTask('XUH2O', 1200);
+                    this.AssignBoostTask('XGHO2', 450);
+                    this.AssignBoostTask('XUH2O', 1350);
                     this.AssignBoostTask('XLHO2', 1200);
                     this.AssignBoostTask('XZHO2', 600);
                 }
