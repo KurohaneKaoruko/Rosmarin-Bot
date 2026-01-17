@@ -201,6 +201,14 @@ interface StructControlMemory {
      */
     powerSpawn?: boolean;
 
+    /**
+     * PowerSpawn 模式
+     * @description 控制自动化是否允许改写 powerSpawn 开关
+     * - 'auto': 由自动化模块根据阈值决定开关
+     * - 'manual': 手动开关
+     */
+    powerSpawnMode?: 'auto' | 'manual';
+
     // --------------------------------------------------------
     // Factory 配置
     // --------------------------------------------------------

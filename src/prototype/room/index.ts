@@ -15,7 +15,7 @@ import AutoMarket from "./auto/autoMarket"
 import AutoBuild from "./auto/autoBuild"
 import AutoLab from "./auto/autoLab"
 import AutoFactory from "./auto/autoFactory"
-import AutoPower from "./auto/autoPower"
+import AutoPowerSpawn from "./auto/autoPowerSpawn"
 
 import Mission from "./mission"
 import MissionPools from "./mission/pool/MissionPools"
@@ -43,7 +43,7 @@ const plugins = [
     AutoBuild,      // 自动建筑
     AutoLab,        // 自动Lab合成
     AutoFactory,    // 自动Factory生产
-    AutoPower,      // 自动PowerSpawn
+    AutoPowerSpawn, // 自动PowerSpawn
     
     MissionPools,   // 任务池
     MissionAdd,     // 添加任务
