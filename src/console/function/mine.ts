@@ -118,33 +118,42 @@ export default {
             if (!roomName || !targetRoom || !num) return -1;
             const room = Game.rooms[roomName];
             if (!room) return;
-            if (!room.memory['powerMine']) room.memory['powerMine'] = {};
+            
+            // 使用新任务池方法
             if (boostLevel == 1) {
                 const stores = [room.storage, room.terminal, ...room.lab]
-                const GO_Amount = stores.reduce((a, b) => a + b.store['GO'], 0);
-                const UH_Amount = stores.reduce((a, b) => a + b.store['UH'], 0);
-                const LO_Amount = stores.reduce((a, b) => a + b.store['LO'], 0);
+                const GO_Amount = stores.reduce((a, b) => a + (b?.store['GO']||0), 0);
+                const UH_Amount = stores.reduce((a, b) => a + (b?.store['UH']||0), 0);
+                const LO_Amount = stores.reduce((a, b) => a + (b?.store['LO']||0), 0);
                 if (GO_Amount < 3000 || UH_Amount < 3000 || LO_Amount < 3000) {
                     console.log(`房间 ${roomName} 的仓库中GO/UH/LO数量不足，无法孵化T1 power开采队。`);
                     return -1;
                 }
             } else if (boostLevel == 2) {
                 const stores = [room.storage, room.terminal, ...room.lab]
-                const GHO2_Amount = stores.reduce((a, b) => a + b.store['GHO2'], 0);
-                const UH2O_Amount = stores.reduce((a, b) => a + b.store['UH2O'], 0);
-                const LO_Amount = stores.reduce((a, b) => a + b.store['LO'], 0);
+                const GHO2_Amount = stores.reduce((a, b) => a + (b?.store['GHO2']||0), 0);
+                const UH2O_Amount = stores.reduce((a, b) => a + (b?.store['UH2O']||0), 0);
+                const LO_Amount = stores.reduce((a, b) => a + (b?.store['LO']||0), 0);
                 if (GHO2_Amount < 3000 || UH2O_Amount < 3000 || LO_Amount < 3000) {
                     console.log(`房间 ${roomName} 的仓库中GHO2/UH2O/LO数量不足，无法孵化T2 power开采队。`);
                     return -1;
                 }
             }
-            room.memory['powerMine'][targetRoom] = {
+
+            const data: PowerMineTask = {
+                targetRoom: targetRoom,
                 creep: num,                      // creep队伍数
                 max: num,                        // 最大孵化数量
                 boostLevel: boostLevel || 0,     // 强化等级
                 prNum: prNum || 0,              // ranged孵化数量
                 prMax: prNum || 0,     // ranged孵化上限
             };
+            
+            // 先尝试删除旧任务（如果存在）
+            const existId = room.checkSameMissionInPool('mine', 'power', { targetRoom });
+            if (existId) room.deleteMissionFromPool('mine', existId);
+
+            room.addMissionToPool('mine', 'power', 1, data);
             console.log(`房间 ${roomName} 即将向 ${targetRoom} 派出 ${num} 数量的T${boostLevel} Power开采队。`);
             return OK;
         },
@@ -153,11 +162,18 @@ export default {
             if (!roomName || !targetRoom || !num) return -1;
             const room = Game.rooms[roomName];
             if (!room) return;
-            if (!room.memory['depositMine']) room.memory['depositMine'] = {};
-            room.memory['depositMine'][targetRoom] = {
+            
+            const data: DepositMineTask = {
+                targetRoom: targetRoom,
                 num: num,                      // creep队伍数
                 active: true,                  // 是否激活
             }
+
+            // 先尝试删除旧任务（如果存在）
+            const existId = room.checkSameMissionInPool('mine', 'deposit', { targetRoom });
+            if (existId) room.deleteMissionFromPool('mine', existId);
+
+            room.addMissionToPool('mine', 'deposit', 1, data);
             console.log(`房间 ${roomName} 即将向 ${targetRoom} 派出 ${num} 数量的Deposit开采队。`);
             return OK;
         },
@@ -165,15 +181,29 @@ export default {
         cancel(roomName: string, targetRoom: string, type: 'power' | 'deposit') {
             const room = Game.rooms[roomName];
             if (!room) return;
+            
+            // 删除任务池中的任务
+            const mineTasks = room.getAllMissionFromPool('mine');
+            if (mineTasks) {
+                for (const task of mineTasks) {
+                    const data = task.data as MineTask;
+                    if (data.targetRoom !== targetRoom) continue;
+                    if (type && task.type !== type) continue;
+                    
+                    room.deleteMissionFromPool('mine', task.id);
+                }
+            }
+
+            // 删除相关的 Spawn 任务
             const spawnmission = room.getAllMissionFromPool('spawn');
-            if ((!type || type == 'power') && room.memory['powerMine'])
-                delete room.memory['powerMine'][targetRoom]
-            if ((!type || type == 'deposit') && room.memory['depositMine'])
-                delete room.memory['depositMine'][targetRoom]
             if (!spawnmission) return OK;
             for (const mission of spawnmission) {
                 const data = mission.data;
                 if (data.memory.targetRoom == targetRoom) {
+                    // 如果指定了类型，则需要进一步检查 role
+                    if (type === 'power' && !data.memory.role.startsWith('power-')) continue;
+                    if (type === 'deposit' && !data.memory.role.startsWith('deposit-')) continue;
+
                     room.deleteMissionFromPool('spawn', mission.id);
                 }
             }

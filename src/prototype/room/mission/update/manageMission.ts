@@ -6,6 +6,7 @@ const MANAGE_BALANCE = {
         SOURCE: {
             DEFAULT: 4000,
             ENERGY: 30000,
+            POWER: 5000,
             LAB: 3000,
             BAR: 3000,
             GOODS: 1200
@@ -13,6 +14,7 @@ const MANAGE_BALANCE = {
         TARGET: {
             DEFAULT: 3000,
             ENERGY: 25000,
+            POWER: 5000,
             LAB: 3000,
             BAR: 3000,
             GOODS: 1000
@@ -50,10 +52,12 @@ function CheckTerminalResAmount(room: Room) {
     const THRESHOLD = {
         source: {
             [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.SOURCE.ENERGY,
+            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.SOURCE.POWER,
             default: MANAGE_BALANCE.THRESHOLD.SOURCE.DEFAULT
         },
         target: {
             [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.TARGET.ENERGY,
+            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.TARGET.POWER,
             default: MANAGE_BALANCE.THRESHOLD.TARGET.DEFAULT
         }
     }

@@ -37,8 +37,7 @@ export default class PowerCreepUsePower extends PowerCreep {
                 'team-attack', 'team-dismantle', 'team-ranged', 'team-heal',
             ]
             if (!Game.flags[this.name+'-upspawn'] && !this.room.memory.defend &&
-                ((Object.keys(this.room.memory['powerMine']||{}).length == 0 &&
-                Object.keys(this.room.memory['depositMine']||{}).length == 0) ||
+                (!this.room.checkMissionInPool('mine') ||
                 this.room.getSpawnMissionTotalByRoles(roles) < 1)) return false;
         }
         const spawns = this.room.spawn;

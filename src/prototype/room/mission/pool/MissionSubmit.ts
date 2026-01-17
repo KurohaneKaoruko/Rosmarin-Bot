@@ -32,4 +32,27 @@ export default class MissionSubmit extends Room {
         if (global.SpawnMissionNum[this.name][role] < 0) global.SpawnMissionNum[this.name][role] = 0;
         return OK;
     }
+
+    // 提交mine任务
+    submitMineMission(id: Task['id'], data: Partial<MineTask>) {
+        const task = this.getMissionFromPoolById('mine', id);
+        if (!task) return;
+        
+        // 合并数据
+        const newData = { ...task.data, ...data };
+        
+        const deleteFunc = (taskdata: MineTask) => {
+            // 如果被标记为非激活且没有特定条件保留，则可能需要删除
+            // 但目前 mine 任务主要由 UpdateMineMission 管理生命周期，这里主要用于更新状态
+            if (task.type === 'deposit' && (taskdata as DepositMineTask).active === false) {
+                // 可以选择在这里删除，或者等待 UpdateMineMission 清理
+                // 这里我们仅更新状态，让 UpdateMineMission 决定是否删除
+                return false;
+            }
+            return false;
+        }
+
+        this.submitMission('mine', id, newData, deleteFunc);
+        return OK;
+    }
 }

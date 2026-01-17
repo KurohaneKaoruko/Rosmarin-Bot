@@ -34,7 +34,8 @@ export default class MissionPools extends Room {
             'build',
             'repair',
             'terminal',
-            'spawn'
+            'spawn',
+            'mine'
         ]
         for (const type of Object.keys(Pools)) { if(!PoolTypes.includes(type)) delete Pools[type] }
         for (const type of PoolTypes) { if(!Pools[type]) Pools[type] = [] }
@@ -90,6 +91,11 @@ export default class MissionPools extends Room {
 
     // 添加任务到任务池
     public addMissionToPool(PoolName: string, type: Task["type"], level: Task["level"], data: Task["data"]) {
+        // Power 和 Deposit 任务统一存放在 'mine' 池中
+        if (type === 'power' || type === 'deposit') {
+            PoolName = 'mine';
+        }
+        
         const id = `${type.toUpperCase()}-${this.generateId()}`; // 生成id
         let task: Task = {id, type, level, data}
         this.pushTaskToPool(PoolName, task);
@@ -106,37 +112,46 @@ export default class MissionPools extends Room {
     // 获取任务池中的任务
     public getMissionFromPool(PoolName: string, pos?: number, filter?: (task: Task) => boolean) {
         const tasks = this.getPool(PoolName);
-        if (!tasks) { return null; }
-        if (tasks.length === 0) return null; // 如果没有任务，返回null
+        if (!tasks || tasks.length === 0) return null;
 
-        // 筛选未锁且有效的任务
-        if (!filter) filter = () => true;
-        const unlockedTasks = tasks.filter(task => task && !task.lock && filter(task));
+        // 默认过滤器
+        const check = filter || (() => true);
 
-        if (unlockedTasks.length === 0) return null; // 如果没有可用任务，返回null
-        if (unlockedTasks.length === 1) return unlockedTasks[0]; // 如果只有一个任务，返回该任务
-        let resultTasks = [], level = Infinity;
-        for (const task of unlockedTasks) {
-            if (task.level < level) {
-                level = task.level;
-                resultTasks = [task];
-            } else if (task.level === level) {
-                resultTasks.push(task);
+        let bestTask: Task | null = null;
+        let minLevel = Infinity;
+        let minDistance = Infinity;
+
+        // 单次遍历寻找最优任务
+        for (const task of tasks) {
+            // 基础检查：必须存在、未锁定、满足过滤器
+            if (!task || task.lock || !check(task)) continue;
+
+            // 1. 优先级检查
+            if (task.level < minLevel) {
+                // 发现更高优先级的任务，直接更新
+                minLevel = task.level;
+                bestTask = task;
+                // 如果需要计算距离，则初始化距离（如果有位置信息）
+                if (pos != null && task.data?.pos != null) {
+                    minDistance = this.getDistance(task.data.pos, pos);
+                } else {
+                    minDistance = Infinity;
+                }
+                continue;
             }
+
+            // 2. 同优先级下的距离检查（仅当 pos 存在时）
+            if (task.level === minLevel && pos != null && task.data?.pos != null) {
+                const dist = this.getDistance(task.data.pos, pos);
+                if (dist < minDistance) {
+                    minDistance = dist;
+                    bestTask = task;
+                }
+            }
+            // 如果同优先级但没有位置信息，保持当前 bestTask（先到先得）
         }
-        
-        if (resultTasks.length === 0) return null; // 如果没有任务，返回null
-        if (resultTasks.length === 1) return resultTasks[0];
-        let Task = null, distance = Infinity;
-        for (const task of resultTasks) {
-            if (task.data?.pos == null || pos == null) continue;
-            const taskDistance = this.getDistance(task.data.pos, pos);
-            if (taskDistance > distance) continue;
-            distance = taskDistance;
-            Task = task;
-        }
-        if (!Task) return resultTasks[0];
-        return Task;
+
+        return bestTask;
     }
 
     // 不考虑优先级，直接获取第一个任务
@@ -172,6 +187,11 @@ export default class MissionPools extends Room {
 
     // 检查是否有相同任务
     public checkSameMissionInPool(PoolName: string, type: Task["type"], data: Task["data"]) {
+        // Power 和 Deposit 任务统一存放在 'mine' 池中
+        if (type === 'power' || type === 'deposit') {
+            PoolName = 'mine';
+        }
+
         const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
         if (!tasks.length) return null; // 如果没有任务，返回null
