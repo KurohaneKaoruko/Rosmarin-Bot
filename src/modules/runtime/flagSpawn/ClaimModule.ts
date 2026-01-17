@@ -59,7 +59,7 @@ const ClaimModule = (flagName: string) => {
         // 目标房间
         const targetRoom = Game.flags[flagName].pos.roomName;
         // 同时数量
-        let num = flagName.match(/\/N(\d+)$/)?.[1] as any;
+        let num = flagName.match(/\/N-(\d+)$/)?.[1] as any;
         if (!num) num = 1;
         else num = parseInt(num);
         for (let i = 0; i < num; i++) {
@@ -72,7 +72,7 @@ const ClaimModule = (flagName: string) => {
 }
 
 function getSpawnInterval (flagName: string, Default=500) {
-    let spawnInterval = flagName.match(/\/T(\d+)/)?.[1] as any;
+    let spawnInterval = flagName.match(/\/T-(\d+)/)?.[1] as any;
     if (!spawnInterval) spawnInterval = Default;
     else spawnInterval = parseInt(spawnInterval);
     return spawnInterval;
