@@ -1,6 +1,19 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
 
 export default class LabControl extends Room {
+    LabWork() {
+        // 没有lab不处理
+        if (!this.lab) return;
+
+        // 可视化
+        this.VisualLabInfo();
+
+        if (Memory['warmode']) return;
+        
+        // 反应
+        this.RunReaction();
+    }
+    
     VisualLabInfo() {
         if (Game.cpu.bucket < 1000) return;
         this.lab.forEach(lab => {

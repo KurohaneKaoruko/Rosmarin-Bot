@@ -1,8 +1,18 @@
 export default class RoomExecute extends Room {
     exec() {
-        this.MissionUpdate();    // 更新任务池
-        this.StructureWork();    // 处理建筑行为
-        this.activeDefense();    // 主动防御处理
+        // 更新任务池
+        this.MissionUpdate();
+
+        // 管理房间中的建筑物
+        this.SpawnWork();
+        this.TowerWork();
+        this.LinkWork();
+        this.LabWork();
+        this.TerminalWork();
+        this.FactoryWork();
+        this.PowerSpawnWork();
+
+        // 自动化处理
         this.autoMarket();       // 自动市场交易
         this.autoBuild();        // 自动建筑
         this.autoLab();          // 自动Lab合成
@@ -10,6 +20,8 @@ export default class RoomExecute extends Room {
         this.autoPower();        // 自动Power处理
         this.outMine();          // 外矿采集
         
+        // 主动防御处理
+        this.activeDefense();
         this.showDefenseCostMatrix(); // 显示防御cost矩阵
     }
 

@@ -3,10 +3,13 @@ import BaseFunction from "./function/baseFunction"
 import RoomDefense from "./function/defense"
 import OutMine from "./function/outMine"
 
-import StructureWork from "./structure/structureWork"
 import SpawnControl from "./structure/spawnControl"
 import TowerControl from "./structure/towerControl"
 import LabControl from "./structure/labControl"
+import LinkControl from "./structure/linkControl"
+import TerminalControl from "./structure/terminalControl"
+import FactoryControl from "./structure/factoryControl"
+import PowerSpawnControl from "./structure/powerSpawnControl"
 
 import AutoMarket from "./auto/autoMarket"
 import AutoBuild from "./auto/autoBuild"
@@ -28,10 +31,13 @@ const plugins = [
     RoomDefense,    // 房间防御
     OutMine,        // 外矿采集
 
-    StructureWork,  // 建筑物工作
     SpawnControl,   // 孵化控制
     LabControl,     // Lab控制
     TowerControl,   // 塔防控制
+    LinkControl,    // Link控制
+    TerminalControl,    // Terminal控制
+    FactoryControl,     // Factory控制
+    PowerSpawnControl,  // PowerSpawn控制
     
     AutoMarket,     // 自动市场交易
     AutoBuild,      // 自动建筑
@@ -49,5 +55,3 @@ const plugins = [
 ]
 
 export default () => plugins.forEach(plugin => assignPrototype(Room, plugin))
-
-

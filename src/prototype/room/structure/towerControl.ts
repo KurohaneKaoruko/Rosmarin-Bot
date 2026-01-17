@@ -1,6 +1,24 @@
 import { compress } from '@/utils';
 
 export default class TowerControl extends Room {
+    // 处理 Tower 防御和修复逻辑
+    TowerWork() {
+        // 没有tower时不处理
+        if (!this.tower || this.tower.length == 0) return;
+
+        // 攻击敌人
+        if (this.TowerAttackEnemy()) return;
+
+        // 攻击NPC
+        if (this.TowerAttackNPC()) return;
+
+        // 治疗己方单位
+        if (this.TowerHealCreep()) return;
+
+        // 修复建筑物
+        if (this.TowerTaskRepair()) return;
+    }
+    
     /** 
      * 呼叫全体tower对目标发起攻击
      * @param target 要攻击的目标
