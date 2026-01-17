@@ -200,8 +200,9 @@ export default class TowerControl extends Room {
     TowerAttackEnemy() {
         // 搜寻敌人
         if (!global.cache.towerTargets) global.cache.towerTargets = {};
+        const cache = global.cache.towerTargets;
         if (Game.time % 10 == 0) {
-            global.cache.towerTargets[this.name] = 
+            cache[this.name] = 
                 [
                     ...this.find(FIND_HOSTILE_CREEPS, {
                         filter: c => !c.isWhiteList()
@@ -211,11 +212,10 @@ export default class TowerControl extends Room {
                     }).map(c => c.id)
                 ]
         }
-        if (!global.cache.towerTargets[this.name] ||
-            global.cache.towerTargets[this.name].length == 0) return false;
+        if (!cache[this.name] || cache[this.name].length == 0) return false;
         
         // 筛选敌人
-        let Hostiles = (global.cache.towerTargets[this.name]||[])
+        let Hostiles = (cache[this.name]||[])
                         .map((id: Id<Creep> | Id<PowerCreep>) => Game.getObjectById(id))
                         .filter((c: Creep | PowerCreep) => c) as Creep[] | PowerCreep[];
         if (Hostiles.length == 0) return false;
@@ -242,7 +242,7 @@ export default class TowerControl extends Room {
             let hostile = randomHostile(hostiles);
             this.CallTowerAttack(hostile);
         } else {
-            if (Game.time % 20 >= 2) return false;
+            if (Game.time % 20 >= 5) return false;
             let hostile = randomHostile(hostiles);
             this.tower.forEach(tower => {
                 // 如果本tick已经攻击过, 那么不处理
@@ -258,8 +258,7 @@ export default class TowerControl extends Room {
     // 处理普通修复任务, 修复建筑物
     TowerTaskRepair() {
         if (Game.cpu.bucket < 1000) return false;
-        if (!global.cache.towerRepairTarget)
-            global.cache.towerRepairTarget = {};
+        if (!global.cache.towerRepairTarget) global.cache.towerRepairTarget = {};
         let targetCache = global.cache.towerRepairTarget;
         if (Game.time % 20 == 0) {
             targetCache[this.name] = null;
