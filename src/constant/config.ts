@@ -1,5 +1,7 @@
 import {RESOURCE_ABBREVIATIONS} from './ResourceConstant'
 
+export const VERSION = '1.9.2';
+
 /**
  * 基础配置
  */
@@ -7,7 +9,7 @@ export const BASE_CONFIG = {
     // bot名称
     BOT_NAME: 'Rosmarin',
     // 默认签名
-    DEFAULT_SIGN: '🌿𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓🌿',
+    DEFAULT_SIGN: `🌿𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓🌿 ${VERSION}`,
     // 长名资源缩写
     RESOURCE_ABBREVIATIONS,
 }

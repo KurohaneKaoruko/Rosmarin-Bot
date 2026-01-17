@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 
 const PACKAGE_JSON_PATH = path.join(rootDir, 'package.json');
-const HELP_TS_PATH = path.join(rootDir, 'src/console/help.ts');
+const CONFIG_TS_PATH = path.join(rootDir, 'src/constant/config.ts');
 const README_PATH = path.join(rootDir, 'README.md');
 
 function runCommand(cmd, args, { stdio = 'inherit' } = {}) {
@@ -90,7 +90,7 @@ function getGitStagedFiles() {
 function getVersionChangedFiles() {
     const candidates = [
         PACKAGE_JSON_PATH,
-        HELP_TS_PATH,
+        CONFIG_TS_PATH,
         README_PATH,
         path.join(rootDir, 'pnpm-lock.yaml'),
         path.join(rootDir, 'package-lock.json'),
@@ -227,21 +227,21 @@ function updatePackageVersion(newVersion) {
 }
 
 /**
- * 更新 help.ts 中的版本号
+ * 更新 config.ts 中的版本号
  */
-function updateHelpTs(newVersion) {
-    if (!fs.existsSync(HELP_TS_PATH)) return;
-    let content = fs.readFileSync(HELP_TS_PATH, 'utf-8');
+function updateConfigTs(newVersion) {
+    if (!fs.existsSync(CONFIG_TS_PATH)) return;
+    let content = fs.readFileSync(CONFIG_TS_PATH, 'utf-8');
     const nextContent = content.replace(
-        /const VERSION = '[^']+';/,
-        `const VERSION = '${newVersion}';`
+        /export const VERSION = '[^']+';/,
+        `export const VERSION = '${newVersion}';`
     );
     if (content === nextContent) {
-        throw new Error('help.ts 未找到可替换的 VERSION 常量');
+        throw new Error('config.ts 未找到可替换的 VERSION 常量');
     }
     content = nextContent;
-    fs.writeFileSync(HELP_TS_PATH, content, 'utf-8');
-    console.log(`✓ src/console/help.ts 版本已更新为 ${newVersion}`);
+    fs.writeFileSync(CONFIG_TS_PATH, content, 'utf-8');
+    console.log(`✓ config.ts 版本已更新为 ${newVersion}`);
 }
 
 /**
@@ -321,7 +321,7 @@ async function main() {
     }
 
     const updatedVersion = updatePackageVersion(newVersion);
-    updateHelpTs(updatedVersion);
+    updateConfigTs(updatedVersion);
     updateReadme(updatedVersion);
     gitCommitVersion(updatedVersion);
 
