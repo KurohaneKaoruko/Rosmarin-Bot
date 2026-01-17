@@ -12,11 +12,12 @@ const double_heal = {
                     creep.memory.boosted = true;
                 }
             } else {
-                creep.memory.boosted = creep.goBoost([
+                const boosts = [
                     'XGHO2', 'GHO2', 'GO',
                     'XLHO2', 'LHO2', 'LO',
-                    'XKHO2', 'KHO2', 'KO']
-                );
+                    'XZHO2', 'ZHO2', 'ZO'
+                ];
+                creep.memory.boosted = creep.goBoost(boosts, true, true);
             }
             return;
         }
@@ -29,32 +30,14 @@ const double_heal = {
         let healed = false;
     
         if(!creep.memory.bind) {
-            const creeps = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => !c.memory.bind && c.memory.role != 'double-heal' &&
-                                 c.memory.squad == creep.memory.squad });
-            if(creeps.length) {
-                const squadCreep = creep.pos.findClosestByRange(creeps);
-                creep.memory.bind = squadCreep.id;
-                squadCreep.memory.bind = creep.id;
-            }
-        }
-    
-        if(!creep.memory.bind) {
-            if (creep.hits < creep.hitsMax) creep.heal(creep);
-            let needHeal = this.pos.findClosestByPath(FIND_MY_CREEPS,{
-                filter: (creep: Creep) => creep.hitsMax-creep.hits>100
-            });
-            if(needHeal) {
-                if (creep.pos.isNearTo(needHeal)) {
-                    creep.heal(needHeal);
-                } else if (creep.pos.inRangeTo(needHeal, 3)) {
-                    creep.rangedHeal(needHeal);
-                } if (!creep.pos.isNearTo(needHeal)) {
-                    creep.moveTo(needHeal);
-                }
+            const attackCreep = creep.room.find(FIND_MY_CREEPS,
+                {filter: (c) => c.memory.role == 'defend-2attack' && !c.memory.bind});
+            if (attackCreep.length > 0) {
+                creep.memory.bind = attackCreep[0].id;
+                attackCreep[0].memory.bind = creep.id;
             }
             return;
-        };
+        }
     
         const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
     
