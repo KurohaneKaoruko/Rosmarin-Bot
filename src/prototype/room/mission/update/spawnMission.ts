@@ -1,5 +1,15 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
 
+// 孵化相关
+const SPAWN_MIN_ENERGY = 50e3;
+// 维修相关
+const REPAIR_MIN_ENERGY = 100e3;
+// 刷墙相关
+const WALL_MIN_ENERGY = 50000;
+// 搬运任务生成阈值
+const TRANSPORT_MIN = 10000;
+const TRANSPORT_HIGH = 100000;
+
 const RoleSpawnCheck = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
@@ -12,14 +22,14 @@ const RoleSpawnCheck = {
         if (!Game.flags[`${room.name}/UPGRADE`]) return false;
         const ticksToDowngrade = room.controller?.ticksToDowngrade || 0;
         if (lv == 8 && ticksToDowngrade > 100000) return false;
-        if (lv >= 5 && ticksToDowngrade > 10000 && room[RESOURCE_ENERGY] < 50e3) return false;
+        if (lv >= 5 && ticksToDowngrade > 10000 && room[RESOURCE_ENERGY] < SPAWN_MIN_ENERGY) return false;
         return current < num;
     },
     'transport': (room: Room, current: number) => {
         const num = RoleLevelData['transport'][room.level]['num'];
         let energy = (room.storage?.store[RESOURCE_ENERGY] || 0) +
                         (room.terminal?.store[RESOURCE_ENERGY] || 0);
-        if (energy < 10000) return false;
+        if (energy < TRANSPORT_MIN) return false;
         return current < num && (room.storage || room.terminal);
     },
     'manager': (room: Room, current: number) => {
@@ -44,11 +54,11 @@ const RoleSpawnCheck = {
         if (room.level < 6) {
             if (current < 2 && room.checkMissionInPool('build')) return true;
         } else {
-            if (room.storage?.store[RESOURCE_ENERGY] < 10e3) return false;
+            if (room.storage?.store[RESOURCE_ENERGY] < TRANSPORT_MIN) return false;
             if (current < 1 && room.checkMissionInPool('build')) return true;
             if (current < 2 && room.getMissionNumInPool('build') > 10) return true;
         }
-        if (current >= 1 || room[RESOURCE_ENERGY] < 100e3) return false;
+        if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
         if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
             let WR_Tasks = global.WallRampartRepairMission?.[room.name];
             if (WR_Tasks && Object.keys(WR_Tasks)?.length > 0) return true;
@@ -92,7 +102,7 @@ const RoleSpawnCheck = {
         const match = UPFlag.name.match(/UP-UPGRADE\/(\d+)/);
         let num = match ? parseInt(match[1]) : 0;
         if (num < 1) return false;
-        if (room.level >= 4 && room[RESOURCE_ENERGY] < 100000) return false;
+        if (room.level >= 4 && room[RESOURCE_ENERGY] < TRANSPORT_HIGH) return false;
         
         return current < num;
     },
@@ -104,7 +114,7 @@ const RoleSpawnCheck = {
         let num = match ? parseInt(match[1]) : 0;
         if (num < 1) return false;
         if (room.level < 7)  return false;
-        if (room[RESOURCE_ENERGY] < 100000) return false;
+        if (room[RESOURCE_ENERGY] < TRANSPORT_HIGH) return false;
         return current < num;
     }
 }

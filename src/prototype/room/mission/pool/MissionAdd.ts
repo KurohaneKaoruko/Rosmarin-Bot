@@ -6,10 +6,10 @@ import {decompressBodyConfig} from "@/utils";
  */
 export default class MissionAdd extends Room {
     // 添加搬运任务
-    ManageMissionAdd(source: string, target: string, resourceType: any, amount: number) {
+    ManageMissionAdd(source: string, target: string, resourceType: ResourceConstant, amount: number) {
         // 将缩写转换为全名
         const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-        if(RES[resourceType]) resourceType = RES[resourceType];
+        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
         // 将缩写转换为全名
         const structures = {
             s: 'storage',
@@ -41,7 +41,7 @@ export default class MissionAdd extends Room {
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
         // 将缩写转换为全名
         const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-        if(RES[resourceType]) resourceType = RES[resourceType];
+        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
         // 检查是否有相同任务
         let existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
         if (existingTaskId) {
@@ -83,7 +83,7 @@ export default class MissionAdd extends Room {
     }
 
     // 添加孵化任务
-    SpawnMissionAdd(name: string, body: any[] | string, level: number, role: string, memory?: CreepMemory, upbody?: boolean) {
+    SpawnMissionAdd(name: string, body: ((BodyPartConstant | number)[])[] | string, level: number, role: string, memory?: CreepMemory, upbody?: boolean) {
         if (!RoleData[role]) {
             console.log(`role ${role} 不存在`);
             return -1;
