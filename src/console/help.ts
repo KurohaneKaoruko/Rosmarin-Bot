@@ -1,4 +1,4 @@
-const VERSION = '1.9.1';
+const VERSION = '1.9.2';
 
 const head = `<span style="color: #D0CAE0;"><b>
 ——————————————————————————— 迷迭香 𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓 ${VERSION} ———————————————————————————
