@@ -71,9 +71,13 @@ export default class RoomDefense extends Room {
             const rangedDefender = Object.values(Game.creeps)
                 .filter(creep => creep.room.name == this.name &&
                     creep.memory.role == 'defend-ranged') as any;
+            const d2aNum = Object.values(Game.creeps)
+                .filter(creep => creep.room.name == this.name &&
+                    creep.memory.role == 'defend-2attack') as any;
             const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
-            let attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
-            let rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
+            const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
+            const rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
+            const d2aQueueNum = SpawnMissionNum['defend-2attack'] || 0;
             if (hostiles.some((c: Creep) => c.body.some(part => part.type == ATTACK) ||
                 hostiles.some((c: Creep) => c.body.some(part => part.type == WORK))) &&
                 (attackDefender.length + attackQueueNum) < 1) {
@@ -97,6 +101,20 @@ export default class RoomDefense extends Room {
                 if (mustBoost) {
                     this.AssignBoostTask('XKHO2', 1200);
                     this.AssignBoostTask('XZHO2', 300);
+                }
+            }
+            if (hostiles.filter((c: Creep) => c.body.some(part => part.type == RANGED_ATTACK)).length >= 2 &&
+                (d2aNum.length + d2aQueueNum < 1)) {
+                let mustBoost = false;
+                if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000 && this['XLHO2'] >= 3000) {
+                    mustBoost = true;
+                }
+                this.SpawnMissionAdd('', [], -1, 'defend-2attack', {home: this.name, mustBoost} as any, true);
+                this.SpawnMissionAdd('', [], -1, 'defend-2heal', {home: this.name, mustBoost} as any, true);
+                if (mustBoost) {
+                    this.AssignBoostTask('XUH2O', 1200);
+                    this.AssignBoostTask('XLHO2', 1200);
+                    this.AssignBoostTask('XZHO2', 600);
                 }
             }
         } else if (this.level == 7) {
