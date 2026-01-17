@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
 import inquirer from 'inquirer';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,11 +48,53 @@ function getCurrentVersion() {
 /**
  * 更新 package.json 中的版本号
  */
-function updatePackageJson(newVersion) {
-    const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8'));
-    packageJson.version = newVersion;
-    fs.writeFileSync(PACKAGE_JSON_PATH, JSON.stringify(packageJson, null, 2) + '\n', 'utf-8');
-    console.log(`✓ package.json 版本已更新为 ${newVersion}`);
+function detectPackageManager() {
+    try {
+        const packageJson = JSON.parse(fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8'));
+        if (typeof packageJson.packageManager === 'string') {
+            if (packageJson.packageManager.startsWith('pnpm@')) return 'pnpm';
+            if (packageJson.packageManager.startsWith('npm@')) return 'npm';
+        }
+    } catch {}
+
+    const userAgent = process.env.npm_config_user_agent;
+    if (typeof userAgent === 'string') {
+        if (userAgent.startsWith('pnpm/')) return 'pnpm';
+        if (userAgent.startsWith('npm/')) return 'npm';
+    }
+
+    if (fs.existsSync(path.join(rootDir, 'pnpm-lock.yaml')) || fs.existsSync(path.join(rootDir, 'pnpm-workspace.yaml'))) {
+        return 'pnpm';
+    }
+    if (fs.existsSync(path.join(rootDir, 'package-lock.json'))) {
+        return 'npm';
+    }
+
+    return 'npm';
+}
+
+function updatePackageVersion(newVersion) {
+    const packageManager = detectPackageManager();
+    const args = ['version', newVersion, '--no-git-tag-version'];
+
+    if (packageManager === 'pnpm' && fs.existsSync(path.join(rootDir, 'pnpm-workspace.yaml'))) {
+        args.push('--workspace-root');
+    }
+
+    const result = spawnSync(packageManager, args, {
+        cwd: rootDir,
+        stdio: 'inherit',
+        shell: process.platform === 'win32',
+    });
+
+    if (result.error) throw result.error;
+    if (typeof result.status === 'number' && result.status !== 0) {
+        throw new Error(`${packageManager} version 失败 (exit code: ${result.status})`);
+    }
+
+    const updatedVersion = getCurrentVersion();
+    console.log(`✓ package.json 版本已更新为 ${updatedVersion}`);
+    return updatedVersion;
 }
 
 /**
@@ -137,9 +180,9 @@ async function main() {
         return;
     }
 
-    updatePackageJson(newVersion);
-    updateHelpTs(newVersion);
-    updateReadme(newVersion);
+    const updatedVersion = updatePackageVersion(newVersion);
+    updateHelpTs(updatedVersion);
+    updateReadme(updatedVersion);
 
     console.log('\n✓ 版本更新完成!');
 }

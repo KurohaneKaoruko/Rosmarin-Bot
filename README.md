@@ -1,6 +1,6 @@
 # Rosmarin-Bot / 迷迭香Bot
 
-![version](https://img.shields.io/badge/version-1.8.0-orange)
+![version](https://img.shields.io/badge/version-1.8.1-orange)
 ![language-typescript](https://img.shields.io/badge/language-typescript-3178c6)
 ![screeps](https://img.shields.io/badge/game-Screeps-green)
 ![license](https://img.shields.io/badge/license-MIT-blue)
