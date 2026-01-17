@@ -64,8 +64,8 @@ const ClaimModule = (flagName: string) => {
         else num = parseInt(num);
         for (let i = 0; i < num; i++) {
             room.SpawnMissionAdd('', '', num, 'attack-claimer', {targetRoom, num});
-            log('CLAIM', `${room.name} 孵化了 ${num} 个 attack-claimer 来攻击 ${targetRoom}`);
         }
+        log('CLAIM', `${room.name} 孵化了 ${num} 个 attack-claimer 来攻击 ${targetRoom}`);
         return true;
     }
 
