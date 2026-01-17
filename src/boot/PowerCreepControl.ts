@@ -3,7 +3,7 @@ import { log } from "@/utils";
 /**
  * PowerCreep 工作控制
  */
-export const powerControl = function (pc: PowerCreep) {
+export const powerCreepControl = function (pc: PowerCreep) {
     if (!pc) return;
     if (!pc.ticksToLive) {
         if (Game.time % 20) return; // 每20tick检查一次
