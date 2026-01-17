@@ -1,4 +1,4 @@
-import {compressBodyConfig} from "@/utils";
+import {compressBodyConfig, log} from "@/utils";
 import {TEAM_CONFIG} from "@/constant/TeamConfig";
 import Team from "./TeamClass/Team";
 import TeamCreep from "./TeamClass/TeamCreep";
@@ -130,7 +130,7 @@ const TeamModule = {
             // 孵化计数
             flagMemory['lastTime'] = Game.time;
             flagMemory['spawnCount'] = (flagMemory['spawnCount']||0) + 1;
-            console.log(flagName, `已添加一支小队的孵化任务, 配置:${config}, 编号:${teamID}`);
+            log('TeamModule', `${flagName} 已派送小队 ${teamID} 到 ${flag.pos.roomName}, 配置:${config},`);
             // 孵化数量
             let spawnCount = flagName.match(/_N(\d+)/)?.[1] as any;
             if (!spawnCount) {
@@ -141,7 +141,7 @@ const TeamModule = {
 
             if (flagMemory['spawnCount'] >= parseInt(spawnCount)) {
                 flag.remove();
-                console.log(flagName, '孵化数量已满');
+                log('TeamModule', flagName, '孵化数量已满');
                 delete Memory.flags[flagName];
             }
         }
