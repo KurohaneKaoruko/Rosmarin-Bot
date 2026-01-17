@@ -130,7 +130,8 @@ function UpdateWallRepairMission(room: Room) {
         // 刷墙维修
         if(hits < hitsMax * WALL_HITS_MAX_THRESHOLD) {
             const level = Math.round(hits / hitsMax * 100) + 1; // 优先级
-            const targetHits = Math.ceil(level / 100 * hitsMax) % (hitsMax * WALL_HITS_MAX_THRESHOLD);
+            const maxHits = Math.floor(hitsMax * WALL_HITS_MAX_THRESHOLD);
+            const targetHits = Math.min(Math.ceil(level / 100 * hitsMax), maxHits);
             const data = {target: id, pos: posInfo, hits: targetHits};
             if (!tasks[level]) tasks[level] = [];
             tasks[level].push(data);
@@ -154,15 +155,23 @@ function BuildRepairMissionCheck(room: Room) {
     room.checkMissionPool('build', checkFunc);
     room.checkMissionPool('repair', checkFunc);
 
-    let wallTasks = global.WallRampartRepairMission[room.name];
-    if (!wallTasks || wallTasks.length === 0) return;
-    for (let i = wallTasks.length - 1; i >= 0; i--) {
-        const task = wallTasks[i];
-        const { target, hits } = task;
-        const structure = Game.getObjectById(target) as Structure | null;
-        if (!structure || structure.hits > hits) {
-            wallTasks.splice(i, 1); // 删除当前元素
+    if (!global.WallRampartRepairMission) return;
+    const wallTaskMap = global.WallRampartRepairMission[room.name];
+    if (!wallTaskMap) return;
+
+    for (const lvStr of Object.keys(wallTaskMap)) {
+        const lv = Number(lvStr);
+        const tasks = wallTaskMap[lv];
+        if (!tasks || tasks.length === 0) { delete wallTaskMap[lv]; continue; }
+
+        for (let i = tasks.length - 1; i >= 0; i--) {
+            const task = tasks[i];
+            const { target, hits } = task;
+            const structure = Game.getObjectById(target) as Structure | null;
+            if (!structure || structure.hits >= hits) tasks.splice(i, 1);
         }
+
+        if (tasks.length === 0) delete wallTaskMap[lv];
     }
 }
 

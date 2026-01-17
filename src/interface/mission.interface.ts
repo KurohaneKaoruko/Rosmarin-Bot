@@ -27,7 +27,7 @@ interface Room {
     /**
      * 从任务池获取任务
      * @param PoolName - 任务池名称
-     * @param pos - 可选，指定获取第几个任务（从0开始）
+     * @param pos - 可选，creep位置（compress 后的 number），用于同级任务按距离选择
      * @param checkFunc - 可选，自定义检查函数，返回true的任务才会被获取
      * @returns 符合条件的任务对象，未找到返回null
      * @example const task = room.getMissionFromPool('transport', 0, (t) => t.data.resourceType === RESOURCE_ENERGY);
@@ -141,9 +141,9 @@ interface Room {
     /**
      * 检查并清理任务池中已完成、过期或失效的任务
      * @param PoolName - 任务池名称
-     * @param checkFunc - 检查函数，返回true表示任务应被删除
+     * @param checkFunc - 检查函数，返回true表示任务有效并保留
      * @returns OK表示检查完成
-     * @example room.checkMissionPool('build', (t) => !Game.getObjectById(t.data.target));
+     * @example room.checkMissionPool('build', (t) => !!Game.getObjectById(t.data.target));
      */
     checkMissionPool(PoolName: string, checkFunc: (t: Task) => boolean): OK | void;
 
@@ -346,7 +346,7 @@ interface MissionPool {
 interface Task {
     /** 
      * 任务唯一ID
-     * @description 格式通常为 'task_' + Game.time + '_' + 随机数
+     * @description 由业务生成并保证唯一性，常见形如 'TYPE-XXXX'
      */
     id: string;
     
