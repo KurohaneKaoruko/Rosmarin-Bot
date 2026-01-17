@@ -28,13 +28,62 @@ const tryRequire = (path) => {
 	}
 };
 
+const decodeBase64ToUint8Array = (base64) => {
+	// @ts-ignore
+	if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(base64, 'base64'));
+	// @ts-ignore
+	const bin = atob(base64);
+	const bytes = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+	return bytes;
+};
+
+const toWasmBytes = (data) => {
+	if (!data) throw new Error('WASM 模块不存在');
+	if (data instanceof ArrayBuffer) return new Uint8Array(data);
+	if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+	if (typeof data === 'string') return decodeBase64ToUint8Array(data);
+	if (typeof data === 'object') {
+		// @ts-ignore
+		if (data.binary && typeof data.binary === 'string') return decodeBase64ToUint8Array(data.binary);
+		// @ts-ignore
+		if (data.default) return toWasmBytes(data.default);
+	}
+	throw new Error(`WASM 模块类型不支持: ${typeof data}`);
+};
+
+const validateWasmHeader = (bytes) => {
+	return (
+		bytes &&
+		bytes.length >= 8 &&
+		bytes[0] === 0x00 &&
+		bytes[1] === 0x61 &&
+		bytes[2] === 0x73 &&
+		bytes[3] === 0x6d &&
+		bytes[4] === 0x01 &&
+		bytes[5] === 0x00 &&
+		bytes[6] === 0x00 &&
+		bytes[7] === 0x00
+	);
+};
+
+const getWasmBinary = () => {
+	const moduleNoExt = tryRequire('algo_wasm_priorityqueue');
+	if (moduleNoExt) return toWasmBytes(moduleNoExt);
+	const moduleWithExt = tryRequire('algo_wasm_priorityqueue.wasm');
+	if (moduleWithExt) return toWasmBytes(moduleWithExt);
+	throw new Error('未找到 algo_wasm_priorityqueue WASM 模块');
+};
+
 const getWasModule = () => {
-	const binary = tryRequire('algo_wasm_priorityqueue.wasm')
-	? require('algo_wasm_priorityqueue.wasm')
-	: require('algo_wasm_priorityqueue'); // 读取二进制文件
-	const wasmModule = new WebAssembly.Module(binary); // 初始化为wasm类
+	const bytes = getWasmBinary();
+	if (!validateWasmHeader(bytes)) {
+		const head = Array.from(bytes.slice(0, 8)).map((n) => n.toString(16).padStart(2, '0')).join(' ');
+		throw new Error(`WASM 头校验失败: ${head}`);
+	}
+	const wasmModule = new WebAssembly.Module(bytes);
 	return wasmModule;
-}
+};
 
 
 
@@ -101,6 +150,8 @@ export class PriorityQueue extends BaseQueue {
 		let instance;
 		/**@type {node[]} */
 		const cache: any[] = [];
+		const heap: any[] = [];
+		const isMin = !!isMinRoot;
 
 		const imports = {
 			// 把wasm类实例化需要的接口函数
@@ -113,14 +164,60 @@ export class PriorityQueue extends BaseQueue {
 		};
 		// @ts-ignore
 		// eslint-disable-next-line prefer-const
-		const wasmModule = getWasModule();
-		instance = new WebAssembly.Instance(wasmModule, imports).exports; // 实例化
-		instance.init(+!!isMinRoot); // !!转化为boolean, +转为数字
+		let useWasm = false;
+		try {
+			const wasmModule = getWasModule();
+			instance = new WebAssembly.Instance(wasmModule, imports).exports; // 实例化
+			instance.init(+!!isMinRoot); // !!转化为boolean, +转为数字
+			useWasm = true;
+		} catch (e) {
+			useWasm = false;
+		}
+
+		const higherPriority = (a, b) => (isMin ? a.k < b.k : a.k > b.k);
+		const heapPush = (node) => {
+			heap.push(node);
+			let i = heap.length - 1;
+			while (i > 0) {
+				const p = (i - 1) >> 1;
+				if (higherPriority(heap[p], heap[i])) break;
+				const t = heap[p];
+				heap[p] = heap[i];
+				heap[i] = t;
+				i = p;
+			}
+		};
+		const heapPop = () => {
+			if (heap.length === 0) return undefined;
+			const root = heap[0];
+			const last = heap.pop();
+			if (heap.length > 0) {
+				heap[0] = last;
+				let i = 0;
+				while (true) {
+					let best = i;
+					const l = i * 2 + 1;
+					const r = l + 1;
+					if (l < heap.length && higherPriority(heap[l], heap[best])) best = l;
+					if (r < heap.length && higherPriority(heap[r], heap[best])) best = r;
+					if (best === i) break;
+					const t = heap[i];
+					heap[i] = heap[best];
+					heap[best] = t;
+					i = best;
+				}
+			}
+			return root;
+		};
 
 		/**
 		 * @param {node} node
 		 */
 		this.push = (node) => {
+			if (!useWasm) {
+				heapPush(node);
+				return;
+			}
 			try {
 				instance.push(node.k, cache.length);
 				cache.push(node);
@@ -139,6 +236,7 @@ export class PriorityQueue extends BaseQueue {
 		 *  @returns {node|undefined}
 		 */
 		this.pop = () => {
+			if (!useWasm) return heapPop();
 			if (instance.size() > 0) {
 				const pointer = instance.top();
 				const id = instance.get_identifier(pointer);
@@ -155,6 +253,7 @@ export class PriorityQueue extends BaseQueue {
 		 *  @returns {node|undefined}
 		 */
 		this.top = () => {
+			if (!useWasm) return heap[0];
 			if (instance.size() > 0) {
 				const pointer = instance.top();
 				return cache[instance.get_identifier(pointer)];
@@ -171,6 +270,24 @@ export class PriorityQueue extends BaseQueue {
 				func(node);
 				ReclaimNode(node);
 			}
+		};
+
+		this.size = () => {
+			if (!useWasm) return heap.length;
+			return instance.size();
+		};
+
+		this.clear = () => {
+			if (!useWasm) {
+				heap.length = 0;
+				return;
+			}
+			instance.clear();
+		};
+
+		this.isEmpty = () => {
+			if (!useWasm) return heap.length === 0;
+			return !instance.is_empty();
 		};
 
 		Object.defineProperty(this, 'instance', {
