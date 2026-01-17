@@ -2,6 +2,15 @@ import { RoleData } from '@/constant/CreepConstant';
 import { decompressBodyConfig, GenCreepName } from '@/utils';
 
 export default class SpawnControl extends Room {
+    SpawnWork() {
+        // 没有spawn时不处理
+        if (!this.spawn) return;
+        // 可视化孵化状态
+        this.VisualSpawnInfo();
+        // 孵化creep
+        this.SpawnCreep();
+    }
+
     VisualSpawnInfo() {
         this.spawn.forEach(spawn => {
             if (!spawn.spawning) return;
