@@ -12,14 +12,16 @@ export default class MissionGet extends Room {
         const task = this.getMissionFromPool('transport', posInfo);
         if(!task) return null;
 
-        const source = Game.getObjectById(task.data.source) as any;
-        const target = Game.getObjectById(task.data.target) as any;
-        const resourceType = task.data.resourceType;
-        const amount = task.data.amount;
+        const data = task.data as TransportTask;
+        const source = Game.getObjectById(data.source);
+        const target = Game.getObjectById(data.target);
+        const resourceType = data.resourceType;
+        const amount = data.amount;
+        
         // 任务无效则删除, 重新获取
         if(!source || !target || !resourceType || !amount ||
-            source.store[resourceType] == 0 ||
-            target.store.getFreeCapacity(resourceType) == 0) {
+            (source as any).store[resourceType] == 0 ||
+            (target as any).store.getFreeCapacity(resourceType) == 0) {
             this.deleteMissionFromPool('transport',task.id);
             return this.getTransportMission(creep);
         }
