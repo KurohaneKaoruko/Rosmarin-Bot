@@ -33,7 +33,7 @@ type CachedLayout = {
 };
 
 /** 缓存有效期（tick） */
-const CACHE_TTL = 50;
+const CACHE_TTL = 100;
 
 /** 缓存存放在 global 上，避免写入 Memory 造成体积与反序列化开销 */
 function getCacheStore(): { byKey: { [key: string]: CachedLayout }; lastKeyByRoomLayout: { [key: string]: string } } {
