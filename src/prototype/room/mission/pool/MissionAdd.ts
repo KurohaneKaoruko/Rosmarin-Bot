@@ -102,6 +102,7 @@ export default class MissionAdd extends Room {
 
         if(energy > this.energyCapacityAvailable) return -1;
         if(!memory) memory = {} as CreepMemory;
+        else memory = _.cloneDeep(memory);
         memory.role = role;
         if (upbody === undefined) {
             this.addMissionToPool('spawn', 'spawn', level, {name, body, memory, energy})
