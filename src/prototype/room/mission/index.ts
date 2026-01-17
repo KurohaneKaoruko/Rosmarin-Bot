@@ -1,8 +1,8 @@
 import {UpdateBuildRepairMission,
         UpdateWallRepairMission,
-        BuildRepairMissionCheck} from './update/buildRepairMission'
+        BuildRepairMissionCheck} from './update/work/index'
 import {UpdateTransportMission,
-        TransportMissionCheck} from './update/transportMission'
+        TransportMissionCheck} from './update/transport/index'
 import {UpdateManageMission} from './update/manageMission'
 import {UpdateSpawnMission} from './update/spawnMission'
 
