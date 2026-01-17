@@ -5,10 +5,11 @@ export default class AutoLab extends Room {
     autoLab() {
         if (Game.time % 50) return;
         if (!this.lab || !this.lab.length) return;
-        const botmem =  Memory['StructControlData'][this.name];
+        let botmem =  Memory['StructControlData'][this.name];
+        if (!botmem) botmem = Memory['StructControlData'][this.name] = {};
+        if (botmem.lab === undefined) botmem.lab = true;
+        if (!botmem.lab) return;
 
-        // 关停时不处理
-        if (!botmem || !botmem.lab) return;
         const labProduct = botmem.labAtype && botmem.labBtype ?
                         REACTIONS[botmem.labAtype][botmem.labBtype] : null;
         const amount = botmem.labAmount;    // 产物限额
@@ -82,7 +83,7 @@ const getT1Task = (room: Room) => {
 
     const r = (res: string) => room.getResAmount(res);
 
-    let threshold = 20e3;
+    let threshold = 10e3;
     const H = r(RESOURCE_HYDROGEN);
     const O = r(RESOURCE_OXYGEN);
 

@@ -5,8 +5,9 @@ export default class AutoFactory extends Room {
         if (Game.time % 50) return;
         if (!this.factory) return;
         const botmem = Memory['StructControlData'][this.name];
-        // 关停时不处理
-        if (!botmem || !botmem.factory) return;
+        if (!botmem) return;
+        if (botmem.factory === undefined) botmem.factory = true;
+        if (!botmem.factory) return;
 
         // 产物
         const Product = botmem.factoryProduct;
