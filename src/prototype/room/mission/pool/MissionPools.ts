@@ -14,7 +14,8 @@
  *      type: string,   // 任务类型
  *      level: number,  // 优先级, 越小越优先
  *      data: any,      // 任务数据, 该模块并不关心任务数据的具体内容, 在执行任务时处理即可
- *      lock?: Id,      // 可选, 绑定该任务的creep Id, 如果任务被锁定, 则其他creep无法获取该任务。
+ *      lock?: boolean, // 可选, 任务是否被锁定, 锁定后其他creep无法获取该任务
+ *      bindCreep?: Id<Creep> | null, // 可选, 绑定该任务的creep Id
  * }
  */
 
@@ -128,7 +129,7 @@ export default class MissionPools extends Room {
         if (resultTasks.length === 1) return resultTasks[0];
         let Task = null, distance = Infinity;
         for (const task of resultTasks) {
-            if (!task.data.pos || !pos) continue;
+            if (task.data?.pos == null || pos == null) continue;
             const taskDistance = this.getDistance(task.data.pos, pos);
             if (taskDistance > distance) continue;
             distance = taskDistance;
@@ -141,9 +142,10 @@ export default class MissionPools extends Room {
     // 不考虑优先级，直接获取第一个任务
     public getMissionFromPoolFirst(PoolName: string, filter?: (task: Task) => boolean) {
         if (!filter) filter = () => true;
-        const tasks = this.getPool(PoolName).filter(task => task && !task.lock && filter(task));
-        if (!tasks) { return; }
-        if (tasks.length === 0) return null; // 如果没有任务，返回null
+        const pool = this.getPool(PoolName);
+        if (!pool) return null;
+        const tasks = pool.filter(task => task && !task.lock && filter(task));
+        if (tasks.length === 0) return null;
         return tasks[0];
     }
 
@@ -216,7 +218,7 @@ export default class MissionPools extends Room {
         if (!tasks.length) return; // 如果没有任务，不处理
 
         const task = tasks.find(t => t.id === id)
-        if (task) {console.log(`任务${id}不存在`);return;}
+        if (!task) {console.log(`任务${id}不存在`);return;}
 
         task.lock = false;
         task.bindCreep = null;
@@ -224,7 +226,7 @@ export default class MissionPools extends Room {
     }
 
     // 更新任务池中的任务
-    public updateMissionPool(PoolName: string, id: Task["id"], {level, data}) {
+    public updateMissionPool(PoolName: string, id: Task["id"], {level, data, lock}: {level?: Task["level"], data?: Task["data"], lock?: Task["lock"]}) {
         const tasks = Memory.MissionPools[this.name][PoolName];
         if (!tasks) { return; }
         if (!tasks.length) return; // 如果没有任务，不处理
@@ -240,6 +242,10 @@ export default class MissionPools extends Room {
             for(const key in data){
                 task.data[key] = data[key];
             }
+        }
+        if (lock !== undefined) {
+            task.lock = lock;
+            if (!lock) task.bindCreep = null;
         }
 
         return OK;
@@ -267,10 +273,9 @@ export default class MissionPools extends Room {
         if (!tasks) { return; }
         if (!tasks.length) return; // 如果没有任务，不处理
 
-        for (const task of tasks) {
-            // 检查函数返回false，则删除任务
-            if (!checkFunc(task))
-                this.deleteMissionFromPool(PoolName, task.id)
+        for (let i = tasks.length - 1; i >= 0; i--) {
+            const task = tasks[i];
+            if (!checkFunc(task)) tasks.splice(i, 1);
         }
         return OK;
     }

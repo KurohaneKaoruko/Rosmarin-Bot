@@ -1,5 +1,34 @@
 import { compress } from '@/utils';
 
+type PosLike = RoomPosition | { pos: RoomPosition } | number;
+
+function toPosNumber(pos: PosLike): number {
+    if (typeof pos === 'number') return pos;
+    const p = 'pos' in pos ? pos.pos : pos;
+    return compress(p.x, p.y);
+}
+
+function addTransportMission(
+    room: Room,
+    level: number,
+    params: {
+        pos: PosLike;
+        source: Id<Structure>;
+        target: Id<Structure>;
+        resourceType: ResourceConstant;
+        amount: number;
+    }
+) {
+    if (!params.amount || params.amount <= 0) return;
+    room.TransportMissionAdd(level, {
+        pos: toPosNumber(params.pos),
+        source: params.source,
+        target: params.target,
+        resourceType: params.resourceType,
+        amount: params.amount,
+    } as any);
+}
+
 // 更新运输任务
 function UpdateTransportMission(room: Room) {
     const storage = room.storage;
@@ -41,28 +70,30 @@ function UpdateEnergyMission(room: Room) {
     // 检查spawn和扩展是否需要填充能量
     if(room.spawn && room.spawn.length > 0 && room.energyAvailable < room.energyCapacityAvailable) {
         room.spawn.forEach((s) => {
-            if (s.store.getFreeCapacity(RESOURCE_ENERGY) == 0) return;
-            if (energy < s.store.getFreeCapacity(RESOURCE_ENERGY)) return;
-            energy -= s.store.getFreeCapacity(RESOURCE_ENERGY);
-            room.TransportMissionAdd(LevelMap.ext, {
-                pos: compress(s.pos.x, s.pos.y),
+            const amount = s.store.getFreeCapacity(RESOURCE_ENERGY);
+            if (amount === 0) return;
+            if (energy < amount) return;
+            energy -= amount;
+            addTransportMission(room, LevelMap.ext, {
+                pos: s,
                 source: storageOrTerminal.id,
                 target: s.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: s.store.getFreeCapacity(RESOURCE_ENERGY),
-            })
+                amount,
+            });
         })
         room.extension.forEach((e) => {
-            if (e.store.getFreeCapacity(RESOURCE_ENERGY) == 0) return;
-            if (energy < e.store.getFreeCapacity(RESOURCE_ENERGY)) return;
-            energy -= e.store.getFreeCapacity(RESOURCE_ENERGY);
-            room.TransportMissionAdd(LevelMap.ext, {
-                pos: compress(e.pos.x, e.pos.y),
+            const amount = e.store.getFreeCapacity(RESOURCE_ENERGY);
+            if (amount === 0) return;
+            if (energy < amount) return;
+            energy -= amount;
+            addTransportMission(room, LevelMap.ext, {
+                pos: e,
                 source: storageOrTerminal.id,
                 target: e.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: e.store.getFreeCapacity(RESOURCE_ENERGY),
-            })
+                amount,
+            });
         })
     }
 
@@ -71,17 +102,16 @@ function UpdateEnergyMission(room: Room) {
         const towers = room.tower
             .filter((t: StructureTower) => t && t.store.getFreeCapacity(RESOURCE_ENERGY) > 200);
         towers.forEach((t: StructureTower) => {
-            if(energy < t.store.getFreeCapacity(RESOURCE_ENERGY)) return;
-            energy -= t.store.getFreeCapacity(RESOURCE_ENERGY);
-            const posInfo = compress(t.pos.x, t.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            const amount = t.store.getFreeCapacity(RESOURCE_ENERGY);
+            if(energy < amount) return;
+            energy -= amount;
+            addTransportMission(room, LevelMap.tower, {
+                pos: t,
                 source: storageOrTerminal.id,
                 target: t.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: t.store.getFreeCapacity(RESOURCE_ENERGY),
-            }
-            room.TransportMissionAdd(LevelMap.tower, taskdata)
+                amount,
+            });
         })
     }
 
@@ -93,17 +123,16 @@ function UpdateEnergyMission(room: Room) {
         const labs = room.lab
             .filter((l: StructureLab) => l && l.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
         labs.forEach((l: StructureLab) => {
-            if(energy < l.store.getFreeCapacity(RESOURCE_ENERGY)) return;
-            energy -= l.store.getFreeCapacity(RESOURCE_ENERGY);
-            const posInfo = compress(l.pos.x, l.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            const amount = l.store.getFreeCapacity(RESOURCE_ENERGY);
+            if(energy < amount) return;
+            energy -= amount;
+            addTransportMission(room, LevelMap.labEnergy, {
+                pos: l,
                 source: storage.id,
                 target: l.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: l.store.getFreeCapacity(RESOURCE_ENERGY),
-            }
-            room.TransportMissionAdd(LevelMap.labEnergy, taskdata)
+                amount,
+            });
         })
     }
 
@@ -116,17 +145,15 @@ function UpdateEnergyMission(room: Room) {
         (!centerPos || !room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
         const powerSpawn = room.powerSpawn;
         const amount = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
-        if(powerSpawn && powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY) > 400 && energy >= amount) {
+        if(powerSpawn && amount > 400 && energy >= amount) {
             energy -= amount;
-            const posInfo = compress(powerSpawn.pos.x, powerSpawn.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            addTransportMission(room, LevelMap.powerSpawn, {
+                pos: powerSpawn,
                 source: storage.id,
                 target: powerSpawn.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: amount,
-            }
-            room.TransportMissionAdd(LevelMap.powerSpawn, taskdata)
+                amount,
+            });
         }
     }
 
@@ -139,15 +166,13 @@ function UpdateEnergyMission(room: Room) {
         const amount = Math.min(nuker.store.getFreeCapacity(RESOURCE_ENERGY), 3000);
         if(nuker && amount > 0 && energy >= amount) {
             energy -= amount;
-            const posInfo = compress(nuker.pos.x, nuker.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            addTransportMission(room, LevelMap.nuker, {
+                pos: nuker,
                 source: storage.id,
                 target: nuker.id,
                 resourceType: RESOURCE_ENERGY,
-                amount: amount,
-            }
-            room.TransportMissionAdd(LevelMap.nuker, taskdata)
+                amount,
+            });
         }
     }
 
@@ -181,15 +206,13 @@ function UpdatePowerMission(room: Room) {
 
     if(!target || target.store[RESOURCE_POWER] <= 0) return;
 
-    const posInfo = compress(target.pos.x, target.pos.y);
-    const taskdata = {
-        pos: posInfo,
+    addTransportMission(room, LevelMap.powerSpawn, {
+        pos: target,
         source: target.id,
         target: powerSpawn.id,
         resourceType: RESOURCE_POWER,
         amount: Math.min(neededAmount, target.store[RESOURCE_POWER]),
-    }
-    room.TransportMissionAdd(LevelMap.powerSpawn, taskdata)
+    });
 }
 
 // 检查lab是否需要填充资源
@@ -214,15 +237,13 @@ function UpdateLabMission(room: Room) {
             if(BotMemStructures['boostRes'][lab.id]) return;
             if(BotMemStructures['boostTypes'][lab.id]) return;
             if (!lab.store[lab.mineralType] || lab.store[lab.mineralType] === 0) return;
-            const posInfo = compress(lab.pos.x, lab.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            addTransportMission(room, LevelMap.lab, {
+                pos: lab,
                 source: lab.id,
                 target: storage.id,
                 resourceType: lab.mineralType,
                 amount: lab.store[lab.mineralType],
-            }
-            room.TransportMissionAdd(LevelMap.lab, taskdata);
+            });
         })
         return;
     }
@@ -234,15 +255,13 @@ function UpdateLabMission(room: Room) {
         const type = index === 0 ? labAtype : labBtype;
         if(!lab.mineralType || lab.mineralType === type) return; // 资源类型正确时不操作
         if(!lab.store[lab.mineralType] || lab.store[lab.mineralType] === 0) return; // 资源为空
-        const posInfo = compress(lab.pos.x, lab.pos.y);
-        const taskdata = {
-            pos: posInfo,
+        addTransportMission(room, LevelMap.lab, {
+            pos: lab,
             source: lab.id,
             target: storage.id,
             resourceType: lab.mineralType,
             amount: lab.store[lab.mineralType],
-        }
-        room.TransportMissionAdd(LevelMap.lab, taskdata)
+        });
     });
 
     // 检查labA和labB是否需要填充设定的资源
@@ -251,16 +270,15 @@ function UpdateLabMission(room: Room) {
         if(lab.mineralType && lab.mineralType !== type) return;    // 有其他资源时不填充
         if(lab.store.getFreeCapacity(type) < 1000) return;   // 需要填充的量太少时不添加任务
         if(room.getResAmount(type) < 1000) return; // 资源不足时不添加任务
-        const posInfo = compress(lab.pos.x, lab.pos.y);
-        const target = [storage, terminal].find(target => target.store[type] > 0);
-        const taskdata = {
-            pos: posInfo,
+        const target = [storage, terminal].find(target => target && target.store[type] > 0);
+        if (!target) return;
+        addTransportMission(room, LevelMap.lab, {
+            pos: lab,
             source: target.id,
             target: lab.id,
             resourceType: type,
             amount: Math.min(lab.store.getFreeCapacity(type), target.store[type]),
-        } as any;
-        room.TransportMissionAdd(LevelMap.lab, taskdata)
+        } as any);
     });
 
     const boostmem = BotMemStructures['boostRes'];
@@ -273,15 +291,13 @@ function UpdateLabMission(room: Room) {
             boostmem[lab.id] || boostmem2[lab.id]) return;
         if (!lab.store[lab.mineralType] || lab.store[lab.mineralType] == 0) return;
         if (lab.store.getFreeCapacity(lab.mineralType) >= 100) return;
-        const posInfo = compress(lab.pos.x, lab.pos.y);
-        const taskdata = {
-            pos: posInfo,
+        addTransportMission(room, LevelMap.lab, {
+            pos: lab,
             source: lab.id,
             target: storage.id,
             resourceType: lab.mineralType,
             amount: lab.store[lab.mineralType],
-        }
-        room.TransportMissionAdd(LevelMap.lab, taskdata)
+        });
     });
 
     // 如果lab的资源不同于产物，则全部取出（不包括labA、labB，以及设定了boost的）
@@ -290,15 +306,13 @@ function UpdateLabMission(room: Room) {
             boostmem[lab.id] || boostmem2[lab.id]) return;
         if(lab.mineralType == REACTIONS[labAtype][labBtype]) return;
         if(!lab.store[lab.mineralType] || lab.store[lab.mineralType] == 0) return;
-        const posInfo = compress(lab.pos.x, lab.pos.y);
-        const taskdata = {
-            pos: posInfo,
+        addTransportMission(room, LevelMap.lab, {
+            pos: lab,
             source: lab.id,
             target: storage.id,
             resourceType: lab.mineralType,
             amount: lab.store[lab.mineralType],
-        }
-        room.TransportMissionAdd(LevelMap.lab, taskdata)
+        });
     });
 }
 
@@ -307,6 +321,7 @@ function UpdateLabBoostMission(room: Room) {
     const storage = room.storage;
     const terminal = room.terminal;
     if (!storage && !terminal) return;
+    const storeTarget = storage || terminal;
     
     const botmem = Memory['StructControlData'][room.name];
     if (!botmem['boostRes']) return;
@@ -361,15 +376,13 @@ function UpdateLabBoostMission(room: Room) {
         
         // 如果lab中存在非设定的资源，则搬走
         if(lab.mineralType !== mineral && lab.store[lab.mineralType] > 0) {
-            const posInfo = compress(lab.pos.x, lab.pos.y);
-            const taskdata = {
-                pos: posInfo,
+            addTransportMission(room, LevelMap.boost, {
+                pos: lab,
                 source: lab.id,
-                target: storage.id,
+                target: storeTarget.id,
                 resourceType: lab.mineralType,
                 amount: lab.store[lab.mineralType],
-            }
-            room.TransportMissionAdd(LevelMap.boost, taskdata)
+            });
             return;
         }
 
@@ -383,16 +396,14 @@ function UpdateLabBoostMission(room: Room) {
         if(lab.store[mineral] < totalAmount) {
             const amount = totalAmount - lab.store[mineral];
             const target = [storage, terminal].find(t => t.store[mineral] > 0);
-            const posInfo = compress(lab.pos.x, lab.pos.y);
             if (!target) return;
-            const taskdata = {
-                pos: posInfo,
+            addTransportMission(room, LevelMap.boost, {
+                pos: lab,
                 source: target.id,
                 target: lab.id,
                 resourceType: mineral,
-                amount: Math.min(amount, target.store[mineral])
-            }
-            room.TransportMissionAdd(LevelMap.boost, taskdata)
+                amount: Math.min(amount, target.store[mineral]),
+            });
             return;
         }
     });
@@ -424,15 +435,13 @@ function UpdateNukerMission(room: Room) {
         return; // 如果storage和terminal都不足，则不补充
     }
 
-    const posInfo = compress(nuker.pos.x, nuker.pos.y);
-    const taskdata = {
-        pos: posInfo,
-        source: source,
+    addTransportMission(room, LevelMap.nuker, {
+        pos: nuker,
+        source,
         target: nuker.id,
         resourceType: RESOURCE_GHODIUM,
-        amount: amount,
-    }
-    room.TransportMissionAdd(LevelMap.nuker, taskdata)
+        amount,
+    });
 }
 
 

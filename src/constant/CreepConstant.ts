@@ -21,7 +21,7 @@ export const RoleData: RoleConfig = {
     },  // 采集
     'carrier': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
-        level: 4, code: 'C', work: 'carrier'
+        level: 3, code: 'C', work: 'carrier'
     },  // 通用搬运
     'transport': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
