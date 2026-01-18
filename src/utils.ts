@@ -166,8 +166,9 @@ export function getPrice(type: any, orderType: any): any {
     const topOrders = orders.filter(order => {
         // 初步过滤
         if (type == 'energy' && order.amount < 10000) return false;
-        if (rooms[order.roomName]) return false;
-        rooms[order.roomName] = true;
+        const roomKey = order.roomName || order.id;
+        if (rooms[roomKey]) return false;
+        rooms[roomKey] = true;
         return true;
     }).slice(0, 10);
     if (topOrders.length === 0) return null;
@@ -180,14 +181,14 @@ export function getPrice(type: any, orderType: any): any {
         const filteredOrders = topOrders.filter(order => order.price <= averagePrice * 1.2);
         // 实际价格不超过最高价的一定比例
         const maxPrice = topOrders[0].price * 0.995;
-        const filterPrice = filteredOrders[0].price;
+        const filterPrice = (filteredOrders[0]?.price ?? topOrders[0].price);
         Price = Math.min(filterPrice, maxPrice);
     } else if (orderType === ORDER_SELL) {
         // 过滤掉低于平均价格太多的订单
         const filteredOrders = topOrders.filter(order => order.price >= averagePrice * 0.8);
         // 实际价格不低于最低价的一定比例
         const minPrice = topOrders[0].price * 1.005;
-        const filterPrice = filteredOrders[0].price;
+        const filterPrice = (filteredOrders[0]?.price ?? topOrders[0].price);
         Price = Math.max(filterPrice, minPrice);
     } else return null;
 
