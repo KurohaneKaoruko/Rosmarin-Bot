@@ -20,10 +20,11 @@ const RoleSpawnCheck = {
         const lv = room.level;
         const num = RoleLevelData['upgrader'][lv]['num'];
         if (room.memory.defend) return false;
-        if (!Game.flags[`${room.name}/UPGRADE`]) return false;
-        const ticksToDowngrade = room.controller?.ticksToDowngrade || 0;
-        if (lv == 8 && ticksToDowngrade > 100000) return false;
-        if (lv >= 5 && ticksToDowngrade > 10000 && room[RESOURCE_ENERGY] < SPAWN_MIN_ENERGY) return false;
+        const ttd = room.controller?.ticksToDowngrade || 0;
+        // 能量不充裕时不常驻升级
+        if (lv == 8 && ttd > 100000 && room[RESOURCE_ENERGY] < 300e3) return false;
+        // 能量太低暂时不升级
+        if (lv >= 5 && ttd > 10000 && room[RESOURCE_ENERGY] < 50e3) return false;
         return current < num;
     },
     'transport': (room: Room, current: number) => {
