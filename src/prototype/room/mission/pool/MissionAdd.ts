@@ -55,6 +55,28 @@ export default class MissionAdd extends Room {
         }
     }
 
+    SendMissionUpsertMax(targetRoom: string, resourceType: string | ResourceConstant, amount: number, maxAmount?: number) {
+        // 资源管理用：同 {targetRoom, resourceType} 的发送任务已存在时，不覆盖成更小的 amount，避免任务执行中被重复调度“反复改写”导致不收敛
+        // 规则：nextAmount = max(currentAmount, amount)，并可选地做 maxAmount 上限限制（防止一次性排队过多）
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        if (RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
+        if (!amount || typeof amount !== 'number' || amount <= 0) return false;
+
+        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
+        if (existingTaskId) {
+            const task = this.getMissionFromPoolById('terminal', existingTaskId);
+            const currentAmount = (task?.data as SendTask | undefined)?.amount ?? 0;
+            let nextAmount = Math.max(currentAmount, amount);
+            if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
+            if (nextAmount === currentAmount) return OK;
+            return this.updateMissionPool('terminal', existingTaskId, {data: {amount: nextAmount} as any});
+        }
+
+        let nextAmount = amount;
+        if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
+        return this.addMissionToPool('terminal', 'send', 0, {targetRoom, resourceType, amount: nextAmount} as SendTask);
+    }
+
     // 添加建造维修任务
     BuildRepairMissionAdd(type: 'build' | 'repair', level: number, data: BuildTask | RepairTask) {
         // 检查是否有相同任务

@@ -89,7 +89,10 @@ export default class MissionGet extends Room {
             if (task.type != 'send') return false;
             const data = task.data as SendTask;
             const resourceType = data.resourceType;
-            return terminal.store[resourceType] >= Math.min(data.amount, 1000);
+            // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个“最小批量”
+            // 否则可能出现任务存在但永远取不到（terminal 资源少于门槛）导致卡住
+            const minBatch = resourceType === RESOURCE_ENERGY ? 5000 : 100;
+            return (terminal.store[resourceType] || 0) >= Math.min(data.amount, minBatch);
         }
         const task = this.getMissionFromPoolFirst('terminal', checkFunc);
         if(!task) return null;

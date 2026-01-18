@@ -73,8 +73,6 @@ export const ResourceManage = {
         }
 
         // 处理每种资源的调度
-        // sendOK: 限制每 tick 每个供应房间最多安排一次跨房间发送（避免任务堆积/CPU 抖动）
-        const sendOK = Object.create(null) as Record<string, boolean>;
         // costRatioCache: 估算传输成本比例 cost/amount（用 sampleAmount 近似），用于快速过滤高成本目标
         const costRatioCache = Object.create(null) as Record<string, Record<string, number>>;
 
@@ -89,6 +87,45 @@ export const ResourceManage = {
             return ratio;
         }
 
+        const queuedPair = Object.create(null) as Record<string, Record<string, Record<string, number>>>;
+        const queuedOut = Object.create(null) as Record<string, Record<string, number>>;
+        const queuedIn = Object.create(null) as Record<string, Record<string, number>>;
+
+        const addQueued = (sourceRoomName: string, targetRoomName: string, res: string, amount: number) => {
+            // queuedPair：用于限制同一 source->target 同资源的累计排队上限（避免对单目标过量调度）
+            // queuedIn/queuedOut：用于把“已排队待发送量”视作已调度，从而在下一轮计算 surplus/deficit 时去重，避免重复下发任务
+            if (!queuedPair[sourceRoomName]) queuedPair[sourceRoomName] = Object.create(null) as Record<string, Record<string, number>>;
+            if (!queuedPair[sourceRoomName][res]) queuedPair[sourceRoomName][res] = Object.create(null) as Record<string, number>;
+            queuedPair[sourceRoomName][res][targetRoomName] = (queuedPair[sourceRoomName][res][targetRoomName] || 0) + amount;
+
+            if (!queuedIn[targetRoomName]) queuedIn[targetRoomName] = Object.create(null) as Record<string, number>;
+            queuedIn[targetRoomName][res] = (queuedIn[targetRoomName][res] || 0) + amount;
+
+            if (!queuedOut[sourceRoomName]) queuedOut[sourceRoomName] = Object.create(null) as Record<string, number>;
+            if (res === RESOURCE_ENERGY) {
+                const ratio = getCostRatio(sourceRoomName, targetRoomName);
+                queuedOut[sourceRoomName][res] = (queuedOut[sourceRoomName][res] || 0) + Math.floor(amount * (1 + ratio));
+            } else {
+                queuedOut[sourceRoomName][res] = (queuedOut[sourceRoomName][res] || 0) + amount;
+            }
+        }
+
+        const missionPools = Memory.MissionPools || {};
+        for (const sourceRoomName in missionPools) {
+            const roomPools = missionPools[sourceRoomName];
+            const terminalTasks = roomPools?.terminal;
+            if (!Array.isArray(terminalTasks)) continue;
+            for (const task of terminalTasks) {
+                if (!task || task.type !== 'send') continue;
+                const data = task.data as any;
+                const targetRoom = data?.targetRoom;
+                const resourceType = data?.resourceType;
+                const amount = data?.amount;
+                if (!targetRoom || !resourceType || typeof amount !== 'number' || amount <= 0) continue;
+                addQueued(sourceRoomName, targetRoom, resourceType, amount);
+            }
+        }
+
         const setResAmountCached = (roomName: string, res: string, amount: number) => {
             if (!amountCache[roomName]) amountCache[roomName] = Object.create(null) as Record<string, number>;
             amountCache[roomName][res] = amount;
@@ -99,9 +136,12 @@ export const ResourceManage = {
             const isGoods = Goods.includes(res as any);
             const minSendAmount = isGoods ? 100 : (res == RESOURCE_ENERGY ? 5000 : 1000);
             const maxSendAmount = isGoods ? 100 : Infinity;
+            // 调度上限：用于实现“一次性尽量下发完，但不至于某个富余房间排队爆炸”
+            const perPairCap = isGoods ? 100 : (res == RESOURCE_ENERGY ? 50000 : 10000);
+            const perSourceCap = isGoods ? 100 : (res == RESOURCE_ENERGY ? 100000 : 20000);
+            const perSourceMaxPairs = 3;
 
             const sourceRooms = ResManageMap[res].source
-                .filter(roomName => !sendOK[roomName])
                 .map(roomName => Game.rooms[roomName])
                 .filter((room: Room) => !!room);
 
@@ -114,7 +154,9 @@ export const ResourceManage = {
             // sources: 以“可供给余量 surplus”排序，优先从最富余的房间开始调度
             const sources = sourceRooms
                 .map(room => {
-                    const amount = getResAmountCached(room, res);
+                    const baseAmount = getResAmountCached(room, res);
+                    const pending = queuedOut[room.name]?.[res] || 0;
+                    const amount = Math.max(0, baseAmount - pending);
                     const thresholds = ThresholdMap[room.name]?.[res];
                     const targetThreshold = thresholds ? thresholds[0] : 0;
                     return { room, amount, surplus: amount - targetThreshold };
@@ -125,12 +167,15 @@ export const ResourceManage = {
             // targets: 以“缺口 deficit”排序，优先补最缺的房间；同时受终端剩余容量与供给阈值上限限制
             const targets = targetRooms
                 .map(room => {
-                    const amount = getResAmountCached(room, res);
+                    const baseAmount = getResAmountCached(room, res);
+                    const pendingIn = queuedIn[room.name]?.[res] || 0;
+                    const amount = baseAmount + pendingIn;
                     const thresholds = ThresholdMap[room.name]?.[res];
                     const targetThreshold = thresholds ? thresholds[0] : 0;
                     const sourceThreshold = thresholds ? thresholds[1] : Infinity;
                     const terminalFree = room.terminal.store.getFreeCapacity();
-                    const deficit = Math.min(targetThreshold - amount, sourceThreshold - amount, terminalFree);
+                    const terminalFreeAfter = Math.max(0, terminalFree - pendingIn);
+                    const deficit = Math.min(targetThreshold - amount, sourceThreshold - amount, terminalFreeAfter);
                     return { room, amount, deficit };
                 })
                 .filter(t => t.deficit > 0)
@@ -139,19 +184,26 @@ export const ResourceManage = {
             if (sources.length == 0 || targets.length == 0) continue;
 
             for (const source of sources) {
-                if (sendOK[source.room.name]) continue;
-                let scheduled = false;
+                let budgetLeft = perSourceCap - (queuedOut[source.room.name]?.[res] || 0);
+                if (budgetLeft < minSendAmount) continue;
+                let pairsScheduled = 0;
 
                 for (const target of targets) {
                     if (target.room.name === source.room.name) continue;
                     if (target.deficit <= 0) continue;
                     if (source.surplus <= 0) break;
+                    if (budgetLeft <= 0) break;
+                    if (pairsScheduled >= perSourceMaxPairs) break;
 
                     // 用固定样本估算 cost/amount，先快速过滤“成本占比过高”的组合
                     const ratio = getCostRatio(source.room.name, target.room.name);
                     if (ratio > 0.5) continue;
 
-                    let sendAmount = Math.min(source.surplus, target.deficit);
+                    const queuedToTarget = queuedPair[source.room.name]?.[res]?.[target.room.name] || 0;
+                    const pairLeft = perPairCap - queuedToTarget;
+                    if (pairLeft < minSendAmount) continue;
+
+                    let sendAmount = Math.min(source.surplus, target.deficit, budgetLeft, pairLeft);
                     if (maxSendAmount !== Infinity) sendAmount = Math.min(sendAmount, maxSendAmount);
                     if (res == RESOURCE_ENERGY) {
                         // 能量发送会额外消耗 cost，需保证 send + cost 不超过可供给余量
@@ -166,29 +218,32 @@ export const ResourceManage = {
                     if (res == RESOURCE_ENERGY && sendAmount + cost > source.surplus) continue;
 
                     // 不在这里直接 terminal.send：改为下发 send 任务，复用 TerminalWork 执行与成本修正逻辑
-                    const ok = source.room.SendMissionAdd(target.room.name, res as any, sendAmount);
+                    const desiredTotal = queuedToTarget + sendAmount;
+                    const ok = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
                     if (!ok) {
                         global.log(`[资源管理] ${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}, result: failed`);
                         continue;
                     }
 
                     global.log(`[资源管理] ${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}`);
-                    sendOK[source.room.name] = true;
-                    scheduled = true;
+                    addQueued(source.room.name, target.room.name, res, sendAmount);
+                    pairsScheduled++;
 
                     // 仅更新本 tick 的“估算状态”，用于后续匹配更准确；真实资源变化由实际发送发生后决定
-                    if (res == RESOURCE_ENERGY) source.surplus -= sendAmount + cost;
-                    else source.surplus -= sendAmount;
+                    if (res == RESOURCE_ENERGY) {
+                        source.surplus -= sendAmount + cost;
+                        source.amount -= sendAmount + cost;
+                        budgetLeft -= sendAmount + cost;
+                    } else {
+                        source.surplus -= sendAmount;
+                        source.amount -= sendAmount;
+                        budgetLeft -= sendAmount;
+                    }
                     target.deficit -= sendAmount;
-                    if (res == RESOURCE_ENERGY) source.amount -= sendAmount + cost;
-                    else source.amount -= sendAmount;
                     target.amount += sendAmount;
                     setResAmountCached(source.room.name, res, source.amount);
                     setResAmountCached(target.room.name, res, target.amount);
-                    break;
                 }
-
-                if (scheduled) continue;
             }
         }
     }

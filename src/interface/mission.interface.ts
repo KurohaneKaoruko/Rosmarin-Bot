@@ -185,6 +185,17 @@ interface Room {
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number): OK | void;
 
     /**
+     * 添加/合并资源发送任务（用于资源管理的去重调度）
+     * @param targetRoom - 目标房间名
+     * @param resourceType - 资源类型，支持缩写
+     * @param amount - 期望的任务amount（会与现有任务amount取较大值）
+     * @param maxAmount - 可选，上限限制（防止对同一目标排队过多）
+     * @returns OK表示成功，void表示操作完成，false表示参数无效
+     * @description 若已存在相同 {targetRoom, resourceType} 的 send 任务，则 nextAmount = max(currentAmount, amount)，避免任务执行中被反复覆盖导致不收敛
+     */
+    SendMissionUpsertMax(targetRoom: string, resourceType: string | ResourceConstant, amount: number, maxAmount?: number): OK | void | false;
+
+    /**
      * 添加建造或维修任务
      * @param type - 任务类型：'build'建造 或 'repair'维修
      * @param level - 任务优先级，数值越小优先级越高
