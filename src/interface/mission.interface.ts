@@ -336,6 +336,26 @@ interface Room {
      * @example room.MissionUpdate();
      */
     MissionUpdate(): void;
+
+    UpdateSpawnMission(): void;
+    UpdateTransportMission(): void;
+    UpdateManageMission(): void;
+    UpdateBuildRepairMission(): void;
+    UpdateWallRepairMission(): void;
+    TransportMissionCheck(): void;
+    BuildRepairMissionCheck(): void;
+    UpdateMineMission(): void;
+    UpdateHighwayScan(): void;
+
+    UpdateEnergyMission(): void;
+    UpdateLabMission(): void;
+    UpdateLabBoostMission(): void;
+    UpdatePowerMission(): void;
+    UpdateNukerMission(): void;
+
+    TransportLevel(key: any): number;
+    toPosNumber(pos: any): number;
+    addTransportMission(level: number, params: any): void;
 }
 
 

@@ -1,4 +1,5 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
+import { decompressBodyConfig } from "@/utils";
 
 // 孵化相关
 const SPAWN_MIN_ENERGY = 50e3;
@@ -119,28 +120,83 @@ const RoleSpawnCheck = {
     }
 }
 
-
-function UpdateSpawnMission(room: Room) {
-    if (!room.spawn) return false;
+/**
+ * 房间孵化任务模块（spawn）
+ * @description
+ * - 根据房间状态与 RoleSpawnCheck 规则动态生成孵化任务
+ * - 提供 SpawnMissionAdd 将孵化任务写入任务池并统计 global.SpawnMissionNum
+ */
+export default class SpawnMission extends Room {
+    /**
+     * spawn 更新入口
+     * @description 按角色规则检查缺口并生成对应孵化任务
+     * @returns true 表示已执行检查，false 表示不满足条件（例如无 spawn）
+     */
+    UpdateSpawnMission() {
+        if (!this.spawn) return false;
+        
+        const CreepNum = this.getCreepNum();
+        const SpawnMissionNum = this.getSpawnMissionNum();
     
-    const CreepNum = room.getCreepNum();
-    const SpawnMissionNum = room.getSpawnMissionNum();
-
-    for (const role in RoleSpawnCheck) {
-        const current = (CreepNum[role] || 0) + (SpawnMissionNum[role] || 0);
-        if (RoleSpawnCheck[role](room, current)) {
-            room.SpawnMissionAdd(
-                RoleData[role].code,
-                '',
-                RoleData[role]['level'],
-                role,
-                { home: room.name } as CreepMemory
-            );
+        for (const role in RoleSpawnCheck) {
+            const current = (CreepNum[role] || 0) + (SpawnMissionNum[role] || 0);
+            if (RoleSpawnCheck[role](this, current)) {
+                this.SpawnMissionAdd(
+                    RoleData[role].code,
+                    '',
+                    RoleData[role]['level'],
+                    role,
+                    { home: this.name } as CreepMemory
+                );
+            }
         }
+    
+        return true;
     }
 
-    return true;
+    /**
+     * 添加孵化任务（spawn）
+     * @param name - 孵化任务标识（常用 RoleData[role].code）
+     * @param body - 身体配置（数组或压缩字符串）
+     * @param level - 任务优先级；<0 时使用默认等级
+     * @param role - creep 角色
+     * @param memory - creep memory（会克隆并写入 role）
+     * @param upbody - 是否启用升级 body（可选）
+     * @returns OK 表示入队成功，-1 表示失败
+     */
+    SpawnMissionAdd(name: string, body: ((BodyPartConstant | number)[])[] | string, level: number, role: string, memory?: CreepMemory, upbody?: boolean) {
+        if (!RoleData[role]) {
+            console.log(`role ${role} 不存在`);
+            return -1;
+        }
+
+        if(!memory) memory = {} as CreepMemory;
+        else memory = _.cloneDeep(memory);
+        memory.role = role;
+        
+        if(level < 0) level = RoleData[role].level;
+        let bodypart: BodyPartConstant[];
+        let energy: number = 0;
+        if (typeof body === 'string') {
+            bodypart = this.GenerateBodys(decompressBodyConfig(body), role)
+            energy = this.CalculateEnergy(bodypart);
+        } else {
+            bodypart = this.GenerateBodys(body, role);
+            energy = this.CalculateEnergy(bodypart);
+        }
+
+        if(energy > this.energyCapacityAvailable) return -1;
+        
+        if (upbody === undefined) {
+            this.addMissionToPool('spawn', 'spawn', level, {name, body, memory, energy})
+        } else {
+            upbody = upbody || false;
+            this.addMissionToPool('spawn', 'spawn', level, {name, body, memory, energy, upbody})
+        }
+        if (!global.SpawnMissionNum) global.SpawnMissionNum = {};
+        if (!global.SpawnMissionNum[this.name]) global.SpawnMissionNum[this.name] = {};
+        if (!global.SpawnMissionNum[this.name][role]) global.SpawnMissionNum[this.name][role] = 0;
+        global.SpawnMissionNum[this.name][role] = global.SpawnMissionNum[this.name][role] + 1;
+        return OK;
+    }
 }
-
-
-export {UpdateSpawnMission}

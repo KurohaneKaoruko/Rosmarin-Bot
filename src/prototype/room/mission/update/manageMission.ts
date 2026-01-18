@@ -31,15 +31,7 @@ const MANAGE_BALANCE = {
     TERMINAL_RES_LIMIT: 10000
 }
 
-// 更新中央搬运工的任务
-function UpdateManageMission(room: Room) {
-    // 检查终端资源预留数量，不足则补充，超过则搬出
-    CheckTerminalResAmount(room);
-    // 检查工厂资源数量，补充或搬出
-    CheckFactoryResAmount(room);
-    // 补充powerSpawn资源，只在特定布局生效
-    CheckPowerSpawnResAmount(room);
-}
+
 
 // 检查终端资源, 自动调度资源
 function CheckTerminalResAmount(room: Room) {
@@ -197,4 +189,104 @@ function CheckPowerSpawnResAmount(room: Room) {
     fillPowerSpawn(RESOURCE_POWER, 50, MANAGE_BALANCE.POWER_SPAWN_POWER_LIMIT);
 }
 
-export  {UpdateManageMission};
+
+/**
+ * 房间资源调度任务模块（manage/terminal）
+ * @description
+ * - 自动平衡 storage/terminal/factory/powerSpawn 资源
+ * - 通过任务池驱动 manager/transport creep 执行搬运与终端发送
+ */
+export default class ManageMission extends Room {
+    /**
+     * manage 更新入口
+     * @description 检查终端、工厂、powerSpawn 的资源状态并生成调度任务
+     */
+    UpdateManageMission() {
+        // 检查终端资源预留数量，不足则补充，超过则搬出
+        CheckTerminalResAmount(this);
+        // 检查工厂资源数量，补充或搬出
+        CheckFactoryResAmount(this);
+        // 补充powerSpawn资源，只在特定布局生效
+        CheckPowerSpawnResAmount(this);
+    }
+
+    /**
+     * 添加/更新中央搬运任务（manage）
+     * @param source - 来源建筑（可用缩写：s/t/l/f/p）
+     * @param target - 目标建筑（可用缩写：s/t/l/f/p）
+     * @param resourceType - 资源类型（支持缩写映射）
+     * @param amount - 搬运数量（>0）
+     */
+    ManageMissionAdd(source: string, target: string, resourceType: ResourceConstant, amount: number) {
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
+        const structures = {
+            s: 'storage',
+            t: 'terminal',
+            l: 'link',
+            f: 'factory',
+            p: 'powerSpawn'
+        }
+        if(source in structures) source = structures[source];
+        if(target in structures) target = structures[target];
+
+        if(!source || !target || !resourceType || !amount) return false;
+        if(typeof amount !== 'number' || amount <= 0) return false;
+
+        let existingTaskId = this.checkSameMissionInPool('manage', 'manage', {source, target, resourceType} as ManageTask);
+        if (existingTaskId) {
+            return this.updateMissionPool('manage', existingTaskId,
+                {data:{source, target, resourceType, amount} as ManageTask});
+        } else {
+            return this.addMissionToPool('manage', 'manage', 0, 
+                {source, target, resourceType, amount} as ManageTask);
+        }
+    }
+
+    /**
+     * 添加/更新终端发送任务（terminal/send）
+     * @param targetRoom - 目标房间名
+     * @param resourceType - 资源类型（支持缩写映射）
+     * @param amount - 发送数量（>0）
+     */
+    SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
+        let existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
+        if (existingTaskId) {
+            return this.updateMissionPool('terminal', existingTaskId,
+                {data:{targetRoom, resourceType, amount} as SendTask});
+        } else {
+            return this.addMissionToPool('terminal', 'send', 0, 
+                {targetRoom, resourceType, amount} as SendTask);
+        }
+    }
+
+    /**
+     * Upsert 终端发送任务，并保证任务数量“只增不减”
+     * @description 同 {targetRoom, resourceType} 的 send 任务已存在时，不覆盖成更小的 amount，避免反复调度导致不收敛。
+     * @param targetRoom - 目标房间名
+     * @param resourceType - 资源类型（支持缩写映射）
+     * @param amount - 期望至少发送数量（>0）
+     * @param maxAmount - 可选上限（防止一次性排队过多）
+     */
+    SendMissionUpsertMax(targetRoom: string, resourceType: string | ResourceConstant, amount: number, maxAmount?: number) {
+        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        if (RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
+        if (!amount || typeof amount !== 'number' || amount <= 0) return false;
+
+        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
+        if (existingTaskId) {
+            const task = this.getMissionFromPoolById('terminal', existingTaskId);
+            const currentAmount = (task?.data as SendTask | undefined)?.amount ?? 0;
+            let nextAmount = Math.max(currentAmount, amount);
+            if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
+            if (nextAmount === currentAmount) return OK;
+            return this.updateMissionPool('terminal', existingTaskId, {data: {amount: nextAmount} as any});
+        }
+
+        let nextAmount = amount;
+        if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
+        return this.addMissionToPool('terminal', 'send', 0, {targetRoom, resourceType, amount: nextAmount} as SendTask);
+    }
+}

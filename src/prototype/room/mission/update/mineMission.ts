@@ -1,125 +1,20 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
 import { decompress } from '@/utils';
 
-/**
- * 扫描过道
- * @description 替代原 LookHighWay
- */
-export const UpdateHighwayScan = (room: Room) => {
-    const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
-    if (Game.time % LOOK_INTERVAL > 1) return;
-
-    // 能量储备不足时不添加过道采集任务
-    if (room[RESOURCE_ENERGY] < 50000) return;
-    const outminePower = Memory['RoomControlData'][room.name]['outminePower'];
-    const outmineDeposit = Memory['RoomControlData'][room.name]['outmineDeposit'];
-    // 没开启自动挖就不找
-    if (!outminePower && !outmineDeposit) return;
-    
-    // 监控列表
-    let lookList = Memory['OutMineData'][room.name]?.['highway'] || [];
-    if (lookList.length == 0) return;
-    
-    // 观察
-    if (Game.time % LOOK_INTERVAL == 0) {
-        if (!room.observer) return;
-        // 观察编号
-        let lookIndex = Math.floor(Game.time / LOOK_INTERVAL) % lookList.length;
-        const roomName = lookList[lookIndex];
-        // 没有视野才看
-        if (!Game.rooms[roomName]) {
-            room.observer.observeRoom(roomName);
-        }
-        return;
-    }
-    
-    // 处理
-    for(const roomName of lookList) {
-        if (/^[EW]\d*[1-9][NS]\d*[1-9]$/.test(roomName)) continue;
-
-        const targetRoom = Game.rooms[roomName];
-        if (!targetRoom) continue;    // 没有视野不处理
-
-        // power
-        if (outminePower) {
-            // 检查是否已有该房间的任务
-            const existId = room.checkSameMissionInPool('mine', 'power', { targetRoom: roomName });
-            if (!existId) {
-                let P_num = PowerBankCheck(targetRoom);
-                if (P_num) {
-                    const power = targetRoom.find(FIND_STRUCTURES,{
-                        filter:(s)=>s.structureType===STRUCTURE_POWER_BANK
-                    })[0].power;
-                    let data = PowerMineMissionData(room, P_num, power) as PowerMineTask;
-                    data.targetRoom = roomName;
-                    
-                    room.addMissionToPool('mine', 'power', 1, data);
-                    console.log(`在 ${roomName} 发现 PowerBank (${power} power), 已加入开采队列。`);
-                    console.log(`将从 ${room.name} 派出 ${data.creep} 数量的T${data.boostLevel}采集队。Ranged数量:${data.prNum}。`);
-                }
-            }
-        }
-
-        // deposit
-        if (outmineDeposit) {
-            const existId = room.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName });
-            if (!existId) {
-                let D_num = DepositCheck(targetRoom);
-                if (D_num > 0) {
-                    const data: DepositMineTask = {
-                        targetRoom: roomName,
-                        num: D_num,
-                        active: true
-                    };
-                    room.addMissionToPool('mine', 'deposit', 1, data);
-                    console.log(`在 ${roomName} 发现 Deposit, 已加入开采队列。`);
-                    console.log(`将从 ${room.name} 派出总共 ${D_num} 数量的采集队。`);
-                }
-            }
-        }
-    }
-}
-
-/**
- * 矿场任务更新
- */
-export const UpdateMineMission = (room: Room) => {
-    const tasks = room.getAllMissionFromPool('mine');
-    if (!tasks || tasks.length === 0) return;
-
-    const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
-    // 为了分散CPU消耗，不同任务可以错开tick执行，这里简单沿用原逻辑的频率控制，或者每tick执行但内部判断
-    if (Game.time % LOOK_INTERVAL != 1) return;
-
-    // 孵化任务数统计
-    const SpawnMissionNum = room.getSpawnMissionNum() || {};
-
-    for (const task of tasks) {
-        if (task.type === 'power') {
-            handlePowerMine(room, task, task.data as PowerMineTask, SpawnMissionNum);
-        } else if (task.type === 'deposit') {
-            handleDepositMine(room, task, task.data as DepositMineTask, SpawnMissionNum);
-        }
-    }
-}
-
 const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnMissionNum: {[role: string]: number}) => {
     const targetRoom = mineData.targetRoom;
     const targetRoomObj = Game.rooms[targetRoom];
     
-    // 检查 PowerBank 状态
     const powerBank = targetRoomObj?.powerBank?.[0] ?? targetRoomObj?.find(FIND_STRUCTURES, {
         filter: (structure) => structure.structureType === STRUCTURE_POWER_BANK
     })[0];
 
-    // 如果有视野且没有PowerBank，说明已打完或消失
     if (targetRoomObj && !powerBank) {
         room.deleteMissionFromPool('mine', task.id);
         console.log(`${targetRoom} 的 PowerBank 已耗尽, 已移出开采队列。`);
         return;
     }
 
-    // 统计以targetRoom为工作目标的所有role情况
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom);
     let pa = 0, ph = 0;
     let P_num = mineData.creep;
@@ -135,7 +30,6 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
         P_num = 1;
     }
 
-    // 孵化采集队
     if (!mineData.count) mineData.count = 0;
     if (mineData.count < mineData.max) {
         let panum = pa + (SpawnMissionNum['power-attack']||0);
@@ -158,7 +52,6 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
             room.SpawnMissionAdd('PA', [], -1, 'power-attack', memory);
             room.SpawnMissionAdd('PH', [], -1, 'power-heal', memory);
 
-            // 计数增加
             mineData.count = mineData.count + 1;
             needUpdate = true;
             
@@ -170,7 +63,6 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
         }
     }
 
-    // 孵化 Ranged
     if (!mineData.prCount) mineData.prCount = 0;
     if (mineData.prCount < mineData.prMax && mineData.prNum > 0) {
         let prnum = (CreepByTargetRoom['power-ranged'] || []).length +
@@ -190,8 +82,6 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
     }
 
     if (!targetRoomObj) return;
-
-    // 孵化搬运工
     if (!powerBank) return; 
 
     const maxPc = powerBank.power / 1250;
@@ -226,7 +116,6 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, Sp
     }
 
     const targetRoomObj = Game.rooms[targetRoom];
-    // 定期检查 Deposit 状态
     if (targetRoomObj && Game.time % (LOOK_INTERVAL * 5) == 1) {
         D_num = DepositCheck(targetRoomObj);
         if (D_num > 0) {
@@ -243,7 +132,6 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, Sp
 
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom);
 
-    // 孵化采集者
     const dh = (CreepByTargetRoom['deposit-harvest'] || [])
                 .filter((c: any) => c.spawning || c.ticksToLive > 200).length;
     const dhnum = dh + (SpawnMissionNum['deposit-harvest']||0)
@@ -252,7 +140,6 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, Sp
         room.SpawnMissionAdd('DH', [], -1, 'deposit-harvest', memory);
     }
 
-    // 孵化搬运者
     const dt = (CreepByTargetRoom['deposit-transfer'] || [])
                 .filter((c: any) => c.spawning || c.ticksToLive > 150).length;
     const dtnum = dt + (SpawnMissionNum['deposit-transfer']||0)
@@ -261,9 +148,6 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, Sp
         room.SpawnMissionAdd('DT', [], -1, 'deposit-transfer', memory);
     }
 }
-
-
-// ==================== 辅助函数 ====================
 
 const PowerBankCheck = function (room: Room) {
     const powerBank = room.find(FIND_STRUCTURES, {
@@ -318,8 +202,6 @@ const DepositCheck = function (room: Room) {
         })
         if (num == 0) continue;
         
-        // 注意：原逻辑在这里写了 room.memory['depositMine']，这里仅用于检测数量，不再副作用写入Memory
-        // 但原逻辑中 DepositCheck 会累加多个 deposit 的开采位
         D_num += Math.min(num, 3);
     }
 
@@ -344,18 +226,16 @@ const PowerMineMissionData = function (room: Room, P_num: number, power: number)
     }
 
     let data: Partial<PowerMineTask> = {};
-    // 一队T2
     if (power >= 7000 && LO_Amount >= 3000 &&
         GHO2_Amount >= 3000 && UH2O_Amount >= 3000) {
         data = {
-            creep: 1,      // creep队伍数
-            max: 2,            // 最大孵化数量
-            boostLevel: 2,     // 强化等级
-            prNum: 0,          // ranged数量
-            prMax: 0,     // ranged最大孵化数
+            creep: 1,
+            max: 2,
+            boostLevel: 2,
+            prNum: 0,
+            prMax: 0,
         }
     }
-    // 一队T1 + 5个ranged
     else if (power >= 7000 && LO_Amount >= 3000 &&
         GO_Amount >= 3000 && UH_Amount >= 3000) {
         data = {
@@ -366,7 +246,6 @@ const PowerMineMissionData = function (room: Room, P_num: number, power: number)
             prMax: 8,
         }
     }
-    // 两队T1, 只有一个位置时补充4个ranged
     else if (power > 3000 && LO_Amount >= 3000 &&
         GO_Amount >= 3000 && UH_Amount >= 3000) {
         data = {
@@ -377,7 +256,6 @@ const PowerMineMissionData = function (room: Room, P_num: number, power: number)
             prMax: 6,
         }
     }
-    // 三队T0, 2个位置以下时补充4个ranged
     else {
         data = {
             creep: P_num,
@@ -391,14 +269,11 @@ const PowerMineMissionData = function (room: Room, P_num: number, power: number)
     return data;
 }
 
-// 获取到指定房间工作creep数量, 根据role分组
 const getCreepByTargetRoom = function (targetRoom: string) {
     if (global.CreepByTargetRoom &&
         global.CreepByTargetRoom.time === Game.time) {
-        // 如果当前tick已经统计过，则直接返回
         return global.CreepByTargetRoom[targetRoom] || {};
     } else {
-        // 如果当前tick没有统计过，则重新统计
         global.CreepByTargetRoom = { time: Game.time };
         for (const name in Game.creeps) {
             const creep = Game.creeps[name];
@@ -420,3 +295,110 @@ const getCreepByTargetRoom = function (targetRoom: string) {
         return global.CreepByTargetRoom[targetRoom] || {};
     }
 }
+
+/**
+ * 外矿/过道采集任务模块（mine）
+ * @description
+ * - 过道扫描：使用 Observer 周期性观察 highway 房间，并在发现 PowerBank/Deposit 时写入任务池
+ * - 矿场任务更新：根据任务池状态孵化对应 creeps，并在目标耗尽后清理任务
+ */
+export default class MineMission extends Room {
+    /**
+     * 扫描过道（highway）并尝试创建 mine 任务
+     * @description
+     * - 按 OUTMINE_CONFIG.LOOK_INTERVAL 分帧观察
+     * - 能量不足/未开启自动挖时跳过
+     * - 发现 PowerBank/Deposit 后写入任务池（mine/power, mine/deposit）
+     */
+    UpdateHighwayScan() {
+        const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
+        if (Game.time % LOOK_INTERVAL > 1) return;
+
+        if (this[RESOURCE_ENERGY] < 50000) return;
+        const outminePower = Memory['RoomControlData'][this.name]['outminePower'];
+        const outmineDeposit = Memory['RoomControlData'][this.name]['outmineDeposit'];
+        if (!outminePower && !outmineDeposit) return;
+        
+        let lookList = Memory['OutMineData'][this.name]?.['highway'] || [];
+        if (lookList.length == 0) return;
+        
+        if (Game.time % LOOK_INTERVAL == 0) {
+            if (!this.observer) return;
+            let lookIndex = Math.floor(Game.time / LOOK_INTERVAL) % lookList.length;
+            const roomName = lookList[lookIndex];
+            if (!Game.rooms[roomName]) {
+                this.observer.observeRoom(roomName);
+            }
+            return;
+        }
+        
+        for(const roomName of lookList) {
+            if (/^[EW]\d*[1-9][NS]\d*[1-9]$/.test(roomName)) continue;
+
+            const targetRoom = Game.rooms[roomName];
+            if (!targetRoom) continue;
+
+            if (outminePower) {
+                const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName });
+                if (!existId) {
+                    let P_num = (PowerBankCheck as any)(targetRoom);
+                    if (P_num) {
+                        const power = targetRoom.find(FIND_STRUCTURES,{
+                            filter:(s)=>s.structureType===STRUCTURE_POWER_BANK
+                        })[0].power;
+                        let data = (PowerMineMissionData as any)(this, P_num, power) as PowerMineTask;
+                        data.targetRoom = roomName;
+                        
+                        this.addMissionToPool('mine', 'power', 1, data);
+                        console.log(`在 ${roomName} 发现 PowerBank (${power} power), 已加入开采队列。`);
+                        console.log(`将从 ${this.name} 派出 ${data.creep} 数量的T${data.boostLevel}采集队。Ranged数量:${data.prNum}。`);
+                    }
+                }
+            }
+
+            if (outmineDeposit) {
+                const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName });
+                if (!existId) {
+                    let D_num = (DepositCheck as any)(targetRoom);
+                    if (D_num > 0) {
+                        const data: DepositMineTask = {
+                            targetRoom: roomName,
+                            num: D_num,
+                            active: true
+                        };
+                        this.addMissionToPool('mine', 'deposit', 1, data);
+                        console.log(`在 ${roomName} 发现 Deposit, 已加入开采队列。`);
+                        console.log(`将从 ${this.name} 派出总共 ${D_num} 数量的采集队。`);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 更新矿场任务（mine）
+     * @description
+     * - 遍历 mine 任务池
+     * - power：按血量/衰减等条件孵化 PA/PH/PR/PC
+     * - deposit：孵化 DH/DT
+     */
+    UpdateMineMission() {
+        const tasks = this.getAllMissionFromPool('mine');
+        if (!tasks || tasks.length === 0) return;
+
+        const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
+        if (Game.time % LOOK_INTERVAL != 1) return;
+
+        const SpawnMissionNum = this.getSpawnMissionNum() || {};
+
+        for (const task of tasks) {
+            if (task.type === 'power') {
+                (handlePowerMine as any)(this, task, task.data as PowerMineTask, SpawnMissionNum);
+            } else if (task.type === 'deposit') {
+                (handleDepositMine as any)(this, task, task.data as DepositMineTask, SpawnMissionNum);
+            }
+        }
+    }
+}
+
+

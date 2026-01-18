@@ -19,9 +19,14 @@ import AutoPowerSpawn from "./auto/autoPowerSpawn"
 
 import Mission from "./mission"
 import MissionPools from "./mission/pool/MissionPools"
-import MissionAdd from "./mission/pool/MissionAdd"
 import MissionGet from "./mission/pool/MissionGet"
 import MissionSubmit from "./mission/pool/MissionSubmit"
+
+import SpawnMission from "./mission/update/spawnMission"
+import ManageMission from "./mission/update/manageMission"
+import WorkMission from "./mission/update/workMission"
+import MineMission from "./mission/update/mineMission"
+import TransportMission from "./mission/update/transportMission"
 
 import RoomExecute from "./execute"
 
@@ -45,11 +50,16 @@ const plugins = [
     AutoFactory,    // 自动Factory生产
     AutoPowerSpawn, // 自动PowerSpawn
     
+    Mission,        // 任务模块
     MissionPools,   // 任务池
-    MissionAdd,     // 添加任务
     MissionGet,     // 获取任务
     MissionSubmit,  // 提交任务
-    Mission,        // 任务模块
+    SpawnMission,
+    ManageMission,
+    WorkMission,
+    MineMission,
+    TransportMission,
+    
 
     RoomExecute,    // 房间执行
 ]
