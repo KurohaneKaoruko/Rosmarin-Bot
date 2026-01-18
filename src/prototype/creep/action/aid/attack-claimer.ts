@@ -29,7 +29,7 @@ const attackClaimer = {
                         controller.pos.y+1, controller.pos.x+1 ]
                         .map((xy) => Math.max(0, Math.min(xy, 49)))
             let creeps = creep.room.lookForAtArea(LOOK_CREEPS, area[0], area[1] , area[2], area[3], true)
-                            .filter((c) => c.creep.my && c.creep.memory.role == 'aclaimer');
+                            .filter((c) => c.creep.my && c.creep.memory.role == 'attack-claimer');
             if(creeps.length < creep.memory['num'] && creep.ticksToLive > 10) return;
             if (creep.ticksToLive <= 10) {
                 creeps.forEach((c) => c.creep.attackController(controller));
