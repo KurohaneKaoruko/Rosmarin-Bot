@@ -139,9 +139,9 @@ return`
 function allResTips(text, tipStrArray, id, left){
     left = left-1;
     left*=100;
-    let showCore = tipStrArray.map(e=>`<div style="padding:3px 6px;margin:2px;background:rgba(50,60,80,0.5);border-radius:3px;"><t onclick="goto('${e}')" style="cursor:pointer;"> ${e} </t></div>`.replace(/[\\"]/g,'%')).join("")
+    let showCore = tipStrArray.map(e=>`<div style="padding:2px 5px;margin:1px;background:rgba(50,60,80,0.5);border-radius:2px;font-size:12px;line-height:1.15;"><t onclick="goto('${e}')" style="cursor:pointer;"> ${e} </t></div>`.replace(/[\\"]/g,'%')).join("")
     let time = Game.time;
-    return `<t class="a${id}-a${time}" style="cursor:pointer;padding:2px 8px;border-radius:3px;transition:all 0.2s;">${text}</t><script>
+    return `<t class="a${id}-a${time}" style="cursor:pointer;padding:1px 5px;border-radius:3px;transition:all 0.2s;font-size:12px;line-height:1.15;">${text}</t><script>
     function goto(e){
         let roomName = e.split(":")[0].replace(/\\s+/g, "");
         window.location.href = window.location.href.substring(0,window.location.href.lastIndexOf("/")+1)+roomName;
@@ -153,8 +153,8 @@ function allResTips(text, tipStrArray, id, left){
             tip = document.createElement("div");
                 tip.style.backgroundColor = "rgba(30,35,48,0.95)"; 
                 tip.style.border = "1px solid #3d5174";
-                tip.style.borderRadius = "8px";
-                tip.style.padding = "8px";
+                tip.style.borderRadius = "6px";
+                tip.style.padding = "6px";
             tip.style.position = "absolute";
             tip.style.zIndex=10;
                 tip.style.color = "#e0e0e0";
@@ -175,24 +175,16 @@ function allResTips(text, tipStrArray, id, left){
 `.replace(/[\r\n]/g, "");
 }
 
-// 获取资源图标
 function getResourceIcon(resourceType) {
-    const iconMap = {
-        energy: '⚡',
-        power: '🟥',
-        ops: '🟥',
-        U: '🔵',
-        L: '🟢',
-        K: '🟣',
-        Z: '🟡',
-        X: '🔴',
-        G: '⚪',
-        H: '⚪',
-        O: '⚪',
-        empty: '🔄'
-    };
-    
-    return iconMap[resourceType] || '🔷';
+    if (resourceType === 'empty') {
+        return `<span style="display:inline-block;width:12px;height:12px;border:1px dashed #555;border-radius:2px;margin-right:2px;vertical-align:middle;"></span>`;
+    }
+
+    const safeType = String(resourceType);
+    const baseUrl = 'https://s3.amazonaws.com/static.screeps.com/upload/mineral-icons/';
+    const iconUrl = baseUrl + encodeURIComponent(safeType) + '.png';
+
+    return `<img src="${iconUrl}" alt="${safeType}" style="height:12px;width:14px;object-fit:contain;vertical-align:middle;margin-right:3px;border-radius:2px;" />`;
 }
 
 let pro = {
@@ -239,20 +231,30 @@ let pro = {
         }
 
         let html = `
-        <div style="white-space: normal; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: rgba(30,35,48,0.8); padding: 15px; border-radius: 8px; margin-top: 10px; color: #e0e0e0; box-shadow: 0 4px 8px rgba(0,0,0,0.3);">
-            <div style="font-size: 18px; color: #e0e0e0; font-weight: bold; border-bottom: 1px solid #3d5174; padding-bottom: 5px;">
+        <div class="rr-container">
+            <style>
+                .rr-container{white-space:normal;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background-color:rgba(30,35,48,0.8);padding:10px;border-radius:6px;margin-top:10px;color:#e0e0e0;box-shadow:0 3px 6px rgba(0,0,0,0.28)}
+                .rr-title{font-size:16px;color:#e0e0e0;font-weight:700;border-bottom:1px solid #3d5174;padding-bottom:4px}
+                .rr-cell{border-radius:3px;padding:4px 6px;display:flex;justify-content:space-between;align-items:center;line-height:1.15;font-size:12px}
+                .rr-label{display:inline-flex;align-items:center;gap:2px}
+                .rr-number{font-weight:600;text-align:right;min-width:56px;font-variant-numeric:tabular-nums}
+                .rr-mute{opacity:.65}
+            </style>
+            <div class="rr-title">
                 💎资源总览
             </div>
         `;
         
         let id = 0
-        let categoryStyle = 'background: linear-gradient(135deg, #324868 0%, #1f2737 100%); color: #e0e0e0; font-weight: bold; padding: 8px 12px; border-radius: 4px; margin: 10px 0 5px 0; display: block;';
+        let categoryStyle = 'background: linear-gradient(135deg, #324868 0%, #1f2737 100%); color: #e0e0e0; font-weight: bold; padding: 5px 8px; border-radius: 3px; margin: 6px 0 3px 0; display: block; font-size: 12px; line-height: 1.1;';
         
         // 创建资源单元格
         let createResourceCell = function(resType, amount) {
             const icon = getResourceIcon(resType);
             const bgColor = amount > 0 ? 'rgba(45,55,72,0.5)' : 'rgba(45,55,72,0.2)';
             const textColor = amount > 0 ? RES_COLOR_MAP[resType] || '#ccc' : '#666';
+            const labelClass = amount > 0 ? 'rr-label' : 'rr-label rr-mute';
+            const labelHtml = `<span class="${labelClass}" style="color: ${RES_COLOR_MAP[resType] || '#ccc'};">${icon}<span>${resType}</span></span>`;
             
             let arr = [];
             for(let roomName in roomResAll){
@@ -264,13 +266,13 @@ let pro = {
             id++;
             
             const tipContent = arr.length > 0 ? 
-                allResTips(`<span style="color: ${RES_COLOR_MAP[resType] || '#ccc'};">${icon} ${resType}</span>`, arr, id, 1) : 
-                `<span style="color: ${RES_COLOR_MAP[resType] || '#ccc'};">${icon} ${resType}</span>`;
+                allResTips(labelHtml, arr, id, 1) : 
+                `<t style="padding:1px 5px;border-radius:3px;display:inline-block;">${labelHtml}</t>`;
             
             return `
-                <div style="background-color: ${bgColor}; border-radius: 4px; padding: 5px 8px; display: flex; justify-content: space-between; align-items: center;">
+                <div class="rr-cell" style="background-color: ${bgColor};">
                     <div>${tipContent}</div>
-                    <div style="color: ${textColor}; font-weight: 500; text-align: right; min-width: 60px;">${formatNumber(amount)}</div>
+                    <div class="rr-number" style="color: ${textColor};">${formatNumber(amount)}</div>
                 </div>
             `;
         };
@@ -285,7 +287,7 @@ let pro = {
             // 如果某个类别所有资源数量都为0，显示一个简化的提示
             if (filteredList.length === 0) {
                 html += `
-                <div style="padding: 10px; text-align: center; color: #a0a0a0; font-style: italic; background-color: rgba(45,55,72,0.2); border-radius: 4px; margin-bottom: 15px;">
+                <div style="padding: 8px; text-align: center; color: #a0a0a0; font-style: italic; background-color: rgba(45,55,72,0.2); border-radius: 4px; margin-bottom: 10px; font-size: 12px;">
                     此类别暂无资源
                 </div>`;
                 return;
@@ -294,11 +296,11 @@ let pro = {
             // 确定每行显示多少个资源
             const itemsPerRow = 4; // 每行显示4个资源
             
-            html += `<div style="margin-bottom: 15px;">`;
+            html += `<div style="margin-bottom: 10px;">`;
             
             // 将资源按行分组显示
             for (let i = 0; i < filteredList.length; i += itemsPerRow) {
-                html += `<div style="display: grid; grid-template-columns: repeat(${itemsPerRow}, 1fr); gap: 8px; margin-bottom: 8px;">`;
+                html += `<div style="display: grid; grid-template-columns: repeat(${itemsPerRow}, 1fr); gap: 6px; margin-bottom: 6px;">`;
                 
                 // 添加当前行的资源
                 for (let j = i; j < i + itemsPerRow && j < filteredList.length; j++) {
@@ -320,38 +322,9 @@ let pro = {
         // 其他资源类别使用表格视图显示
         // 创建详细表格布局，所有资源共用，按照分类和Tab切换
         html += `
-        <div style="${categoryStyle}">商品资源</div>
-        <div style="margin-bottom: 15px;">
-            <div style="display: flex; margin-bottom: 8px; border-bottom: 1px solid #2d3850; padding-bottom: 5px;">
-                <div style="flex: 1; text-align: center; color: #ccc;">无色</div>
-                <div style="flex: 1; text-align: center; color: #76a9e0;">蓝色</div>
-                <div style="flex: 1; text-align: center; color: #e0c676;">黄色</div>
-                <div style="flex: 1; text-align: center; color: #d68aee;">紫色</div>
-                <div style="flex: 1; text-align: center; color: #8aee8a;">绿色</div>
-            </div>
-            
-            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;">
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    ${c_grey.map(type => createResourceCell(type, all[type] || 0)).join('')}
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    ${c_blue.map(type => createResourceCell(type, all[type] || 0)).join('')}
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    ${c_yellow.map(type => createResourceCell(type, all[type] || 0)).join('')}
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    ${c_pink.map(type => createResourceCell(type, all[type] || 0)).join('')}
-                </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
-                    ${c_green.map(type => createResourceCell(type, all[type] || 0)).join('')}
-                </div>
-            </div>
-        </div>
-        
         <div style="${categoryStyle}">强化资源</div>
-        <div style="margin-bottom: 15px;">
-            <div style="display: flex; margin-bottom: 8px; border-bottom: 1px solid #2d3850; padding-bottom: 5px;">
+        <div style="margin-bottom: 10px;">
+            <div style="display: flex; margin-bottom: 6px; border-bottom: 1px solid #2d3850; padding-bottom: 4px; font-size: 12px;">
                 <div style="flex: 1; text-align: center; color: #ccc;">基础</div>
                 <div style="flex: 1; text-align: center; color: #76a9e0;">蓝色(U)</div>
                 <div style="flex: 1; text-align: center; color: #e0c676;">黄色(Z)</div>
@@ -360,24 +333,53 @@ let pro = {
                 <div style="flex: 1; text-align: center; color: #e0e0e0;">白色(G)</div>
             </div>
             
-            <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px;">
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+            <div style="display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_grey.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_blue.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_yellow.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_pink.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_green.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
-                <div style="display: flex; flex-direction: column; gap: 5px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
                     ${b_withe.map(type => createResourceCell(type, all[type] || 0)).join('')}
+                </div>
+            </div>
+        </div>
+
+        <div style="${categoryStyle}">商品资源</div>
+        <div style="margin-bottom: 10px;">
+            <div style="display: flex; margin-bottom: 6px; border-bottom: 1px solid #2d3850; padding-bottom: 4px; font-size: 12px;">
+                <div style="flex: 1; text-align: center; color: #ccc;">白色</div>
+                <div style="flex: 1; text-align: center; color: #76a9e0;">蓝色</div>
+                <div style="flex: 1; text-align: center; color: #e0c676;">黄色</div>
+                <div style="flex: 1; text-align: center; color: #d68aee;">紫色</div>
+                <div style="flex: 1; text-align: center; color: #8aee8a;">绿色</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px;">
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${c_grey.map(type => createResourceCell(type, all[type] || 0)).join('')}
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${c_blue.map(type => createResourceCell(type, all[type] || 0)).join('')}
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${c_yellow.map(type => createResourceCell(type, all[type] || 0)).join('')}
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${c_pink.map(type => createResourceCell(type, all[type] || 0)).join('')}
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                    ${c_green.map(type => createResourceCell(type, all[type] || 0)).join('')}
                 </div>
             </div>
         </div>`;
