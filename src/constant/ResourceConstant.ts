@@ -8,7 +8,8 @@
 export const RESOURCE_BALANCE = {
     'energy': [300e3, 400e3],
     'power': [5e3, 10e3],
-    'ops': [10e3, 20e3],
+    'ops': [5e3, 10e3],
+    
     'U': [10e3, 30e3],
     'L': [10e3, 30e3],
     'Z': [10e3, 30e3],
@@ -33,6 +34,17 @@ export const RESOURCE_BALANCE = {
     'GH': [10e3, 20e3],
     'GO': [10e3, 20e3],
 
+    'UHO2': [10e3, 20e3],
+    'UH2O': [10e3, 20e3],
+    'ZHO2': [10e3, 20e3],
+    'ZH2O': [10e3, 20e3],
+    'LHO2': [10e3, 20e3],
+    'LH2O': [10e3, 20e3],
+    'KHO2': [10e3, 20e3],
+    'KH2O': [10e3, 20e3],
+    'GHO2': [10e3, 20e3],
+    'GH2O': [10e3, 20e3],
+
     'XUHO2': [10e3, 20e3],
     'XUH2O': [10e3, 20e3],
     'XZHO2': [10e3, 20e3],
@@ -53,6 +65,13 @@ export const RESOURCE_BALANCE = {
     [RESOURCE_REDUCTANT]: [5e3, 10e3],
     [RESOURCE_PURIFIER]: [5e3, 10e3],
 }
+
+// 各个等级工厂合成商品时的需求资源
+export const RESOURCE_FACTORY_REQUIREMENT = {
+    // 任意等级工厂
+    'any': [],
+}
+
 
 
 

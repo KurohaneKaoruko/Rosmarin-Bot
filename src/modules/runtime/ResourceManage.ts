@@ -1,4 +1,5 @@
 import {Goods, RESOURCE_BALANCE} from '@/constant/ResourceConstant'
+import { log } from '@/utils';
 
 /** 资源管理模块 */
 export const ResourceManage = {
@@ -219,13 +220,13 @@ export const ResourceManage = {
 
                     // 不在这里直接 terminal.send：改为下发 send 任务，复用 TerminalWork 执行与成本修正逻辑
                     const desiredTotal = queuedToTarget + sendAmount;
-                    const ok = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
-                    if (!ok) {
-                        global.log(`[资源管理] ${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}, result: failed`);
+                    const rc = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
+                    if (rc !== OK) {
+                        log('资源管理', `${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}, result: ${rc}`);
                         continue;
                     }
 
-                    global.log(`[资源管理] ${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}`);
+                    log('资源管理', `${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}`);
                     addQueued(source.room.name, target.room.name, res, sendAmount);
                     pairsScheduled++;
 
