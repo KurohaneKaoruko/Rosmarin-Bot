@@ -20,12 +20,12 @@ export default class Mission extends Room {
     MissionUpdate() {
         const schedule: Array<{ interval: number; offset: number; run: () => void }> = [
             { interval: 10, offset: 0, run: () => this.UpdateSpawnMission() },
-            { interval: 20, offset: 0, run: () => this.UpdateTransportMission() },
-            { interval: 30, offset: 1, run: () => this.UpdateManageMission() },
-            { interval: 50, offset: 1, run: () => this.UpdateBuildRepairMission() },
-            { interval: 50, offset: 2, run: () => this.UpdateWallRepairMission() },
-            { interval: 100, offset: 2, run: () => this.TransportMissionCheck() },
-            { interval: 200, offset: 2, run: () => this.BuildRepairMissionCheck() },
+            { interval: 20, offset: 1, run: () => this.UpdateTransportMission() },
+            { interval: 30, offset: 2, run: () => this.UpdateManageMission() },
+            { interval: 50, offset: 3, run: () => this.UpdateBuildRepairMission() },
+            { interval: 50, offset: 4, run: () => this.UpdateWallRepairMission() },
+            { interval: 100, offset: 5, run: () => this.TransportMissionCheck() },
+            { interval: 200, offset: 6, run: () => this.BuildRepairMissionCheck() },
             { interval: 1, offset: 0, run: () => this.UpdateMineMission() },
             { interval: 1, offset: 0, run: () => this.UpdateHighwayScan() },
         ];

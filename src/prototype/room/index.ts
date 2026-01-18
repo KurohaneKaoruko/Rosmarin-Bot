@@ -54,11 +54,11 @@ const plugins = [
     MissionPools,   // 任务池
     MissionGet,     // 获取任务
     MissionSubmit,  // 提交任务
-    SpawnMission,
-    ManageMission,
-    WorkMission,
-    MineMission,
-    TransportMission,
+    SpawnMission,   // 孵化任务
+    ManageMission,  // 管理任务
+    WorkMission,    // 工作任务
+    MineMission,    // 采矿任务
+    TransportMission,   // 运输任务
     
 
     RoomExecute,    // 房间执行
