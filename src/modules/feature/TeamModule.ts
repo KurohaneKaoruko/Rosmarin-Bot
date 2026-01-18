@@ -22,7 +22,7 @@ const TeamModule = {
             let flag = Game.flags[flagName];
 
             // 孵化间隔
-            let spawnInterval = flagName.match(/T(\d+)/)?.[1] as any;
+            let spawnInterval = flagName.match(/_T(\d+)/)?.[1] as any;
             if (!spawnInterval) spawnInterval = 1000;
             else spawnInterval = parseInt(spawnInterval);
             const flagMemory = flag.memory;

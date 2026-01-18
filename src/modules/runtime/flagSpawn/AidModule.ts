@@ -32,7 +32,7 @@ const RoleBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
 
 const AidModule = (flagName: string) => {
     // 增援建造
-    // AID-BUILD_孵化房间_S-能量源房间_T间隔
+    // AID-BUILD_孵化房间_S-能量源房间_T-间隔
     if (flagName.startsWith('AID-BUILD/')) {
         // 孵化间隔
         let spawnInterval = getSpawnInterval(flagName);
@@ -163,7 +163,7 @@ const AidModule = (flagName: string) => {
 
 
 function getSpawnInterval (flagName: string) {
-    let spawnInterval = flagName.match(/\/T(\d+)/)?.[1] as any;
+    let spawnInterval = flagName.match(/\/T-(\d+)/)?.[1] as any;
     if (!spawnInterval) spawnInterval = 500;
     else spawnInterval = parseInt(spawnInterval);
     return spawnInterval;
