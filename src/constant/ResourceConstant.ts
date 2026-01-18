@@ -17,9 +17,22 @@ export const RESOURCE_BALANCE = {
     'O': [10e3, 30e3],
     'G': [10e3, 20e3],
     'X': [10e3, 20e3],
-    'OH': [10e3, 10e3],
-    'ZK': [5e3, 10e3],
-    'UL': [5e3, 10e3],
+
+    'OH': [10e3, 15e3],
+    'ZK': [10e3, 15e3],
+    'UL': [10e3, 15e3],
+
+    'UH': [10e3, 20e3],
+    'UO': [10e3, 20e3],
+    'ZH': [10e3, 20e3],
+    'ZO': [10e3, 20e3],
+    'KH': [10e3, 20e3],
+    'KO': [10e3, 20e3],
+    'LH': [10e3, 20e3],
+    'LO': [10e3, 20e3],
+    'GH': [10e3, 20e3],
+    'GO': [10e3, 20e3],
+
     'XUHO2': [10e3, 20e3],
     'XUH2O': [10e3, 20e3],
     'XZHO2': [10e3, 20e3],
@@ -30,14 +43,15 @@ export const RESOURCE_BALANCE = {
     'XKH2O': [10e3, 20e3],
     'XGHO2': [10e3, 20e3],
     'XGH2O': [10e3, 20e3],
+
     [RESOURCE_UTRIUM_BAR]: [5e3, 10e3],
     [RESOURCE_LEMERGIUM_BAR]: [5e3, 10e3],
     [RESOURCE_ZYNTHIUM_BAR]: [5e3, 10e3],
     [RESOURCE_KEANIUM_BAR]: [5e3, 10e3],
     [RESOURCE_GHODIUM_MELT]: [3e3, 10e3],
-    [RESOURCE_OXIDANT]: [3e3, 10e3],
-    [RESOURCE_REDUCTANT]: [3e3, 10e3],
-    [RESOURCE_PURIFIER]: [3e3, 10e3],
+    [RESOURCE_OXIDANT]: [5e3, 10e3],
+    [RESOURCE_REDUCTANT]: [5e3, 10e3],
+    [RESOURCE_PURIFIER]: [5e3, 10e3],
 }
 
 
