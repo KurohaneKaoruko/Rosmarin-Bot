@@ -129,7 +129,7 @@ const getT2Task = (room: Room) => {
     if (Game.time % 100) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
-    if (r('OH') < 9000) return [ null, 0 ];
+    if (r('OH') < 5000) return [ null, 0 ];
     const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), 20e3);
     if (check('GH', 'GH2O')) return [ 'GH2O', r('GH2O') + 10e3 ];
     if (check('GO', 'GHO2')) return [ 'GHO2', r('GHO2') + 10e3 ];
@@ -146,7 +146,7 @@ const getT3Task = (room: Room) => {
     if (Game.time % 100) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
-    if (r('X') < 9000) return [ null, 0 ];
+    if (r('X') <5000) return [ null, 0 ];
     const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), 20e3);
     if (check('GH2O', 'XGH2O')) return [ 'XGH2O', r('XGH2O') + 10e3 ];
     if (check('GHO2', 'XGHO2')) return [ 'XGHO2', r('XGHO2') + 10e3 ];

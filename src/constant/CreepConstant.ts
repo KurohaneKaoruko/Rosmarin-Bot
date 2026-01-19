@@ -242,8 +242,8 @@ export const RoleLevelData = {
     },
     'carrier': {
         1: { bodypart: [[CARRY, 2], [MOVE, 2]], num: 1 },
-        2: { bodypart: [[CARRY, 3], [MOVE, 3]], num: 1 },
-        3: { bodypart: [[CARRY, 7], [MOVE, 7]], num: 1 },
+        2: { bodypart: [[CARRY, 3], [MOVE, 3]], num: 2 },
+        3: { bodypart: [[CARRY, 7], [MOVE, 7]], num: 2 },
         4: { bodypart: [[CARRY, 10], [MOVE, 10]], num: 1 },
         5: { bodypart: [[CARRY, 12], [MOVE, 12]], num: 1 },
         6: { bodypart: [[CARRY, 15], [MOVE, 15]], num: 1 },
@@ -272,8 +272,8 @@ export const RoleLevelData = {
     },
     'upgrader': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
-        2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },
-        3: { bodypart: [[WORK, 3], [CARRY, 3], [MOVE, 6]], num: 3 },
+        2: { bodypart: [[WORK, 3], [CARRY, 1], [MOVE, 4]], num: 3 },
+        3: { bodypart: [[WORK, 4], [CARRY, 2], [MOVE, 6]], num: 3 },
         4: { bodypart: [[WORK, 5], [CARRY, 3], [MOVE, 8]], num: 2 },
         5: { bodypart: [[WORK, 10], [CARRY, 5], [MOVE, 10]], num: 2 },
         6: { bodypart: [[WORK, 15], [CARRY, 5], [MOVE, 10]], num: 2 },

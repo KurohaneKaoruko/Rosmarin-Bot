@@ -1,9 +1,5 @@
+.*/
 node_modules
 .secret.json
 dist
-.vscode
-.idea
-.kiro
-.trae
-package-lock.json
 test
