@@ -1,32 +1,45 @@
 /** 统计模块 */
+import { RoleData } from '@/constant/CreepConstant';
+
+// --- Configuration Constants ---
+const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)
+const LONG_STAT_INTERVAL = 100;     // 长周期统计间隔 (ticks) - 用于升级速度、市场均价等
+const CPU_AVG_WINDOW = 1000;        // CPU 平均值统计窗口 (ticks)
+const MARKET_ORDER_LIMIT = 10;      // 市场订单统计数量 (top N)
+
 export const Statistics = {
     end: function() {
-        if (!Memory['OpenStats']) return;
+        const targets = getStatsTargets();
+        if (targets.length <= 0) return;
         if (!Memory.stats) Memory.stats = {}
 
         updateCPUinfo();       // 统计 CPU 使用量
 
-        if (Game.time % 20 !== 1) return;
-        updateGclGpl();        // 统计 GCL / GPL 的升级百分比和等级
-        updateGclGplSpeed();   // 统计 GCL / GPL 的升级速度
-        updateRoomStats();     // 房间等级 & 房间能量储备
-        updateRoomUpgradeTimeEstimate(); // 房间升级时间估计
-        updateCreepCount();    // Creep 数量
-        updateCreditInfo();    // credit变动情况
+        if (Game.time % STAT_INTERVAL === 1) {
+            updateGclGpl();        // 统计 GCL / GPL 的升级百分比和等级
+            updateGclGplSpeed();   // 统计 GCL / GPL 的升级速度
+            updateRoomStats();     // 房间等级 & 房间能量储备
+            updateRoomUpgradeTimeEstimate(); // 房间升级时间估计
+            updateCreepCount();    // Creep 数量
+            updateCreditInfo();    // credit变动情况
+        }
+
+        drawStatsHUD(targets);
     }
 }
 
 function updateCPUinfo() {
-    Memory.stats.cpu = Game.cpu.getUsed()   // 统计 CPU 总使用量
+    const used = Game.cpu.getUsed();
+    Memory.stats.cpu = used;   // 统计 CPU 总使用量
     // bucket 当前剩余量
     try { Memory.stats.bucket = Game.cpu.bucket; }
     catch (e) { Memory.stats.bucket = 0; };
 
     if(!Memory.stats.cpuUsed) Memory.stats.cpuUsed = { total: 0,count: 0 };
 
-    Memory.stats.cpuUsed['total'] += Game.cpu.getUsed();
+    Memory.stats.cpuUsed['total'] += used;
     Memory.stats.cpuUsed['count'] += 1;
-    if (Memory.stats.cpuUsed['count'] >= 1000) {
+    if (Memory.stats.cpuUsed['count'] >= CPU_AVG_WINDOW) {
         let total = Memory.stats.cpuUsed['total'];
         let count = Memory.stats.cpuUsed['count'];
         Memory.stats.AvgCpuUsed = total / count;
@@ -45,16 +58,16 @@ function updateGclGpl() {
 
 function updateGclGplSpeed() {
     // 统计 GCL / GPL 的升级速度
-    if (Game.time % 100 !== 1) return;
+    if (Game.time % LONG_STAT_INTERVAL !== 1) return;
     const timeDelta = (Date.now() - (Number(Memory.stats.previousTimestamp) || Date.now())) / 1000;    // 100tick时间差
     Memory.stats.previousTimestamp = Date.now();    // 记录当前时间戳
-    Memory.stats.tickTime = timeDelta / 100;    // 每个tick的时间
+    // Memory.stats.tickTime = timeDelta / 100;    // 每个tick的时间 (Removed)
 
     const gclIncrement = Game.gcl.progress - (Number(Memory.stats.GclProgress) || Game.gcl.progress);    // GCL 的进度增量
     const gclRemaining = Game.gcl.progressTotal - Game.gcl.progress;    // GCL 的剩余进度
     Memory.stats.GclProgress = Game.gcl.progress;   // GCL 的当前进度
     if (gclIncrement > 0) {
-        Memory.stats.gclUpTick = ((gclRemaining / gclIncrement) * 100) || 0;    // GCL 升级所需的tick数
+        Memory.stats.gclUpTick = ((gclRemaining / gclIncrement) * LONG_STAT_INTERVAL) || 0;    // GCL 升级所需的tick数
         Memory.stats.gclUpTime = ((gclRemaining / gclIncrement) * timeDelta) || 0;    // GCL 预计升级所需时间
     } else {
         Memory.stats.gclUpTick = 0;
@@ -65,7 +78,7 @@ function updateGclGplSpeed() {
     const gplRemaining = Game.gpl.progressTotal - Game.gpl.progress;    // GPL 的剩余进度
     Memory.stats.GplProgress = Game.gpl.progress;    // GPL 的当前进度
     if (gplIncrement > 0) {
-        Memory.stats.gplUpTick = ((gplRemaining / gplIncrement) * 100) || 0;    // GPL 升级所需的tick数
+        Memory.stats.gplUpTick = ((gplRemaining / gplIncrement) * LONG_STAT_INTERVAL) || 0;    // GPL 升级所需的tick数
         Memory.stats.gplUpTime = ((gplRemaining / gplIncrement) * timeDelta) || 0;    // GPL 预计升级所需时间
     } else {
         Memory.stats.gplUpTick = 0;
@@ -77,7 +90,6 @@ function updateGclGplSpeed() {
 function updateRoomStats() {
     // 房间等级 & 房间能量储备
     const stats = Memory.stats;
-    stats.rcl = {};
     stats.rclLevel = {};
     stats.rclProgress = {};
     stats.energyHistory = stats.energy || {};
@@ -94,10 +106,8 @@ function updateRoomStats() {
         stats.rclLevel[roomName] = controller.level;    // 房间等级
         if (controller.level < 8) {
             stats.rclProgress[roomName] = (controller.progress / controller.progressTotal) * 100;    // 房间升级百分比
-            stats.rcl[roomName] = stats.rclLevel[roomName] + (stats.rclProgress[roomName]/100);    // 房间等级(浮点数)
         } else {
             stats.rclProgress[roomName] = 0;
-            stats.rcl[roomName] = stats.rclLevel[roomName];
         }
         
         // 能量储备
@@ -112,7 +122,7 @@ function updateRoomStats() {
 
 function updateRoomUpgradeTimeEstimate() {
     // 房间升级时间估计
-    if (Game.time % 100 !== 1) return;
+    if (Game.time % LONG_STAT_INTERVAL !== 1) return;
     const stats = Memory.stats;
     const lastProgress = stats.lastRclProgress || {};
     const timeDelta = (Date.now() - (Number(stats.lastUpgradeTimestamp) || Date.now())) / 1000;  // 时间差
@@ -131,7 +141,7 @@ function updateRoomUpgradeTimeEstimate() {
         if (progressIncrement > 0) {
             const timeToUpgrade = progressRemaining / progressIncrement;
             stats.rclUpTime[roomName] = timeToUpgrade * timeDelta;
-            stats.rclUpTick[roomName] = timeToUpgrade * 100;
+            stats.rclUpTick[roomName] = timeToUpgrade * LONG_STAT_INTERVAL;
         } else {
             stats.rclUpTime[roomName] = 0;
             stats.rclUpTick[roomName] = 0;
@@ -158,7 +168,7 @@ function updateCreepCount() {
 function updateCreditInfo() {
     Memory.stats.credit = Game.market.credits;
 
-    if(Game.time % 100 !== 1) return;
+    if(Game.time % LONG_STAT_INTERVAL !== 1) return;
     const cr = Game.market.credits;
     Memory.stats.creditChanges = cr - (Number(Memory.stats.lastCredit) || cr)
     Memory.stats.lastCredit = cr;
@@ -168,8 +178,8 @@ function updateCreditInfo() {
     if (!orders || orders.length === 0) {
         Memory.stats.energyAveragePrice = 0;
     } else {
-        const topOrders = orders.sort((a, b) => b.price - a.price).slice(0, 10);
-        const averagePrice = topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length;
+        const topOrders = selectTopOrders(orders, MARKET_ORDER_LIMIT, (a, b) => b.price - a.price);
+        const averagePrice = topOrders.length > 0 ? topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length : 0;
         Memory.stats.energyAveragePrice = averagePrice;
     }
 
@@ -178,10 +188,287 @@ function updateCreditInfo() {
     if (!sellOrders || sellOrders.length === 0) {
         Memory.stats.energyAverageSellPrice = 0;
     } else {
-        const topSellOrders = sellOrders.sort((a, b) => a.price - b.price).slice(0, 10);
-        const averageSellPrice = topSellOrders.reduce((sum, order) => sum + order.price, 0) / topSellOrders.length;
+        const topSellOrders = selectTopOrders(sellOrders, MARKET_ORDER_LIMIT, (a, b) => a.price - b.price);
+        const averageSellPrice = topSellOrders.length > 0 ? topSellOrders.reduce((sum, order) => sum + order.price, 0) / topSellOrders.length : 0;
         Memory.stats.energyAverageSellPrice = averageSellPrice;
     }
     
+}
+
+function getStatsTargets(): string[] {
+    const suffix = '/stats';
+    const targets = new Set<string>();
+    let useAll = false;
+
+    for (const flagName in Game.flags) {
+        if (!flagName.endsWith(suffix)) continue;
+        const prefix = flagName.slice(0, -suffix.length);
+        if (prefix === 'ALL') {
+            useAll = true;
+            break;
+        }
+        if (prefix) targets.add(prefix);
+    }
+
+    if (useAll) {
+        for (const room of Object.values(Game.rooms)) {
+            if (!room.controller?.my) continue;
+            targets.add(room.name);
+        }
+    }
+
+    return [...targets].filter(roomName => !!Game.rooms[roomName]);
+}
+
+// --- Visualization Constants & Helpers ---
+
+const STYLE = {
+    font: '0.65 monospace',
+    fontBold: 'bold 0.7 monospace',
+    color: '#e6e6e6',
+    colorSub: '#aaaaaa',
+    colorWarn: '#f0d44e',
+    colorErr: '#e65c5c',
+    colorGood: '#76e094',
+    bg: '#000000',
+    bgOpacity: 0.6,
+    barBg: '#444444',
+    barGcl: '#76e094',
+    barGpl: '#6b99e6',
+    barRcl: '#f0d44e',
+};
+
+function drawStatsHUD(roomNames: string[]) {
+    const stats = Memory.stats || {};
+    for (const roomName of roomNames) {
+        if (!Game.rooms[roomName]) continue;
+        renderStatsHUD(Game.rooms[roomName].visual, roomName, stats);
+    }
+}
+
+function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
+    let x = 1;
+    let y = 1;
+    const width = 14; 
+    const lineHeight = 0.8;
+    
+    const startY = y;
+    const padding = 0.4; // Increased padding slightly
+    
+    // --- Pre-calculate Height ---
+    let totalHeight = 0;
+    
+    // Header (Room+RCL, CPU) - 2 rows
+    totalHeight += lineHeight * 2;
+    
+    // GCL & GPL (2 rows + padding)
+    totalHeight += 0.8 * 2;
+    
+    // RCL Progress Bar (Only if < 8)
+    const rclLvl = stats.rclLevel?.[roomName];
+    if (typeof rclLvl === 'number' && rclLvl < 8) {
+        totalHeight += 0.8; 
+    }
+    // Note: If RCL is 8, it's just in the header, no extra row needed.
+    
+    // Extra spacing before Economy section
+    totalHeight += 0.4;
+    
+    // Economy & Stats (3 rows: Credits, Energy, Market)
+    totalHeight += lineHeight * 3;
+    
+    // Creeps (1 or 2 rows)
+    const creepCount = stats.creepCount || 0;
+    const roleSummary = getTopRolesSummary(stats.creeps);
+    totalHeight += lineHeight; 
+    if (roleSummary) {
+        totalHeight += lineHeight; 
+    }
+    
+    totalHeight += 0.2;
+
+    // Draw Background Rect FIRST
+    visual.rect(x - padding, startY - padding, width + padding * 2, totalHeight + padding * 2, {
+        fill: STYLE.bg,
+        opacity: STYLE.bgOpacity,
+        stroke: '#000000',
+        strokeWidth: 0.05
+    });
+
+    // --- Row 1: Room Name + RCL Status ---
+    let title = roomName;
+    let rclColor = STYLE.color;
+    if (typeof rclLvl === 'number') {
+        title += ` RCL ${rclLvl}`;
+        if (rclLvl === 8) {
+            title += " (Max)";
+            rclColor = STYLE.barRcl;
+        }
+    }
+    visual.text(title, x, y + 0.2, { align: 'left', font: 'bold 0.8 monospace', color: rclColor });
+    y += lineHeight;
+
+    // --- Row 2: CPU & Bucket ---
+    const cpu = typeof stats.cpu === 'number' ? stats.cpu : 0;
+    const bucket = typeof stats.bucket === 'number' ? stats.bucket : 0;
+    const avgCpu = typeof stats.AvgCpuUsed === 'number' ? stats.AvgCpuUsed : 0;
+
+    const cpuColor = cpu > (avgCpu * 1.5) && cpu > 20 ? STYLE.colorWarn : STYLE.color;
+    const bucketColor = bucket < 1000 ? STYLE.colorErr : (bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood);
+    
+    visual.text(`CPU: ${cpu.toFixed(1)} / ${avgCpu.toFixed(1)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
+    visual.text(`Bkt: ${formatK(bucket)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
+    y += lineHeight;
+
+    // --- Global Progress: GCL & GPL (Vertical Stack) ---
+    const gclLvl = stats.gclLevel || 0;
+    const gclPct = stats.gcl || 0;
+    const gplLvl = stats.gplLevel || 0;
+    const gplPct = stats.gpl || 0;
+
+    // Row 3: GCL
+    drawProgressBar(visual, x, y, width, 0.5, gclPct / 100, STYLE.barGcl, `GCL ${gclLvl}`);
+    y += 0.8; // Increased padding to prevent overlap with GPL or Credits
+
+    // Row 4: GPL
+    drawProgressBar(visual, x, y, width, 0.5, gplPct / 100, STYLE.barGpl, `GPL ${gplLvl}`);
+    y += 0.8; // Increased padding
+
+    // --- Room Progress: RCL (If < 8) ---
+    if (typeof rclLvl === 'number' && rclLvl < 8) {
+        const rclPct = stats.rclProgress?.[roomName] || 0;
+        const upTime = stats.rclUpTime?.[roomName];
+        let label = `${(rclPct).toFixed(1)}%`;
+        if (upTime > 0) label += ` - ${formatSeconds(upTime)}`;
+        
+        drawProgressBar(visual, x, y, width, 0.5, rclPct / 100, STYLE.barRcl, label);
+        y += 0.8; // Increased padding
+    }
+
+    // Extra spacing before Economy section
+    y += 0.4;
+
+    // --- Economy & Stats ---
+    const credit = stats.credit || 0;
+    const creditChange = stats.creditChanges || 0;
+    const energy = stats.energy?.[roomName] || 0;
+    const energyChange = stats.energyRise?.[roomName] || 0;
+    const spawnCap = stats.SpawnEnergy?.[roomName] || 0;
+
+    // Row: Credits
+    const crColor = creditChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
+    const crStr = `Cr: ${formatK(credit)} (${formatSigned(creditChange)})`;
+    visual.text(crStr, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
+    y += lineHeight;
+
+    // Row: Room Energy (Swapped to be above Market)
+    const eColor = energyChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
+    const eStr = `E: ${formatK(energy)} (${formatSigned(energyChange)})`;
+    const capStr = `Cap: ${formatK(spawnCap)}`;
+    visual.text(`${eStr}  ${capStr}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
+    y += lineHeight;
+
+    // Row: Market Prices (Moved below Energy)
+    const buy = stats.energyAveragePrice?.toFixed(3) || '-';
+    const sell = stats.energyAverageSellPrice?.toFixed(3) || '-';
+    const mktStr = `Mkt: Buy ${buy} / Sell ${sell}`;
+    visual.text(mktStr, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
+    y += lineHeight;
+
+    // Row: Creeps
+    visual.text(`Creeps: ${creepCount}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
+    y += lineHeight;
+    if (roleSummary) {
+        visual.text(roleSummary, x, y + 0.2, { align: 'left', font: '0.6 monospace', color: STYLE.colorSub });
+        y += lineHeight;
+    }
+}
+
+function drawProgressBar(visual: RoomVisual, x: number, y: number, w: number, h: number, pct: number, color: string, label?: string) {
+    // Background
+    visual.rect(x, y, w, h, { fill: STYLE.barBg, opacity: 0.8 });
+    // Bar
+    const barW = Math.max(0, Math.min(1, pct)) * w;
+    if (barW > 0) {
+        visual.rect(x, y, barW, h, { fill: color, opacity: 0.9 });
+    }
+    // Label
+    if (label) {
+        visual.text(label, x + w / 2, y + h / 2 + 0.1, {
+            align: 'center',
+            color: '#ffffff',
+            font: 'bold 0.5 monospace',
+            stroke: '#000000',
+            strokeWidth: 0.15,
+            opacity: 1
+        });
+    }
+}
+
+function getTopRolesSummary(creepsByRole: any): string {
+    if (!creepsByRole) return '';
+    
+    // Aggregate by abbreviation
+    const aggregated: Record<string, number> = {};
+    for (const [role, count] of Object.entries(creepsByRole)) {
+        if (typeof count !== 'number') continue;
+        const code = RoleData[role]?.code || role;
+        aggregated[code] = (aggregated[code] || 0) + count;
+    }
+    
+    const entries = Object.entries(aggregated);
+    if (entries.length <= 0) return '';
+    
+    // Sort by count descending
+    entries.sort((a, b) => b[1] - a[1]);
+    
+    // Show ALL roles
+    return entries.map(([code, count]) => `${code}:${count}`).join(' ');
+}
+
+function formatSigned(n: number): string {
+    if (!Number.isFinite(n)) return '0';
+    return n >= 0 ? `+${Math.floor(n)}` : `${Math.floor(n)}`;
+}
+
+function formatK(n: number): string {
+    if (!Number.isFinite(n)) return '0';
+    if (Math.abs(n) >= 1000) return `${Math.round(n / 100) / 10}k`;
+    return `${Math.round(n)}`;
+}
+
+function formatSeconds(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+    const total = Math.floor(seconds);
+    const s = total % 60;
+    const m = Math.floor(total / 60) % 60;
+    const h = Math.floor(total / 3600);
+    if (h > 0) return `${h}h${m}m`;
+    if (m > 0) return `${m}m${s}s`;
+    return `${s}s`;
+}
+
+function selectTopOrders<T>(items: T[], limit: number, compare: (a: T, b: T) => number): T[] {
+    if (!items || items.length <= 0) return [];
+    const result: T[] = [];
+    for (const item of items) {
+        if (result.length <= 0) {
+            result.push(item);
+            continue;
+        }
+
+        let inserted = false;
+        for (let i = 0; i < result.length; i++) {
+            if (compare(item, result[i]) < 0) {
+                result.splice(i, 0, item);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) result.push(item);
+
+        if (result.length > limit) result.length = limit;
+    }
+    return result;
 }
 

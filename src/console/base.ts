@@ -104,8 +104,20 @@ const Base = {
     },
 
     stats() {
-        Memory['OpenStats'] = !Memory['OpenStats'];
-        log('', `信息统计功能已${Memory['OpenStats'] ? '开启' : '关闭'}`);  
+        const flagName = 'ALL/stats';
+        const flag = Game.flags[flagName];
+        if (flag) {
+            flag.remove();
+            log('', `信息统计功能已关闭 (Removed ${flagName})`);
+        } else {
+            const room = Object.values(Game.rooms).find(r => r.controller && r.controller.my);
+            if (room) {
+                room.createFlag(room.controller!.pos.x, room.controller!.pos.y + 1, flagName);
+                log('', `信息统计功能已开启 (Created ${flagName} in ${room.name})`);
+            } else {
+                return Error('未找到己方房间，无法创建统计旗帜');
+            }
+        }
         return OK;
     },
 
