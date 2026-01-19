@@ -116,9 +116,10 @@ npm install
 | 命令 | 说明 |
 |------|------|
 | `npm run build` | 仅构建，输出到 `dist/` 目录 |
-| `npm run push` | 构建并上传到 main 分支 |
-| `npm run sim` | 构建并上传到 sim 分支（模拟器测试） |
-| `npm run local` | 构建并复制到本地客户端 |
+| `npm run push` | 交互选择目标并执行构建/上传/复制 |
+| `npm run push:main` | 构建并上传到 main 分支 |
+| `npm run push:sim` | 构建并上传到 sim 分支（模拟器测试） |
+| `npm run push:local` | 构建并复制到本地客户端 |
 | `npm run count` | 统计代码行数 |
 | `npm run ver` | 更新版本号 |
 
@@ -210,8 +211,8 @@ resource.manage.set('W1N1', 'energy', {source: 500000, target: 100000})
 
 ```
 rosmarin-bot/
-├── plugins/                 # Rollup 插件
-│   └── rollup-plugin-screeps.js
+├── plugins/                 # Rolldown/Rollup 插件
+│   └── plugin-screeps.js
 ├── scripts/                 # 开发脚本
 │   ├── countFiles.js        # 统计代码量
 │   ├── submit.js            # 提交代码到游戏
@@ -248,7 +249,8 @@ rosmarin-bot/
 │   ├── main.ts              # 入口文件
 │   └── utils.ts             # 通用工具
 ├── package.json
-├── rollup.config.js         # Rollup 配置
+├── rolldown.config.js       # Rolldown 配置（当前使用）
+├── rollup.config.js         # Rollup 配置（保留对照）
 └── tsconfig.json            # TypeScript 配置
 ```
 
@@ -257,7 +259,7 @@ rosmarin-bot/
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | TypeScript | 5.x | 主要开发语言 |
-| Rollup | 4.x | 模块打包 |
+| Rolldown | 1.x | 模块打包 |
 | Terser | 5.x | 代码压缩 |
 
 ## 🎨 可用布局
@@ -275,7 +277,7 @@ rosmarin-bot/
 
 ### 首次使用
 - 首次切换分支后如果报错，再执行一次 `npm run push` 即可
-- 建议先在 sim 分支测试：`npm run sim`
+- 建议先在 sim 分支测试：`npm run push:sim`
 
 ### 布局相关
 - 手动布局时需确保 **Storage、Terminal、Factory 与一个 Link 集中放置**
