@@ -67,8 +67,8 @@
 ## 🚀 快速开始
 
 ### 环境要求
-- Node.js 16+
-- npm 或 yarn
+- Node.js 18.18+（ESLint 9 / Vitest 需要）
+- pnpm
 
 ### 安装
 
@@ -78,7 +78,7 @@ git clone https://github.com/KurohaneKaoruko/Rosmarin-Bot.git
 cd Rosmarin-Bot
 
 # 安装依赖
-npm install
+pnpm install
 ```
 
 ### 配置
@@ -110,28 +110,32 @@ npm install
 ```
 
 > 💡 **Token 获取**：登录 [Screeps 官网](https://screeps.com/) → Account → Auth Tokens → Generate Token
+>
+> 💡 `.secret.json` 的顶层 key（如 main/sim/local）就是可选的推送目标名：`pnpm push` 会列出这些目标供选择；也可以自行新增更多目标。
 
 ### 构建命令
 
 | 命令 | 说明 |
 |------|------|
-| `npm run build` | 仅构建，输出到 `dist/` 目录 |
-| `npm run push` | 交互选择目标并执行构建/上传/复制 |
-| `npm run push:main` | 构建并上传到 main 分支 |
-| `npm run push:sim` | 构建并上传到 sim 分支（模拟器测试） |
-| `npm run push:local` | 构建并复制到本地客户端 |
-| `npm run count` | 统计代码行数 |
-| `npm run ver` | 更新版本号 |
+| `pnpm build` | 仅构建，输出到 `dist/`（未指定 DEST 时不会上传） |
+| `pnpm push` / `pnpm submit` | 交互选择目标并执行构建 + 上传/复制 |
+| `pnpm push:main` | 构建并上传到 `.secret.json` 的 `main` 配置 |
+| `pnpm push:sim` | 构建并上传到 `.secret.json` 的 `sim` 配置 |
+| `pnpm push:local` | 构建并复制到 `.secret.json` 的 `local.copyPath` |
+| `pnpm count` | 统计代码行数 |
+| `pnpm ver` | 更新版本号 |
+| `pnpm test` | 运行测试（Vitest） |
 
 ### 游戏内启动
 
 **快速启动（一条指令完成下面的全部步骤）**
 ```javascript
 // 使用自动布局一键完成
-bot.add('W1N1')
+bot.start('W1N1')
 // 使用静态布局
-bot.add('W1N1', 布局名)
-// 需要放置旗帜 centerPos 来指定布局中心
+bot.start('W1N1', 'rosemary')
+// 静态布局需要指定布局中心：
+// - 放置旗帜 centerPos 到布局中心位置
 ```
 
 
@@ -172,7 +176,8 @@ layout.auto('W1N1')
 | `helpRoom` | 房间管理指令 |
 | `helpLayout` | 布局设置指令 |
 | `helpInfo` | 信息查看指令 |
-| `helpOutmine` | 外矿采集指令 |
+| `helpMine` | 外矿采集指令 |
+| `helpRoad` | 外矿道路规划指令 |
 | `helpMarket` | 市场交易指令 |
 | `helpLab` | Lab 合成指令 |
 | `helpFactory` | Factory 生产指令 |
@@ -219,10 +224,10 @@ rosmarin-bot/
 │   └── updateVersion.js     # 更新版本号
 ├── src/
 │   ├── boot/                # 启动控制模块
-│   │   ├── CreepControl.ts  # Creep 控制
-│   │   ├── FlagControl.ts   # Flag 控制
-│   │   ├── PowerControl.ts  # Power 控制
-│   │   └── RoomControl.ts   # 房间控制
+│   │   ├── CreepControl.ts
+│   │   ├── FlagControl.ts
+│   │   ├── PowerCreepControl.ts
+│   │   └── RoomControl.ts
 │   ├── console/             # 控制台命令
 │   │   ├── base.ts          # 基础命令
 │   │   ├── help.ts          # 帮助文本
@@ -237,21 +242,18 @@ rosmarin-bot/
 │   │   └── errorMapper.ts   # 错误映射
 │   ├── interface/           # TypeScript 类型定义
 │   ├── modules/             # 功能模块
-│   │   ├── flagSpawn/       # Flag 触发孵化
-│   │   ├── function/        # 功能模块 (清理/Pixel/统计)
-│   │   ├── planner/         # 布局规划
-│   │   ├── team/            # 小队战斗
-│   │   ├── utils/           # 工具函数
-│   │   ├── wheel/           # 轮子 (寻路/缓存/Profiler)
-│   │   ├── ResourceManage.ts # 资源管理
-│   │   └── WarModule.ts     # 战争模块
+│   │   ├── feature/         # 主要功能（布局/小队/外矿等）
+│   │   ├── infra/           # 基础设施（寻路/缓存/Profiler等）
+│   │   ├── runtime/         # 运行期模块（外矿/战争/统计等）
+│   │   └── utils/           # 工具模块（包含 wasm）
 │   ├── prototype/           # 原型扩展
 │   ├── main.ts              # 入口文件
 │   └── utils.ts             # 通用工具
 ├── package.json
 ├── rolldown.config.js       # Rolldown 配置（当前使用）
 ├── rollup.config.js         # Rollup 配置（保留对照）
-└── tsconfig.json            # TypeScript 配置
+├── tsconfig.json            # TypeScript 配置
+└── vitest.config.ts         # 测试配置
 ```
 
 ## 🔧 技术栈
@@ -259,8 +261,10 @@ rosmarin-bot/
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | TypeScript | 5.x | 主要开发语言 |
-| Rolldown | 1.x | 模块打包 |
-| Terser | 5.x | 代码压缩 |
+| Rolldown | 1.x(beta) | 模块打包与压缩 |
+| screeps-api | 1.x | 代码上传 |
+| Vitest | 1.x | 单元测试 |
+| ESLint | 9.x | 代码规范（本地开发） |
 
 ## 🎨 可用布局
 
@@ -276,14 +280,14 @@ rosmarin-bot/
 ## 📝 注意事项
 
 ### 首次使用
-- 首次切换分支后如果报错，再执行一次 `npm run push` 即可
-- 建议先在 sim 分支测试：`npm run push:sim`
+- 建议先在 sim 目标测试：`pnpm push:sim`
+- `pnpm push` 会从 `.secret.json` 读取可用目标并交互选择
 
 ### 布局相关
 - 手动布局时需确保 **Storage、Terminal、Factory 与一个 Link 集中放置**
 - 与这四个建筑均相邻的点位即为中心，是中央搬运工的位置
 - 手动布局需要将该点设置为布局中心，否则部分自动化功能将无法使用
-- 使用 `layout.setcenter(roomName, x, y)` 设置布局中心
+- 使用 `room.setcenter(roomName, x, y)` 设置布局中心
 
 ### 外矿相关
 - 外矿道路建造需要房间达到对应等级
