@@ -1,4 +1,4 @@
-import screeps from './plugins/rollup-plugin-screeps.js';
+import screeps from './plugins/plugin-screeps.js';
 // 这个rollup-plugin-screeps是修改过的版本, 兼容新版rollup
 import clear from 'rollup-plugin-clear';
 import copy from 'rollup-plugin-copy';

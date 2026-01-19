@@ -37,7 +37,7 @@ const selectUser = async () => {
 };
 
 const exec = (user) => {
-	shelljs.exec(`npx rollup -cw --environment DEST:${user}`);
+	shelljs.exec(`npx rollup -c --environment DEST:${user}`);
 };
 
 const submit = async () => {

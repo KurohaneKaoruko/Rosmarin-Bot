@@ -1,5 +1,4 @@
 {
-  "types": ["screeps"],
   "compilerOptions": {
     "target": "ES2017", // 指定 ECMAScript 目标版本
     "module": "esnext", // 指定模块系统的类型
@@ -7,6 +6,7 @@
     "lib": ["ES2018"], // 指定要包含的库文件
     "outDir": "./dist", // 输出目录
     "rootDir": "./src", // 根目录
+    "types": ["screeps", "node", "lodash"],
     "baseUrl": ".", // 基础目录，用于解析非相对模块名称
     "paths": { // 路径映射
       "@/*": ["./src/*"] // 将 @ 符号映射到 src 目录
@@ -21,8 +21,9 @@
     "declaration": false, // 生成声明文件
     "sourceMap": true, // 生成源映射文件
     "noImplicitAny": false, // 是否禁止隐式的 any 类型
-    "experimentalDecorators": true // 是否启用实验性的装饰器
+    "experimentalDecorators": true, // 是否启用实验性的装饰器
+    "allowUmdGlobalAccess": true // 允许在模块中访问 UMD 全局变量（如 _）
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }
