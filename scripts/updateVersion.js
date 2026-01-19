@@ -12,7 +12,20 @@ const PACKAGE_JSON_PATH = path.join(rootDir, 'package.json');
 const CONFIG_TS_PATH = path.join(rootDir, 'src/constant/config.ts');
 const README_PATH = path.join(rootDir, 'README.md');
 
-const gitConfigOverrides = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'];
+const gitConfigOverrides = [
+    '-c',
+    'core.autocrlf=false',
+    '-c',
+    'core.eol=lf',
+    '-c',
+    'core.safecrlf=false',
+    '-c',
+    'core.quotepath=false',
+    '-c',
+    'i18n.commitEncoding=utf-8',
+    '-c',
+    'i18n.logOutputEncoding=utf-8',
+];
 
 function runCommand(cmd, args, { stdio = 'inherit' } = {}) {
     const result = spawnSync(cmd, args, {
@@ -37,7 +50,12 @@ function runShellCommand(cmd, args, { stdio = 'inherit' } = {}) {
 }
 
 function runGit(args, { stdio = 'inherit' } = {}) {
-    const result = runCommand('git', [...gitConfigOverrides, ...args], { stdio });
+    const shouldPipe = stdio === 'pipe' ? 'pipe' : 'pipe';
+    const result = runCommand('git', [...gitConfigOverrides, ...args], { stdio: shouldPipe });
+    if (stdio !== 'pipe') {
+        if (result.stdout) process.stdout.write(String(result.stdout));
+        if (result.stderr) process.stderr.write(String(result.stderr));
+    }
     if (typeof result.status === 'number' && result.status !== 0) {
         const detail = stdio === 'pipe' ? `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() : '';
         throw new Error(`git ${args.join(' ')} 失败 (exit code: ${result.status})${detail ? `\n${detail}` : ''}`);
