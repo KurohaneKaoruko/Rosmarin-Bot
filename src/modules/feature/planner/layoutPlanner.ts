@@ -33,7 +33,7 @@ type CachedLayout = {
 };
 
 /** 缓存有效期（tick） */
-const CACHE_TTL = 100;
+const CACHE_TTL = 50;
 
 /** 缓存存放在 global 上，避免写入 Memory 造成体积与反序列化开销 */
 function getCacheStore(): { byKey: { [key: string]: CachedLayout }; lastKeyByRoomLayout: { [key: string]: string } } {
@@ -440,14 +440,30 @@ function computeDynamic63(roomName: string): CachedLayout | null {
     const room = Game.rooms[roomName];
     if (!room) return null;
 
+    // Detect flag center
+    const PosFlag = Game.flags.storagePos || Game.flags.centerPos;
+    let flagCenter: LayoutCenter | null = null;
+    if (PosFlag && PosFlag.pos.roomName === roomName) {
+        flagCenter = { x: PosFlag.pos.x, y: PosFlag.pos.y };
+    }
+
     const cached = getLastCachedByRoomLayout(roomName, '63auto');
     if (cached) {
-        log('LayoutPlanner', `命中缓存: dynamic ${roomName} 63auto center(${cached.center.x},${cached.center.y})`);
-        return {
-            ...cached,
-            structMap: cloneStructMap(cached.structMap),
-            layoutMemory: cloneLayoutMemory(cached.layoutMemory)
-        };
+        let valid = true;
+        if (flagCenter && (cached.center.x !== flagCenter.x || cached.center.y !== flagCenter.y)) {
+            valid = false;
+        }
+
+        if (valid) {
+            log('LayoutPlanner', `命中缓存: dynamic ${roomName} 63auto center(${cached.center.x},${cached.center.y})`);
+            return {
+                ...cached,
+                structMap: cloneStructMap(cached.structMap),
+                layoutMemory: cloneLayoutMemory(cached.layoutMemory)
+            };
+        } else {
+             log('LayoutPlanner', `缓存失效: dynamic ${roomName} 63auto center mismatch (flag: ${flagCenter?.x},${flagCenter?.y} vs cache: ${cached.center.x},${cached.center.y})`);
+        }
     }
 
     if (Game.cpu.bucket < 100) return null;
@@ -462,7 +478,7 @@ function computeDynamic63(roomName: string): CachedLayout | null {
     if (storagePos && storagePos.pos.roomName !== roomName) storagePos.remove();
 
     const computeManor = autoPlanner63.ManagerPlanner.computeManor;
-    const roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb]);
+    const roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], flagCenter);
     if (!roomStructsData) return null;
 
     const center = { x: roomStructsData.storagePos.storageX, y: roomStructsData.storagePos.storageY };

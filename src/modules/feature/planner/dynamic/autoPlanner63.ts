@@ -611,7 +611,7 @@ const ManagerPlanner = {
 	 * @param points [flagController,flagMineral,flagSourceA,flagSourceB]
 	 * @return result { roomName:roomName,storagePos:{x,y},labPos:{x,y},structMap:{ "rampart" : [[x1,y1],[x2,y2] ...] ...} }
 	 */
-	computeManor(roomName, points, blocked?) {
+	computeManor(roomName, points, fixedCenter?, blocked?) {
 		ManagerPlanner.init();
 		for (const p of points) {
 			if (p && p.roomName == roomName) objects.push(p);
@@ -645,6 +645,12 @@ const ManagerPlanner = {
 
 		let centerX = undefined;
 		let centerY = undefined;
+
+		let centerPos = fixedCenter;
+		if (!centerPos && Game.flags.storagePos && Game.flags.storagePos.pos.roomName == roomName) {
+			centerPos = { x: Game.flags.storagePos.pos.x, y: Game.flags.storagePos.pos.y };
+		}
+
 		_.keys(sizeMap).forEach((pos) => {
 			// if(sizeMap[pos]<150)return
 
@@ -653,8 +659,8 @@ const ManagerPlanner = {
 			const allList = allCacheMap[pos];
 			if (currentPutAbleList.length < minPlaneCnt) return;
 			if (
-				Game.flags.storagePos &&
-				!currentPutAbleList.find((e) => e.x == Game.flags.storagePos.pos.x && e.y == Game.flags.storagePos.pos.y)
+				centerPos &&
+				!currentPutAbleList.find((e) => e.x == centerPos.x && e.y == centerPos.y)
 			)
 				return;
 
@@ -723,9 +729,9 @@ const ManagerPlanner = {
 				innerPutAbleList = currentInnerPutAbleList;
 				wallCnt = currentWallCnt;
 				finalPos = pos;
-				if (Game.flags.storagePos) {
-					centerX = Game.flags.storagePos.pos.x;
-					centerY = Game.flags.storagePos.pos.y;
+				if (centerPos) {
+					centerX = centerPos.x;
+					centerY = centerPos.y;
 				} else {
 					centerX = currentPutAbleList.map((e) => e.x).reduce((a, b) => a + b) / currentPutAbleList.length;
 					centerY = currentPutAbleList.map((e) => e.y).reduce((a, b) => a + b) / currentPutAbleList.length;
@@ -772,9 +778,9 @@ const ManagerPlanner = {
 				}
 			});
 
-		if (Game.flags.storagePos) {
-			storageX = Game.flags.storagePos.pos.x;
-			storageY = Game.flags.storagePos.pos.y;
+		if (centerPos) {
+			storageX = centerPos.x;
+			storageY = centerPos.y;
 		}
 
 		let labX = 0;
