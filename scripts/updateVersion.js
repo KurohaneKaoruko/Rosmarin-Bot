@@ -12,6 +12,8 @@ const PACKAGE_JSON_PATH = path.join(rootDir, 'package.json');
 const CONFIG_TS_PATH = path.join(rootDir, 'src/constant/config.ts');
 const README_PATH = path.join(rootDir, 'README.md');
 
+const gitConfigOverrides = ['-c', 'core.autocrlf=false', '-c', 'core.eol=lf'];
+
 function runCommand(cmd, args, { stdio = 'inherit' } = {}) {
     const result = spawnSync(cmd, args, {
         cwd: rootDir,
@@ -35,7 +37,7 @@ function runShellCommand(cmd, args, { stdio = 'inherit' } = {}) {
 }
 
 function runGit(args, { stdio = 'inherit' } = {}) {
-    const result = runCommand('git', args, { stdio });
+    const result = runCommand('git', [...gitConfigOverrides, ...args], { stdio });
     if (typeof result.status === 'number' && result.status !== 0) {
         const detail = stdio === 'pipe' ? `${result.stdout ?? ''}${result.stderr ?? ''}`.trim() : '';
         throw new Error(`git ${args.join(' ')} 失败 (exit code: ${result.status})${detail ? `\n${detail}` : ''}`);
@@ -128,19 +130,13 @@ function gitCommitVersion(newVersion) {
 
     runGit(['add', '--', ...filesToCommit], { stdio: 'inherit' });
 
-    const diffCheck = spawnSync('git', ['diff', '--cached', '--quiet', '--', ...filesToCommit], {
-        cwd: rootDir,
-        stdio: 'pipe',
-        shell: false,
-        encoding: 'utf-8',
-    });
-    if (diffCheck.error) throw diffCheck.error;
-    if (typeof diffCheck.status === 'number' && diffCheck.status === 0) {
+    try {
+        runGit(['diff', '--cached', '--quiet', '--', ...filesToCommit], { stdio: 'pipe' });
         console.log('! 暂存区无变更，跳过提交');
         return;
-    }
-    if (typeof diffCheck.status === 'number' && diffCheck.status !== 1) {
-        throw new Error(`git diff --cached 检查失败 (exit code: ${diffCheck.status})`);
+    } catch (err) {
+        const message = String(err?.message ?? err);
+        if (!message.includes('exit code: 1')) throw err;
     }
 
     runGit(['commit', '-m', `chore: 更新版本号至${newVersion}`, '--', ...filesToCommit], { stdio: 'inherit' });
