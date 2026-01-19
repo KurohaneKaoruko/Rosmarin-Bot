@@ -5,6 +5,7 @@
  */
 
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { RoomArray } from '@/modules/utils/roomArray';
 import { compress, decompress } from '@/utils';
 
 // ============================================================
@@ -1252,8 +1253,8 @@ export class RoadVisual {
 
     private static drawRoomPositions(room: Room, roomPositions: RoomPosition[], sharedCount?: { [key: string]: number }): void {
         const visual = room.visual;
-        const plannedXy = new Set<string>();
-        for (const pos of roomPositions) plannedXy.add(`${pos.x}:${pos.y}`);
+        const roadIndex = new RoomArray().init();
+        for (const pos of roomPositions) roadIndex.set(pos.x, pos.y, 'road');
 
         const cache = this.roomStateCache[room.name];
         const state =
@@ -1283,6 +1284,9 @@ export class RoadVisual {
                       return next;
                   })();
 
+        const colorByXy = new Map<string, string>();
+        const priorityByXy = new Map<string, number>();
+
         for (const pos of roomPositions) {
             const sharedKey = `${pos.roomName}:${pos.x}:${pos.y}`;
             const isShared = !!sharedCount && sharedCount[sharedKey] > 1;
@@ -1292,49 +1296,52 @@ export class RoadVisual {
             const hasSite = state.roadSiteXy.has(xyKey);
 
             let color: string;
-            let radius = 0.3;
+            let priority: number;
 
             if (road) {
                 if (road.hits < road.hitsMax * EXTERNAL_ROAD_CONFIG.REPAIR_THRESHOLD) {
                     color = this.COLORS.DAMAGED;
-                    radius = 0.4;
+                    priority = 5;
                 } else if (isShared) {
                     color = this.COLORS.SHARED;
+                    priority = 2;
                 } else {
                     color = this.COLORS.BUILT;
+                    priority = 1;
                 }
             } else if (hasSite) {
                 color = this.COLORS.SITE;
+                priority = 3;
             } else {
                 color = this.COLORS.PLANNED;
+                priority = 4;
             }
 
-            visual.circle(pos.x, pos.y, {
-                radius,
-                fill: color,
-                opacity: 0.4
+            colorByXy.set(xyKey, color);
+            priorityByXy.set(xyKey, priority);
+
+            visual.text('•', pos.x, pos.y + 0.25, {
+                color,
+                opacity: 0.75,
+                font: 0.7
             });
         }
 
         if (roomPositions.length <= 1 || roomPositions.length > this.MAX_ROOM_POSITIONS_FOR_LINES) return;
 
         for (const pos of roomPositions) {
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const nx = pos.x + dx;
-                    const ny = pos.y + dy;
-                    if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-                    const neighborKey = `${nx}:${ny}`;
-                    if (!plannedXy.has(neighborKey)) continue;
-                    if (pos.x > nx || (pos.x === nx && pos.y >= ny)) continue;
-                    visual.line(pos.x, pos.y, nx, ny, {
-                        color: '#ffffff',
-                        opacity: 0.25,
-                        lineStyle: 'dashed'
-                    });
+            roadIndex.forNear((x: number, y: number, val: number | string) => {
+                if (val !== 'road') return;
+                if ((pos.x >= x && pos.y >= y) || (pos.x > x && pos.y < y)) {
+                    const fromKey = `${pos.x}:${pos.y}`;
+                    const toKey = `${x}:${y}`;
+                    const fromPriority = priorityByXy.get(fromKey) ?? 0;
+                    const toPriority = priorityByXy.get(toKey) ?? 0;
+                    const useKey = fromPriority >= toPriority ? fromKey : toKey;
+                    const color = colorByXy.get(useKey) ?? '#ffffff';
+                    visual.line(x, y, pos.x, pos.y, { color });
                 }
-            }
+            }, pos.x, pos.y);
         }
     }
 
