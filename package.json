@@ -9,6 +9,7 @@
     "push:main": "cross-env DEST=main rolldown -c",
     "push:sim": "cross-env DEST=sim rolldown -c",
     "push:local": "cross-env DEST=local rolldown -c",
+    "lint": "eslint .",
     "test": "vitest run",
     "commit": "git add . && git-cz",
     "submit": "node ./scripts/submit.js",
