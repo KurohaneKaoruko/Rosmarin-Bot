@@ -101,7 +101,10 @@ export default class MoveFunction extends Creep {
             else if (y === 49) direction = TOP;
             
             if (direction) {
-                this.move(direction);
+                const code = this.move(direction);
+                if (code !== OK && code !== ERR_TIRED) {
+                    this.moveTo(new RoomPosition(25, 25, this.room.name), { maxRooms: 1, range: 20 });
+                }
             }
             return true;
         }

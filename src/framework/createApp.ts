@@ -46,13 +46,13 @@ export const createApp = () => {
 
     let initOK = false;
     const init = () => {
-        runCall('init');
         const tryInit = (proto: any, objs: Record<string, any>) => {
             if (proto.init) Object.values(objs).forEach((o: any) => o.init());
         };
         tryInit(Room.prototype, Game.rooms);
         tryInit(Creep.prototype, Game.creeps);
         tryInit(PowerCreep.prototype, Game.powerCreeps);
+        runCall('init');
         initOK = true;
         if (Game.shard.name !== 'sim') console.log('全局初始化完成。');
     };
