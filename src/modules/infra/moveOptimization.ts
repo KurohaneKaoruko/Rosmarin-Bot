@@ -150,6 +150,22 @@ let reg1 = /^([WE])([0-9]+)([NS])([0-9]+)$/;    // parse得到['E28N7','E','28',
  * @description moveOpt 内部会频繁对 roomName 做正则解析，这里做轻量缓存减少重复计算
  */
 let roomNameParseCache = {};
+let roomNameParseCacheSize = 0;
+let roomNameParseCacheLastClearTick = 0;
+let roomNameParseCacheMaxSize = 2000;
+let roomNameParseCacheClearInterval = 1000;
+
+function maybeClearRoomNameParseCache() {
+    if (roomNameParseCacheSize <= roomNameParseCacheMaxSize) {
+        return;
+    }
+    if (typeof Game != 'undefined' && Game.time - roomNameParseCacheLastClearTick < roomNameParseCacheClearInterval) {
+        return;
+    }
+    roomNameParseCache = {};
+    roomNameParseCacheSize = 0;
+    roomNameParseCacheLastClearTick = typeof Game != 'undefined' ? Game.time : roomNameParseCacheLastClearTick;
+}
 
 /**
  * 解析房间名
@@ -160,9 +176,11 @@ function parseRoomName(roomName) {
     if (roomName in roomNameParseCache) {
         return roomNameParseCache[roomName];
     }
+    maybeClearRoomNameParseCache();
     let m = reg1.exec(roomName);
     if (!m || m.length != 5) {
         roomNameParseCache[roomName] = null;
+        roomNameParseCacheSize++;
         return null;
     }
     let parsed = {
@@ -172,6 +190,7 @@ function parseRoomName(roomName) {
         nsNum: +m[4]
     };
     roomNameParseCache[roomName] = parsed;
+    roomNameParseCacheSize++;
     return parsed;
 }
 /**
@@ -990,15 +1009,28 @@ function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, o
     maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
     for (combinedX = minX; combinedX <= maxX; combinedX++) {
         if (combinedX in globalPathCache) {
-            for (combinedY = minY; combinedY <= maxY; combinedY++) {
-                if (combinedY in globalPathCache[combinedX]) {
-                    for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                        pathCounter++;
-                        if (isNear(path.start, formalFromPos) && isNear(fromPos, path.posArray[1]) && inRange(path.end, formalToPos, ops.range) && isSameOps(path, ops)) {     // 找到路了
-                            creepCache.path = path;
-                            return true;
-                        }
+            // 遍历已有 combinedY key，避免对稀疏缓存做大区间数值扫描
+            for (let combinedYKey in globalPathCache[combinedX]) {
+                combinedY = +combinedYKey;
+                if (combinedY < minY || combinedY > maxY) {
+                    continue;
+                }
+                for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
+                    pathCounter++;
+                    if (!isSameOps(path, ops)) {
+                        continue;
                     }
+                    if (!isNear(path.start, formalFromPos)) {
+                        continue;
+                    }
+                    if (!isNear(fromPos, path.posArray[1])) {
+                        continue;
+                    }
+                    if (!inRange(path.end, formalToPos, ops.range)) {
+                        continue;
+                    }
+                    creepCache.path = path;
+                    return true;
                 }
             }
         }
@@ -1021,15 +1053,25 @@ function findLongPathInCache(formalFromPos, formalToPos, creepCache, ops) {     
     maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
     for (combinedX = minX; combinedX <= maxX; combinedX++) {
         if (combinedX in globalPathCache) {
-            for (combinedY = minY; combinedY <= maxY; combinedY++) {
-                if (combinedY in globalPathCache[combinedX]) {
-                    for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                        pathCounter++;
-                        if (isNear(path.start, formalFromPos) && inRange(path.end, formalToPos, ops.range) && isSameOps(path, ops)) {     // 找到路了
-                            creepCache.path = path;
-                            return true;
-                        }
+            // 遍历已有 combinedY key，避免对稀疏缓存做大区间数值扫描
+            for (let combinedYKey in globalPathCache[combinedX]) {
+                combinedY = +combinedYKey;
+                if (combinedY < minY || combinedY > maxY) {
+                    continue;
+                }
+                for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
+                    pathCounter++;
+                    if (!isSameOps(path, ops)) {
+                        continue;
                     }
+                    if (!isNear(path.start, formalFromPos)) {
+                        continue;
+                    }
+                    if (!inRange(path.end, formalToPos, ops.range)) {
+                        continue;
+                    }
+                    creepCache.path = path;
+                    return true;
                 }
             }
         }
@@ -1607,8 +1649,7 @@ global.BetterMove= {
         return avoidRooms
     },
     addAvoidRooms (roomName) {
-        let splited = reg1.exec(roomName);
-        if (splited && splited.length == 5) {
+        if (parseRoomName(roomName)) {
             avoidRooms[roomName] = 1;
             return OK;
         } else {
@@ -1616,8 +1657,7 @@ global.BetterMove= {
         }
     },
     deleteAvoidRooms (roomName) {
-        let splited = reg1.exec(roomName);
-        if (splited && splited.length == 5 && avoidRooms[roomName]) {
+        if (parseRoomName(roomName) && avoidRooms[roomName]) {
             delete avoidRooms[roomName];
             return OK;
         } else {
@@ -1625,24 +1665,31 @@ global.BetterMove= {
         }
     },
     deletePathInRoom (roomName) {
-        let splited = reg1.exec(roomName);
-        if (splited && splited.length == 5) {
+        if (parseRoomName(roomName)) {
             this.deleteCostMatrix(roomName);
             let fromalCentralPos = formalize({ x: 25, y: 25, roomName: roomName });
             minX = fromalCentralPos.x + fromalCentralPos.y - 48;
             maxX = fromalCentralPos.x + fromalCentralPos.y + 48;
             minY = minX;
             maxY = maxX;
-            for (combinedX = minX; combinedX <= maxX; combinedX++) {
-                if (combinedX in globalPathCache) {
-                    for (combinedY = minY; combinedY <= maxY; combinedY++) {
-                        if (combinedY in globalPathCache[combinedX]) {
-                            for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                                let posArray = path.posArray;
-                                if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {     // 是这个房间的路
-                                    deletePath(path);
-                                }
-                            }
+            // 遍历已有 key，避免对稀疏缓存做大区间数值扫描
+            for (let combinedXKey in globalPathCache) {
+                combinedX = +combinedXKey;
+                if (combinedX < minX || combinedX > maxX) {
+                    continue;
+                }
+                let xBucket = globalPathCache[combinedXKey];
+                for (let combinedYKey in xBucket) {
+                    combinedY = +combinedYKey;
+                    if (combinedY < minY || combinedY > maxY) {
+                        continue;
+                    }
+                    let pathArray = xBucket[combinedYKey];
+                    for (let i = pathArray.length - 1; i >= 0; i--) {     // 删除会变更数组长度，倒序更安全
+                        let path = pathArray[i];
+                        let posArray = path.posArray;
+                        if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {     // 是这个房间的路
+                            deletePath(path);
                         }
                     }
                 }
@@ -1653,9 +1700,7 @@ global.BetterMove= {
         }
     },
     addAvoidExits (fromRoomName, toRoomName) {    // 【未启用】
-        let splited1 = reg1.exec(fromRoomName);
-        let splited2 = reg1.exec(toRoomName);
-        if (splited1 && splited1.length == 5 && splited2 && splited2.length == 5) {
+        if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             avoidExits[fromRoomName] ? avoidExits[fromRoomName][toRoomName] = 1 : avoidExits[fromRoomName] = { [toRoomName]: 1 };
             return OK;
         } else {
@@ -1663,9 +1708,7 @@ global.BetterMove= {
         }
     },
     deleteAvoidExits (fromRoomName, toRoomName) { // 【未启用】
-        let splited1 = reg1.exec(fromRoomName);
-        let splited2 = reg1.exec(toRoomName);
-        if (splited1 && splited1.length == 5 && splited2 && splited2.length == 5) {
+        if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             if (fromRoomName in avoidExits && toRoomName in avoidExits[fromRoomName]) {
                 delete avoidExits[fromRoomName][toRoomName];
             }
