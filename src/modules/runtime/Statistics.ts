@@ -16,10 +16,8 @@ export const Statistics = {
         updateCPUinfo();       // 统计 CPU 使用量
 
         if (Game.time % STAT_INTERVAL === 1) {
-            updateGclGpl();        // 统计 GCL / GPL 的升级百分比和等级
-            updateGclGplSpeed();   // 统计 GCL / GPL 的升级速度
-            updateRoomStats();     // 房间等级 & 房间能量储备
-            updateRoomUpgradeTimeEstimate(); // 房间升级时间估计
+            updateGclGpl();        // 统计 GCL / GPL 的升级百分比、等级、估计升级时间
+            updateRoomStats();     // 房间等级 & 房间能量储备、升级时间估计
             updateCreepCount();    // Creep 数量
             updateCreditInfo();    // credit变动情况
         }
@@ -54,31 +52,29 @@ function updateGclGpl() {
     Memory.stats.gclLevel = Game.gcl.level
     Memory.stats.gpl = (Game.gpl.progress / Game.gpl.progressTotal) * 100
     Memory.stats.gplLevel = Game.gpl.level
-}
 
-function updateGclGplSpeed() {
-    // 统计 GCL / GPL 的升级速度
-    if (Game.time % LONG_STAT_INTERVAL !== 1) return;
-    const timeDelta = (Date.now() - (Number(Memory.stats.previousTimestamp) || Date.now())) / 1000;    // 100tick时间差
-    Memory.stats.previousTimestamp = Date.now();    // 记录当前时间戳
-    // Memory.stats.tickTime = timeDelta / 100;    // 每个tick的时间 (Removed)
+    // 统计 GCL / GPL 的估计升级时间
+    const INTERVAL = 1000
+    if (Game.time % INTERVAL !== 1) return;
+    const timeDelta = (Date.now() - (Number(Memory.stats.GCLGPLprevTimestamp) || Date.now())) / 1000;    // 时间差
+    Memory.stats.GCLGPLprevTimestamp = Date.now();    // 记录当前时间戳
 
-    const gclIncrement = Game.gcl.progress - (Number(Memory.stats.GclProgress) || Game.gcl.progress);    // GCL 的进度增量
+    const gclIncrement = Game.gcl.progress - (Number(Memory.stats.gclProgress) || Game.gcl.progress);    // GCL 的进度增量
     const gclRemaining = Game.gcl.progressTotal - Game.gcl.progress;    // GCL 的剩余进度
-    Memory.stats.GclProgress = Game.gcl.progress;   // GCL 的当前进度
+    Memory.stats.gclProgress = Game.gcl.progress;   // GCL 的当前进度
     if (gclIncrement > 0) {
-        Memory.stats.gclUpTick = ((gclRemaining / gclIncrement) * LONG_STAT_INTERVAL) || 0;    // GCL 升级所需的tick数
+        Memory.stats.gclUpTick = ((gclRemaining / gclIncrement) * INTERVAL) || 0;    // GCL 升级所需的tick数
         Memory.stats.gclUpTime = ((gclRemaining / gclIncrement) * timeDelta) || 0;    // GCL 预计升级所需时间
     } else {
         Memory.stats.gclUpTick = 0;
         Memory.stats.gclUpTime = 0;
     }
 
-    const gplIncrement = Game.gpl.progress - (Number(Memory.stats.GplProgress) || Game.gpl.progress);    // GPL 的进度增量
+    const gplIncrement = Game.gpl.progress - (Number(Memory.stats.gplProgress) || Game.gpl.progress);    // GPL 的进度增量
     const gplRemaining = Game.gpl.progressTotal - Game.gpl.progress;    // GPL 的剩余进度
-    Memory.stats.GplProgress = Game.gpl.progress;    // GPL 的当前进度
+    Memory.stats.gplProgress = Game.gpl.progress;    // GPL 的当前进度
     if (gplIncrement > 0) {
-        Memory.stats.gplUpTick = ((gplRemaining / gplIncrement) * LONG_STAT_INTERVAL) || 0;    // GPL 升级所需的tick数
+        Memory.stats.gplUpTick = ((gplRemaining / gplIncrement) * INTERVAL) || 0;    // GPL 升级所需的tick数
         Memory.stats.gplUpTime = ((gplRemaining / gplIncrement) * timeDelta) || 0;    // GPL 预计升级所需时间
     } else {
         Memory.stats.gplUpTick = 0;
@@ -96,16 +92,8 @@ function updateRoomStats() {
     stats.energy = {};
     stats.energyRise = {};
     stats.SpawnEnergy = {};
-    stats.energyAvailable = {};
-    stats.totalEnergy = {};
-    stats.energyState = {};
-    stats.energyAlert = {};
-    stats.logisticCount = {};
-    stats.spawnQueue = {};
-    let roomCount = 0;
     for (const room of Object.values(Game.rooms)) {
         if (!room.controller?.my) continue;
-        roomCount++;
         const roomName = room.name;
         const controller = room.controller;
         // 等级信息
@@ -122,36 +110,14 @@ function updateRoomStats() {
         stats.energy[roomName] = storageEnergy + terminalEnergy;
         stats.energyRise[roomName] = stats.energy[roomName] - stats.energyHistory[roomName] || 0;
         stats.SpawnEnergy[roomName] = room.energyCapacityAvailable;
-        stats.energyAvailable[roomName] = room.energyAvailable;
-        const profile = room.getEnergyProfile?.();
-        stats.totalEnergy[roomName] = profile?.totalEnergy ?? stats.energy[roomName];
-        const state = room.memory.energyState || room.updateEnergyState?.(false) || 'NORMAL';
-        stats.energyState[roomName] = state;
-        const creepNum = room.getCreepNum?.() || {};
-        const logisticCount =
-            (creepNum['carrier'] || 0) +
-            (creepNum['transport'] || 0) +
-            (creepNum['manager'] || 0) +
-            (creepNum['universal'] || 0);
-        stats.logisticCount[roomName] = logisticCount;
-        const spawnPool = Memory.MissionPools?.[roomName]?.spawn;
-        stats.spawnQueue[roomName] = Array.isArray(spawnPool) ? spawnPool.length : 0;
-        stats.energyAlert[roomName] =
-            state === 'CRITICAL' &&
-            logisticCount === 0 &&
-            (profile?.containerEnergy || 0) >= (profile?.cap || room.energyCapacityAvailable);
     }
-    stats.roomCount = roomCount;
-}
 
-function updateRoomUpgradeTimeEstimate() {
     // 房间升级时间估计
     if (Game.time % LONG_STAT_INTERVAL !== 1) return;
-    const stats = Memory.stats;
     const lastProgress = stats.lastRclProgress || {};
-    const timeDelta = (Date.now() - (Number(stats.lastUpgradeTimestamp) || Date.now())) / 1000;  // 时间差
-
-    const myRooms = Object.values(Game.rooms).filter(room => room.controller?.my && room.controller.level < 8);
+    const timeDelta = (Date.now() - (Number(stats.RoomPrevTimestamp) || Date.now())) / 1000;  // 时间差
+    stats.RoomPrevTimestamp = Date.now();
+    const myRooms = Object.values(Game.rooms).filter(room => room.my && room.level < 8);
 
     stats.rclUpTime = {};
     stats.rclUpTick = {};
@@ -175,17 +141,17 @@ function updateRoomUpgradeTimeEstimate() {
     }
 
     stats.lastRclProgress = lastProgress;
-    stats.lastUpgradeTimestamp = Date.now();
 }
 
 
 function updateCreepCount() {
-    // Creep 数量
+    // 统计所有 creep 的数量
     Memory.stats.creeps = {};
     let creepCount = 0;
     for (const { memory: { role } } of Object.values(Game.creeps)) {
         Memory.stats.creeps[role] = (Memory.stats.creeps[role] || 0) + 1;
-        creepCount++;}  // 统计所有 creep 的数量
+        creepCount++;
+    }
     Memory.stats.creepCount = creepCount;
 }
 
@@ -349,13 +315,17 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     const gclPct = stats.gcl || 0;
     const gplLvl = stats.gplLevel || 0;
     const gplPct = stats.gpl || 0;
+    const gclEta = typeof stats.gclUpTime === 'number' ? stats.gclUpTime : 0;
+    const gplEta = typeof stats.gplUpTime === 'number' ? stats.gplUpTime : 0;
+    const gclLabel = gclEta > 0 ? `GCL ${gclLvl} - ${formatSeconds(gclEta)}` : `GCL ${gclLvl}`;
+    const gplLabel = gplEta > 0 ? `GPL ${gplLvl} - ${formatSeconds(gplEta)}` : `GPL ${gplLvl}`;
 
     // Row 3: GCL
-    drawProgressBar(visual, x, y, width, 0.5, gclPct / 100, STYLE.barGcl, `GCL ${gclLvl}`);
+    drawProgressBar(visual, x, y, width, 0.5, gclPct / 100, STYLE.barGcl, gclLabel);
     y += 0.8; // Increased padding to prevent overlap with GPL or Credits
 
     // Row 4: GPL
-    drawProgressBar(visual, x, y, width, 0.5, gplPct / 100, STYLE.barGpl, `GPL ${gplLvl}`);
+    drawProgressBar(visual, x, y, width, 0.5, gplPct / 100, STYLE.barGpl, gplLabel);
     y += 0.8; // Increased padding
 
     // --- Room Progress: RCL (If < 8) ---
@@ -457,8 +427,25 @@ function formatSigned(n: number): string {
 
 function formatK(n: number): string {
     if (!Number.isFinite(n)) return '0';
-    if (Math.abs(n) >= 1000) return `${Math.round(n / 100) / 10}k`;
-    return `${Math.round(n)}`;
+    const abs = Math.abs(n);
+    const sign = n < 0 ? '-' : '';
+
+    const units: Array<{ value: number; suffix: string }> = [
+        { value: 1e12, suffix: 'T' },
+        { value: 1e9, suffix: 'B' },
+        { value: 1e6, suffix: 'M' },
+        { value: 1e3, suffix: 'K' },
+    ];
+
+    const formatMax3 = (value: number) => {
+        const s = value.toFixed(3);
+        return s.replace(/\.?0+$/, '');
+    };
+
+    for (const u of units) {
+        if (abs >= u.value) return `${sign}${formatMax3(abs / u.value)}${u.suffix}`;
+    }
+    return `${sign}${formatMax3(abs)}`;
 }
 
 function formatSeconds(seconds: number): string {
@@ -495,4 +482,3 @@ function selectTopOrders<T>(items: T[], limit: number, compare: (a: T, b: T) => 
     }
     return result;
 }
-

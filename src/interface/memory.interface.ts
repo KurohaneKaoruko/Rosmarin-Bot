@@ -653,9 +653,23 @@ interface MissionPoolMemory {
  */
 interface StatsMemory {
     /**
-     * GCL 等级
+     * 上一次GPLGCL统计的时间戳
+     */
+    GCLGPLprevTimestamp?: number;
+    /**
+     * 上一次房间升级统计时间戳
+     */
+    RoomPrevTimestamp?: number;
+    
+    /**
+     * GCL 进度百分比
      */
     gcl?: number;
+
+    /**
+     * GCL 等级
+     */
+    gclLevel?: number;
 
     /**
      * GCL 进度
@@ -668,10 +682,22 @@ interface StatsMemory {
     gclProgressTotal?: number;
 
     /**
-     * GPL 等级
+     * GCL 升级所需tick数
+     */
+    gclUpTick?: number;
+    /**
+     * GCL 升级所需时间
+     */
+    gclUpTime?: number;
+
+    /**
+     * GPL 进度百分比
      */
     gpl?: number;
-
+    /**
+     * GPL 等级
+     */
+    gplLevel?: number;
     /**
      * GPL 进度
      */
@@ -681,6 +707,14 @@ interface StatsMemory {
      * GPL 升级所需进度
      */
     gplProgressTotal?: number;
+    /**
+     * GPL 升级所需tick数
+     */
+    gplUpTick?: number;
+    /**
+     * GPL 升级所需时间
+     */
+    gplUpTime?: number;
 
     /**
      * CPU 使用量
@@ -693,76 +727,113 @@ interface StatsMemory {
     bucket?: number;
 
     /**
-     * 信用点数
+     * CPU 平均值统计累加器
+     * @description total 为窗口内 CPU 累计使用量，count 为采样 tick 数
      */
-    credits?: number;
-
-    /**
-     * 房间统计数据
-     */
-    rooms?: {
-        [roomName: string]: RoomStatsMemory;
+    cpuUsed?: {
+        total: number;
+        count: number;
     };
 
     /**
-     * 其他自定义统计数据
+     * CPU 平均使用量
+     * @description 基于 cpuUsed 的统计窗口计算（CPU 点数 / tick）
      */
-    [key: string]: any;
+    AvgCpuUsed?: number;
 
     /**
-     * 每个房间的当前可用能量（room.energyAvailable）
+     * 房间 RCL 等级
+     * @description key 为房间名
      */
-    energyAvailable?: Record<string, number>;
-    /**
-     * 每个房间的总能量估算（包含 storage/terminal/container 等）
-     */
-    totalEnergy?: Record<string, number>;
-    /**
-     * 每个房间的能量状态（与 RoomMemory.energyState 同步）
-     */
-    energyState?: Record<string, EnergyState>;
-    /**
-     * 每个房间的锁死风险标记（CRITICAL 且关键搬运为0且能量堆积）
-     */
-    energyAlert?: Record<string, boolean>;
-    /**
-     * 每个房间关键后勤数量（carrier/transport/manager/universal 合计）
-     */
-    logisticCount?: Record<string, number>;
-    /**
-     * 每个房间 spawn 任务队列长度
-     */
-    spawnQueue?: Record<string, number>;
-}
-
-/**
- * 房间统计数据
- */
-interface RoomStatsMemory {
-    /**
-     * 控制器等级
-     */
-    level?: number;
+    rclLevel?: Record<string, number>;
 
     /**
-     * 控制器进度
+     * 房间 RCL 升级进度百分比
+     * @description key 为房间名，范围 0-100（RCL8 为 0）
      */
-    progress?: number;
+    rclProgress?: Record<string, number>;
 
     /**
-     * 控制器升级所需进度
+     * 房间 RCL 预计升级剩余时间
+     * @description key 为房间名，单位秒
      */
-    progressTotal?: number;
+    rclUpTime?: Record<string, number>;
+    /**
+     * RCL 升级所需tick数
+     */
+    rclUpTick?: Record<string, number>;
 
     /**
-     * 能量存储量
+     * 房间上次记录的 RCL 进度值
+     * @description key 为房间名，用于计算本周期 progress 增量
      */
-    energy?: number;
+    lastRclProgress?: Record<string, number>;
 
     /**
-     * 其他自定义统计数据
+     * 上一次房间升级统计时间戳
+     * @deprecated 历史遗留字段，请使用 RoomPrevTimestamp
      */
-    [key: string]: any;
+    lastUpgradeTimestamp?: number;
+
+    /**
+     * 房间能量储备
+     * @description storage + terminal 的总能量，key 为房间名
+     */
+    energy?: Record<string, number>;
+
+    /**
+     * 上一次统计周期的房间能量储备快照
+     * @description key 为房间名
+     */
+    energyHistory?: Record<string, number>;
+
+    /**
+     * 房间能量储备增量
+     * @description energy - energyHistory，key 为房间名
+     */
+    energyRise?: Record<string, number>;
+
+    /**
+     * 房间能量容量
+     * @description room.energyCapacityAvailable，key 为房间名
+     */
+    SpawnEnergy?: Record<string, number>;
+
+    /**
+     * 当前市场 credits
+     */
+    credit?: number;
+
+    /**
+     * 统计周期内 credits 变动量
+     */
+    creditChanges?: number;
+
+    /**
+     * 上一次统计周期记录的 credits
+     */
+    lastCredit?: number;
+
+    /**
+     * 能量前十求购均价
+     */
+    energyAveragePrice?: number;
+
+    /**
+     * 能量前十出售均价
+     */
+    energyAverageSellPrice?: number;
+
+    /**
+     * 各角色 creep 数量统计
+     * @description key 为 role
+     */
+    creeps?: Record<string, number>;
+
+    /**
+     * creep 总数
+     */
+    creepCount?: number;
 }
 
 
