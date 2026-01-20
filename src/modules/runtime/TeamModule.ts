@@ -1,8 +1,8 @@
 import {compressBodyConfig, log} from "@/utils";
 import {TEAM_CONFIG} from "@/constant/TeamConfig";
-import Team from "./TeamClass/Team";
-import TeamCreep from "./TeamClass/TeamCreep";
-import TeamCalc from "./TeamClass/TeamCalc";
+import Team from "@/modules/feature/TeamClass/Team";
+import TeamCreep from "@/modules/feature/TeamClass/TeamCreep";
+import TeamCalc from "@/modules/feature/TeamClass/TeamCalc";
 
 const TeamModule = {
     start: function () {
@@ -247,4 +247,4 @@ const TeamModule = {
     },
 }
 
-export default TeamModule
+export { TeamModule }

@@ -76,11 +76,6 @@ const Base = {
             log('', `已清空房间 ${roomName} 的 ${type} 任务`);
             return OK;
         },
-        roomPath(roomName: string) {
-            global.BetterMove.deletePathInRoom(roomName);
-            log('', `已清空房间 ${roomName} 的路径缓存`);
-            return OK;
-        },
         boostTask(roomName: string) {
             const boostmem = Memory['StructControlData'][roomName];
             boostmem['boostRes'] = {};
@@ -119,10 +114,6 @@ const Base = {
             }
         }
         return OK;
-    },
-
-    avoidRoom(room: string): OK | Error {
-        return global.BetterMove.addAvoidRooms(room);
     },
 
     log(text: string, ...args: any[]): OK | Error {

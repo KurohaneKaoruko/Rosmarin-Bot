@@ -1,3 +1,4 @@
+import { log } from '@/utils.js';
 import { errorMapper } from './errorMapper.js'
 import { BASE_CONFIG } from '@/constant/config.js'
 
@@ -45,7 +46,8 @@ export const createApp = () => {
     };
 
     let initOK = false;
-    const init = () => {
+    const runInit = () => {
+        if (initOK) return;
         const tryInit = (proto: any, objs: Record<string, any>) => {
             if (proto.init) Object.values(objs).forEach((o: any) => o.init());
         };
@@ -54,7 +56,13 @@ export const createApp = () => {
         tryInit(PowerCreep.prototype, Game.powerCreeps);
         runCall('init');
         initOK = true;
-        if (Game.shard.name !== 'sim') console.log('全局初始化完成。');
+        if (Game.shard.name === 'sim') return;
+        if (Memory.lastinit) {
+            log(name, `<b>挂载完成。[距离上次挂载 ${Game.time - Memory.lastinit} tick]</b>`);
+        } else {
+            log(name, `<b>挂载完成。</b>`);
+        }
+        Memory.lastinit = Game.time;
     };
 
     let _MemoryCache: Memory;
@@ -77,7 +85,7 @@ export const createApp = () => {
 
     /** 主要逻辑 */
     const exec = () => {
-        if (!initOK) init();
+        runInit();
         runCall('start');
         runners.room();
         runners.creep();
