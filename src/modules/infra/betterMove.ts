@@ -604,6 +604,49 @@ function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT
 }
 
 let temporalAvoidFrom, temporalAvoidTo;
+let bounceAvoidFrom, bounceAvoidTo, bounceAvoidUntil;
+
+function registerRoomBounceGuard(creep, targetRoomName) {
+    if (!creep || !creep.memory) return;
+
+    if (!bounceAvoidUntil || Game.time > bounceAvoidUntil) {
+        bounceAvoidFrom = bounceAvoidTo = '';
+        bounceAvoidUntil = 0;
+    }
+
+    let mem = creep.memory._bmRoomBounce;
+    if (!mem) {
+        mem = creep.memory._bmRoomBounce = {
+            lastRoom: creep.pos.roomName,
+            prevRoom: '',
+            prev2Room: '',
+            lastSwitch: Game.time,
+            prevSwitch: Game.time,
+            blockUntil: 0,
+            blockFrom: '',
+            blockTo: ''
+        };
+    }
+
+    const current = creep.pos.roomName;
+    if (mem.lastRoom !== current) {
+        mem.prev2Room = mem.prevRoom;
+        mem.prevRoom = mem.lastRoom;
+        mem.lastRoom = current;
+        mem.prevSwitch = mem.lastSwitch || Game.time;
+        mem.lastSwitch = Game.time;
+
+        const bounced = mem.prev2Room && mem.prev2Room === current && (Game.time - mem.prevSwitch) <= 20;
+        if (bounced && targetRoomName && targetRoomName !== mem.prevRoom) {
+            mem.blockFrom = current;
+            mem.blockTo = mem.prevRoom;
+            mem.blockUntil = Game.time + 100;
+            bounceAvoidFrom = mem.blockFrom;
+            bounceAvoidTo = mem.blockTo;
+            bounceAvoidUntil = mem.blockUntil;
+        }
+    }
+}
 function routeCallback(nextRoomName, fromRoomName) {    // 避开avoidRooms设置了的
     if (nextRoomName in avoidRooms) {
         //console.log('Infinity at ' + nextRoomName);
@@ -616,6 +659,9 @@ function bypassRouteCallback(nextRoomName, fromRoomName) {
         //console.log(`Infinity from ${fromRoomName} to ${nextRoomName}`);
         return Infinity;
     }
+    if (bounceAvoidUntil && Game.time <= bounceAvoidUntil && fromRoomName == bounceAvoidFrom && nextRoomName == bounceAvoidTo) {
+        return Infinity;
+    }
     return routeCallback(nextRoomName, fromRoomName);
 }
 /**
@@ -626,7 +672,10 @@ function bypassRouteCallback(nextRoomName, fromRoomName) {
  */
 function findRoute(fromRoomName, toRoomName, bypass) {  // TODO 以后跨shard寻路也放在这个函数里
     //console.log('findRoute', fromRoomName, toRoomName, bypass);
-    return Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypass ? bypassRouteCallback : routeCallback });
+    if (bypass) {
+        return Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypassRouteCallback });
+    }
+    return Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: routeCallback });
 }
 
 /**
@@ -1207,6 +1256,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         toPos = { x: firstArg, y: secondArg, roomName: this.room.name };
         ops = opts || {};
     }
+    registerRoomBounceGuard(this, toPos.roomName);
     ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
     ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
 
