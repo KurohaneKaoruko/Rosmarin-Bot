@@ -121,6 +121,28 @@ interface Memory {
     };
 }
 
+/**
+ * 房间能量状态
+ * @description 用于恢复期/日常期的策略切换（孵化体型、任务优先级等）
+ */
+type EnergyState = 'CRITICAL' | 'LOW' | 'NORMAL' | 'SURPLUS';
+
+interface RoomMemory {
+    /**
+     * 房间能量状态（由房间逻辑更新）
+     * @description 实际实现会做间隔刷新（避免频繁统计），恢复期会更频繁
+     */
+    energyState?: EnergyState;
+    /**
+     * 能量状态最近一次更新时间（Game.time）
+     */
+    energyStateTick?: number;
+    /**
+     * 建议保留的最低能量储备（用于保证关键孵化/回填链路）
+     */
+    energyReserve?: number;
+}
+
 // ============================================================
 // 房间控制配置 - Room Control Memory
 // ============================================================
@@ -680,6 +702,31 @@ interface StatsMemory {
      * 其他自定义统计数据
      */
     [key: string]: any;
+
+    /**
+     * 每个房间的当前可用能量（room.energyAvailable）
+     */
+    energyAvailable?: Record<string, number>;
+    /**
+     * 每个房间的总能量估算（包含 storage/terminal/container 等）
+     */
+    totalEnergy?: Record<string, number>;
+    /**
+     * 每个房间的能量状态（与 RoomMemory.energyState 同步）
+     */
+    energyState?: Record<string, EnergyState>;
+    /**
+     * 每个房间的锁死风险标记（CRITICAL 且关键搬运为0且能量堆积）
+     */
+    energyAlert?: Record<string, boolean>;
+    /**
+     * 每个房间关键后勤数量（carrier/transport/manager/universal 合计）
+     */
+    logisticCount?: Record<string, number>;
+    /**
+     * 每个房间 spawn 任务队列长度
+     */
+    spawnQueue?: Record<string, number>;
 }
 
 /**

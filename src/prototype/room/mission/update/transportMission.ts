@@ -199,6 +199,9 @@ export default class TransportMission extends Room {
             })
         }
 
+        const state = room.memory.energyState || room.updateEnergyState?.(false);
+        if (state === 'LOW' || state === 'CRITICAL') return;
+
         if(room.getResAmount(RESOURCE_ENERGY) < 10000) return;
 
         if (Game.time % 20 === 0 && room.level >= 6 && room.lab) {
@@ -525,4 +528,3 @@ export default class TransportMission extends Room {
         });
     }
 }
-

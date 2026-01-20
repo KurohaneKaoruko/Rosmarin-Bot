@@ -96,6 +96,12 @@ function updateRoomStats() {
     stats.energy = {};
     stats.energyRise = {};
     stats.SpawnEnergy = {};
+    stats.energyAvailable = {};
+    stats.totalEnergy = {};
+    stats.energyState = {};
+    stats.energyAlert = {};
+    stats.logisticCount = {};
+    stats.spawnQueue = {};
     let roomCount = 0;
     for (const room of Object.values(Game.rooms)) {
         if (!room.controller?.my) continue;
@@ -116,6 +122,24 @@ function updateRoomStats() {
         stats.energy[roomName] = storageEnergy + terminalEnergy;
         stats.energyRise[roomName] = stats.energy[roomName] - stats.energyHistory[roomName] || 0;
         stats.SpawnEnergy[roomName] = room.energyCapacityAvailable;
+        stats.energyAvailable[roomName] = room.energyAvailable;
+        const profile = room.getEnergyProfile?.();
+        stats.totalEnergy[roomName] = profile?.totalEnergy ?? stats.energy[roomName];
+        const state = room.memory.energyState || room.updateEnergyState?.(false) || 'NORMAL';
+        stats.energyState[roomName] = state;
+        const creepNum = room.getCreepNum?.() || {};
+        const logisticCount =
+            (creepNum['carrier'] || 0) +
+            (creepNum['transport'] || 0) +
+            (creepNum['manager'] || 0) +
+            (creepNum['universal'] || 0);
+        stats.logisticCount[roomName] = logisticCount;
+        const spawnPool = Memory.MissionPools?.[roomName]?.spawn;
+        stats.spawnQueue[roomName] = Array.isArray(spawnPool) ? spawnPool.length : 0;
+        stats.energyAlert[roomName] =
+            state === 'CRITICAL' &&
+            logisticCount === 0 &&
+            (profile?.containerEnergy || 0) >= (profile?.cap || room.energyCapacityAvailable);
     }
     stats.roomCount = roomCount;
 }

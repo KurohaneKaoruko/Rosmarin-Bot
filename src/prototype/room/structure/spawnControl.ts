@@ -50,7 +50,9 @@ export default class SpawnControl extends Room {
         if (typeof body == 'string' && body) {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {
-            body = this.GetRoleBodys(role, data.upbody);
+            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            const budget = state === 'LOW' || state === 'CRITICAL' ? this.energyAvailable : undefined;
+            body = this.GetRoleBodys(role, data.upbody, budget);
         }
 
         const bodypart = this.GenerateBodys(body, role);
@@ -78,7 +80,7 @@ export default class SpawnControl extends Room {
 
     SpawnCreep() {
         if (Game.time % 5) return;
-        if (this.energyAvailable < 250) return;
+        if (this.energyAvailable < 200) return;
 
         let spawn: StructureSpawn;
         if (this.level == 8 || this.spawn.length == 1) {
@@ -107,6 +109,24 @@ export default class SpawnControl extends Room {
         // 处理停摆
         if (data.cost > this.energyAvailable) {
             if (role !== 'harvester' && role !== 'transport' && role !== 'carrier' && role !== 'manager') return;
+
+            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            if (state === 'LOW' || state === 'CRITICAL') {
+                const config = this.GetRoleBodys(role, false, this.energyAvailable);
+                const bodypart = this.GenerateBodys(config, role);
+                const cost = this.CalculateEnergy(bodypart);
+                if (bodypart.length > 0 && cost > 0 && cost <= this.energyAvailable) {
+                    const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
+                    if (emergencyResult === OK) {
+                        if (!global.CreepNum) global.CreepNum = {};
+                        if (!global.CreepNum[this.name]) global.CreepNum[this.name] = {};
+                        global.CreepNum[this.name][role] = (global.CreepNum[this.name][role] || 0) + 1;
+                        this.submitSpawnMission(data.taskId);
+                        global.log(`房间 ${this.name} 不足以孵化目标体型 ${role}，已按当前能量孵化缩小体型。`);
+                        return;
+                    }
+                }
+            }
             
             let T_num = 0, C_num = 0, H_num = 0, univ_num = 0;
             this.find(FIND_MY_CREEPS).forEach(c => {

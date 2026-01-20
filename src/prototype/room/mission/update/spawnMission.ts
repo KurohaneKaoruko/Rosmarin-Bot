@@ -11,6 +11,14 @@ const WALL_MIN_ENERGY = 50000;
 const TRANSPORT_MIN = 10000;
 const TRANSPORT_HIGH = 100000;
 
+const getEnergyState = (room: Room) => {
+    return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
+}
+
+const getTotalEnergy = (room: Room) => {
+    return (room as any).getEnergyProfile?.().totalEnergy ?? (room as any)[RESOURCE_ENERGY] ?? 0;
+}
+
 const RoleSpawnCheck = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
@@ -29,10 +37,15 @@ const RoleSpawnCheck = {
     },
     'transport': (room: Room, current: number) => {
         const num = RoleLevelData['transport'][room.level]['num'];
+        if (current >= num) return false;
+        const state = getEnergyState(room);
+        if (state === 'LOW' || state === 'CRITICAL') {
+            return !!(room.storage || room.terminal || (room.container && room.container.length > 0));
+        }
         let energy = (room.storage?.store[RESOURCE_ENERGY] || 0) +
                         (room.terminal?.store[RESOURCE_ENERGY] || 0);
         if (energy < TRANSPORT_MIN) return false;
-        return current < num && (room.storage || room.terminal);
+        return !!(room.storage || room.terminal);
     },
     'manager': (room: Room, current: number) => {
         const num = RoleLevelData['manager'][room.level]['num'];
@@ -53,12 +66,16 @@ const RoleSpawnCheck = {
     },
     'worker': (room: Room, current: number) => {
         if (Memory['warmode']) return false;
-        if (room.level < 6) {
-            if (current < 2 && room.checkMissionInPool('build')) return true;
-        } else {
-            if (room.storage?.store[RESOURCE_ENERGY] < TRANSPORT_MIN) return false;
-            if (current < 1 && room.checkMissionInPool('build')) return true;
-            if (current < 2 && room.getMissionNumInPool('build') > 10) return true;
+        const state = getEnergyState(room);
+        const cap = room.energyCapacityAvailable || 0;
+        const totalEnergy = getTotalEnergy(room);
+        if (room.checkMissionInPool('build')) {
+            if (state === 'SURPLUS' || state === 'NORMAL') {
+                if (current < 1) return true;
+                if (current < 2 && room.getMissionNumInPool('build') > 10) return true;
+            } else if (state === 'LOW') {
+                if (current < 1 && totalEnergy >= Math.max(1000, cap * 2)) return true;
+            }
         }
         if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
         if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {

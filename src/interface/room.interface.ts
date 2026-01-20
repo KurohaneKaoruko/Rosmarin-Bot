@@ -192,6 +192,32 @@ interface Room {
      * @description 检查房间能量是否已满且所有tower能量充足（空余<100）
      */
     CheckSpawnAndTower(): boolean;
+
+    /**
+     * 获取房间能量概况
+     * @description 用于恢复期/日常期策略判断
+     */
+    getEnergyProfile(): {
+        cap: number;
+        avail: number;
+        storageEnergy: number;
+        terminalEnergy: number;
+        containerEnergy: number;
+        linkEnergy: number;
+        totalEnergy: number;
+    };
+
+    /**
+     * 更新房间能量状态并写入 room.memory
+     * @param force - 是否强制刷新（忽略同 tick 缓存）
+     * @returns 能量状态
+     */
+    updateEnergyState(force?: boolean): NonNullable<RoomMemory['energyState']>;
+
+    /**
+     * 获取房间能量状态（内部可复用 updateEnergyState 的缓存）
+     */
+    getEnergyState(): NonNullable<RoomMemory['energyState']>;
     
     /** 
      * 获取房间内最近的source
@@ -245,7 +271,7 @@ interface Room {
      * @description 根据房间等级和能量容量动态生成合适的体型
      * @example const body = room.GetRoleBodys('harvester'); // [[WORK, 5], [CARRY, 1], [MOVE, 3]]
      */
-    GetRoleBodys(role: string, upbody?: boolean): ((BodyPartConstant | number)[])[];
+    GetRoleBodys(role: string, upbody?: boolean, energyBudget?: number): ((BodyPartConstant | number)[])[];
     
     /** 
      * 生成creep body

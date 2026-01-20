@@ -63,6 +63,55 @@ export default class BaseFunction extends Room {
         return true;
     }
 
+    getEnergyProfile() {
+        const cap = this.energyCapacityAvailable || 0;
+        const avail = this.energyAvailable || 0;
+        const storageEnergy = this.storage?.store[RESOURCE_ENERGY] || 0;
+        const terminalEnergy = this.terminal?.store[RESOURCE_ENERGY] || 0;
+        const containerEnergy = (this.container || []).reduce((sum, c) => sum + (c?.store[RESOURCE_ENERGY] || 0), 0);
+        const linkEnergy = (this.link || []).reduce((sum, l) => sum + (l?.store[RESOURCE_ENERGY] || 0), 0);
+        const totalEnergy = ((this as any)[RESOURCE_ENERGY] || 0) + linkEnergy;
+        return { cap, avail, storageEnergy, terminalEnergy, containerEnergy, linkEnergy, totalEnergy };
+    }
+
+    updateEnergyState(force = false) {
+        if (!force && this.memory.energyStateTick && this.memory.energyState) {
+            const interval = this.memory.energyState === 'CRITICAL' ? 2 : 5;
+            if (Game.time - this.memory.energyStateTick < interval) return this.memory.energyState;
+        }
+        const { cap, avail, containerEnergy, linkEnergy, totalEnergy } = this.getEnergyProfile();
+        const capRef = Math.max(300, cap);
+        const creepNum = this.getCreepNum();
+        const logisticNum =
+            (creepNum['carrier'] || 0) +
+            (creepNum['transport'] || 0) +
+            (creepNum['manager'] || 0) +
+            (creepNum['universal'] || 0);
+
+        type EnergyState = NonNullable<RoomMemory['energyState']>;
+        let state: EnergyState;
+        if (avail < Math.min(300, capRef)) {
+            state = 'CRITICAL';
+        } else if (logisticNum === 0 && this.CheckSpawnAndTower() && (containerEnergy + linkEnergy) >= capRef) {
+            state = 'CRITICAL';
+        } else if (totalEnergy < capRef * 5) {
+            state = 'LOW';
+        } else if (totalEnergy >= capRef * 50) {
+            state = 'SURPLUS';
+        } else {
+            state = 'NORMAL';
+        }
+
+        this.memory.energyReserve = Math.floor(capRef * 2);
+        this.memory.energyState = state;
+        this.memory.energyStateTick = Game.time;
+        return state;
+    }
+
+    getEnergyState() {
+        return this.updateEnergyState(false);
+    }
+
     // 获取绑定最少的能量源
     closestSource(creep: Creep) {
         // 初始化最少Creep绑定计数
@@ -130,9 +179,10 @@ export default class BaseFunction extends Room {
     }
 
     /* 动态生成角色体型 */
-    GetRoleBodys(role: string, upbody?:boolean) {
+    GetRoleBodys(role: string, upbody?:boolean, energyBudget?: number) {
         let lv = this.level;
         let body: any[];
+        const budget = energyBudget ?? this.energyCapacityAvailable;
 
         if (RoleLevelData[role]) {
             while (lv >= 1) {
@@ -143,7 +193,7 @@ export default class BaseFunction extends Room {
                 } else {
                     body = bodyconfig.bodypart
                 }
-                if (this.energyCapacityAvailable >=
+                if (budget >=
                     this.CalculateEnergy(this.GenerateBodys(body))) break;
                 lv--;
             }
