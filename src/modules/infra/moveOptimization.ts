@@ -144,16 +144,46 @@ let unWalkableCCost = 255;
  *  util functions
  */
 let reg1 = /^([WE])([0-9]+)([NS])([0-9]+)$/;    // parse得到['E28N7','E','28','N','7']
+
+/**
+ * 房间名解析缓存
+ * @description moveOpt 内部会频繁对 roomName 做正则解析，这里做轻量缓存减少重复计算
+ */
+let roomNameParseCache = {};
+
+/**
+ * 解析房间名
+ * @param {string} roomName
+ * @returns {{ ew:'W'|'E', ewNum:number, ns:'N'|'S', nsNum:number } | null}
+ */
+function parseRoomName(roomName) {
+    if (roomName in roomNameParseCache) {
+        return roomNameParseCache[roomName];
+    }
+    let m = reg1.exec(roomName);
+    if (!m || m.length != 5) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+    let parsed = {
+        ew: /** @type {'W'|'E'} */(m[1]),
+        ewNum: +m[2],
+        ns: /** @type {'N'|'S'} */(m[3]),
+        nsNum: +m[4]
+    };
+    roomNameParseCache[roomName] = parsed;
+    return parsed;
+}
 /**
  *  统一到大地图坐标，平均单次开销0.00005
  * @param {RoomPosition} pos
  */
 function formalize(pos) {
-    let splited = reg1.exec(pos.roomName);
-    if (splited && splited.length == 5) {
+    let parsed = parseRoomName(pos.roomName);
+    if (parsed) {
         return { // 如果这里出现类型错误，那么意味着房间名字不是正确格式但通过了parse，小概率事件
-            x: (splited[1] === 'W' ? -splited[2] : +splited[2] + 1) * 50 + pos.x,
-            y: (splited[3] === 'N' ? -splited[4] : +splited[4] + 1) * 50 + pos.y
+            x: (parsed.ew === 'W' ? -parsed.ewNum : parsed.ewNum + 1) * 50 + pos.x,
+            y: (parsed.ns === 'N' ? -parsed.nsNum : parsed.nsNum + 1) * 50 + pos.y
         }
     } // else 房间名字不是正确格式
     return {}
@@ -193,12 +223,12 @@ function isNear(pos1, pos2) {
     } else if (pos1.roomName && pos2.roomName) {    // 是完整的RoomPosition
         if (pos1.x + pos2.x != 49 && pos1.y + pos2.y != 49) return false;    // 肯定不是两个边界点, 0.00003 cpu
         // start
-        let splited1 = reg1.exec(pos1.roomName);
-        let splited2 = reg1.exec(pos2.roomName);
-        if (splited1 && splited1.length == 5 && splited2 && splited2.length == 5) {
+        let parsed1 = parseRoomName(pos1.roomName);
+        let parsed2 = parseRoomName(pos2.roomName);
+        if (parsed1 && parsed2) {
             // 统一到大地图坐标
-            let formalizedEW = (splited1[1] === 'W' ? -splited1[2] : +splited1[2] + 1) * 50 + pos1.x - (splited2[1] === 'W' ? -splited2[2] : +splited2[2] + 1) * 50 - pos2.x;
-            let formalizedNS = (splited1[3] === 'N' ? -splited1[4] : +splited1[4] + 1) * 50 + pos1.y - (splited2[3] === 'N' ? -splited2[4] : +splited2[4] + 1) * 50 - pos2.y;
+            let formalizedEW = (parsed1.ew === 'W' ? -parsed1.ewNum : parsed1.ewNum + 1) * 50 + pos1.x - (parsed2.ew === 'W' ? -parsed2.ewNum : parsed2.ewNum + 1) * 50 - pos2.x;
+            let formalizedNS = (parsed1.ns === 'N' ? -parsed1.nsNum : parsed1.nsNum + 1) * 50 + pos1.y - (parsed2.ns === 'N' ? -parsed2.nsNum : parsed2.nsNum + 1) * 50 - pos2.y;
             return -1 <= formalizedEW && formalizedEW <= 1 && -1 <= formalizedNS && formalizedNS <= 1;
         }
         // end - start = 0.00077 cpu
@@ -216,7 +246,7 @@ function inRange(pos1, pos2, range) {
     } else {
         pos1 = formalize(pos1);
         pos2 = formalize(pos2);
-        return pos1.x && pos2.x && inRange(pos1, pos2);
+        return typeof pos1.x == 'number' && typeof pos2.x == 'number' && inRange(pos1, pos2, range);
     }
 }
 
@@ -1230,9 +1260,101 @@ function clearUnused() {
  */
 
 const defaultVisualizePathStyle = { fill: 'transparent', stroke: '#fff', lineStyle: 'dashed', strokeWidth: .15, opacity: .1 };
-/**@type {[MoveToOpts, RoomPosition, CreepPaths['1'], MyPath, number, RoomPosition[], boolean]}
+
+/**
+ *  尝试复用 creep 级路径缓存并推进一步
+ *  @description 命中时会负责处理：正常前进/跨房检查/堵路对穿或绕路/偏离一格修正
+ *  @param {Creep} creep
+ *  @param {RoomPosition} toPos
+ *  @param {MoveToOpts} ops
+ *  @param {CreepPaths['1']} creepCache
+ *  @returns {ScreepsReturnCode | null} 返回 null 表示需要重新寻路
  */
-let [ops, toPos, creepCache, path, idx, posArray, found] = [];
+function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
+    const path = creepCache.path;
+    const idx = creepCache.idx;
+
+    if (!path || !(idx in path.posArray) || path.ignoreStructures != !!ops.ignoreDestructibleStructures) {
+        return null;
+    }
+
+    const posArray = path.posArray;
+    if (!(isEqual(toPos, creepCache.dst) || inRange(posArray[posArray.length - 1], toPos, ops.range))) {
+        return null;
+    }
+
+    if (isEqual(creep.pos, posArray[idx])) {    // 正常
+        if ('storage' in creep.room && inRange(creep.room.storage.pos, creep.pos, coreLayoutRange) && ops.ignoreCreeps) {
+            testNearStorageCheck++;
+            if (trySwap(creep, posArray[idx + 1], false, true) == OK) {
+                testNearStorageSwap++;
+            }
+        }
+        //creep.say('正常');
+        return moveOneStep(creep, ops.visualizePathStyle, toPos);
+    }
+
+    if (idx + 1 in posArray && idx + 2 in posArray && isEqual(creep.pos, posArray[idx + 1])) {  // 跨房了
+        creepCache.idx++;
+        if (!path.directionArray[idx + 2]) {  // 第一次见到该房则检查房间
+            if (checkRoom(creep.room, path, creepCache.idx)) {   // 传creep所在位置的idx
+                //creep.say('新房 可走');
+                //console.log(`${Game.time}: ${creep.name} check room ${creep.pos.roomName} OK`);
+                return moveOneStep(creep, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+            }   // else 检查中发现房间里有建筑挡路，重新寻路
+            //console.log(`${Game.time}: ${creep.name} check room ${creep.pos.roomName} failed`);
+            deletePath(path);
+            return null;
+        }
+        //creep.say('这个房间见过了');
+        return moveOneStep(creep, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+    }
+
+    if (isNear(creep.pos, posArray[idx])) {  // 堵路了
+        const code = trySwap(creep, posArray[idx], ops.bypassHostileCreeps, ops.ignoreCreeps);  // 检查挡路creep
+        if (code == ERR_INVALID_TARGET) {   // 是被设置了不可对穿的creep或者敌对creep挡路，临时绕路
+            testBypass++;
+            ops.bypassRange = ops.bypassRange || 5; // 默认值
+            if (typeof ops.bypassRange != "number" || typeof ops.range != 'number') {
+                return ERR_INVALID_ARGS;
+            }
+            if (findTemporalPath(creep, toPos, ops)) { // 有路，creepCache的内容会被这个函数更新
+                //creep.say('开始绕路');
+                return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+            }
+            //creep.say('没路啦');
+            return ERR_NO_PATH;
+        }
+
+        if (code == ERR_NOT_FOUND && isObstacleStructure(creep.room, posArray[idx], ops.ignoreDestructibleStructures)) {   // 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
+            //console.log(`${Game.time}: ${creep.name} find obstacles at ${creep.pos}`);
+            delete costMatrixCache[creep.pos.roomName];
+            deletePath(path);
+            return null;
+        }
+        // else 上tick移动失败但也不是建筑物和creep/pc挡路。有2个情况：1.下一格路本来是穿墙路并碰巧消失了；2.下一格是房间出口，有另一个creep抢路了然后它被传送到隔壁了。不处理第1个情况，按第2个情况对待。
+        //creep.say('对穿' + getDirection(creep.pos, posArray[idx]) + '-' + originMove.call(creep, getDirection(creep.pos, posArray[idx])));
+        if (ops.visualizePathStyle) {
+            showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
+        }
+        creepMoveCache[creep.name] = Game.time;
+        return originMove.call(creep, getDirection(creep.pos, posArray[idx]));  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
+    }
+
+    if (idx - 1 >= 0 && isNear(creep.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
+        //creep.say('偏离一格');
+        if (creep.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
+            trySwap(creep, posArray[idx - 1], false, true);
+        }
+        if (ops.visualizePathStyle) {
+            showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
+        }
+        creepMoveCache[creep.name] = Game.time;
+        return originMove.call(creep, getDirection(creep.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
+    }
+
+    return null; // 彻底偏离，重新寻路
+}
 /**
  *  把moveTo重写一遍
  * @param {Creep} this
@@ -1248,6 +1370,12 @@ function betterMoveTo(firstArg, secondArg, opts) {
     if (this.spawning) {
         return ERR_BUSY;
     }
+
+    // moveTo 调用临时变量（局部声明，避免跨调用串值）
+    let toPos;
+    let ops;
+    let creepCache;
+    let found;
 
     if (typeof firstArg == 'object') {
         toPos = firstArg.pos || firstArg;
@@ -1291,74 +1419,10 @@ function betterMoveTo(firstArg, secondArg, opts) {
     // HELP：感兴趣的帮我检查这里的核心逻辑orz
     creepCache = creepPathCache[this.name];
     if (creepCache) {  // 有缓存
-        path = creepCache.path;
-        idx = creepCache.idx;
-        if (path && idx in path.posArray && path.ignoreStructures == !!ops.ignoreDestructibleStructures) {  // 缓存路条件相同
-            posArray = path.posArray;
-            if (isEqual(toPos, creepCache.dst) || inRange(posArray[posArray.length - 1], toPos, ops.range)) {   // 正向走，目的地没变
-                if (isEqual(this.pos, posArray[idx])) {    // 正常
-                    if ('storage' in this.room && inRange(this.room.storage.pos, this.pos, coreLayoutRange) && ops.ignoreCreeps) {
-                        testNearStorageCheck++;
-                        if (trySwap(this, posArray[idx + 1], false, true) == OK) {
-                            testNearStorageSwap++;
-                        }
-                    }
-                    //this.say('正常');
-                    return moveOneStep(this, ops.visualizePathStyle, toPos);
-                } else if (idx + 1 in posArray && idx + 2 in posArray && isEqual(this.pos, posArray[idx + 1])) {  // 跨房了
-                    creepCache.idx++;
-                    if (!path.directionArray[idx + 2]) {  // 第一次见到该房则检查房间
-                        if (checkRoom(this.room, path, creepCache.idx)) {   // 传creep所在位置的idx
-                            //this.say('新房 可走');
-                            //console.log(`${Game.time}: ${this.name} check room ${this.pos.roomName} OK`);
-                            return moveOneStep(this, ops.visualizePathStyle, toPos);  // 路径正确，继续走
-                        }   // else 检查中发现房间里有建筑挡路，重新寻路
-                        //console.log(`${Game.time}: ${this.name} check room ${this.pos.roomName} failed`);
-                        deletePath(path);
-                    } else {
-                        //this.say('这个房间见过了');
-                        return moveOneStep(this, ops.visualizePathStyle, toPos);  // 路径正确，继续走
-                    }
-                } else if (isNear(this.pos, posArray[idx])) {  // 堵路了
-                    let code = trySwap(this, posArray[idx], ops.bypassHostileCreeps, ops.ignoreCreeps);  // 检查挡路creep
-                    if (code == OK) {   // 让这个逻辑掉下去
-                    } else if (code == ERR_INVALID_TARGET) {   // 是被设置了不可对穿的creep或者敌对creep挡路，临时绕路
-                        testBypass++;
-                        ops.bypassRange = ops.bypassRange || 5; // 默认值
-                        if (typeof ops.bypassRange != "number" || typeof ops.range != 'number') {
-                            return ERR_INVALID_ARGS;
-                        }
-                        if (findTemporalPath(this, toPos, ops)) { // 有路，creepCache的内容会被这个函数更新
-                            //this.say('开始绕路');
-                            return startRoute(this, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
-                        } else {  // 没路
-                            //this.say('没路啦');
-                            return ERR_NO_PATH;
-                        }
-                    } else if (code == ERR_NOT_FOUND && isObstacleStructure(this.room, posArray[idx], ops.ignoreDestructibleStructures)) {   // 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
-                        //console.log(`${Game.time}: ${this.name} find obstacles at ${this.pos}`);
-                        delete costMatrixCache[this.pos.roomName];
-                        deletePath(path);
-                    } // else 上tick移动失败但也不是建筑物和creep/pc挡路。有2个情况：1.下一格路本来是穿墙路并碰巧消失了；2.下一格是房间出口，有另一个creep抢路了然后它被传送到隔壁了。不处理第1个情况，按第2个情况对待。
-                    //this.say('对穿' + getDirection(this.pos, posArray[idx]) + '-' + originMove.call(this, getDirection(this.pos, posArray[idx])));
-                    if (ops.visualizePathStyle) {
-                        showVisual(this, toPos, posArray, idx, 1, ops.visualizePathStyle);
-                    }
-                    creepMoveCache[this.name] = Game.time;
-                    return originMove.call(this, getDirection(this.pos, posArray[idx]));  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
-                } else if (idx - 1 >= 0 && isNear(this.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
-                    //this.say('偏离一格');
-                    if (this.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
-                        trySwap(this, posArray[idx - 1], false, true);
-                    }
-                    if (ops.visualizePathStyle) {
-                        showVisual(this, toPos, posArray, idx, 1, ops.visualizePathStyle);
-                    }
-                    creepMoveCache[this.name] = Game.time;
-                    return originMove.call(this, getDirection(this.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
-                } // else 彻底偏离，重新寻路
-            } // else 目的地变了
-        } // else 缓存中没路或者条件变了
+        const code = tryMoveWithCreepCache(this, toPos, ops, creepCache);
+        if (code !== null) {
+            return code;
+        }
     } // else 需要重新寻路，先找缓存路，找不到就寻路
 
     if (!creepCache) {    // 初始化cache
@@ -1376,7 +1440,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
         return ERR_INVALID_ARGS
     }
 
-    found = this.pos.roomName == toPos.roomName ? findShortPathInCache(formalize(this.pos), formalize(toPos), this.pos, creepCache, ops) : findLongPathInCache(formalize(this.pos), formalize(toPos), creepCache, ops);
+    const fromFormalPos = formalize(this.pos);
+    const toFormalPos = formalize(toPos);
+    found = this.pos.roomName == toPos.roomName ?
+        findShortPathInCache(fromFormalPos, toFormalPos, this.pos, creepCache, ops) :
+        findLongPathInCache(fromFormalPos, toFormalPos, creepCache, ops);
     if (found) {
         //this.say('cached');
         //console.log(this, this.pos, 'hit');
