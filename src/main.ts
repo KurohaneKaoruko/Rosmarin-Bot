@@ -14,7 +14,7 @@ import { FlagSpawn } from '@/modules/runtime/flagSpawn';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 
-import '@/modules/infra/betterMove';    // creep移动优化
+import '@/modules/infra/moveOpt';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
 import '@/modules/infra/roomResource'; // 资源统计
 
