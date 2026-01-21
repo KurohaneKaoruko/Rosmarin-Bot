@@ -94,58 +94,87 @@ let unWalkableCCost = 255;
 /***************************************
  *  util functions
  */
-let reg1 = /^([WE])([0-9]+)([NS])([0-9]+)$/;    // parse得到['E28N7','E','28','N','7']
 
 /**
  * 房间名解析缓存
  * @description moveOpt 内部会频繁对 roomName 做正则解析，这里做轻量缓存减少重复计算
  */
-let roomNameParseCache = {};
-let roomNameParseCacheSize = 0;
-let roomNameParseCacheLastClearTick = 0;
-let roomNameParseCacheMaxSize = 2000;
-let roomNameParseCacheClearInterval = 1000;
-
+let roomNameParseCache = Object.create(null);
 cache.roomNameParseCache = roomNameParseCache;
-
-function maybeClearRoomNameParseCache() {
-    if (roomNameParseCacheSize <= roomNameParseCacheMaxSize) {
-        return;
-    }
-    if (typeof Game != 'undefined' && Game.time - roomNameParseCacheLastClearTick < roomNameParseCacheClearInterval) {
-        return;
-    }
-    for (let k in roomNameParseCache) {
-        delete roomNameParseCache[k];
-    }
-    roomNameParseCacheSize = 0;
-    roomNameParseCacheLastClearTick = typeof Game != 'undefined' ? Game.time : roomNameParseCacheLastClearTick;
-}
 
 /**
  * 解析房间名
  * @param {string} roomName
  * @returns {{ ew:'W'|'E', ewNum:number, ns:'N'|'S', nsNum:number } | null}
  */
-function parseRoomName(roomName) {
-    if (roomName in roomNameParseCache) {
-        return roomNameParseCache[roomName];
-    }
-    maybeClearRoomNameParseCache();
-    let m = reg1.exec(roomName);
-    if (!m || m.length != 5) {
+function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N' | 'S'; nsNum: number; } | null {
+    const cached = roomNameParseCache[roomName];
+    if (cached !== undefined) return cached;
+    const len = roomName.length;
+    if (len < 4) {
         roomNameParseCache[roomName] = null;
-        roomNameParseCacheSize++;
         return null;
     }
+
+    const ewCode = roomName.charCodeAt(0);
+    if (ewCode !== 69 && ewCode !== 87) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+
+    let i = 1;
+    let ewNum = 0;
+    const ewStart = i;
+    while (i < len) {
+        const code = roomName.charCodeAt(i);
+        if (code === 78 || code === 83) break;
+        const digit = code - 48;
+        if (digit < 0 || digit > 9) {
+            roomNameParseCache[roomName] = null;
+            return null;
+        }
+        ewNum = ewNum * 10 + digit;
+        i++;
+    }
+    if (i === ewStart || i >= len) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+
+    const nsCode = roomName.charCodeAt(i);
+    if (nsCode !== 78 && nsCode !== 83) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+    i++;
+    if (i >= len) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+
+    let nsNum = 0;
+    const nsStart = i;
+    while (i < len) {
+        const digit = roomName.charCodeAt(i) - 48;
+        if (digit < 0 || digit > 9) {
+            roomNameParseCache[roomName] = null;
+            return null;
+        }
+        nsNum = nsNum * 10 + digit;
+        i++;
+    }
+    if (i === nsStart) {
+        roomNameParseCache[roomName] = null;
+        return null;
+    }
+
     let parsed = {
-        ew: /** @type {'W'|'E'} */(m[1]),
-        ewNum: +m[2],
-        ns: /** @type {'N'|'S'} */(m[3]),
-        nsNum: +m[4]
+        ew: /** @type {'W'|'E'} */(ewCode === 87 ? 'W' : 'E'),
+        ewNum,
+        ns: /** @type {'N'|'S'} */(nsCode === 83 ? 'S' : 'N'),
+        nsNum
     };
     roomNameParseCache[roomName] = parsed;
-    roomNameParseCacheSize++;
     return parsed;
 }
 /**
