@@ -12,56 +12,62 @@ export default class MoveFunction extends Creep {
 
         const DETOUR_WINDOW = 20;
         const COOLDOWN_TTL = 15;
+        const currentRoom = this.pos.roomName;
 
         const opts: any = options || {};
         if (opts.range === undefined) opts.range = 3;
 
-        // 状态机：用于“决定绕房后继续执行绕房方案”，避免 A->B->A 反复横跳
+        // moveToRoom 状态缓存：降低跨房抖动并保持目标点稳定
         let state = this.memory._moveToRoomState;
         if (!state || state.targetRoom !== roomName) {
             state = this.memory._moveToRoomState = {
                 targetRoom: roomName,
                 targetPos: null,
-                lastRoom: this.room.name,
-                lastRoomTick: Game.time,
+                lastRoom: currentRoom,
                 leftTargetTick: 0,
                 cooldownUntil: 0
             };
         }
 
-        // 记录“离开目标房间”的时刻与“回到目标房间”的冷却窗口
-        if (state.lastRoom !== this.room.name) {
-            if (state.lastRoom === roomName && this.room.name !== roomName) {
+        // 记录跨房切换与“离开目标房间”时间点
+        const lastRoom = state.lastRoom || currentRoom;
+        if (lastRoom !== currentRoom) {
+            if (lastRoom === roomName && currentRoom !== roomName) {
                 state.leftTargetTick = Game.time;
             }
-            if (this.room.name === roomName && state.lastRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+            if (currentRoom === roomName && lastRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
                 state.cooldownUntil = Game.time + COOLDOWN_TTL;
             }
-            state.lastRoom = this.room.name;
-            state.lastRoomTick = Game.time;
+            state.lastRoom = currentRoom;
         }
 
-        // 目标点：保持稳定，避免每 tick 随机导致策略抖动
-        if (!state.targetPos || state.targetPos.roomName !== roomName) {
-            if (this.room.name === roomName && this.room.controller) {
-                const p = this.room.controller.pos;
-                state.targetPos = { x: p.x, y: p.y, roomName };
-            } else {
-                let seed = 0;
-                const s = `${this.name}|${roomName}`;
-                for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
-                const centerX = 25;
-                const centerY = 25;
-                const range = 10;
-                const span = range * 2 + 1;
-                const x = (seed % span) + (centerX - range);
-                const y = (((seed >>> 8) % span) + (centerY - range));
-                state.targetPos = { x, y, roomName };
+        // 目标点策略：目标房间有视野时优先使用 controller 坐标，否则使用稳定随机点
+        let targetPos = state.targetPos as { x: number; y: number; roomName?: string } | null;
+        const targetRoom = Game.rooms[roomName];
+        const targetController = targetRoom?.controller;
+        if (targetController) {
+            const p = targetController.pos;
+            if (!targetPos || targetPos.x !== p.x || targetPos.y !== p.y) {
+                targetPos = { x: p.x, y: p.y };
+                state.targetPos = targetPos;
             }
         }
+        if (!targetPos || ('roomName' in targetPos && targetPos.roomName !== roomName)) {
+            let seed = 0;
+            const s = `${this.name}|${roomName}`;
+            for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
+            const centerX = 25;
+            const centerY = 25;
+            const range = 10;
+            const span = range * 2 + 1;
+            const x = (seed % span) + (centerX - range);
+            const y = (((seed >>> 8) % span) + (centerY - range));
+            targetPos = { x, y };
+            state.targetPos = targetPos;
+        }
 
-        // detour 续行：如果刚从目标房间 detour 出来，则在 detour 房间内优先走回目标房间的出口
-        if (this.room.name !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+        // detour 续行：刚从目标房间绕出时，优先走回目标房出口
+        if (currentRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
             let exitPos = null;
             const bm: any = (globalThis as any).BetterMove;
             if (bm && typeof bm.getClosestExitPos === 'function') {
@@ -79,12 +85,12 @@ export default class MoveFunction extends Creep {
             }
         }
 
-        // 回到目标房间后的短冷却：优先房内推进，避免刚回房又立刻再次绕出去
-        if (this.room.name === roomName && state.cooldownUntil && Game.time < state.cooldownUntil && opts.maxRooms === undefined) {
+        // 冷却期内收敛 maxRooms，避免刚回房又绕出
+        if (currentRoom === roomName && state.cooldownUntil && Game.time < state.cooldownUntil && opts.maxRooms === undefined) {
             opts.maxRooms = 1;
         }
 
-        const tarPos = new RoomPosition(state.targetPos.x, state.targetPos.y, roomName);
+        const tarPos = new RoomPosition(targetPos.x, targetPos.y, roomName);
         return this.moveTo(tarPos, opts);
     }
 
