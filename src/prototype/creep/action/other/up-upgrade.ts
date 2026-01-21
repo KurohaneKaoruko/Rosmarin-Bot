@@ -1,4 +1,5 @@
-import { compress, decompress} from '@/utils';
+import { compress, decompress} from '@/modules/utils/compress';
+
 
 const upgrade = function (creep: Creep) {
     if (creep.room.level == 8) {

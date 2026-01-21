@@ -1,4 +1,4 @@
-import { compressBodyConfig } from "@/utils";
+import { compressBodyConfig } from "@/modules/utils/compress";
 
 type BoostConfig = {
     bodypart: [BodyPartConstant, number][];

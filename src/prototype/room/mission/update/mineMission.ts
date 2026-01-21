@@ -1,5 +1,4 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
-import { decompress } from '@/utils';
 
 const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnMissionNum: {[role: string]: number}) => {
     const targetRoom = mineData.targetRoom;

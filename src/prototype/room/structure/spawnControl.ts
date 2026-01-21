@@ -1,5 +1,8 @@
 import { RoleData } from '@/constant/CreepConstant';
-import { decompressBodyConfig, GenCreepName } from '@/utils';
+import { GenCreepName } from '@/utils';
+import { decompressBodyConfig } from '@/modules/utils/compress';
+
+
 
 export default class SpawnControl extends Room {
     SpawnWork() {

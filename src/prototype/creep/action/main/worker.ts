@@ -1,4 +1,4 @@
-import { decompress } from '@/utils';
+import { decompress } from '@/modules/utils/compress';
 
 const RepairRampart = function (creep: Creep) {
     if (creep.memory.cache.buildRampartId) {

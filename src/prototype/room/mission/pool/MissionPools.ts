@@ -19,7 +19,7 @@
  * }
  */
 
-import { decompress } from "@/utils";
+import { decompress } from "@/modules/utils/compress";
 
 /** 通用的任务池模块 */
 export default class MissionPools extends Room {

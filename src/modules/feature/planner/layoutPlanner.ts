@@ -1,4 +1,5 @@
-import { compress, compressBatch, log } from '@/utils';
+import { log } from '@/utils';
+import { compress, compressBatch } from '@/modules/utils/compress';
 import HelperVisual from '@/modules/feature/planner/helperVisual';
 import { autoPlanner63 } from '@/modules/feature/planner/dynamic/autoPlanner63';
 import * as StaticPlanner from '@/modules/feature/planner/static';

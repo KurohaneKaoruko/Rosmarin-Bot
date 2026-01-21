@@ -1,4 +1,4 @@
-import { compress } from '@/utils';
+import { compress } from '@/modules/utils/compress';
 
 const RepairWork = function (creep: Creep) {
     let target = Game.getObjectById(creep.memory.cache.targetId) as StructureRampart | StructureWall | null;

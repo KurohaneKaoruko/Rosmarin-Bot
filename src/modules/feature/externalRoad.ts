@@ -6,7 +6,7 @@
 
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoomArray } from '@/modules/utils/roomArray';
-import { compress, decompress } from '@/utils';
+import { compress, decompress } from '@/modules/utils/compress';
 
 // ============================================================
 // CostMatrix 缓存管理器

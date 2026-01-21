@@ -1,4 +1,6 @@
-import { compress } from '@/utils';
+import { compress } from '@/modules/utils/compress';
+
+
 
 type PosLike = RoomPosition | { pos: RoomPosition } | number;
 type TransportLevelKey = 'boost' | 'ext' | 'tower' | 'labEnergy' | 'lab' | 'powerSpawn' | 'nuker';

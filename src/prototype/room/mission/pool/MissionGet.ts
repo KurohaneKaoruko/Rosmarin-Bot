@@ -1,4 +1,4 @@
-import { compress,decompress } from '@/utils';
+import { compress,decompress } from '@/modules/utils/compress';
 
 /**
  * 任务获取模块

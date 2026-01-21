@@ -1,4 +1,4 @@
-import { compress } from '@/utils';
+import { compress } from '@/modules/utils/compress';
 
 export default class TowerControl extends Room {
     // 处理 Tower 防御和修复逻辑

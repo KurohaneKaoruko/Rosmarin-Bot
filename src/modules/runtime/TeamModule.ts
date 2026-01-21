@@ -1,4 +1,5 @@
-import {compressBodyConfig, log} from "@/utils";
+import {log} from "@/utils";
+import {compressBodyConfig} from "@/modules/utils/compress";
 import {TEAM_CONFIG} from "@/constant/TeamConfig";
 import Team from "@/modules/feature/TeamClass/Team";
 import TeamCreep from "@/modules/feature/TeamClass/TeamCreep";

@@ -1,4 +1,6 @@
-import { compress } from '@/utils';
+import { compress } from '@/modules/utils/compress';
+
+
 
 const createSite = function(creep: any) {
     if (Game.rooms[creep.memory.homeRoom].controller.level < 4) return;

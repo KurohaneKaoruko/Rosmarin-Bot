@@ -1,4 +1,4 @@
-import { compress, decompress } from '@/utils';
+import { compress, decompress } from '@/modules/utils/compress';
 
 /**
  * 房间 Work 任务更新模块

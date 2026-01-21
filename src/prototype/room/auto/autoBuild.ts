@@ -1,4 +1,6 @@
-import {decompress} from "@/utils"
+import {decompress} from "@/modules/utils/compress"  
+
+
 
 export default class AutoBuild extends Room {
     // 自动建筑

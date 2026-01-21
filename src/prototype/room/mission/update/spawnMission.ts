@@ -1,5 +1,5 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
-import { decompressBodyConfig } from "@/utils";
+import { decompressBodyConfig } from "@/modules/utils/compress";
 
 // 孵化相关
 const SPAWN_MIN_ENERGY = 50e3;
