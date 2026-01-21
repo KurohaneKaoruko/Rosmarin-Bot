@@ -2035,88 +2035,80 @@ global.BetterMove= {
 
 
 
+/**
+ * 原型方法包装工具
+ * @description
+ * 1) 第一次包装时将原方法保存到 backupName（如 $moveTo）；
+ * 2) 后续再次调用不会覆盖 backupName，避免多次加载导致丢失原实现；
+ * 3) 将 originalName 替换为 wrap。
+ */
+function wrapProtoMethod(proto, originalName, backupName, wrap) {
+    if (!proto[backupName]) {
+        proto[backupName] = proto[originalName];
+    }
+    proto[originalName] = wrap;
+}
 
+/**
+ * moveTo 前更新 dontPullMe 状态
+ * @description
+ * - 靠近房间边缘两格（<=1 或 >=48）时：禁止被对穿/拉动
+ * - 原地停留超过 6 tick 时：禁止被对穿/拉动
+ * 说明：保持使用 creep.memory.lastPos 字段，避免影响已有线上行为/数据结构
+ */
+function updateDontPullMeForMoveTo(creep) {
+    let isNearEdge = creep.pos.x <= 1 || creep.pos.x >= 48 || creep.pos.y <= 1 || creep.pos.y >= 48;
+    let isStuckTooLong = false;
 
+    if (creep.memory.lastPos && creep.memory.lastPos.x == creep.pos.x && creep.memory.lastPos.y == creep.pos.y) {
+        creep.memory.lastPos.time += 1;
+        isStuckTooLong = creep.memory.lastPos.time > 6;
+    } else {
+        creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: 0 };
+    }
 
-if(!Creep.prototype.$moveTo) {
+    creep.memory.dontPullMe = isNearEdge || isStuckTooLong;
+}
+
+/**
+ * 对指定 action 进行 dontPullMe 包装（复用同一套逻辑）
+ * @description
+ * - 首次包装时保存原方法到 $methodName
+ * - 执行 action 前将 dontPullMe 设为 true，避免被对穿打断关键动作
+ */
+function wrapActionSetDontPullMeTrue(methodName) {
+    const backupName = `$${methodName}`;
+    if (Creep.prototype[backupName]) {
+        return;
+    }
+    wrapProtoMethod(Creep.prototype, methodName, backupName, function (...args) {
+        this.memory.dontPullMe = true;
+        return this[backupName](...args);
+    });
+}
+
+if (!Creep.prototype.$moveTo) {
     Creep.prototype.originMoveTo = originMoveTo;
-    PowerCreep.prototype.originMoveTo = originMoveTo;
-    Creep.prototype.$moveTo = Creep.prototype.moveTo;
-    PowerCreep.prototype.$moveTo = Creep.prototype.moveTo;
-    Creep.prototype.moveTo = function (target, ...e) {
-        // 检查Creep是否位于房间边缘两格内或者停留时间过长
-        let isNearEdge = this.pos.x <= 1 || this.pos.x >= 48 || this.pos.y <= 1 || this.pos.y >= 48;
-        let isStuckTooLong = false;
-
-        if (this.memory.lastPos && this.memory.lastPos.x == this.pos.x && this.memory.lastPos.y == this.pos.y) {
-            this.memory.lastPos.time += 1;
-            isStuckTooLong = this.memory.lastPos.time > 6;
-        } else {
-            this.memory.lastPos = {x: this.pos.x, y: this.pos.y, time: 0};
-        }
-
-        this.memory.dontPullMe = isNearEdge || isStuckTooLong;
-        // this.say(this.memory.lastPos.time)
-        return this.$moveTo(target, ...e)
-    };
+    wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', function (target, ...e) {
+        updateDontPullMeForMoveTo(this);
+        return this.$moveTo(target, ...e);
+    });
 }
 
-// Creep.prototype.$move=Creep.prototype.move;
-// Creep.prototype.move=function (...e) {
-//     this.memory.dontPullMe = false;
-//     return this.$move(...e)
-// };
-
-if(!Creep.prototype.$build) {
-    Creep.prototype.$build = Creep.prototype.build;
-    Creep.prototype.build = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$build(...e)
-    };
+if (!PowerCreep.prototype.$moveTo) {
+    // PowerCreep 的 moveTo 可能与 Creep 不同，备份应保存其自身实现
+    PowerCreep.prototype.originMoveTo = PowerCreep.prototype.moveTo;
+    wrapProtoMethod(PowerCreep.prototype, 'moveTo', '$moveTo', function (target, ...e) {
+        return this.$moveTo(target, ...e);
+    });
 }
 
-if(!Creep.prototype.$repair) {
-    Creep.prototype.$repair = Creep.prototype.repair;
-    Creep.prototype.repair = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$repair(...e)
-    };
-}
+wrapActionSetDontPullMeTrue('build');
+wrapActionSetDontPullMeTrue('repair');
+wrapActionSetDontPullMeTrue('upgradeController');
+wrapActionSetDontPullMeTrue('dismantle');
+wrapActionSetDontPullMeTrue('harvest');
+wrapActionSetDontPullMeTrue('attack');
 
-if(!Creep.prototype.$upgradeController) {
-    Creep.prototype.$upgradeController = Creep.prototype.upgradeController;
-    Creep.prototype.upgradeController = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$upgradeController(...e)
-    };
-}
-
-if(!Creep.prototype.$dismantle) {
-    Creep.prototype.$dismantle = Creep.prototype.dismantle;
-    Creep.prototype.dismantle = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$dismantle(...e)
-    };
-}
-
-if(!Creep.prototype.$harvest) {
-    Creep.prototype.$harvest = Creep.prototype.harvest;
-    Creep.prototype.harvest = function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$harvest(...e)
-    };
-}
-
-if(!Creep.prototype.$attack){
-    Creep.prototype.$attack=Creep.prototype.attack;
-    Creep.prototype.attack=function (...e) {
-        this.memory.dontPullMe = true;
-        return this.$attack(...e)
-    };
-}
-
-// Creep.prototype.$withdraw=Creep.prototype.withdraw;
-// Creep.prototype.withdraw=function (...e) {
-//     this.memory.dontPullMe = true;
-//     return this.$withdraw(...e)
-// };
+// wrapActionSetDontPullMeTrue('move');
+// wrapActionSetDontPullMeTrue('withdraw');
