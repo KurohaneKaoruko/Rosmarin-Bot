@@ -66,6 +66,10 @@ const cache = {
     costMatrixCacheTimer
 };
 
+// squad 寻路派生矩阵缓存：仅缓存“当前 tick”的结果，避免跨 tick 的陈旧数据
+let squadDerivedMatCacheTick = -1;
+let squadDerivedMatCache = {};
+
 const obstacles = new Set(OBSTACLE_OBJECT_TYPES);
 const originMove = Creep.prototype.move;
 const originMoveTo = Creep.prototype.moveTo;
@@ -411,25 +415,32 @@ function doObTask() {
     }
 }
 
+function forEachDueNumericKey(obj, now, visit) {
+    for (let key in obj) {
+        if (+key <= now) {
+            visit(key);
+        }
+    }
+}
+
 /**
  *  查看ob得到的房间
  */
 function checkObResult() {
-    for (let tick in obTimer) {
+    forEachDueNumericKey(obTimer, Game.time, (tickKey) => {
+        const tick = +tickKey;
         if (tick < Game.time) {
-            delete obTimer[tick];
-            continue;   // 后面可能还有要检查的
-        } else if (tick == Game.time) {
-            for (let result of obTimer[tick]) {
-                if (result.roomName in Game.rooms) {
-                    //console.log('ob得到 ' + result.roomName);
-                    checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
-                }
+            delete obTimer[tickKey];
+            return;
+        }
+        for (let result of obTimer[tickKey]) {
+            if (result.roomName in Game.rooms) {
+                //console.log('ob得到 ' + result.roomName);
+                checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
             }
-            delete obTimer[tick];
-        } // else 没有要检查的
-        break;  // 检查完了或者没有要检查的
-    }
+        }
+        delete obTimer[tickKey];
+    });
 }
 
 /**
@@ -1259,11 +1270,8 @@ function clearDeadCreepPathCache() {
 }
 
 function clearExpiredPaths() {
-    for (let timeKey in pathCacheTimer) {
+    forEachDueNumericKey(pathCacheTimer, Game.time, (timeKey) => {
         const time = +timeKey;
-        if (time > Game.time) {
-            break;
-        }
         //console.log('clear path');
         for (let path of pathCacheTimer[timeKey]) {
             if (path.lastTime == time - pathClearDelay) {
@@ -1271,15 +1279,11 @@ function clearExpiredPaths() {
             }
         }
         delete pathCacheTimer[timeKey];
-    }
+    });
 }
 
 function clearExpiredCostMatrix() {
-    for (let timeKey in costMatrixCacheTimer) {
-        const time = +timeKey;
-        if (time > Game.time) {
-            break;
-        }
+    forEachDueNumericKey(costMatrixCacheTimer, Game.time, (timeKey) => {
         //console.log('clear costMat');
         for (let data of costMatrixCacheTimer[timeKey]) {
             delete costMatrixCache[data.roomName];
@@ -1288,7 +1292,7 @@ function clearExpiredCostMatrix() {
             }
         }
         delete costMatrixCacheTimer[timeKey];
-    }
+    });
 }
 
 function clearUnused() {
@@ -1611,6 +1615,24 @@ function betterFindClosestByPath(type, opts) {
     return originFindClosestByPath.call(this, type, opts);
 }
 
+function getMemberPosSignature(memberPos) {
+    if (!memberPos.length) {
+        return '';
+    }
+    return memberPos.map((p) => `${p.x},${p.y}`).sort().join('|');
+}
+
+function getSquadDerivedMatCacheForThisTick() {
+    if (typeof Game == 'undefined') {
+        return null;
+    }
+    if (squadDerivedMatCacheTick !== Game.time) {
+        squadDerivedMatCacheTick = Game.time;
+        squadDerivedMatCache = {};
+    }
+    return squadDerivedMatCache;
+}
+
 /**
  *  opts: memberPos:relativePos[], avoidTowersHigherThan:number, avoidObstaclesHigherThan:number
  * @param {RoomPosition} toPos
@@ -1625,9 +1647,10 @@ function findSquadPathTo(toPos, opts) {
     const range = typeof opts.range == 'number' ? opts.range : 1;
     const ignoreCondition = !!opts.ignoreDestructibleStructures;
     const memberPos = Array.isArray(opts.memberPos) ? opts.memberPos : [];
+    const memberPosSignature = getMemberPosSignature(memberPos);
 
-    const derivedMatCache = {};
     const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
+    const derivedMatCache = userCallback ? {} : (getSquadDerivedMatCacheForThisTick() || {});
 
     const roomCallback = (roomName) => {
         if (roomName in avoidRooms) {
@@ -1643,8 +1666,9 @@ function findSquadPathTo(toPos, opts) {
         if (!memberPos.length) {
             return base;
         }
-        if (derivedMatCache[roomName]) {
-            return derivedMatCache[roomName];
+        const cacheKey = `${roomName}|${ignoreCondition ? 1 : 0}|${memberPosSignature}`;
+        if (derivedMatCache[cacheKey]) {
+            return derivedMatCache[cacheKey];
         }
         let derived = new PathFinder.CostMatrix;
         for (let y = 0; y < 50; y++) {
@@ -1668,7 +1692,7 @@ function findSquadPathTo(toPos, opts) {
                 }
             }
         }
-        derivedMatCache[roomName] = derived;
+        derivedMatCache[cacheKey] = derived;
         return derived;
     };
 
