@@ -57,18 +57,18 @@ const outCarry = {
             }
         }
 
-        // 使用 collectFromContainer 收集能量容器
-        if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) {
-            return;
-        }
-
         // 使用 collectDroppedResource 收集掉落资源
         if (creep.collectDroppedResource(undefined, 500)) {
             return;
         }
+
+        // 使用 collectFromContainer 收集能量容器
+        if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) {
+            return;
+        }
         
         // 使用 collectFromTombstone 收集墓碑资源
-        if (creep.collectFromTombstone()) {
+        if (creep.collectFromTombstone(undefined, 500)) {
             return;
         }
 

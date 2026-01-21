@@ -337,10 +337,11 @@ interface Creep {
     
     /** 
      * 从墓碑收集资源
-     * @param resourceType - 可选，资源类型
+     * @param resourceType - 可选，资源类型，不传则收集任意资源
+     * @param minAmount - 可选，最小数量
      * @returns true表示找到并正在收集，false表示未找到
      */
-    collectFromTombstone(resourceType?: ResourceConstant): boolean;
+    collectFromTombstone(resourceType?: ResourceConstant, minAmount?: number): boolean;
     
     /** 
      * 从废墟收集资源

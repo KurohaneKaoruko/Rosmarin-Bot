@@ -47,13 +47,13 @@ export default class CollectFunction extends Creep {
      * @param resourceType 资源类型，默认为任意类型
      * @returns boolean - true 表示找到并正在收集，false 表示未找到
      */
-    collectFromTombstone(resourceType?: ResourceConstant): boolean {
+    collectFromTombstone(resourceType?: ResourceConstant, minAmount?: number): boolean {
         const tombstones = this.room.find(FIND_TOMBSTONES, {
             filter: (tombstone: Tombstone) => {
                 if (resourceType) {
-                    return tombstone.store.getUsedCapacity(resourceType) > 0;
+                    return tombstone.store.getUsedCapacity(resourceType) > (minAmount || 0);
                 }
-                return tombstone.store.getUsedCapacity() > 0;
+                return tombstone.store.getUsedCapacity() > (minAmount || 0);
             }
         });
 
