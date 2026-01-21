@@ -956,7 +956,8 @@ function deletePath(path) {
  * @param {number} maxX
  * @param {number} minY
  * @param {number} maxY
- * @param {(pathArray: MyPath[], combinedX: number, combinedY: number) => void} visit
+ * @param {(pathArray: MyPath[], combinedX: number, combinedY: number) => boolean | void} visit 返回 true 则提前终止遍历
+ * @returns {boolean} 是否提前终止（visit 返回 true）
  */
 function forEachPathArrayInCacheRange(minX, maxX, minY, maxY, visit) {
     for (let combinedXKey in globalPathCache) {
@@ -970,9 +971,12 @@ function forEachPathArrayInCacheRange(minX, maxX, minY, maxY, visit) {
             if (combinedYNum < minY || combinedYNum > maxY) {
                 continue;
             }
-            visit(xBucket[combinedYKey], combinedXNum, combinedYNum);
+            if (visit(xBucket[combinedYKey], combinedXNum, combinedYNum)) {
+                return true;
+            }
         }
     }
+    return false;
 }
 
 /*
@@ -1003,9 +1007,6 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
 
     let found = false;
     forEachPathArrayInCacheRange(minX, maxX, minY, maxY, (pathArray) => {
-        if (found) {
-            return;
-        }
         for (let path of pathArray) {     // 这个数组应该会很短
             pathCounter++;
             if (!isSameOps(path, ops)) {
@@ -1022,7 +1023,7 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
             }
             creepCache.path = path;
             found = true;
-            return;
+            return true;
         }
     });
     return found;
@@ -1153,14 +1154,21 @@ function moveOneStepReverse(creep, visualStyle, toPos) {    // deprecated
  * @param {RoomPosition} toPos
  * @param {boolean} ignoreCreeps
  */
+function computeStartIndex(creepPos, posArray) {
+    let idx = 0;
+    while (idx < posArray.length && isNear(creepPos, posArray[idx])) {
+        idx += 1;
+    }
+    return idx - 1;
+}
+
 function startRoute(creep, pathCache, visualStyle, toPos, ignoreCreeps) {
     let posArray = pathCache.path.posArray;
 
-    let idx = 0;
-    while (idx in posArray && isNear(creep.pos, posArray[idx])) {
-        idx += 1;
+    let idx = computeStartIndex(creep.pos, posArray);
+    if (idx < 0) {
+        idx = 0;
     }
-    idx -= 1;
     pathCache.idx = idx;
 
     if (visualStyle) {
@@ -1169,10 +1177,10 @@ function startRoute(creep, pathCache, visualStyle, toPos, ignoreCreeps) {
     creepMoveCache[creep.name] = Game.time;
 
     let nextStep = posArray[idx];
-    if (ignoreCreeps) {
+    if (ignoreCreeps && isNear(creep.pos, nextStep)) {
         trySwap(creep, nextStep, false, true);
     }
-    return originMove.call(creep, getDirection(creep.pos, posArray[idx]));
+    return originMove.call(creep, getDirection(creep.pos, nextStep));
 }
 
 /**
@@ -1637,6 +1645,37 @@ function bmDeletePathInRoom(roomName) {
     }
 }
 
+function bmSetChangeMoveTo(bool) {
+    Creep.prototype.moveTo = wrapFn(bool ? betterMoveTo : originMoveTo, 'moveTo');
+    analyzeCPU.moveTo = { sum: 0, calls: 0 };
+    testCacheHits = 0;
+    testCacheMiss = 0;
+    testNormal = 0;
+    testNearStorageCheck = 0;
+    testNearStorageSwap = 0;
+    testTrySwap = 0;
+    testBypass = 0;
+    normalLogicalCost = 0;
+    cacheHitCost = 0;
+    cacheMissCost = 0;
+    return OK;
+}
+
+function bmPrint() {
+    let text = '\navarageTime\tcalls\tFunctionName';
+    for (let fn in analyzeCPU) {
+        text += `\n${(analyzeCPU[fn].sum / analyzeCPU[fn].calls).toFixed(5)}\t\t${analyzeCPU[fn].calls}\t\t${fn}`;
+    }
+    let hitCost = cacheHitCost / testCacheHits;
+    let missCost = cacheMissCost / testCacheMiss;
+    let missRate = testCacheMiss / (testCacheMiss + testCacheHits);
+    text += `\nnormal logical cost: ${(normalLogicalCost / testNormal).toFixed(5)}, total cross rate: ${(testTrySwap / analyzeCPU.moveTo.calls).toFixed(4)}, total bypass rate:  ${(testBypass / analyzeCPU.moveTo.calls).toFixed(4)}`
+    text += `\nnear storage check rate: ${(testNearStorageCheck / analyzeCPU.moveTo.calls).toFixed(4)}, near storage cross rate: ${(testNearStorageSwap / testNearStorageCheck).toFixed(4)}`
+    text += `\ncache search rate: ${((testCacheMiss + testCacheHits) / analyzeCPU.moveTo.calls).toFixed(4)}, total hit rate: ${(1 - missRate).toFixed(4)}, avg check paths: ${(pathCounter / (testCacheMiss + testCacheHits)).toFixed(3)}`;
+    text += `\ncache hit avg cost: ${(hitCost).toFixed(5)}, cache miss avg cost: ${(missCost).toFixed(5)}, total avg cost: ${(hitCost * (1 - missRate) + missCost * missRate).toFixed(5)}`;
+    return text;
+}
+
 global.BetterMove= {
     // getPosMoveAble (pos){
     //     generateCostMatrix(Game.rooms[pos.roomName])
@@ -1649,21 +1688,7 @@ global.BetterMove= {
         return OK;
     },
     creepPathCache:creepPathCache,
-    setChangeMoveTo (bool) {
-        Creep.prototype.moveTo = wrapFn(bool ? betterMoveTo : originMoveTo, 'moveTo');
-        analyzeCPU.moveTo = { sum: 0, calls: 0 };
-        testCacheHits = 0;
-        testCacheMiss = 0;
-        testNormal = 0;
-        testNearStorageCheck = 0;
-        testNearStorageSwap = 0;
-        testTrySwap = 0;
-        testBypass = 0;
-        normalLogicalCost = 0;
-        cacheHitCost = 0;
-        cacheMissCost = 0;
-        return OK;
-    },
+    setChangeMoveTo: bmSetChangeMoveTo,
     setChangeFindClostestByPath (bool) {
         // RoomPosition.prototype.findClosestByPath = wrapFn(bool? betterFindClosestByPath : originFindClosestByPath, 'findClosestByPath');
         analyzeCPU.findClosestByPath = { sum: 0, calls: 0 };
@@ -1734,20 +1759,7 @@ global.BetterMove= {
             return ERR_INVALID_ARGS;
         }
     },
-    print () {
-        let text = '\navarageTime\tcalls\tFunctionName';
-        for (let fn in analyzeCPU) {
-            text += `\n${(analyzeCPU[fn].sum / analyzeCPU[fn].calls).toFixed(5)}\t\t${analyzeCPU[fn].calls}\t\t${fn}`;
-        }
-        let hitCost = cacheHitCost / testCacheHits;
-        let missCost = cacheMissCost / testCacheMiss;
-        let missRate = testCacheMiss / (testCacheMiss + testCacheHits);
-        text += `\nnormal logical cost: ${(normalLogicalCost / testNormal).toFixed(5)}, total cross rate: ${(testTrySwap / analyzeCPU.moveTo.calls).toFixed(4)}, total bypass rate:  ${(testBypass / analyzeCPU.moveTo.calls).toFixed(4)}`
-        text += `\nnear storage check rate: ${(testNearStorageCheck / analyzeCPU.moveTo.calls).toFixed(4)}, near storage cross rate: ${(testNearStorageSwap / testNearStorageCheck).toFixed(4)}`
-        text += `\ncache search rate: ${((testCacheMiss + testCacheHits) / analyzeCPU.moveTo.calls).toFixed(4)}, total hit rate: ${(1 - missRate).toFixed(4)}, avg check paths: ${(pathCounter / (testCacheMiss + testCacheHits)).toFixed(3)}`;
-        text += `\ncache hit avg cost: ${(hitCost).toFixed(5)}, cache miss avg cost: ${(missCost).toFixed(5)}, total avg cost: ${(hitCost * (1 - missRate) + missCost * missRate).toFixed(5)}`;
-        return text;
-    },
+    print: bmPrint,
     clear: () => { }
     // clear: clearUnused
 }
