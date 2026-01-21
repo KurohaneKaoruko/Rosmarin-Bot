@@ -16,8 +16,11 @@ let config = {
     changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
     changeFindClostestByPath: true,     // 【待测试】轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
     autoVisual: false,  // 【未启用】
-    enableFlee: false,   // 【待测试】是否启用 flee
-    enableSquadPath: false // 【待测试】是否启用 findSquadPathTo
+    enableFlee: true,   // 【待测试】是否启用 flee
+    enableSquadPath: true, // 【待测试】是否启用 findSquadPathTo
+    enableRouteCache: true, // 【待测试】是否启用寻路缓存
+    routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
+    enableBypassCostMatReuse: true  // 【待测试】是否启用绕过房间的costMatrix缓存
 }
 // 运行时参数 
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
@@ -25,6 +28,10 @@ let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的�
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
 // @ts-ignore
 let avoidRooms: any[] = Memory.bypassRooms ? Memory.bypassRooms : []; // 永不踏入这些房间
+let avoidRoomsVersion = 0;
+function markAvoidRoomsChanged() {
+    avoidRoomsVersion = (avoidRoomsVersion + 1) | 0;
+}
 let avoidExits = {
     'fromRoom': 'toRoom'
 }   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
@@ -47,6 +54,7 @@ let creepMoveCache = {};    // 缓存每个creep最后一次移动的tick
 let emptyCostMatrix = new PathFinder.CostMatrix;
 /** @type {CMs} */
 let costMatrixCache = {};    // true存ignoreDestructibleStructures==true的，false同理
+let costMatrixRevision = Object.create(null);
 /** @type {{ [time: number]:{roomName:string, avoids:string[]}[] }} */
 let costMatrixCacheTimer = {}; // 用于记录costMatrix的创建时间，清理过期costMatrix
 let autoClearTick = Game.time;  // 用于避免重复清理缓存
@@ -57,6 +65,7 @@ const cache = {
     creepPathCache,
     creepMoveCache,
     costMatrixCache,
+    costMatrixRevision,
     costMatrixCacheTimer
 };
 
@@ -541,8 +550,10 @@ function generateCostMatrix(room, pos) {
         true: noStructureCostMat,   // 对应 ignoreDestructibleStructures = true
         false: structureCostMat     // 对应 ignoreDestructibleStructures = false
     };
+    costMatrixRevision[room.name] = ((costMatrixRevision[room.name] | 0) + 1) | 0;
 
     let avoids = [];
+    let avoidChanged = false;
     if (room.controller && room.controller.owner && !room.controller.my && hostileCostMatrixClearDelay) {  // 他人房间，删除costMat才能更新被拆的建筑位置
         if (!(Game.time + hostileCostMatrixClearDelay in costMatrixCacheTimer)) {
             costMatrixCacheTimer[Game.time + hostileCostMatrixClearDelay] = [];
@@ -557,7 +568,10 @@ function generateCostMatrix(room, pos) {
             for (let direction in neighbors) {
                 let status = Game.map.getRoomStatus(neighbors[direction]);
                 if (status.status == 'closed') {
-                    avoidRooms[neighbors[direction]] = 1;
+                    if (!(neighbors[direction] in avoidRooms)) {
+                        avoidRooms[neighbors[direction]] = 1;
+                        avoidChanged = true;
+                    }
                 } else if (status.status != 'normal' && status.timestamp != null) {
                     let estimateTickToChange = (status.timestamp - new Date().getTime()) / 10000; // 10s per tick
                     clearDelay = clearDelay > estimateTickToChange ? Math.ceil(estimateTickToChange) : clearDelay;
@@ -570,6 +584,7 @@ function generateCostMatrix(room, pos) {
                         if (PathFinder.search(pos, exits, { maxRooms: 1, roomCallback: () => noStructureCostMat }).incomplete) {    // 此路不通
                             avoidRooms[neighbors[direction]] = 1;
                             avoids.push(neighbors[direction]);
+                            avoidChanged = true;
                         }
                     }
                 }
@@ -583,6 +598,9 @@ function generateCostMatrix(room, pos) {
             roomName: room.name,
             avoids: avoids  // 因新手墙导致的avoidRooms需要更新
         });   // 记录清理时间
+    }
+    if (avoidChanged) {
+        markAvoidRoomsChanged();
     }
     //console.log('生成costMat ' + room.name);
 
@@ -718,6 +736,16 @@ function registerRoomBounceGuard(creep, targetRoomName) {
         }
     }
 }
+
+let routeCache = Object.create(null);
+
+function getRouteCacheKey(fromRoomName, toRoomName, bypass) {
+    if (!bypass) {
+        return `${fromRoomName}|${toRoomName}|0|${avoidRoomsVersion}`;
+    }
+    return `${fromRoomName}|${toRoomName}|1|${avoidRoomsVersion}|${temporalAvoidFrom}|${temporalAvoidTo}|${bounceAvoidFrom}|${bounceAvoidTo}|${bounceAvoidUntil || 0}|${Game.time}`;
+}
+
 function routeCallback(nextRoomName, fromRoomName) {    // 避开avoidRooms设置了的
     if (nextRoomName in avoidRooms) {
         //console.log('Infinity at ' + nextRoomName);
@@ -743,6 +771,18 @@ function bypassRouteCallback(nextRoomName, fromRoomName) {
  */
 function findRoute(fromRoomName, toRoomName, bypass) {  // TODO 以后跨shard寻路也放在这个函数里
     //console.log('findRoute', fromRoomName, toRoomName, bypass);
+    if (config.enableRouteCache) {
+        const key = getRouteCacheKey(fromRoomName, toRoomName, bypass);
+        const cached = routeCache[key];
+        if (cached && (bypass || (Game.time - cached.tick) <= (config.routeCacheTTL | 0))) {
+            return cached.route;
+        }
+        const result = bypass
+            ? Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypassRouteCallback })
+            : Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: routeCallback });
+        routeCache[key] = { tick: Game.time, route: result };
+        return result;
+    }
     if (bypass) {
         return Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypassRouteCallback });
     }
@@ -783,6 +823,49 @@ function bypassMy(creep) {
     return creep.my && creep.memory.dontPullMe;
 }
 let bypassRoomName, bypassCostMat, bypassIgnoreCondition, userCostCallback, costMat, route;
+let bypassCostMatReuseCache = Object.create(null);
+
+function getReusableBypassCostMatrix(roomName, ignoreCondition) {
+    const key = `${roomName}|${ignoreCondition ? 1 : 0}`;
+    const baseRev = costMatrixRevision[roomName] | 0;
+    let entry = bypassCostMatReuseCache[key];
+    if (!entry || entry.tick !== Game.time || entry.baseRev !== baseRev) {
+        entry = bypassCostMatReuseCache[key] = {
+            tick: Game.time,
+            baseRev,
+            mat: costMatrixCache[roomName][ignoreCondition].clone(),
+            changedKeys: [],
+            oldCosts: []
+        };
+    } else {
+        entry.changedKeys.length = 0;
+        entry.oldCosts.length = 0;
+    }
+    return entry;
+}
+
+function applyTemporaryCreepBlocks(mat, creeps, changedKeys, oldCosts) {
+    const seen = Object.create(null);
+    for (let c of creeps) {
+        const x = c.pos.x;
+        const y = c.pos.y;
+        const k = x * 50 + y;
+        if (seen[k]) continue;
+        seen[k] = 1;
+        changedKeys.push(k);
+        oldCosts.push(mat.get(x, y));
+        mat.set(x, y, unWalkableCCost);
+    }
+}
+
+function rollbackTemporaryCreepBlocks(mat, changedKeys, oldCosts) {
+    for (let i = 0; i < changedKeys.length; i++) {
+        const k = changedKeys[i];
+        const x = (k / 50) | 0;
+        const y = k - x * 50;
+        mat.set(x, y, oldCosts[i]);
+    }
+}
 
 function createPathFinderBaseOpts(ops) {
     return {
@@ -865,10 +948,16 @@ function findTemporalPath(creep, toPos, ops) {
         generateCostMatrix(creep.room, creep.pos);
     }
     bypassIgnoreCondition = !!ops.ignoreDestructibleStructures;
-    /** @type {CostMatrix} */
-    bypassCostMat = costMatrixCache[creep.room.name][bypassIgnoreCondition].clone();
-    for (let c of nearbyCreeps) {
-        bypassCostMat.set(c.pos.x, c.pos.y, unWalkableCCost);
+    let reuseEntry;
+    if (config.enableBypassCostMatReuse) {
+        reuseEntry = getReusableBypassCostMatrix(creep.room.name, bypassIgnoreCondition);
+        bypassCostMat = reuseEntry.mat;
+        applyTemporaryCreepBlocks(bypassCostMat, nearbyCreeps, reuseEntry.changedKeys, reuseEntry.oldCosts);
+    } else {
+        bypassCostMat = costMatrixCache[creep.room.name][bypassIgnoreCondition].clone();
+        for (let c of nearbyCreeps) {
+            bypassCostMat.set(c.pos.x, c.pos.y, unWalkableCCost);
+        }
     }
     bypassRoomName = creep.room.name;
     userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
@@ -877,33 +966,39 @@ function findTemporalPath(creep, toPos, ops) {
     let PathFinderOpts = createPathFinderBaseOpts(ops);
     applyMoveToTerrainCosts(PathFinderOpts, ops);
 
-    if (creep.pos.roomName != toPos.roomName) { // findRoute会导致非最优path的问题
-        checkTemporalAvoidExit(creep.pos, creep.room, bypassCostMat);   // 因为creep挡路导致的无法通行的出口
-        route = findRoute(creep.pos.roomName, toPos.roomName, true);
-        if (route == ERR_NO_PATH) {
-            return false;
+    try {
+        if (creep.pos.roomName != toPos.roomName) { // findRoute会导致非最优path的问题
+            checkTemporalAvoidExit(creep.pos, creep.room, bypassCostMat);   // 因为creep挡路导致的无法通行的出口
+            route = findRoute(creep.pos.roomName, toPos.roomName, true);
+            if (route == ERR_NO_PATH) {
+                return false;
+            }
+            PathFinderOpts.maxRooms = PathFinderOpts.maxRooms || route.length + 1;
+            PathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;  // 跨10room则有4000+10*10*100=14000
+            route = route.reduce(routeReduce, { [creep.pos.roomName]: 1 });     // 因为 key in Object 比 Array.includes(value) 快，但不知道值不值得reduce
+            PathFinderOpts.roomCallback = bypassRoomCallbackWithRoute;
+        } else {
+            PathFinderOpts.maxOps = ops.maxOps;
+            PathFinderOpts.roomCallback = bypassRoomCallback;
         }
-        PathFinderOpts.maxRooms = PathFinderOpts.maxRooms || route.length + 1;
-        PathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;  // 跨10room则有4000+10*10*100=14000
-        route = route.reduce(routeReduce, { [creep.pos.roomName]: 1 });     // 因为 key in Object 比 Array.includes(value) 快，但不知道值不值得reduce
-        PathFinderOpts.roomCallback = bypassRoomCallbackWithRoute;
-    } else {
-        PathFinderOpts.maxOps = ops.maxOps;
-        PathFinderOpts.roomCallback = bypassRoomCallback;
-    }
 
-    let result = PathFinder.search(creep.pos, { pos: toPos, range: ops.range }, PathFinderOpts).path;
-    if (result.length) {
-        let creepCache = creepPathCache[creep.name];
-        creepCache.path = {     // 弄个新的自己走，不修改公用的缓存路，只会用于正向走所以也不需要start属性，idx属性会在startRoute中设置
-            end: formalize(result[result.length - 1]),
-            posArray: result,
-            ignoreStructures: !!ops.ignoreDestructibleStructures
+        let result = PathFinder.search(creep.pos, { pos: toPos, range: ops.range }, PathFinderOpts).path;
+        if (result.length) {
+            let creepCache = creepPathCache[creep.name];
+            creepCache.path = {     // 弄个新的自己走，不修改公用的缓存路，只会用于正向走所以也不需要start属性，idx属性会在startRoute中设置
+                end: formalize(result[result.length - 1]),
+                posArray: result,
+                ignoreStructures: !!ops.ignoreDestructibleStructures
+            }
+            generateDirectionArray(creepCache.path);
+            return true;
         }
-        generateDirectionArray(creepCache.path);
-        return true;
+        return false;
+    } finally {
+        if (reuseEntry) {
+            rollbackTemporaryCreepBlocks(bypassCostMat, reuseEntry.changedKeys, reuseEntry.oldCosts);
+        }
     }
-    return false;
 }
 
 let findPathIgnoreCondition;
@@ -1317,11 +1412,19 @@ function clearExpiredPaths() {
 function clearExpiredCostMatrix() {
     forEachDueNumericKey(costMatrixCacheTimer, Game.time, (timeKey) => {
         //console.log('clear costMat');
+        let avoidChanged = false;
         for (let data of costMatrixCacheTimer[timeKey]) {
             delete costMatrixCache[data.roomName];
+            delete costMatrixRevision[data.roomName];
             for (let avoidRoomName of data.avoids) {
-                delete avoidRooms[avoidRoomName];
+                if (avoidRoomName in avoidRooms) {
+                    delete avoidRooms[avoidRoomName];
+                    avoidChanged = true;
+                }
             }
+        }
+        if (avoidChanged) {
+            markAvoidRoomsChanged();
         }
         delete costMatrixCacheTimer[timeKey];
     });
@@ -1403,7 +1506,6 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
     if (typeof ops.range != 'number') {
         return ERR_INVALID_ARGS
     }
-
     const fromFormalPos = formalize(creep.pos);
     const toFormalPos = formalize(toPos);
     const found = creep.pos.roomName == toPos.roomName ?
@@ -1523,6 +1625,7 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
         if (code == ERR_NOT_FOUND && isObstacleStructure(creep.room, curStep, ops.ignoreDestructibleStructures)) {   // 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
             //console.log(`${Game.time}: ${creep.name} find obstacles at ${creep.pos}`);
             delete costMatrixCache[creep.pos.roomName];
+            delete costMatrixRevision[creep.pos.roomName];
             deletePath(path);
             return null;
         }
@@ -1600,7 +1703,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         } // else 要画路，画完再return
     }
 
-    // HELP：感兴趣的帮我检查这里的核心逻辑orz
+
     let creepCache = creepPathCache[this.name];
     if (creepCache) {  // 有缓存
         const code = tryMoveWithCreepCache(this, toPos, ops, creepCache);
@@ -1969,6 +2072,7 @@ function bmSetHostileCostMatrixClearDelay(number) {
 
 function bmDeleteCostMatrix(roomName) {
     delete costMatrixCache[roomName];
+    delete costMatrixRevision[roomName];
     return OK;
 }
 
@@ -1978,7 +2082,10 @@ function bmGetAvoidRoomsMap() {
 
 function bmAddAvoidRooms(roomName) {
     if (parseRoomName(roomName)) {
-        avoidRooms[roomName] = 1;
+        if (!(roomName in avoidRooms)) {
+            avoidRooms[roomName] = 1;
+            markAvoidRoomsChanged();
+        }
         return OK;
     } else {
         return ERR_INVALID_ARGS;
@@ -1988,6 +2095,7 @@ function bmAddAvoidRooms(roomName) {
 function bmDeleteAvoidRooms(roomName) {
     if (parseRoomName(roomName) && avoidRooms[roomName]) {
         delete avoidRooms[roomName];
+        markAvoidRoomsChanged();
         return OK;
     } else {
         return ERR_INVALID_ARGS;
