@@ -116,7 +116,7 @@ const HarvesterAction = {
             return;
         }
 
-        if (!creep.sitOnSourceContainer()) return;
+        creep.sitOnSourceContainer()
 
         const result = creep.goHaverst(targetSource);
         if (!result) return;

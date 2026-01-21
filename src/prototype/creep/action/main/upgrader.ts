@@ -51,16 +51,18 @@ const Upgrader = {
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
 
-        const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2)) || null;
-        const container = creep.room.container.find(l => l.pos.inRangeTo(creep.room.controller, 2)) ?? null;
+        const links = creep.room.link.filter(l => l.pos.inRangeTo(creep.room.controller, 2)) || [];
+        const link = links.find(l => l.store[RESOURCE_ENERGY] > 0);
+        const containers = creep.room.container.filter(c => c.pos.inRangeTo(creep.room.controller, 1)) || [];
+        const container = containers.find(c => c.store[RESOURCE_ENERGY] > 0);
 
-        if (link && link.store[RESOURCE_ENERGY] > 0) {
+        if (link) {
             creep.goWithdraw(link, RESOURCE_ENERGY);
         }
-        else if(container && container.store[RESOURCE_ENERGY] > 0) {
+        else if(container) {
             creep.goWithdraw(container, RESOURCE_ENERGY);
         }
-        else if(!link || creep.room.level < 6) { creep.TakeEnergy() }
+        else if(links.length == 0 || creep.room.level < 6) { creep.TakeEnergy() }
 
         if (creep.store.getFreeCapacity() === 0) {
             creep.say('⚡');
