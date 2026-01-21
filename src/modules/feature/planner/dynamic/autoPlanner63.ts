@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { PriorityQueue, NewNode } from '@/modules/utils/priorityQueue'
 import { RoomArray } from '@/modules/utils/roomArray'
-import HelperVisual from '@/modules/feature/planner/helperVisual'
+import HelperVisual from '@/modules/utils/helperVisual'
 
 class UnionFind {
 	constructor(size) {

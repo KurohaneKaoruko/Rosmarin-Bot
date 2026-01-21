@@ -1,5 +1,5 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/modules/utils/compress';
-import HelperVisual from '@/modules/feature/planner/helperVisual';
+import HelperVisual from '@/modules/utils/helperVisual';
 import LayoutPlanner from '@/modules/feature/planner/layoutPlanner';
 
 export default {
