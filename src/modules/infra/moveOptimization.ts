@@ -105,9 +105,9 @@ cache.roomNameParseCache = roomNameParseCache;
 /**
  * 解析房间名
  * @param {string} roomName
- * @returns {{ ew:'W'|'E', ewNum:number, ns:'N'|'S', nsNum:number } | null}
+ * @returns {{ ew:'W'|'E', ewNum:number, ns:'N'|'S', nsNum:number, baseX:number, baseY:number } | null}
  */
-function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N' | 'S'; nsNum: number; } | null {
+function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N' | 'S'; nsNum: number; baseX: number; baseY: number; } | null {
     const cached = roomNameParseCache[roomName];
     if (cached !== undefined) return cached;
     const len = roomName.length;
@@ -172,7 +172,9 @@ function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N
         ew: /** @type {'W'|'E'} */(ewCode === 87 ? 'W' : 'E'),
         ewNum,
         ns: /** @type {'N'|'S'} */(nsCode === 83 ? 'S' : 'N'),
-        nsNum
+        nsNum,
+        baseX: (ewCode === 87 ? -ewNum : ewNum + 1) * 50,
+        baseY: (nsCode === 83 ? nsNum + 1 : -nsNum) * 50
     };
     roomNameParseCache[roomName] = parsed;
     return parsed;
@@ -185,8 +187,8 @@ function formalize(pos) {
     let parsed = parseRoomName(pos.roomName);
     if (parsed) {
         return { // 如果这里出现类型错误，那么意味着房间名字不是正确格式但通过了parse，小概率事件
-            x: (parsed.ew === 'W' ? -parsed.ewNum : parsed.ewNum + 1) * 50 + pos.x,
-            y: (parsed.ns === 'N' ? -parsed.nsNum : parsed.nsNum + 1) * 50 + pos.y
+            x: parsed.baseX + pos.x,
+            y: parsed.baseY + pos.y
         }
     } // else 房间名字不是正确格式
     return {}
@@ -230,8 +232,8 @@ function isNear(pos1, pos2) {
         let parsed2 = parseRoomName(pos2.roomName);
         if (parsed1 && parsed2) {
             // 统一到大地图坐标
-            let formalizedEW = (parsed1.ew === 'W' ? -parsed1.ewNum : parsed1.ewNum + 1) * 50 + pos1.x - (parsed2.ew === 'W' ? -parsed2.ewNum : parsed2.ewNum + 1) * 50 - pos2.x;
-            let formalizedNS = (parsed1.ns === 'N' ? -parsed1.nsNum : parsed1.nsNum + 1) * 50 + pos1.y - (parsed2.ns === 'N' ? -parsed2.nsNum : parsed2.nsNum + 1) * 50 - pos2.y;
+            let formalizedEW = (parsed1.baseX + pos1.x) - (parsed2.baseX + pos2.x);
+            let formalizedNS = (parsed1.baseY + pos1.y) - (parsed2.baseY + pos2.y);
             return -1 <= formalizedEW && formalizedEW <= 1 && -1 <= formalizedNS && formalizedNS <= 1;
         }
         // end - start = 0.00077 cpu
@@ -246,11 +248,18 @@ function isNear(pos1, pos2) {
 function inRange(pos1, pos2, range) {
     if (pos1.roomName == pos2.roomName) {
         return -range <= pos1.x - pos2.x && pos1.x - pos2.x <= range && -range <= pos1.y - pos2.y && pos1.y - pos2.y <= range;
-    } else {
-        pos1 = formalize(pos1);
-        pos2 = formalize(pos2);
-        return typeof pos1.x == 'number' && typeof pos2.x == 'number' && inRange(pos1, pos2, range);
     }
+    if (!pos1.roomName || !pos2.roomName) {
+        return false;
+    }
+    let parsed1 = parseRoomName(pos1.roomName);
+    let parsed2 = parseRoomName(pos2.roomName);
+    if (!parsed1 || !parsed2) {
+        return false;
+    }
+    let formalizedEW = (parsed1.baseX + pos1.x) - (parsed2.baseX + pos2.x);
+    let formalizedNS = (parsed1.baseY + pos1.y) - (parsed2.baseY + pos2.y);
+    return -range <= formalizedEW && formalizedEW <= range && -range <= formalizedNS && formalizedNS <= range;
 }
 
 /**
