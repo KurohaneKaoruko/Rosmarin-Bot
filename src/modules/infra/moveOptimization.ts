@@ -18,11 +18,12 @@ reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
  */
 // 初始化参数
 let config = {
-    changeMove: true,   // 【未启用】为creep.move增加对穿能力
+    changeMove: true,   // 【待测试】为creep.move增加对穿能力
     changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
-    changeFindClostestByPath: true,     // 【未启用】轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
+    changeFindClostestByPath: true,     // 【待测试】轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
     autoVisual: false,  // 【未启用】
-    enableFlee: false   // 【未启用】是否添加flee()函数，注意这会在Creep.prototype上添加官方未有键值，flee()用法见最底下module.exports处
+    enableFlee: false,   // 【待测试】是否启用 flee
+    enableSquadPath: false // 【待测试】是否启用 findSquadPathTo
 }
 // 运行时参数 
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
@@ -1578,30 +1579,158 @@ function betterMoveTo(firstArg, secondArg, opts) {
 
 /**
  *
- * @param {Creep} this 写好后删这个参数
  * @param {DirectionConstant | Creep} target
  */
 function betterMove(target) {
-
+    if (typeof target == "number") {
+        const nextPos = direction2Pos(this.pos, target);
+        if (nextPos) {
+            trySwap(this, nextPos, false, true);
+        }
+        creepMoveCache[this.name] = Game.time;
+        return originMove.call(this, target);
+    }
+    if (target && typeof target == 'object' && 'pos' in target) { // pull 机制
+        creepMoveCache[this.name] = Game.time;
+        return originMove.call(this, target);
+    }
+    return ERR_INVALID_ARGS;
 }
 
 /**
- * @param {RoomPosition} this 写好后删这个参数
  * @param {FindConstant} type
  * @param {FindPathOpts & FilterOptions<FIND_STRUCTURES> & { algorithm?: string }} opts
  */
 function betterFindClosestByPath(type, opts) {
-
+    if (!opts) {
+        opts = {};
+    }
+    if (opts.ignoreCreeps === undefined) {
+        opts = Object.assign({ ignoreCreeps: true }, opts);
+    }
+    return originFindClosestByPath.call(this, type, opts);
 }
 
 /**
  *  opts: memberPos:relativePos[], avoidTowersHigherThan:number, avoidObstaclesHigherThan:number
- * @param {RoomPosition} this 写好后删这个参数
  * @param {RoomPosition} toPos
  * @param {*} opts
  */
 function findSquadPathTo(toPos, opts) {
+    if (!toPos || typeof toPos.x != 'number' || typeof toPos.y != 'number') {
+        return [];
+    }
+    opts = opts || {};
 
+    const range = typeof opts.range == 'number' ? opts.range : 1;
+    const ignoreCondition = !!opts.ignoreDestructibleStructures;
+    const memberPos = Array.isArray(opts.memberPos) ? opts.memberPos : [];
+
+    const derivedMatCache = {};
+    const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
+
+    const roomCallback = (roomName) => {
+        if (roomName in avoidRooms) {
+            return false;
+        }
+        let base = roomName in costMatrixCache ? costMatrixCache[roomName][ignoreCondition] : emptyCostMatrix;
+        if (userCallback) {
+            let resultCostMat = userCallback(roomName, roomName in costMatrixCache ? base.clone() : new PathFinder.CostMatrix);
+            if (resultCostMat instanceof PathFinder.CostMatrix) {
+                base = resultCostMat;
+            }
+        }
+        if (!memberPos.length) {
+            return base;
+        }
+        if (derivedMatCache[roomName]) {
+            return derivedMatCache[roomName];
+        }
+        let derived = new PathFinder.CostMatrix;
+        for (let y = 0; y < 50; y++) {
+            for (let x = 0; x < 50; x++) {
+                let blocked = false;
+                for (let rel of memberPos) {
+                    const rx = x + rel.x;
+                    const ry = y + rel.y;
+                    if (rx < 0 || ry < 0 || rx > 49 || ry > 49 || base.get(rx, ry) == unWalkableCCost) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (blocked) {
+                    derived.set(x, y, unWalkableCCost);
+                } else {
+                    const v = base.get(x, y);
+                    if (v) {
+                        derived.set(x, y, v);
+                    }
+                }
+            }
+        }
+        derivedMatCache[roomName] = derived;
+        return derived;
+    };
+
+    const PathFinderOpts = createPathFinderBaseOpts(opts);
+    applyMoveToTerrainCosts(PathFinderOpts, opts);
+    PathFinderOpts.roomCallback = roomCallback;
+    PathFinderOpts.maxOps = opts.maxOps;
+
+    return PathFinder.search(this, { pos: toPos, range }, PathFinderOpts).path;
+}
+
+function flee(targets, opts) {
+    opts = opts || {};
+    const range = typeof opts.range == 'number' ? opts.range : 5;
+    const ignoreCondition = !!opts.ignoreDestructibleStructures;
+    const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
+
+    if (!Array.isArray(targets) || !targets.length) {
+        return ERR_INVALID_ARGS;
+    }
+    const goals = [];
+    for (let t of targets) {
+        if (!t) continue;
+        if (t.pos && typeof t.pos.x == 'number') {
+            goals.push({ pos: t.pos, range: typeof t.range == 'number' ? t.range : range });
+        } else if (typeof t.x == 'number' && typeof t.y == 'number' && t.roomName) {
+            goals.push({ pos: t, range });
+        }
+    }
+    if (!goals.length) {
+        return ERR_INVALID_ARGS;
+    }
+
+    const roomCallback = (roomName) => {
+        if (roomName in avoidRooms) {
+            return false;
+        }
+        let base = roomName in costMatrixCache ? costMatrixCache[roomName][ignoreCondition] : emptyCostMatrix;
+        if (userCallback) {
+            let resultCostMat = userCallback(roomName, roomName in costMatrixCache ? base.clone() : new PathFinder.CostMatrix);
+            if (resultCostMat instanceof PathFinder.CostMatrix) {
+                base = resultCostMat;
+            }
+        }
+        return base;
+    };
+
+    const PathFinderOpts = createPathFinderBaseOpts(opts);
+    applyMoveToTerrainCosts(PathFinderOpts, opts);
+    PathFinderOpts.roomCallback = roomCallback;
+    PathFinderOpts.maxOps = opts.maxOps;
+    PathFinderOpts.flee = true;
+
+    const result = PathFinder.search(this.pos, goals, PathFinderOpts).path;
+    if (!result.length) {
+        return ERR_NO_PATH;
+    }
+    if (this.fatigue) {
+        return ERR_TIRED;
+    }
+    creepMoveCache[this.name] = Game.time;
+    return originMove.call(this, getDirection(this.pos, result[0]));
 }
 
 /**
@@ -1644,10 +1773,15 @@ observers = observers.reduce((temp, id) => {
     return temp;
 }, []);
 
-// Creep.prototype.move = wrapFn(config.changeMove? betterMove : originMove, 'move');
-Creep.prototype.moveTo = wrapFn(config.changeMoveTo ? betterMoveTo : originMoveTo, 'moveTo');
-// RoomPosition.prototype.findClosestByPath = wrapFn(config.changeFindClostestByPath? betterFindClosestByPath : originFindClosestByPath, 'findClosestByPath');
-// Creep.prototype.flee()和RoomPosition.prototype.findClosestByPath()将在v0.9或v1.0版本加入
+function applyConfig() {
+    bmSetChangeMove(!!config.changeMove);
+    bmSetChangeMoveTo(!!config.changeMoveTo);
+    bmSetChangeFindClostestByPath(!!config.changeFindClostestByPath);
+    bmSetEnableFlee(!!config.enableFlee);
+    bmSetEnableSquadPath(!!config.enableSquadPath);
+}
+
+applyConfig();
 
 
 // module.exports
@@ -1688,7 +1822,13 @@ function bmDeletePathInRoom(roomName) {
 }
 
 function bmSetChangeMoveTo(bool) {
-    Creep.prototype.moveTo = wrapFn(bool ? betterMoveTo : originMoveTo, 'moveTo');
+    config.changeMoveTo = !!bool;
+    const impl = wrapFn(bool ? betterMoveTo : originMoveTo, 'moveTo');
+    if (Creep.prototype.$moveTo) {
+        Creep.prototype.$moveTo = impl;
+    } else {
+        Creep.prototype.moveTo = impl;
+    }
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
     testCacheHits = 0;
     testCacheMiss = 0;
@@ -1719,13 +1859,33 @@ function bmPrint() {
 }
 
 function bmSetChangeMove(bool) {
-    //Creep.prototype.move = wrapFn(bool? betterMove : originMove, 'move');
+    config.changeMove = !!bool;
+    if (bool) {
+        if (!Creep.prototype.$move) {
+            Creep.prototype.$move = Creep.prototype.move;
+        }
+        Creep.prototype.move = wrapFn(betterMove, 'move');
+    } else if (bool === false) {
+        if (Creep.prototype.$move) {
+            Creep.prototype.move = Creep.prototype.$move;
+        }
+    }
     analyzeCPU.move = { sum: 0, calls: 0 };
     return OK;
 }
 
 function bmSetChangeFindClostestByPath(bool) {
-    // RoomPosition.prototype.findClosestByPath = wrapFn(bool? betterFindClosestByPath : originFindClosestByPath, 'findClosestByPath');
+    config.changeFindClostestByPath = !!bool;
+    if (bool) {
+        if (!RoomPosition.prototype.$findClosestByPath) {
+            RoomPosition.prototype.$findClosestByPath = RoomPosition.prototype.findClosestByPath;
+        }
+        RoomPosition.prototype.findClosestByPath = wrapFn(betterFindClosestByPath, 'findClosestByPath');
+    } else if (bool === false) {
+        if (RoomPosition.prototype.$findClosestByPath) {
+            RoomPosition.prototype.findClosestByPath = RoomPosition.prototype.$findClosestByPath;
+        }
+    }
     analyzeCPU.findClosestByPath = { sum: 0, calls: 0 };
     return OK;
 }
@@ -1778,6 +1938,51 @@ function bmDeleteAvoidRooms(roomName) {
     }
 }
 
+function bmSetEnableSquadPath(bool) {
+    config.enableSquadPath = !!bool;
+    if (bool) {
+        if (!RoomPosition.prototype.$findSquadPathTo) {
+            RoomPosition.prototype.$findSquadPathTo = RoomPosition.prototype.findSquadPathTo;
+        }
+        RoomPosition.prototype.findSquadPathTo = wrapFn(findSquadPathTo, 'findSquadPathTo');
+    } else if (bool === false) {
+        if (RoomPosition.prototype.$findSquadPathTo) {
+            RoomPosition.prototype.findSquadPathTo = RoomPosition.prototype.$findSquadPathTo;
+        }
+    }
+    return OK;
+}
+
+function bmSetEnableFlee(bool) {
+    config.enableFlee = !!bool;
+    if (bool) {
+        if (!Creep.prototype.$flee) {
+            Creep.prototype.$flee = Creep.prototype.flee;
+        }
+        Creep.prototype.flee = wrapFn(flee, 'flee');
+    } else if (bool === false) {
+        if (Creep.prototype.$flee) {
+            Creep.prototype.flee = Creep.prototype.$flee;
+        } else {
+            delete Creep.prototype.flee;
+        }
+    }
+    return OK;
+}
+
+function bmGetConfig() {
+    return config;
+}
+
+function bmSetConfig(partial) {
+    if (!partial || typeof partial != 'object') {
+        return ERR_INVALID_ARGS;
+    }
+    Object.assign(config, partial);
+    applyConfig();
+    return OK;
+}
+
 global.BetterMove= {
     // getPosMoveAble (pos){
     //     generateCostMatrix(Game.rooms[pos.roomName])
@@ -1798,6 +2003,10 @@ global.BetterMove= {
     getAvoidRoomsMap: bmGetAvoidRoomsMap,
     addAvoidRooms: bmAddAvoidRooms,
     deleteAvoidRooms: bmDeleteAvoidRooms,
+    setEnableSquadPath: bmSetEnableSquadPath,
+    setEnableFlee: bmSetEnableFlee,
+    getConfig: bmGetConfig,
+    setConfig: bmSetConfig,
     deletePathInRoom: bmDeletePathInRoom,
     addAvoidExits (fromRoomName, toRoomName) {    // 【未启用】
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
