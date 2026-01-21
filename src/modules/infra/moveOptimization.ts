@@ -2029,7 +2029,11 @@ function bmDeletePathInRoom(roomName) {
 
 function bmSetChangeMoveTo(bool) {
     config.changeMoveTo = !!bool;
-    const impl = wrapFn(bool ? betterMoveTo : originMoveTo, 'moveTo');
+    const core = bool ? betterMoveTo : originMoveTo;
+    const impl = wrapFn(function (...args) {
+        updateDontPullMeForMoveTo(this);
+        return core.apply(this, args);
+    }, 'moveTo');
     if (Creep.prototype.$moveTo) {
         Creep.prototype.$moveTo = impl;
     } else {
@@ -2255,7 +2259,7 @@ global.BetterMove= {
  * 3) 将 originalName 替换为 wrap。
  */
 function wrapProtoMethod(proto, originalName, backupName, wrap) {
-    if (!proto[backupName]) {
+    if (!proto[backupName] || proto[backupName] === proto[originalName]) {
         proto[backupName] = proto[originalName];
     }
     proto[originalName] = wrap;
@@ -2296,22 +2300,6 @@ function wrapActionSetDontPullMeTrue(methodName) {
     wrapProtoMethod(Creep.prototype, methodName, backupName, function (...args) {
         this.memory.dontPullMe = true;
         return this[backupName](...args);
-    });
-}
-
-if (!Creep.prototype.$moveTo) {
-    Creep.prototype.originMoveTo = originMoveTo;
-    wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', function (target, ...e) {
-        updateDontPullMeForMoveTo(this);
-        return this.$moveTo(target, ...e);
-    });
-}
-
-if (!PowerCreep.prototype.$moveTo) {
-    // PowerCreep 的 moveTo 可能与 Creep 不同，备份应保存其自身实现
-    PowerCreep.prototype.originMoveTo = PowerCreep.prototype.moveTo;
-    wrapProtoMethod(PowerCreep.prototype, 'moveTo', '$moveTo', function (target, ...e) {
-        return this.$moveTo(target, ...e);
     });
 }
 
