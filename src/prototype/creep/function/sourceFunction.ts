@@ -69,8 +69,15 @@ export default class SourceFunction extends Creep {
     sitOnSourceContainer(): boolean {
         const sourceContainer = this.getNearbySourceContainer(1);
         if (!sourceContainer) return true;
-        if (this.pos.isEqualTo(sourceContainer.pos)) return true;
-        this.moveTo(sourceContainer);
+        const creepsOnContainer = sourceContainer.pos.lookFor(LOOK_CREEPS);
+        const powerCreepsOnContainer = sourceContainer.pos.lookFor(LOOK_POWER_CREEPS);
+        if (
+            creepsOnContainer.length > 0 ||
+            powerCreepsOnContainer.length > 0
+        ) {
+            return true;
+        }
+        this.moveTo(sourceContainer, { range: 0 });
         return false;
     }
 }
