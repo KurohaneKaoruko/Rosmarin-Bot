@@ -10,29 +10,82 @@ export default class MoveFunction extends Creep {
     moveToRoom(roomName: string, options = {}) {
         if (this.fatigue > 0) return ERR_TIRED;
 
-        options['range'] = 3;
-        let lastTargetPos = null;
+        const DETOUR_WINDOW = 20;
+        const COOLDOWN_TTL = 15;
 
-        if (this.memory.lastTargetPos &&
-            this.memory.lastTargetPos.roomName === roomName) {
-            lastTargetPos = this.memory.lastTargetPos;
-        } else {
+        const opts: any = options || {};
+        if (opts.range === undefined) opts.range = 3;
+
+        // 状态机：用于“决定绕房后继续执行绕房方案”，避免 A->B->A 反复横跳
+        let state = this.memory._moveToRoomState;
+        if (!state || state.targetRoom !== roomName) {
+            state = this.memory._moveToRoomState = {
+                targetRoom: roomName,
+                targetPos: null,
+                lastRoom: this.room.name,
+                lastRoomTick: Game.time,
+                leftTargetTick: 0,
+                cooldownUntil: 0
+            };
+        }
+
+        // 记录“离开目标房间”的时刻与“回到目标房间”的冷却窗口
+        if (state.lastRoom !== this.room.name) {
+            if (state.lastRoom === roomName && this.room.name !== roomName) {
+                state.leftTargetTick = Game.time;
+            }
+            if (this.room.name === roomName && state.lastRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+                state.cooldownUntil = Game.time + COOLDOWN_TTL;
+            }
+            state.lastRoom = this.room.name;
+            state.lastRoomTick = Game.time;
+        }
+
+        // 目标点：保持稳定，避免每 tick 随机导致策略抖动
+        if (!state.targetPos || state.targetPos.roomName !== roomName) {
             if (this.room.name === roomName && this.room.controller) {
-                lastTargetPos = this.room.controller.pos;
-                this.memory.lastTargetPos = { x: lastTargetPos.x, y: lastTargetPos.y, roomName};
+                const p = this.room.controller.pos;
+                state.targetPos = { x: p.x, y: p.y, roomName };
             } else {
+                let seed = 0;
+                const s = `${this.name}|${roomName}`;
+                for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
                 const centerX = 25;
                 const centerY = 25;
                 const range = 10;
-                const randomX = Math.floor(Math.random() * (range * 2 + 1)) + (centerX - range);
-                const randomY = Math.floor(Math.random() * (range * 2 + 1)) + (centerY - range);
-                lastTargetPos = { x: randomX, y: randomY, roomName }
-                this.memory.lastTargetPos = lastTargetPos;
+                const span = range * 2 + 1;
+                const x = (seed % span) + (centerX - range);
+                const y = (((seed >>> 8) % span) + (centerY - range));
+                state.targetPos = { x, y, roomName };
             }
         }
 
-        const tarPos = new RoomPosition(lastTargetPos.x, lastTargetPos.y, roomName);
-        return this.moveTo(tarPos, options);
+        // detour 续行：如果刚从目标房间 detour 出来，则在 detour 房间内优先走回目标房间的出口
+        if (this.room.name !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+            let exitPos = null;
+            const bm: any = (globalThis as any).BetterMove;
+            if (bm && typeof bm.getClosestExitPos === 'function') {
+                exitPos = bm.getClosestExitPos(this.pos, roomName);
+            } else {
+                const exitDir = this.room.findExitTo(roomName);
+                if (exitDir === FIND_EXIT_TOP || exitDir === FIND_EXIT_RIGHT || exitDir === FIND_EXIT_BOTTOM || exitDir === FIND_EXIT_LEFT) {
+                    const exits = this.room.find(exitDir);
+                    exitPos = exits.length ? this.pos.findClosestByRange(exits) : null;
+                }
+            }
+            if (exitPos) {
+                if (opts.maxRooms === undefined) opts.maxRooms = 1;
+                return this.moveTo(exitPos, Object.assign({}, opts, { maxRooms: 1, range: 0 }));
+            }
+        }
+
+        // 回到目标房间后的短冷却：优先房内推进，避免刚回房又立刻再次绕出去
+        if (this.room.name === roomName && state.cooldownUntil && Game.time < state.cooldownUntil && opts.maxRooms === undefined) {
+            opts.maxRooms = 1;
+        }
+
+        const tarPos = new RoomPosition(state.targetPos.x, state.targetPos.y, roomName);
+        return this.moveTo(tarPos, opts);
     }
 
     /**

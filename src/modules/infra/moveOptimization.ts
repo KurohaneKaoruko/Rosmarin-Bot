@@ -20,7 +20,9 @@ let config = {
     enableSquadPath: true, // 【待测试】是否启用 findSquadPathTo
     enableRouteCache: true, // 【待测试】是否启用寻路缓存
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
-    enableBypassCostMatReuse: true  // 【待测试】是否启用绕过房间的costMatrix缓存
+    enableBypassCostMatReuse: true,  // 【待测试】是否启用绕过房间的costMatrix缓存
+    enableSameRoomDetourCooldown: true, // 同房目标发生“绕房又回房”后短暂收敛到 maxRooms=1，避免反复进出房间
+    sameRoomDetourCooldownTTL: 15 // 冷却 tick 数（只影响未显式传 maxRooms 的调用）
 }
 // 运行时参数 
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
@@ -110,6 +112,10 @@ let unWalkableCCost = 255;
  */
 let roomNameParseCache = Object.create(null);
 cache.roomNameParseCache = roomNameParseCache;
+
+function maybeClearRoomNameParseCache() {
+    return;
+}
 
 /**
  * 解析房间名
@@ -269,6 +275,25 @@ function inRange(pos1, pos2, range) {
     let formalizedEW = (parsed1.baseX + pos1.x) - (parsed2.baseX + pos2.x);
     let formalizedNS = (parsed1.baseY + pos1.y) - (parsed2.baseY + pos2.y);
     return -range <= formalizedEW && formalizedEW <= range && -range <= formalizedNS && formalizedNS <= range;
+}
+
+function getClosestExitPos(fromPos, toRoomName) {
+    if (!fromPos || !toRoomName) {
+        return null;
+    }
+    const room = Game.rooms[fromPos.roomName];
+    if (!room) {
+        return null;
+    }
+    const exitDir = room.findExitTo(toRoomName);
+    if (typeof exitDir !== 'number') {
+        return null;
+    }
+    const exits = room.find(exitDir);
+    if (!exits || !exits.length) {
+        return null;
+    }
+    return fromPos.findClosestByRange(exits);
 }
 
 /**
@@ -1675,6 +1700,31 @@ function betterMoveTo(firstArg, secondArg, opts) {
 
     registerRoomBounceGuard(this, toPos.roomName);
 
+    if (config.enableSameRoomDetourCooldown) {
+        // 同房目标的“绕房承诺/冷却”：
+        // - 允许出现 A->B->A 这种绕房更快的路线；
+        // - 但当检测到“从目标房绕出后又回到目标房”时，短时间内把 maxRooms 收敛为 1（仅当调用方未显式传 maxRooms），
+        //   用于稳定推进房内阶段，减少下一 tick 又立刻重新绕出去导致的反复进出。
+        let detour = this.memory._bmSameRoomDetour;
+        if (!detour) {
+            // lastRoom: 上一次所在房间；leftTick: 最近一次从目标房离开的 tick
+            detour = this.memory._bmSameRoomDetour = { lastRoom: this.pos.roomName, lastTick: Game.time, leftTick: 0 };
+        }
+        if (detour.lastRoom !== this.pos.roomName) {
+            if (detour.lastRoom === toPos.roomName && this.pos.roomName !== toPos.roomName) {
+                detour.leftTick = Game.time;
+            }
+            if (this.pos.roomName === toPos.roomName && detour.lastRoom !== toPos.roomName && detour.leftTick && (Game.time - detour.leftTick) <= 20) {
+                this.memory._bmDetourCooldownUntil = Game.time + (config.sameRoomDetourCooldownTTL | 0);
+            }
+            detour.lastRoom = this.pos.roomName;
+            detour.lastTick = Game.time;
+        }
+        if (toPos.roomName === this.pos.roomName && ops.maxRooms === undefined && this.memory._bmDetourCooldownUntil && Game.time < this.memory._bmDetourCooldownUntil) {
+            ops.maxRooms = 1;
+        }
+    }
+
     if (typeof toPos.x != "number" || typeof toPos.y != "number") {   // 房名无效或目的坐标不是数字，不合法
         //this.say('no tar');
         return ERR_INVALID_TARGET;
@@ -2167,6 +2217,7 @@ global.BetterMove= {
     getAvoidRoomsMap: bmGetAvoidRoomsMap,
     addAvoidRooms: bmAddAvoidRooms,
     deleteAvoidRooms: bmDeleteAvoidRooms,
+    getClosestExitPos: getClosestExitPos,
     setEnableSquadPath: bmSetEnableSquadPath,
     setEnableFlee: bmSetEnableFlee,
     getConfig: bmGetConfig,
