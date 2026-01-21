@@ -1,11 +1,5 @@
 // @ts-nocheck
 
-export {};
-
-declare global {
-    var cache: any;
-}
-
 // 本模块通过Scorpior的超级移动优化修改而来
 /*
 creep对穿+跨房间寻路+寻路缓存 

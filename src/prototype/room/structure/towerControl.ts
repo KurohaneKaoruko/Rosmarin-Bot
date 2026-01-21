@@ -159,9 +159,9 @@ export default class TowerControl extends Room {
 
     // 治疗己方单位
     TowerHealCreep() {
-        if (!global.cache.towerHealTargets) global.cache.towerHealTargets = {};
+        if (!global.towerHealTargets) global.towerHealTargets = {};
         if (Game.time % 10 == 0) {
-            const targets = global.cache.towerHealTargets[this.name] = [];
+            const targets = global.towerHealTargets[this.name] = [];
             targets.push(...this.find(FIND_POWER_CREEPS, {
                 filter: c => c.hits < c.hitsMax && (c.my || c.isWhiteList())
                 }).map(c => c.id));
@@ -169,7 +169,7 @@ export default class TowerControl extends Room {
                 filter: c => c.hits < c.hitsMax && (c.my || c.isWhiteList())
             }).map(c => c.id));
         }
-        const healTarget = (global.cache.towerHealTargets[this.name]||[])
+        const healTarget = (global.towerHealTargets[this.name]||[])
                 .map((id: Id<Creep>) => Game.getObjectById(id))
                 .filter((c: Creep | null) => c && c.hits < c.hitsMax) as any[];
         if (healTarget.length > 0) {
@@ -195,13 +195,13 @@ export default class TowerControl extends Room {
 
     // 攻击NPC单位
     TowerAttackNPC() {
-        if (!global.cache.towerAttackNPC) global.cache.towerAttackNPC = {};
+        if (!global.towerAttackNPC) global.towerAttackNPC = {};
         if (Game.time % 10 == 0) {
-            global.cache.towerAttackNPC[this.name] = this.find(FIND_HOSTILE_CREEPS, {
+            global.towerAttackNPC[this.name] = this.find(FIND_HOSTILE_CREEPS, {
                 filter: c => c.owner.username == 'Source Keeper' || c.owner.username == 'Invader'
             }).map(c => c.id);
         }
-        let Hostiles = (global.cache.towerAttackNPC[this.name]||[])
+        let Hostiles = (global.towerAttackNPC[this.name]||[])
                     .map((id: Id<Creep>) => Game.getObjectById(id))
                     .filter((c:Creep) => c && this.TowerDamageToCreep(c) > 0);
         if (Hostiles.length > 0) {
@@ -217,8 +217,8 @@ export default class TowerControl extends Room {
     // 攻击敌人
     TowerAttackEnemy() {
         // 搜寻敌人
-        if (!global.cache.towerTargets) global.cache.towerTargets = {};
-        const cache = global.cache.towerTargets;
+        if (!global.towerTargets) global.towerTargets = {};
+        const cache = global.towerTargets;
         if (Game.time % 10 == 0) {
             cache[this.name] = 
                 [
@@ -276,8 +276,8 @@ export default class TowerControl extends Room {
     // 处理普通修复任务, 修复建筑物
     TowerTaskRepair() {
         if (Game.cpu.bucket < 1000) return false;
-        if (!global.cache.towerRepairTarget) global.cache.towerRepairTarget = {};
-        let targetCache = global.cache.towerRepairTarget;
+        if (!global.towerRepairTarget) global.towerRepairTarget = {};
+        let targetCache = global.towerRepairTarget;
         if (Game.time % 20 == 0) {
             targetCache[this.name] = null;
             if (this.checkMissionInPool('repair')) {

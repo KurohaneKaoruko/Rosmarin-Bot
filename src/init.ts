@@ -32,9 +32,5 @@ export const GlobalInit = {
         // 基本配置信息
         global.BASE_CONFIG = BASE_CONFIG;
         global.BOT_NAME = BASE_CONFIG.BOT_NAME;
-        global.cache = {};
     },
-    start() {
-        if(!global.cache) global.cache = {};
-    }
 }
