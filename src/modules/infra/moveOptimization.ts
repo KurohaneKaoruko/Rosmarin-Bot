@@ -113,10 +113,6 @@ let unWalkableCCost = 255;
 let roomNameParseCache = Object.create(null);
 cache.roomNameParseCache = roomNameParseCache;
 
-function maybeClearRoomNameParseCache() {
-    return;
-}
-
 /**
  * 解析房间名
  * @param {string} roomName
@@ -1710,6 +1706,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
             // lastRoom: 上一次所在房间；leftTick: 最近一次从目标房离开的 tick
             detour = this.memory._bmSameRoomDetour = { lastRoom: this.pos.roomName, lastTick: Game.time, leftTick: 0 };
         }
+        // 检测“从目标房绕出后又回到目标房”
         if (detour.lastRoom !== this.pos.roomName) {
             if (detour.lastRoom === toPos.roomName && this.pos.roomName !== toPos.roomName) {
                 detour.leftTick = Game.time;
