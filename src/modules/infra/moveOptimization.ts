@@ -316,16 +316,38 @@ function getDirection(fromPos, toPos) {
     }
 }
 
-let reg2 = /^[WE]([0-9]+)[NS]([0-9]+)$/;    // parse得到['E28N7','28','7']
-let isHighWay = config.地图房号最大数字超过100 ?
-    (roomName) => {
-        let splited = reg2.exec(roomName);
-        return splited[1] % 10 == 0 || splited[2] % 10 == 0;
-    } :
-    (roomName) => {
-        // E0 || E10 || E1S0 || [E10S0|E1S10] || [E10S10] 比正则再除快
-        return roomName[1] == 0 || roomName[2] == 0 || roomName[3] == 0 || roomName[4] == 0 || roomName[5] == 0;
-    }
+// let reg2 = /^[WE]([0-9]+)[NS]([0-9]+)$/;    // parse得到['E28N7','28','7']
+// let isHighWay = config.地图房号最大数字超过100 ?
+//     (roomName) => {
+//         let splited = reg2.exec(roomName);
+//         return splited[1] % 10 == 0 || splited[2] % 10 == 0;
+//     } :
+//     (roomName) => {
+//         // E0 || E10 || E1S0 || [E10S0|E1S10] || [E10S10] 比正则再除快
+//         return roomName[1] == 0 || roomName[2] == 0 || roomName[3] == 0 || roomName[4] == 0 || roomName[5] == 0;
+//     }
+
+// 检查是否是高速公路（末位为0或N/S前一位为0）
+// 只支持1000以内的房间号, 如果要扩展, 可在继续加匹配
+let isHighWay = (roomName) => {
+    // 1. 检查末位 (Y坐标个位)
+    if (roomName.charCodeAt(roomName.length - 1) === 48) return true;
+
+    // 2. 探测 N(78) 或 S(83) 的位置并检查前一位
+    // Index 2 (例如 E1N1)
+    let code = roomName.charCodeAt(2);
+    if (code === 78 || code === 83) return roomName.charCodeAt(1) === 48;
+    
+    // Index 3 (例如 E10N1)
+    code = roomName.charCodeAt(3);
+    if (code === 78 || code === 83) return roomName.charCodeAt(2) === 48;
+    
+    // Index 4 (例如 E100N1)
+    code = roomName.charCodeAt(4);
+    if (code === 78 || code === 83) return roomName.charCodeAt(3) === 48;
+    
+    return false;
+};
 
 /**
  *  缓存的路径和当前moveTo参数相同

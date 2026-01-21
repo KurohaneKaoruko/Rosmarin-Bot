@@ -267,6 +267,32 @@ export const creepPosBipartiteMatch = (creeps: Creep[], pos: RoomPosition[], ran
     return result
 }
 
+/**
+ * 检查房间名是否是高速公路（末位为0或N/S前一位为0）
+ * 只支持1000以内的房间号
+ * @param roomName 房间名
+ * @returns 是否是高速公路
+ */
+export const isHighWay = (roomName: string) => {
+    // 1. 检查末位 (Y坐标个位)
+    if (roomName.charCodeAt(roomName.length - 1) === 48) return true;
+
+    // 2. 探测 N(78) 或 S(83) 的位置并检查前一位
+    // Index 2 (例如 E1N1)
+    let code = roomName.charCodeAt(2);
+    if (code === 78 || code === 83) return roomName.charCodeAt(1) === 48;
+    
+    // Index 3 (例如 E10N1)
+    code = roomName.charCodeAt(3);
+    if (code === 78 || code === 83) return roomName.charCodeAt(2) === 48;
+    
+    // Index 4 (例如 E100N1)
+    code = roomName.charCodeAt(4);
+    if (code === 78 || code === 83) return roomName.charCodeAt(3) === 48;
+    
+    return false;
+};
+
 
 import { FlowerNames } from '@/constant/CreepName';
 
