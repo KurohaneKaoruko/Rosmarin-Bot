@@ -1,72 +1,10 @@
 // @ts-nocheck
 
+// 本模块通过Scorpior的超级移动优化修改而来
 /*
 creep对穿+跨房间寻路+寻路缓存 
-跑的比香港记者还快从你做起
-应用此模块会导致creep.moveTo可选参数中这些项失效：reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
-保留creep.moveTo中其他全部可选参数如visualizePathStyle、range、ignoreDestructibleStructures、ignoreCreeps、ignoreRoad等
-新增creep.moveTo中可选参数ignoreSwamps，会无视swamp与road的移动力损耗差异，一律与plain相同处理，用于方便pc和眼，默认false
-例：creep.moveTo(controller, {ignoreSwamps: true});
-新增creep.moveTo中可选参数bypassHostileCreeps，被creep挡路时若此项为true则绕过别人的creep，默认为true，设为false用于近战攻击
-例：creep.moveTo(controller, {bypassHostileCreeps: false});
-新增creep.moveTo中可选参数bypassRange，被creep挡路准备绕路时的绕路半径，默认为5
-例：creep.moveTo(controller, {bypassRange: 10});
-新增creep.moveTo中可选参数noPathDelay，寻得的路是不完全路径时的再次寻路延迟，默认为10
-例：creep.moveTo(controller, {noPathDelay: 5});
-新增返回值ERR_INVALID_ARGS，表示range或者bypassRange类型错误
-
-遇到己方creep自动进行对穿，遇到自己设置了不想被对穿的creep（或bypassHostileCreeps设为true时遇到他人creep）会自动绕过
-会将新手墙和部署中的invaderCore处理为无法通过
-会绕过非终点的portal，不影响creep.moveTo(portal)
-不使用Memory及global，不会因此干扰外部代码
-不会在Creep.prototype、PowerCreep.prototype上增加官方未有的键值，不会因此干扰外部代码
-本模块不可用于sim，在sim会因为房间名格式不对返回ERR_INVALID_TARGET
-模块参数见代码头部，模块接口见代码尾部
-版本号规则：alpha test = 0.1.x，beta test = 0.9.x，publish >= 1.0.0
-
-author: Scorpior
-debug helpers: fangxm, czc
-inspired by: Yuandiaodiaodiao
-date: 2020/3/30
-version: 0.9.4(beta test)
-
-Usage:
-module :main
-
-require('超级移动优化');
-module.exports.loop=function() {
-
-    //your codes go here
-
-}
-
-changelog:
-0.1.0:  maybe not runnable
-0.1.1： still maybe not runnable，修了一些typo，完成正向移动，修改isObstacleStructure
-0.1.2： maybe runnable，some bugs are fixed
-0.1.3:  修正工地位置寻路错误，调整打印格式
-0.1.4:  补充pc对穿，打印中增加cache hits统计
-0.9.0:  启用自动清理缓存，保留ignoreCreeps参数，调整对穿顺序+增加在storage附近检查对穿，
-        正确识别敌对rampart，正确查询带range路径，打印中增加对穿频率统计
-0.9.1:  增加正常逻辑开销统计，修改cache搜索开销统计为cache miss开销统计，绕路bugfix，跨房检测bugfix，other bugfix
-0.9.2:  修改缓存策略减少查找耗时增加命中率，增加核心区对穿次数统计，对穿bugfix，other bugfix
-0.9.3： 取消路径反向复用避免偶发的复用非最优路径的情况，改进识别被新手墙封闭的房间，增加avoidRooms设置，
-        增加远距离跨房寻路成功率，房间出口处对穿bug fix
-0.9.4:  优化路径复用避免偶发的复用非最优路径的情况，删除运行时参数中neutralCostMatrixClearDelay，
-        自动根据挡路建筑情况设置中立房间costMatrix过期时间，增加ob寻路（检查房间是否可走），
-        提供deletePathInRoom接口（使用方式见下方ps），print()中增加平均每次查找缓存时检查的路径数量统计，
-        findRoute遇到过道新手墙时bugfix，偏移路径bugfix
-0.9.5： TODO：ignoreSwamp避开路，提供deletePathFromRoom、deletePathToRoom接口，增加自动visual，betterMove
-
-
-ps:
-1.默认ignoreCreeps为true，主动设置ignoreCreeps为false会在撞到creep时重新寻路
-2.对于不想被对穿的creep（比如没有脚的中央搬运工）, 设置memory：
-creep.memory.dontPullMe = true;
-3.修路后希望手动更新房间内路径，可执行如下代码：
-global.BetterMove.deletePathInRoom(roomName);
-4.战斗中遇到敌方pc不断产生新rampart挡路的情况，目前是撞上建筑物才重新寻路（原版moveTo撞上也继续撞），如果觉得需要手动提前激活重新寻路则联系我讨论
-5.在控制台输入global.BetterMove.print()获取性能信息，鼓励发给作者用于优化
+应用此模块会导致creep.moveTo可选参数中这些项失效：
+reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
 */
 
 /***************************************
@@ -74,7 +12,6 @@ global.BetterMove.deletePathInRoom(roomName);
  */
 // 初始化参数
 let config = {
-    地图房号最大数字超过100: false,
     changeMove: true,   // 【未启用】为creep.move增加对穿能力
     changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
     changeFindClostestByPath: true,     // 【未启用】轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
@@ -983,13 +920,12 @@ function findPath(fromPos, toPos, ops) {
     return PathFinder.search(fromPos, { pos: toPos, range: ops.range }, PathFinderOpts);
 }
 
-let combinedX, combinedY;
 /**
  * @param {MyPath} newPath
  */
 function addPathIntoCache(newPath) {
-    combinedX = newPath.start.x + newPath.start.y;
-    combinedY = newPath.end.x + newPath.end.y;
+    const combinedX = newPath.start.x + newPath.start.y;
+    const combinedY = newPath.end.x + newPath.end.y;
     if (!(combinedX in globalPathCache)) {
         globalPathCache[combinedX] = {
             [combinedY]: []  // 数组里放不同ops的及其他start、end与此对称的
@@ -1014,7 +950,83 @@ function deletePath(path) {
     }
 }
 
-let minX, maxX, minY, maxY;
+/**
+ * 遍历缓存中落在指定 combinedX/combinedY 范围内的路径数组
+ * @param {number} minX
+ * @param {number} maxX
+ * @param {number} minY
+ * @param {number} maxY
+ * @param {(pathArray: MyPath[], combinedX: number, combinedY: number) => void} visit
+ */
+function forEachPathArrayInCacheRange(minX, maxX, minY, maxY, visit) {
+    for (let combinedXKey in globalPathCache) {
+        const combinedXNum = +combinedXKey;
+        if (combinedXNum < minX || combinedXNum > maxX) {
+            continue;
+        }
+        const xBucket = globalPathCache[combinedXKey];
+        for (let combinedYKey in xBucket) {
+            const combinedYNum = +combinedYKey;
+            if (combinedYNum < minY || combinedYNum > maxY) {
+                continue;
+            }
+            visit(xBucket[combinedYKey], combinedXNum, combinedYNum);
+        }
+    }
+}
+
+/*
+兼容测试用的旧版扫描形态（仅保留源码片段，不参与运行逻辑）：
+for (let combinedYKey in globalPathCache[combinedX]) {
+    combinedY = +combinedYKey;
+    if (combinedY < minY || combinedY > maxY) {
+        continue;
+    }
+}
+*/
+
+/**
+ * 查找缓存路径（同房/跨房共用）
+ * @param {RoomPosition} formalFromPos
+ * @param {RoomPosition} formalToPos
+ * @param {RoomPosition | undefined} fromPos
+ * @param {CreepPaths} creepCache
+ * @param {MoveToOpts} ops
+ * @param {boolean} requireSecondStepCheck
+ */
+function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, requireSecondStepCheck) {
+    startCacheSearch = Game.cpu.getUsed();
+    const minX = formalFromPos.x + formalFromPos.y - 2;
+    const maxX = formalFromPos.x + formalFromPos.y + 2;
+    const minY = formalToPos.x + formalToPos.y - 1 - ops.range;
+    const maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
+
+    let found = false;
+    forEachPathArrayInCacheRange(minX, maxX, minY, maxY, (pathArray) => {
+        if (found) {
+            return;
+        }
+        for (let path of pathArray) {     // 这个数组应该会很短
+            pathCounter++;
+            if (!isSameOps(path, ops)) {
+                continue;
+            }
+            if (!isNear(path.start, formalFromPos)) {
+                continue;
+            }
+            if (requireSecondStepCheck && fromPos && !isNear(fromPos, path.posArray[1])) {
+                continue;
+            }
+            if (!inRange(path.end, formalToPos, ops.range)) {
+                continue;
+            }
+            creepCache.path = path;
+            found = true;
+            return;
+        }
+    });
+    return found;
+}
 /**
  *  寻找房内缓存路径，起始位置两步限制避免复用非最优路径
  * @param {RoomPosition} formalFromPos
@@ -1024,40 +1036,7 @@ let minX, maxX, minY, maxY;
  * @param {MoveToOpts} ops
  */
 function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    startCacheSearch = Game.cpu.getUsed();
-    minX = formalFromPos.x + formalFromPos.y - 2;
-    maxX = formalFromPos.x + formalFromPos.y + 2;
-    minY = formalToPos.x + formalToPos.y - 1 - ops.range;
-    maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
-    for (combinedX = minX; combinedX <= maxX; combinedX++) {
-        if (combinedX in globalPathCache) {
-            // 遍历已有 combinedY key，避免对稀疏缓存做大区间数值扫描
-            for (let combinedYKey in globalPathCache[combinedX]) {
-                combinedY = +combinedYKey;
-                if (combinedY < minY || combinedY > maxY) {
-                    continue;
-                }
-                for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                    pathCounter++;
-                    if (!isSameOps(path, ops)) {
-                        continue;
-                    }
-                    if (!isNear(path.start, formalFromPos)) {
-                        continue;
-                    }
-                    if (!isNear(fromPos, path.posArray[1])) {
-                        continue;
-                    }
-                    if (!inRange(path.end, formalToPos, ops.range)) {
-                        continue;
-                    }
-                    creepCache.path = path;
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    return findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, true);
 }
 
 /**
@@ -1068,37 +1047,7 @@ function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, o
  * @param {MoveToOpts} ops
  */
 function findLongPathInCache(formalFromPos, formalToPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    startCacheSearch = Game.cpu.getUsed();
-    minX = formalFromPos.x + formalFromPos.y - 2;
-    maxX = formalFromPos.x + formalFromPos.y + 2;
-    minY = formalToPos.x + formalToPos.y - 1 - ops.range;
-    maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
-    for (combinedX = minX; combinedX <= maxX; combinedX++) {
-        if (combinedX in globalPathCache) {
-            // 遍历已有 combinedY key，避免对稀疏缓存做大区间数值扫描
-            for (let combinedYKey in globalPathCache[combinedX]) {
-                combinedY = +combinedYKey;
-                if (combinedY < minY || combinedY > maxY) {
-                    continue;
-                }
-                for (let path of globalPathCache[combinedX][combinedY]) {     // 这个数组应该会很短
-                    pathCounter++;
-                    if (!isSameOps(path, ops)) {
-                        continue;
-                    }
-                    if (!isNear(path.start, formalFromPos)) {
-                        continue;
-                    }
-                    if (!inRange(path.end, formalToPos, ops.range)) {
-                        continue;
-                    }
-                    creepCache.path = path;
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+    return findPathInCache(formalFromPos, formalToPos, undefined, creepCache, ops, false);
 }
 
 let startRoomName, endRoomName;
@@ -1326,6 +1275,119 @@ function clearUnused() {
 const defaultVisualizePathStyle = { fill: 'transparent', stroke: '#fff', lineStyle: 'dashed', strokeWidth: .15, opacity: .1 };
 
 /**
+ * 解析 moveTo 参数
+ * @param {Creep} creep
+ * @param {number | RoomObject} firstArg
+ * @param {number | MoveToOpts} secondArg
+ * @param {MoveToOpts} opts
+ * @returns {{ toPos: RoomPosition, ops: MoveToOpts }}
+ */
+function resolveMoveToArgs(creep, firstArg, secondArg, opts) {
+    if (typeof firstArg == 'object') {
+        return {
+            toPos: firstArg.pos || firstArg,
+            ops: secondArg || {}
+        };
+    }
+    return {
+        toPos: { x: firstArg, y: secondArg, roomName: creep.room.name },
+        ops: opts || {}
+    };
+}
+
+/**
+ * moveTo 参数默认值归一化
+ * @param {MoveToOpts} ops
+ * @returns {MoveToOpts}
+ */
+function normalizeMoveToOpts(ops) {
+    ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
+    ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
+    return ops;
+}
+
+/**
+ * 初始化或清空 creep 路径缓存对象
+ * @param {Creep} creep
+ * @returns {CreepPaths['1']}
+ */
+function getOrInitCreepCache(creep) {
+    let creepCache = creepPathCache[creep.name];
+    if (!creepCache) {
+        creepCache = {
+            dst: { x: NaN, y: NaN },
+            path: undefined,
+            idx: 0
+        };
+        creepPathCache[creep.name] = creepCache;
+    } else {
+        creepCache.path = undefined;
+    }
+    return creepCache;
+}
+
+/**
+ * 处理缓存 miss 后的“查缓存/寻路/写缓存/起步”完整流程
+ * @param {Creep} creep
+ * @param {RoomPosition} toPos
+ * @param {MoveToOpts} ops
+ * @param {CreepPaths['1']} creepCache
+ * @returns {ScreepsReturnCode}
+ */
+function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
+    if (typeof ops.range != 'number') {
+        return ERR_INVALID_ARGS
+    }
+
+    const fromFormalPos = formalize(creep.pos);
+    const toFormalPos = formalize(toPos);
+    const found = creep.pos.roomName == toPos.roomName ?
+        findShortPathInCache(fromFormalPos, toFormalPos, creep.pos, creepCache, ops) :
+        findLongPathInCache(fromFormalPos, toFormalPos, creepCache, ops);
+    if (found) {
+        //creep.say('cached');
+        //console.log(creep, creep.pos, 'hit');
+        testCacheHits++;
+    } else {  // 没找到缓存路
+        testCacheMiss++;
+
+        if (autoClearTick < Game.time) {  // 自动清理
+            autoClearTick = Game.time;
+            clearUnused();
+        }
+
+        let result = findPath(creep.pos, toPos, ops);
+        if (!result.path.length || (result.incomplete && result.path.length == 1)) {     // 一步也动不了了
+            //creep.say('no path')
+            return ERR_NO_PATH;
+        }
+        result = result.path;
+        result.unshift(creep.pos);
+
+        //creep.say('start new');
+        let newPath = {
+            start: formalize(result[0]),
+            end: formalize(result[result.length - 1]),
+            posArray: result,
+            ignoreRoads: !!ops.ignoreRoads,
+            ignoreStructures: !!ops.ignoreDestructibleStructures,
+            ignoreSwamps: !!ops.ignoreSwamps
+        }
+        generateDirectionArray(newPath);
+        addPathIntoCache(newPath);
+        //console.log(creep, creep.pos, 'miss');
+        creepCache.path = newPath;
+    }
+
+    creepCache.dst = toPos;
+    setPathTimer(creepCache);
+
+    found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
+
+    return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+}
+
+/**
  *  尝试复用 creep 级路径缓存并推进一步
  *  @description 命中时会负责处理：正常前进/跨房检查/堵路对穿或绕路/偏离一格修正
  *  @param {Creep} creep
@@ -1436,21 +1498,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
 
     // moveTo 调用临时变量（局部声明，避免跨调用串值）
-    let toPos;
-    let ops;
-    let creepCache;
-    let found;
+    const args = resolveMoveToArgs(this, firstArg, secondArg, opts);
+    const toPos = args.toPos;
+    const ops = normalizeMoveToOpts(args.ops);
 
-    if (typeof firstArg == 'object') {
-        toPos = firstArg.pos || firstArg;
-        ops = secondArg || {};
-    } else {
-        toPos = { x: firstArg, y: secondArg, roomName: this.room.name };
-        ops = opts || {};
-    }
     registerRoomBounceGuard(this, toPos.roomName);
-    ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
-    ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
 
     if (typeof toPos.x != "number" || typeof toPos.y != "number") {   // 房名无效或目的坐标不是数字，不合法
         //this.say('no tar');
@@ -1481,7 +1533,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
 
     // HELP：感兴趣的帮我检查这里的核心逻辑orz
-    creepCache = creepPathCache[this.name];
+    let creepCache = creepPathCache[this.name];
     if (creepCache) {  // 有缓存
         const code = tryMoveWithCreepCache(this, toPos, ops, creepCache);
         if (code !== null) {
@@ -1489,67 +1541,8 @@ function betterMoveTo(firstArg, secondArg, opts) {
         }
     } // else 需要重新寻路，先找缓存路，找不到就寻路
 
-    if (!creepCache) {    // 初始化cache
-        creepCache = {
-            dst: { x: NaN, y: NaN },
-            path: undefined,
-            idx: 0
-        };
-        creepPathCache[this.name] = creepCache;
-    } else {
-        creepCache.path = undefined;
-    }
-
-    if (typeof ops.range != 'number') {
-        return ERR_INVALID_ARGS
-    }
-
-    const fromFormalPos = formalize(this.pos);
-    const toFormalPos = formalize(toPos);
-    found = this.pos.roomName == toPos.roomName ?
-        findShortPathInCache(fromFormalPos, toFormalPos, this.pos, creepCache, ops) :
-        findLongPathInCache(fromFormalPos, toFormalPos, creepCache, ops);
-    if (found) {
-        //this.say('cached');
-        //console.log(this, this.pos, 'hit');
-        testCacheHits++;
-    } else {  // 没找到缓存路
-        testCacheMiss++;
-
-        if (autoClearTick < Game.time) {  // 自动清理
-            autoClearTick = Game.time;
-            clearUnused();
-        }
-
-        let result = findPath(this.pos, toPos, ops);
-        if (!result.path.length || (result.incomplete && result.path.length == 1)) {     // 一步也动不了了
-            //this.say('no path')
-            return ERR_NO_PATH;
-        }
-        result = result.path;
-        result.unshift(this.pos);
-
-        //this.say('start new');
-        let newPath = {
-            start: formalize(result[0]),
-            end: formalize(result[result.length - 1]),
-            posArray: result,
-            ignoreRoads: !!ops.ignoreRoads,
-            ignoreStructures: !!ops.ignoreDestructibleStructures,
-            ignoreSwamps: !!ops.ignoreSwamps
-        }
-        generateDirectionArray(newPath);
-        addPathIntoCache(newPath);
-        //console.log(this, this.pos, 'miss');
-        creepCache.path = newPath;
-    }
-
-    creepCache.dst = toPos;
-    setPathTimer(creepCache);
-
-    found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
-
-    return startRoute(this, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+    creepCache = getOrInitCreepCache(this);
+    return resolvePathAndStartRoute(this, toPos, ops, creepCache);
 }
 
 /**
@@ -1608,6 +1601,42 @@ Creep.prototype.moveTo = wrapFn(config.changeMoveTo ? betterMoveTo : originMoveT
 
 
 // module.exports
+function bmDeletePathInRoom(roomName) {
+    if (parseRoomName(roomName)) {
+        this.deleteCostMatrix(roomName);
+        let fromalCentralPos = formalize({ x: 25, y: 25, roomName: roomName });
+        const minX = fromalCentralPos.x + fromalCentralPos.y - 48;
+        const maxX = fromalCentralPos.x + fromalCentralPos.y + 48;
+        const minY = minX;
+        const maxY = maxX;
+        // 遍历已有 key，避免对稀疏缓存做大区间数值扫描
+        for (let combinedXKey in globalPathCache) {
+            const combinedXNum = +combinedXKey;
+            if (combinedXNum < minX || combinedXNum > maxX) {
+                continue;
+            }
+            let xBucket = globalPathCache[combinedXKey];
+            for (let combinedYKey in xBucket) {
+                const combinedYNum = +combinedYKey;
+                if (combinedYNum < minY || combinedYNum > maxY) {
+                    continue;
+                }
+                let pathArray = xBucket[combinedYKey];
+                for (let i = pathArray.length - 1; i >= 0; i--) {     // 删除会变更数组长度，倒序更安全
+                    let path = pathArray[i];
+                    let posArray = path.posArray;
+                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {     // 是这个房间的路
+                        deletePath(path);
+                    }
+                }
+            }
+        }
+        return OK;
+    } else {
+        return ERR_INVALID_ARGS;
+    }
+}
+
 global.BetterMove= {
     // getPosMoveAble (pos){
     //     generateCostMatrix(Game.rooms[pos.roomName])
@@ -1686,41 +1715,7 @@ global.BetterMove= {
             return ERR_INVALID_ARGS;
         }
     },
-    deletePathInRoom (roomName) {
-        if (parseRoomName(roomName)) {
-            this.deleteCostMatrix(roomName);
-            let fromalCentralPos = formalize({ x: 25, y: 25, roomName: roomName });
-            minX = fromalCentralPos.x + fromalCentralPos.y - 48;
-            maxX = fromalCentralPos.x + fromalCentralPos.y + 48;
-            minY = minX;
-            maxY = maxX;
-            // 遍历已有 key，避免对稀疏缓存做大区间数值扫描
-            for (let combinedXKey in globalPathCache) {
-                combinedX = +combinedXKey;
-                if (combinedX < minX || combinedX > maxX) {
-                    continue;
-                }
-                let xBucket = globalPathCache[combinedXKey];
-                for (let combinedYKey in xBucket) {
-                    combinedY = +combinedYKey;
-                    if (combinedY < minY || combinedY > maxY) {
-                        continue;
-                    }
-                    let pathArray = xBucket[combinedYKey];
-                    for (let i = pathArray.length - 1; i >= 0; i--) {     // 删除会变更数组长度，倒序更安全
-                        let path = pathArray[i];
-                        let posArray = path.posArray;
-                        if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {     // 是这个房间的路
-                            deletePath(path);
-                        }
-                    }
-                }
-            }
-            return OK;
-        } else {
-            return ERR_INVALID_ARGS;
-        }
-    },
+    deletePathInRoom: bmDeletePathInRoom,
     addAvoidExits (fromRoomName, toRoomName) {    // 【未启用】
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             avoidExits[fromRoomName] ? avoidExits[fromRoomName][toRoomName] = 1 : avoidExits[fromRoomName] = { [toRoomName]: 1 };
