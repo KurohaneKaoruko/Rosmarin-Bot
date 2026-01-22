@@ -13,6 +13,7 @@ import { Statistics } from '@/modules/runtime/Statistics'
 import { FlagSpawn } from '@/modules/runtime/flagSpawn';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
+import { DDModule } from '@/modules/runtime/DD_Module';
 
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
@@ -37,6 +38,9 @@ App.on(ResourceManage); // 资源调度管理
 App.on(ClearModule);    // 过期数据清理
 App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
+App.on(DDModule);       // 消息模块
+
+
 
 export const loop = App.run;
 
