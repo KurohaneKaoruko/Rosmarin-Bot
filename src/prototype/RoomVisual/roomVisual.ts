@@ -1,7 +1,7 @@
 const colors = {
     gray: '#555555',
     light: '#AAAAAA',
-    road: '#666',
+    road: '#fa6f6f',
     energy: '#FFE87B',
     power: '#F53547',
     dark: '#181818',
@@ -430,8 +430,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 break
             }
             case STRUCTURE_RAMPART:
-                this.circle(x, y, {
-                    radius: 0.65,
+                this.rect(x - 0.5, y - 0.5, 1, 1, {
                     fill: '#434C43',
                     stroke: '#5D735F',
                     strokeWidth: 0.10,
@@ -556,7 +555,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 if (rd) {
                     this.line(r[0], r[1], c[0], c[1], {
                         color: color,
-                        width: 0.35,
+                        width: 0.15,
                         opacity: opts.opacity || 1
                     })
                 }
