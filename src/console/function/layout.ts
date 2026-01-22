@@ -1,5 +1,5 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/modules/utils/compress';
-import HelperVisual from '@/modules/utils/helperVisual';
+import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import LayoutPlanner from '@/modules/feature/planner/layoutPlanner';
 
 export default {
@@ -91,7 +91,7 @@ export default {
                     for (const s in layoutMemory) {
                         structMap[s] = decompressBatch(layoutMemory[s]);
                     }
-                    HelperVisual.showRoomStructures(roomName, structMap);
+                    LayoutVisual.showRoomStructures(roomName, structMap);
                     result = OK;
                 }
             } else {

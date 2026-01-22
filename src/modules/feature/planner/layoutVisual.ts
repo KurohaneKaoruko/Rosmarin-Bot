@@ -37,7 +37,7 @@ const structuresColor = {
 	factory: 'yellow'
 };
 
-const HelperVisual = {
+const LayoutVisual = {
     //线性同余随机数
     rnd(seed: number) {
         return (seed * 9301 + 49297) % 233280; //为何使用这三个数?
@@ -91,4 +91,4 @@ const HelperVisual = {
     }
 };
 
-export default HelperVisual;
+export default LayoutVisual;

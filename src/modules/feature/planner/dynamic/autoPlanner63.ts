@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { PriorityQueue, NewNode } from '@/modules/utils/priorityQueue'
 import { RoomArray } from '@/modules/utils/roomArray'
-import HelperVisual from '@/modules/utils/helperVisual'
+import LayoutVisual from '@/modules/feature/planner/layoutVisual'
 
 class UnionFind {
 	constructor(size) {
@@ -595,7 +595,7 @@ const ManagerPlanner = {
 		roomWalkable.forEach((x, y, val) => {
 			if (typeof val === 'number' && val > 0 && sizeMap[unionFind.find(x * 50 + y)] > 0)
 				visual.circle(x, y, {
-					fill: HelperVisual.randomColor(unionFind.find(x * 50 + y).toString()),
+					fill: LayoutVisual.randomColor(unionFind.find(x * 50 + y).toString()),
 					radius: 0.5,
 					opacity: 0.15
 				});
@@ -801,7 +801,7 @@ const ManagerPlanner = {
 		// })
 
 		roomManor.forEach((x, y, val) => {
-			// HelperVisual.showText(roomName,val,{x:x,y:y},"cyan",0.75)
+			// LayoutVisual.showText(roomName,val,{x:x,y:y},"cyan",0.75)
 			if (typeof val === 'number' && val >= 2) {
 				// if(roomManor.get(x,y)>0&&Math.abs(x-storageX)+Math.abs(y-storageY)>2)
 				// visual.text(val, x,y+0.25, {color: 'cyan',opacity:0.99,font: 7})
@@ -815,7 +815,7 @@ const ManagerPlanner = {
 				};
 				for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) check(x + i, y + j);
 				if (checkCnt == 16) {
-					// HelperVisual.showText(roomName,parseInt(distance*10),{x:x+1.5,y:y+1.5},"cyan",0.75)
+					// LayoutVisual.showText(roomName,parseInt(distance*10),{x:x+1.5,y:y+1.5},"cyan",0.75)
 					labDistance = distance;
 					labX = x;
 					labY = y;
@@ -1179,5 +1179,5 @@ const ManagerPlanner = {
 
 export const autoPlanner63 = {
 	ManagerPlanner: ManagerPlanner,
-	HelperVisual: HelperVisual
+	LayoutVisual: LayoutVisual
 };

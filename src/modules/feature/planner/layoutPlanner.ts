@@ -1,6 +1,6 @@
 import { log } from '@/utils';
 import { compress, compressBatch } from '@/modules/utils/compress';
-import HelperVisual from '@/modules/utils/helperVisual';
+import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import { autoPlanner63 } from '@/modules/feature/planner/dynamic/autoPlanner63';
 import * as StaticPlanner from '@/modules/feature/planner/static';
 
@@ -499,7 +499,7 @@ export const LayoutPlanner = {
         if (!center) return ERR_INVALID_ARGS;
         const computed = computeStatic(roomName, layoutType, center);
         if (!computed) return ERR_NOT_FOUND;
-        HelperVisual.showRoomStructures(roomName, computed.structMap);
+        LayoutVisual.showRoomStructures(roomName, computed.structMap);
         return OK;
     },
 
@@ -517,7 +517,7 @@ export const LayoutPlanner = {
     visualDynamic63(roomName: string): number {
         const computed = computeDynamic63(roomName);
         if (!computed) return ERR_NOT_FOUND;
-        HelperVisual.showRoomStructures(roomName, computed.structMap);
+        LayoutVisual.showRoomStructures(roomName, computed.structMap);
         return OK;
     },
 
@@ -552,7 +552,7 @@ export const LayoutPlanner = {
         const roomStructsData = computeManor(roomName, [pc, pm, pa, pb]);
         if (!roomStructsData) return new Error('计算布局失败');
 
-        HelperVisual.showRoomStructures(roomName, roomStructsData.structMap);
+        LayoutVisual.showRoomStructures(roomName, roomStructsData.structMap);
         return OK;
     }
 };
