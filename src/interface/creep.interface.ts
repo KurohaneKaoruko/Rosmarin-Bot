@@ -584,14 +584,14 @@ interface CreepMemory {
     
     /** 
      * 禁止被对穿
-     * @description betterMove模块使用，标记creep是否禁止被其他creep对穿
+     * @description 标记creep是否禁止被其他creep对穿
      * @see src/wheel/betterMove.ts
      */
     dontPullMe?: boolean;
 
     /**
      * 上次位置记录
-     * @description betterMove模块使用，记录creep上次位置和停留时间，用于检测卡住
+     * @description 记录creep上次位置和停留时间，用于检测卡住
      * @see src/wheel/betterMove.ts
      */
     lastPos?: {

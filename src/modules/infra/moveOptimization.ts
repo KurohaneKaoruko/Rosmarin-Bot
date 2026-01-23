@@ -75,7 +75,24 @@ const cache = {
 let squadDerivedMatCacheTick = -1;
 let squadDerivedMatCache = {};
 
-const obstacles = new Set(OBSTACLE_OBJECT_TYPES);
+const obstacles = Object.create(null);
+for (let i = OBSTACLE_OBJECT_TYPES.length; i--;){
+    obstacles[OBSTACLE_OBJECT_TYPES[i]] = 1;
+}
+
+/**
+ * 房间名字符映射缓存
+ */
+let roomCharMap = Object.create(null);
+let nextRoomChar = 1;
+function getRoomChar(roomName) {
+    let c = roomCharMap[roomName];
+    if (!c) {
+        c = roomCharMap[roomName] = nextRoomChar++;
+    }
+    return c;
+}
+
 const originMove = Creep.prototype.move;
 const originMoveTo = Creep.prototype.moveTo;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
@@ -411,13 +428,13 @@ function isClosedRampart(structure) {
  */
 function isObstacleStructure(room, pos, ignoreStructures) {
     let consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos);
-    if (0 in consSite && consSite[0].my && obstacles.has(consSite[0].structureType)) {  // 工地会挡路
+    if (0 in consSite && consSite[0].my && obstacles[consSite[0].structureType]) {  // 工地会挡路
         return true;
     }
     for (let s of room.lookForAt(LOOK_STRUCTURES, pos)) {
         if (!s.hits || s.ticksToDeploy) {     // 是新手墙或者无敌中的invaderCore
             return true;
-        } else if (!ignoreStructures && (obstacles.has(s.structureType) || isClosedRampart(s))) {
+        } else if (!ignoreStructures && (obstacles[s.structureType] || isClosedRampart(s))) {
             return true
         }
     }
@@ -515,63 +532,92 @@ function generateCostMatrix(room, pos) {
     let noStructureCostMat = new PathFinder.CostMatrix; // 不考虑可破坏的建筑，但是要考虑墙上资源点和无敌的3种建筑，可能还有其他不能走的？
     let structureCostMat = new PathFinder.CostMatrix;   // 在noStructrue的基础上加上所有不可行走的建筑
     let totalStructures = room.find(FIND_STRUCTURES);
-    let 修路也没用的墙点 = [].concat(room.find(FIND_SOURCES), room.find(FIND_MINERALS), room.find(FIND_DEPOSITS));
+    
+    // 优化：避免创建大数组，分别遍历
+    let sources = room.find(FIND_SOURCES);
+    for (let i = sources.length; i--;) {
+        noStructureCostMat.set(sources[i].pos.x, sources[i].pos.y, unWalkableCCost);
+    }
+    let minerals = room.find(FIND_MINERALS);
+    for (let i = minerals.length; i--;) {
+        noStructureCostMat.set(minerals[i].pos.x, minerals[i].pos.y, unWalkableCCost);
+    }
+    let deposits = room.find(FIND_DEPOSITS);
+    for (let i = deposits.length; i--;) {
+        noStructureCostMat.set(deposits[i].pos.x, deposits[i].pos.y, unWalkableCCost);
+    }
+
     let x, y, noviceWall, deployingCore, centralPortal;
     let clearDelay = Infinity;
-    for (let object of 修路也没用的墙点) {
-        x = object.pos.x; y = object.pos.y;
-        noStructureCostMat.set(x, y, unWalkableCCost);
-    }
+    const roomName = room.name;
+
     if (room.controller && (room.controller.my || room.controller.safeMode)) {  // 自己的工地不能踩
-        for (let consSite of room.find(FIND_CONSTRUCTION_SITES)) {
-            if (obstacles.has(consSite.structureType)) {
+        let sites = room.find(FIND_CONSTRUCTION_SITES);
+        for (let i = sites.length; i--;) {
+            let consSite = sites[i];
+            if (obstacles[consSite.structureType]) {
                 x = consSite.pos.x; y = consSite.pos.y;
                 noStructureCostMat.set(x, y, unWalkableCCost);
                 structureCostMat.set(x, y, unWalkableCCost);
             }
         }
     }
-    for (let s of totalStructures) {
-        if (s.structureType == STRUCTURE_INVADER_CORE) {  // 第1种可能无敌的建筑
-            if (s.ticksToDeploy) {
-                deployingCore = true;
-                clearDelay = clearDelay > s.ticksToDeploy ? s.ticksToDeploy : clearDelay;
-                noStructureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
-            }
-            structureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
-        } else if (s.structureType == STRUCTURE_PORTAL) {  // 第2种无敌建筑
-            if (!isHighWay(room.name)) {
-                centralPortal = true;
-                clearDelay = clearDelay > s.ticksToDecay ? s.ticksToDecay : clearDelay;
-            }
-            x = s.pos.x; y = s.pos.y;
-            structureCostMat.set(x, y, unWalkableCCost);
-            noStructureCostMat.set(x, y, unWalkableCCost);
-        } else if (s.structureType == STRUCTURE_WALL) {    // 第3种可能无敌的建筑
-            if (!s.hits) {
-                noviceWall = true;
-                noStructureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
-            }
-            structureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
-        } else if (s.structureType == STRUCTURE_ROAD) {    // 路的移动力损耗是1，此处设置能寻到墙上的路
-            x = s.pos.x; y = s.pos.y;
-            if (noStructureCostMat.get(x, y) == 0) {  // 不是在3种无敌建筑或墙中资源上
-                noStructureCostMat.set(x, y, 1);
-                if (structureCostMat.get(x, y) == 0) {     // 不是在不可行走的建筑上
-                    structureCostMat.set(x, y, 1);
+    
+    for (let i = totalStructures.length; i--;) {
+        let s = totalStructures[i];
+        x = s.pos.x; y = s.pos.y;
+        
+        switch (s.structureType) {
+            case STRUCTURE_INVADER_CORE:
+                if (s.ticksToDeploy) {
+                    deployingCore = true;
+                    clearDelay = clearDelay > s.ticksToDeploy ? s.ticksToDeploy : clearDelay;
+                    noStructureCostMat.set(x, y, unWalkableCCost);
                 }
-            }
-        } else if (obstacles.has(s.structureType) || isClosedRampart(s)) {   // HELP：有没有遗漏其他应该设置 noStructureCostMat 的点
-            structureCostMat.set(s.pos.x, s.pos.y, unWalkableCCost);
+                structureCostMat.set(x, y, unWalkableCCost);
+                break;
+            case STRUCTURE_PORTAL:
+                if (!isHighWay(roomName)) {
+                    centralPortal = true;
+                    clearDelay = clearDelay > s.ticksToDecay ? s.ticksToDecay : clearDelay;
+                }
+                structureCostMat.set(x, y, unWalkableCCost);
+                noStructureCostMat.set(x, y, unWalkableCCost);
+                break;
+            case STRUCTURE_WALL:
+                if (!s.hits) {
+                    noviceWall = true;
+                    noStructureCostMat.set(x, y, unWalkableCCost);
+                }
+                structureCostMat.set(x, y, unWalkableCCost);
+                break;
+            case STRUCTURE_ROAD:
+                if (noStructureCostMat.get(x, y) == 0) {  // 不是在3种无敌建筑或墙中资源上
+                    noStructureCostMat.set(x, y, 1);
+                    if (structureCostMat.get(x, y) == 0) {     // 不是在不可行走的建筑上
+                        structureCostMat.set(x, y, 1);
+                    }
+                }
+                break;
+            case STRUCTURE_RAMPART:
+                if (!s.my && !s.isPublic) {
+                    structureCostMat.set(x, y, unWalkableCCost);
+                }
+                break;
+            default:
+                if (obstacles[s.structureType]) {
+                    structureCostMat.set(x, y, unWalkableCCost);
+                }
+                break;
         }
     }
 
-    costMatrixCache[room.name] = {
-        roomName: room.name,
+    costMatrixCache[roomName] = {
+        roomName: roomName,
         true: noStructureCostMat,   // 对应 ignoreDestructibleStructures = true
         false: structureCostMat     // 对应 ignoreDestructibleStructures = false
     };
-    costMatrixRevision[room.name] = ((costMatrixRevision[room.name] | 0) + 1) | 0;
+    costMatrixRevision[roomName] = ((costMatrixRevision[roomName] | 0) + 1) | 0;
 
     let avoids = [];
     let avoidChanged = false;
@@ -580,12 +626,12 @@ function generateCostMatrix(room, pos) {
             costMatrixCacheTimer[Game.time + hostileCostMatrixClearDelay] = [];
         }
         costMatrixCacheTimer[Game.time + hostileCostMatrixClearDelay].push({
-            roomName: room.name,
+            roomName: roomName,
             avoids: avoids
         });   // 记录清理时间
     } else if (noviceWall || deployingCore || centralPortal) { // 如果遇到可能消失的挡路建筑，这3种情况下clearDelay才可能被赋值为非Infinity
         if (noviceWall) {    // 如果看见新手墙
-            let neighbors = Game.map.describeExits(room.name);
+            let neighbors = Game.map.describeExits(roomName);
             for (let direction in neighbors) {
                 let status = Game.map.getRoomStatus(neighbors[direction]);
                 if (status.status == 'closed') {
@@ -611,19 +657,19 @@ function generateCostMatrix(room, pos) {
                 }
             }
         }
-        //console.log(room.name + ' costMat 设置清理 ' + clearDelay);
+        //console.log(roomName + ' costMat 设置清理 ' + clearDelay);
         if (!(Game.time + clearDelay in costMatrixCacheTimer)) {
             costMatrixCacheTimer[Game.time + clearDelay] = [];
         }
         costMatrixCacheTimer[Game.time + clearDelay].push({
-            roomName: room.name,
+            roomName: roomName,
             avoids: avoids  // 因新手墙导致的avoidRooms需要更新
         });   // 记录清理时间
     }
     if (avoidChanged) {
         markAvoidRoomsChanged();
     }
-    //console.log('生成costMat ' + room.name);
+    //console.log('生成costMat ' + roomName);
 
 }
 
@@ -880,7 +926,7 @@ function applyTemporaryCreepBlocks(mat, creeps, changedKeys, oldCosts) {
 }
 
 function rollbackTemporaryCreepBlocks(mat, changedKeys, oldCosts) {
-    for (let i = 0; i < changedKeys.length; i++) {
+    for (let i = changedKeys.length; i--;) {
         const k = changedKeys[i];
         const x = (k / 50) | 0;
         const y = k - x * 50;
@@ -1192,9 +1238,11 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
     const maxX = formalFromPos.x + formalFromPos.y + 2;
     const minY = formalToPos.x + formalToPos.y - 1 - ops.range;
     const maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
+    const exactX = formalFromPos.x + formalFromPos.y;
 
-    return forEachPathArrayInCacheRange(minX, maxX, minY, maxY, (pathArray) => {
-        for (let path of pathArray) {     // 这个数组应该会很短
+    const visit = (pathArray) => {
+        for (let i = pathArray.length; i--;) {
+            let path = pathArray[i];
             pathCounter++;
             if (!isSameOps(path, ops)) {
                 continue;
@@ -1211,6 +1259,26 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
             creepCache.path = path;
             return true;
         }
+        return false;
+    };
+
+    // 优先检查精确匹配的位置
+    if (globalPathCache[exactX]) {
+        const xBucket = globalPathCache[exactX];
+        for (let combinedYKey in xBucket) {
+            const combinedYNum = +combinedYKey;
+            if (combinedYNum < minY || combinedYNum > maxY) {
+                continue;
+            }
+            if (visit(xBucket[combinedYKey])) {
+                return true;
+            }
+        }
+    }
+
+    return forEachPathArrayInCacheRange(minX, maxX, minY, maxY, (pathArray, combinedX) => {
+        if (combinedX === exactX) return false; // 已检查过
+        return visit(pathArray);
     });
 }
 /**
@@ -2274,16 +2342,17 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
  */
 function updateDontPullMeForMoveTo(creep) {
     let isNearEdge = creep.pos.x <= 1 || creep.pos.x >= 48 || creep.pos.y <= 1 || creep.pos.y >= 48;
-    let isStuckTooLong = false;
 
-    if (creep.memory.lastPos && creep.memory.lastPos.x == creep.pos.x && creep.memory.lastPos.y == creep.pos.y) {
-        creep.memory.lastPos.time += 1;
-        isStuckTooLong = creep.memory.lastPos.time > 6;
+    // 使用数字编码替代对象存储，避免每 tick 创建新字符串或对象
+    const currentPacked = (creep.pos.x << 6) | creep.pos.y;
+    if (creep.memory._lpv === currentPacked) {
+        creep.memory._lpt = (creep.memory._lpt || 0) + 1;
     } else {
-        creep.memory.lastPos = { x: creep.pos.x, y: creep.pos.y, time: 0 };
+        creep.memory._lpv = currentPacked;
+        creep.memory._lpt = 0;
     }
 
-    creep.memory.dontPullMe = isNearEdge || isStuckTooLong;
+    creep.memory.dontPullMe = isNearEdge || creep.memory._lpt > 6;
 }
 
 /**
