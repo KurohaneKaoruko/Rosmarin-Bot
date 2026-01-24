@@ -6,7 +6,7 @@ const outCarry = {
         }
         
         // 处理缓存的目标
-        if (creep.memory.cache.targetId) {
+        if (creep.memory.cache?.targetId) {
             let target = Game.getObjectById(creep.memory.cache.targetId) as any;
             if (!target) {
                 delete creep.memory.cache.targetId;

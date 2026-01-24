@@ -44,21 +44,28 @@ let observers = [];  // 如果想用ob寻路，把ob的id放这里
  *  局部缓存
  */
 /** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string}[] }} */
-let obTimer = {};   // 【未启用】用于登记ob调用，在相应的tick查看房间对象
+let obTimer = Object.create(null);   // 【未启用】用于登记ob调用，在相应的tick查看房间对象
 let obTick = Game.time;
 /** @type {Paths} */
-let globalPathCache = {};     // 缓存path
+let globalPathCache = Object.create(null);     // 缓存path
+let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
+let globalPathCachePathCount = 0; // 当前缓存路径总数，空时可快速退出清理逻辑
+let roomStartKeyRefs = Object.create(null); // roomName -> { startKey: refCount }，同房路径的起点引用计数
+let roomStartKeyCount = Object.create(null); // roomName -> startKey 数量，用于比较“按房间索引遍历”与“全表遍历”成本
+let endKeyStartKeyRefs = Object.create(null); // endKey -> { startKey: refCount }，用于从终点范围反向定位可能的 startKey 桶
+let roomEndKeyRefs = Object.create(null); // roomName -> { endKey: refCount }，同房路径的终点引用计数
+let roomEndKeyCount = Object.create(null); // roomName -> endKey 数量，用于评估 endKey 索引遍历成本
 /** @type {MoveTimer} */
-let pathCacheTimer = {}; // 用于记录path被使用的时间，清理长期未被使用的path
+let pathCacheTimer = Object.create(null); // 用于记录path被使用的时间，清理长期未被使用的path
 /** @type {CreepPaths} */
-let creepPathCache = {};    // 缓存每个creep使用path的情况
-let creepMoveCache = {};    // 缓存每个creep最后一次移动的tick
+let creepPathCache = Object.create(null);    // 缓存每个creep使用path的情况
+let creepMoveCache = Object.create(null);    // 缓存每个creep最后一次移动的tick
 let emptyCostMatrix = new PathFinder.CostMatrix;
 /** @type {CMs} */
-let costMatrixCache = {};    // true存ignoreDestructibleStructures==true的，false同理
+let costMatrixCache = Object.create(null);    // true存ignoreDestructibleStructures==true的，false同理
 let costMatrixRevision = Object.create(null);
 /** @type {{ [time: number]:{roomName:string, avoids:string[]}[] }} */
-let costMatrixCacheTimer = {}; // 用于记录costMatrix的创建时间，清理过期costMatrix
+let costMatrixCacheTimer = Object.create(null); // 用于记录costMatrix的创建时间，清理过期costMatrix
 let autoClearTick = Game.time;  // 用于避免重复清理缓存
 
 const cache = {
@@ -73,25 +80,13 @@ const cache = {
 
 // squad 寻路派生矩阵缓存：仅缓存“当前 tick”的结果，避免跨 tick 的陈旧数据
 let squadDerivedMatCacheTick = -1;
-let squadDerivedMatCache = {};
+let squadDerivedMatCache = Object.create(null);
 
 const obstacles = Object.create(null);
 for (let i = OBSTACLE_OBJECT_TYPES.length; i--;){
     obstacles[OBSTACLE_OBJECT_TYPES[i]] = 1;
 }
 
-/**
- * 房间名字符映射缓存
- */
-let roomCharMap = Object.create(null);
-let nextRoomChar = 1;
-function getRoomChar(roomName) {
-    let c = roomCharMap[roomName];
-    if (!c) {
-        c = roomCharMap[roomName] = nextRoomChar++;
-    }
-    return c;
-}
 
 const originMove = Creep.prototype.move;
 const originMoveTo = Creep.prototype.moveTo;
@@ -1145,16 +1140,66 @@ function findPath(fromPos, toPos, ops) {
  * @param {MyPath} newPath
  */
 function addPathIntoCache(newPath) {
-    const combinedX = newPath.start.x + newPath.start.y;
+    // combinedX: 起点坐标打包 (x << 16 | y)，作为一级索引 Key，唯一对应世界坐标的一个点
+    const combinedX = (newPath.start.x << 16) | (newPath.start.y & 0xFFFF);
+    // combinedY: 终点坐标的曼哈顿和 (x + y)，作为二级索引 Key，用于范围搜索
     const combinedY = newPath.end.x + newPath.end.y;
     if (!(combinedX in globalPathCache)) {
         globalPathCache[combinedX] = {
             [combinedY]: []  // 数组里放不同ops的及其他start、end与此对称的
         };
+        globalPathCacheBucketCount++;
     } else if (!(combinedY in globalPathCache[combinedX])) {
         globalPathCache[combinedX][combinedY] = []      // 数组里放不同ops的及其他start、end与此对称的
     }
     globalPathCache[combinedX][combinedY].push(newPath);
+    globalPathCachePathCount++;
+
+    // 维护全局 endKey -> startKey 反向索引，用于 bmDeletePathInRoom 的 useEndIndex 策略
+    // 该索引包含所有房间的路径，因此在查询时需要配合 startKey 范围检查进行过滤
+    let endRefs = endKeyStartKeyRefs[combinedY];
+    if (!endRefs) {
+        // 首次出现该 endKey：初始化 endKey -> startKey 的引用计数
+        endRefs = endKeyStartKeyRefs[combinedY] = Object.create(null);
+    }
+    // 记录 endKey 与 startKey 的引用次数（可能有多条路径共享）
+    endRefs[combinedX] = (endRefs[combinedX] || 0) + 1;
+
+    let posArray = newPath.posArray;
+    if (posArray && posArray.length) {
+        const startRoomName = posArray[0].roomName;
+        const endRoomName = posArray[posArray.length - 1].roomName;
+        if (startRoomName && startRoomName == endRoomName) {
+            // 只记录“起点和终点同房”的路径：bmDeletePathInRoom 只会清理这种路径
+            let roomRefs = roomStartKeyRefs[startRoomName];
+            if (!roomRefs) {
+                // 首次遇到该房间时初始化索引与引用计数字典
+                roomRefs = roomStartKeyRefs[startRoomName] = Object.create(null);
+                roomStartKeyCount[startRoomName] = 0;
+            }
+            if (!roomRefs[combinedX]) {
+                // 首次出现该 startKey：计数加一，供删除时快速遍历
+                roomStartKeyCount[startRoomName]++;
+                roomRefs[combinedX] = 0;
+            }
+            // 记录该 startKey 在该房间内被多少路径引用
+            roomRefs[combinedX]++;
+
+            let roomEndRefs = roomEndKeyRefs[startRoomName];
+            if (!roomEndRefs) {
+                // 首次遇到该房间时初始化 endKey 相关索引
+                roomEndRefs = roomEndKeyRefs[startRoomName] = Object.create(null);
+                roomEndKeyCount[startRoomName] = 0;
+            }
+            if (!roomEndRefs[combinedY]) {
+                // 首次出现该 endKey：累加数量
+                roomEndKeyCount[startRoomName]++;
+                roomEndRefs[combinedY] = 0;
+            }
+            // 记录该 endKey 在该房间内被多少路径引用
+            roomEndRefs[combinedY]++;
+        }
+    }
 }
 
 function invalidate() {
@@ -1165,7 +1210,7 @@ function invalidate() {
  */
 function deletePath(path) {
     if (path.start) {     // 有start属性的不是临时路
-        const startKey = path.start.x + path.start.y;
+        const startKey = (path.start.x << 16) | (path.start.y & 0xFFFF);
         const endKey = path.end.x + path.end.y;
         const xBucket = globalPathCache[startKey];
         if (!xBucket) {
@@ -1180,48 +1225,82 @@ function deletePath(path) {
             return;
         }
         pathArray.splice(idx, 1);
+        globalPathCachePathCount--;
+
+        let endRefs = endKeyStartKeyRefs[endKey];
+        if (endRefs && endRefs[startKey]) {
+            let nextEndRef = endRefs[startKey] - 1;
+            if (nextEndRef <= 0) {
+                // 该 endKey 下此 startKey 已无引用，移出索引并在空时清理 endKey 级别映射
+                delete endRefs[startKey];
+                let hasEndKey = false;
+                for (let k in endRefs) {
+                    hasEndKey = true;
+                    break;
+                }
+                if (!hasEndKey) {
+                    delete endKeyStartKeyRefs[endKey];
+                }
+            } else {
+                // 仍有路径引用该组合，仅减少计数
+                endRefs[startKey] = nextEndRef;
+            }
+        }
+
+        let posArray = path.posArray;
+        if (posArray && posArray.length) {
+            const startRoomName = posArray[0].roomName;
+            const endRoomName = posArray[posArray.length - 1].roomName;
+            if (startRoomName && startRoomName == endRoomName) {
+                // 同房路径：同步维护 roomStartKey 索引与引用计数
+                let roomRefs = roomStartKeyRefs[startRoomName];
+                if (roomRefs && roomRefs[startKey]) {
+                    let nextRef = roomRefs[startKey] - 1;
+                    if (nextRef <= 0) {
+                        // 当前 startKey 在该房间已无路径引用，移出索引并更新数量
+                        delete roomRefs[startKey];
+                        if (roomStartKeyCount[startRoomName]) {
+                            roomStartKeyCount[startRoomName]--;
+                        }
+                    } else {
+                        // 仍有路径引用该 startKey，仅减引用计数
+                        roomRefs[startKey] = nextRef;
+                    }
+                }
+
+                let roomEndRefs = roomEndKeyRefs[startRoomName];
+                if (roomEndRefs && roomEndRefs[endKey]) {
+                    let nextEndCount = roomEndRefs[endKey] - 1;
+                    if (nextEndCount <= 0) {
+                        // 该房间下此 endKey 已无引用，移出索引并更新计数
+                        delete roomEndRefs[endKey];
+                        if (roomEndKeyCount[startRoomName]) {
+                            roomEndKeyCount[startRoomName]--;
+                        }
+                    } else {
+                        // 仍有路径引用该 endKey，仅减少计数
+                        roomEndRefs[endKey] = nextEndCount;
+                    }
+                }
+            }
+        }
+
+        if (pathArray.length === 0) {
+            // 该 endKey 下已无路径，清理二级桶；若一级桶为空则清理并更新计数
+            delete xBucket[endKey];
+            let hasBucketKey = false;
+            for (let k in xBucket) {
+                hasBucketKey = true;
+                break;
+            }
+            if (!hasBucketKey) {
+                delete globalPathCache[startKey];
+                globalPathCacheBucketCount--;
+            }
+        }
         path.posArray = path.posArray.map(invalidate);
     }
 }
-
-/**
- * 遍历缓存中落在指定 combinedX/combinedY 范围内的路径数组
- * @param {number} minX
- * @param {number} maxX
- * @param {number} minY
- * @param {number} maxY
- * @param {(pathArray: MyPath[], combinedX: number, combinedY: number) => boolean | void} visit 返回 true 则提前终止遍历
- * @returns {boolean} 是否提前终止（visit 返回 true）
- */
-function forEachPathArrayInCacheRange(minX, maxX, minY, maxY, visit) {
-    for (let combinedXKey in globalPathCache) {
-        const combinedXNum = +combinedXKey;
-        if (combinedXNum < minX || combinedXNum > maxX) {
-            continue;
-        }
-        const xBucket = globalPathCache[combinedXKey];
-        for (let combinedYKey in xBucket) {
-            const combinedYNum = +combinedYKey;
-            if (combinedYNum < minY || combinedYNum > maxY) {
-                continue;
-            }
-            if (visit(xBucket[combinedYKey], combinedXNum, combinedYNum)) {
-                return true;
-            }
-        }
-    }
-    return false;
-}
-
-/*
-兼容测试用的旧版扫描形态（仅保留源码片段，不参与运行逻辑）：
-for (let combinedYKey in globalPathCache[combinedX]) {
-    combinedY = +combinedYKey;
-    if (combinedY < minY || combinedY > maxY) {
-        continue;
-    }
-}
-*/
 
 /**
  * 查找缓存路径（同房/跨房共用）
@@ -1234,11 +1313,10 @@ for (let combinedYKey in globalPathCache[combinedX]) {
  */
 function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, requireSecondStepCheck) {
     startCacheSearch = Game.cpu.getUsed();
-    const minX = formalFromPos.x + formalFromPos.y - 2;
-    const maxX = formalFromPos.x + formalFromPos.y + 2;
+    
+    // EndSum 搜索范围
     const minY = formalToPos.x + formalToPos.y - 1 - ops.range;
     const maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
-    const exactX = formalFromPos.x + formalFromPos.y;
 
     const visit = (pathArray) => {
         for (let i = pathArray.length; i--;) {
@@ -1262,24 +1340,23 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
         return false;
     };
 
-    // 优先检查精确匹配的位置
-    if (globalPathCache[exactX]) {
-        const xBucket = globalPathCache[exactX];
-        for (let combinedYKey in xBucket) {
-            const combinedYNum = +combinedYKey;
-            if (combinedYNum < minY || combinedYNum > maxY) {
-                continue;
-            }
-            if (visit(xBucket[combinedYKey])) {
-                return true;
+    // 遍历起点周围 3x3 区域 (包括自身)
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            const startKey = ((formalFromPos.x + dx) << 16) | ((formalFromPos.y + dy) & 0xFFFF);
+            const xBucket = globalPathCache[startKey];
+            if (!xBucket) continue;
+
+            // 遍历 EndSum 范围
+            for (let endSum = minY; endSum <= maxY; endSum++) {
+                if (xBucket[endSum]) {
+                    if (visit(xBucket[endSum])) return true;
+                }
             }
         }
     }
 
-    return forEachPathArrayInCacheRange(minX, maxX, minY, maxY, (pathArray, combinedX) => {
-        if (combinedX === exactX) return false; // 已检查过
-        return visit(pathArray);
-    });
+    return false;
 }
 /**
  *  寻找房内缓存路径，起始位置两步限制避免复用非最优路径
@@ -1878,7 +1955,7 @@ function getSquadDerivedMatCacheForThisTick() {
     }
     if (squadDerivedMatCacheTick !== Game.time) {
         squadDerivedMatCacheTick = Game.time;
-        squadDerivedMatCache = {};
+        squadDerivedMatCache = Object.create(null);
     }
     return squadDerivedMatCache;
 }
@@ -1900,7 +1977,7 @@ function findSquadPathTo(toPos, opts) {
     const memberPosSignature = getMemberPosSignature(memberPos);
 
     const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
-    const derivedMatCache = userCallback ? {} : (getSquadDerivedMatCacheForThisTick() || {});
+    const derivedMatCache = userCallback ? Object.create(null) : (getSquadDerivedMatCacheForThisTick() || Object.create(null));
 
     const roomCallback = (roomName) => {
         if (roomName in avoidRooms) {
@@ -2037,7 +2114,7 @@ function moveOneStepReverse(creep, visualStyle, toPos) {    // deprecated
 avoidRooms = avoidRooms.reduce((temp, roomName) => {
     temp[roomName] = 1;
     return temp;
-}, {});
+}, Object.create(null));
 
 observers = observers.reduce((temp, id) => {
     let ob = Game.getObjectById(id);
@@ -2060,39 +2137,154 @@ applyConfig();
 
 // module.exports
 function bmDeletePathInRoom(roomName) {
-    if (parseRoomName(roomName)) {
-        this.deleteCostMatrix(roomName);
-        let fromalCentralPos = formalize({ x: 25, y: 25, roomName: roomName });
-        const minX = fromalCentralPos.x + fromalCentralPos.y - 48;
-        const maxX = fromalCentralPos.x + fromalCentralPos.y + 48;
-        const minY = minX;
-        const maxY = maxX;
-        // 遍历已有 key，避免对稀疏缓存做大区间数值扫描
-        for (let combinedXKey in globalPathCache) {
-            const combinedXNum = +combinedXKey;
-            if (combinedXNum < minX || combinedXNum > maxX) {
-                continue;
-            }
-            let xBucket = globalPathCache[combinedXKey];
+    const parsed = parseRoomName(roomName);
+    if (!parsed) {
+        return ERR_INVALID_ARGS;
+    }
+
+    this.deleteCostMatrix(roomName);
+
+    // 无缓存路径时无需进入扫描流程
+    if (!globalPathCachePathCount) {
+        return OK;
+    }
+
+    const roomKeyCount = roomStartKeyCount[roomName] || 0;
+    const roomEndCount = roomEndKeyCount[roomName] || 0;
+    // 该房间没有登记过同房路径起点，说明无可删路径
+    if (!roomKeyCount && !roomEndCount) {
+        return OK;
+    }
+
+    const bucketCount = globalPathCacheBucketCount;
+    // 根据当前规模选择遍历策略，减少无关扫描
+    const useEndIndex = roomEndCount && (!roomKeyCount || roomEndCount < roomKeyCount);
+    // roomKeyCount 是该房间记录的起点数，天然 <= 2500，无需额外判断 < 2500
+    const useRoomIndex = !useEndIndex && roomKeyCount && roomKeyCount <= bucketCount;
+    const useBucketScan = !useRoomIndex && !useEndIndex && bucketCount && bucketCount < 2500;
+
+    if (useRoomIndex) {
+        // 房间索引更小：只遍历该房间登记过的 startKey
+        const roomKeys = roomStartKeyRefs[roomName];
+        if (!roomKeys) return OK;
+        
+        for (let startKey in roomKeys) {
+            const xBucket = globalPathCache[startKey];
+            if (!xBucket) continue;
+            
             for (let combinedYKey in xBucket) {
-                const combinedYNum = +combinedYKey;
-                if (combinedYNum < minY || combinedYNum > maxY) {
-                    continue;
-                }
-                let pathArray = xBucket[combinedYKey];
-                for (let i = pathArray.length - 1; i >= 0; i--) {     // 删除会变更数组长度，倒序更安全
+                const pathArray = xBucket[combinedYKey];
+                if (!pathArray || !pathArray.length) continue;
+                
+                for (let i = pathArray.length; i--; ) {
                     let path = pathArray[i];
                     let posArray = path.posArray;
-                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {     // 是这个房间的路
+                    if (!posArray || !posArray.length) continue;
+                    
+                    // 仅删除“起点和终点都在该房间”的路径
+                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
                         deletePath(path);
                     }
                 }
             }
         }
         return OK;
-    } else {
-        return ERR_INVALID_ARGS;
     }
+
+    if (useEndIndex) {
+        // 终点索引更小：先枚举 endKey，再通过 endKey->startKey 索引定位桶
+        const roomEndKeys = roomEndKeyRefs[roomName];
+        if (!roomEndKeys) return OK;
+
+        const baseX = parsed.baseX;
+        const baseY = parsed.baseY;
+        const maxX = baseX + 50;
+        const maxY = baseY + 50;
+
+        for (let endKey in roomEndKeys) {
+            const startKeys = endKeyStartKeyRefs[endKey];
+            if (!startKeys) continue;
+            
+            for (let startKey in startKeys) {
+                // 优化：利用 startKey 包含的坐标信息进行快速预过滤
+                // 显式转为数字，虽然 JS 位运算会自动转，但显式转换更安全且明确
+                const key = +startKey;
+                const globalX = key >> 16;
+                const globalY = key & 0xFFFF;
+                if (globalX < baseX || globalX >= maxX || globalY < baseY || globalY >= maxY) {
+                    continue;
+                }
+
+                const xBucket = globalPathCache[key];
+                if (!xBucket) continue;
+                
+                const pathArray = xBucket[endKey];
+                if (!pathArray || !pathArray.length) continue;
+
+                for (let i = pathArray.length; i--; ) {
+                    let path = pathArray[i];
+                    let posArray = path.posArray;
+                    if (!posArray || !posArray.length) continue;
+                    
+                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
+                        deletePath(path);
+                    }
+                }
+            }
+        }
+        return OK;
+    }
+
+    if (useBucketScan) {
+        // 全局桶数量较小：直接扫全局桶
+        for (let startKey in globalPathCache) {
+            const xBucket = globalPathCache[startKey];
+            for (let combinedYKey in xBucket) {
+                const pathArray = xBucket[combinedYKey];
+                if (!pathArray || !pathArray.length) continue;
+
+                for (let i = pathArray.length; i--; ) {
+                    let path = pathArray[i];
+                    let posArray = path.posArray;
+                    if (!posArray || !posArray.length) continue;
+                    
+                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
+                        deletePath(path);
+                    }
+                }
+            }
+        }
+        return OK;
+    }
+
+    // 最后兜底：遍历房间 50x50 起点范围对应的 startKey
+    const baseX = parsed.baseX;
+    const baseY = parsed.baseY;
+    for (let x = 0; x < 50; x++) {
+        const globalX = baseX + x;
+        for (let y = 0; y < 50; y++) {
+            const globalY = baseY + y;
+            const startKey = (globalX << 16) | (globalY & 0xFFFF);
+            const xBucket = globalPathCache[startKey];
+            if (!xBucket) continue;
+            
+            for (let combinedYKey in xBucket) {
+                const pathArray = xBucket[combinedYKey];
+                if (!pathArray || !pathArray.length) continue;
+
+                for (let i = pathArray.length; i--; ) {
+                    let path = pathArray[i];
+                    let posArray = path.posArray;
+                    if (!posArray || !posArray.length) continue;
+                    
+                    if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
+                        deletePath(path);
+                    }
+                }
+            }
+        }
+    }
+    return OK;
 }
 
 function bmSetChangeMoveTo(bool) {
