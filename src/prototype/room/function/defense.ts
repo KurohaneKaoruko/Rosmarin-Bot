@@ -64,88 +64,64 @@ export default class RoomDefense extends Room {
         /** --------主动防御孵化-------- */
         // 40A红球 或 40R蓝球
         global.Hostiles[this.name] = hostiles.map((hostile: Creep) => hostile.id);
-        if (this.level == 8) {
-            const attackDefender = Object.values(Game.creeps)
-                .filter(creep => creep.room.name == this.name &&
-                    creep.memory.role == 'defend-attack') as any;
-            const rangedDefender = Object.values(Game.creeps)
-                .filter(creep => creep.room.name == this.name &&
-                    creep.memory.role == 'defend-ranged') as any;
-            const d2aNum = Object.values(Game.creeps)
-                .filter(creep => creep.room.name == this.name &&
-                    creep.memory.role == 'defend-2attack') as any;
-            const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
-            const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
-            const rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
-            const d2aQueueNum = SpawnMissionNum['defend-2attack'] || 0;
-            if (hostiles.some((c: Creep) => c.body.some(part => part.type == ATTACK) ||
-                hostiles.some((c: Creep) => c.body.some(part => part.type == WORK))) &&
-                (attackDefender.length + attackQueueNum) < 1) {
-                let mustBoost = false;
-                if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) {
-                    mustBoost = true;
-                }
-                this.SpawnMissionAdd('', [], -1, 'defend-attack', {home: this.name, mustBoost} as any);
-                if (mustBoost) {
-                    this.AssignBoostTask('XUH2O', 1200);
-                    this.AssignBoostTask('XZHO2', 300);
-                }
-            }
-            if (hostiles.some((c: Creep) => c.body.some(part => part.type == RANGED_ATTACK)) &&
-                (rangedDefender.length + rangedQueueNum < 1)) {
-                let mustBoost = false;
-                if (this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) {
-                    mustBoost = true;
-                }
-                this.SpawnMissionAdd('', [], -1, 'defend-ranged', {home: this.name, mustBoost} as any);
-                if (mustBoost) {
-                    this.AssignBoostTask('XKHO2', 1200);
-                    this.AssignBoostTask('XZHO2', 300);
-                }
-            }
-            // if (hostiles.filter((c: Creep) => c.body.some(part => part.type == RANGED_ATTACK)).length >= 2 &&
-            //     (d2aNum.length + d2aQueueNum < 1)) {
-            //     let mustBoost = false;
-            //     if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000 &&
-            //         this['XLHO2'] >= 3000 && this['XGHO2'] >= 3000) {
-            //         mustBoost = true;
-            //     }
-            //     this.SpawnMissionAdd('', [], -1, 'defend-2attack', {home: this.name, mustBoost} as any, true);
-            //     this.SpawnMissionAdd('', [], -1, 'defend-2heal', {home: this.name, mustBoost} as any, true);
-            //     if (mustBoost) {
-            //         this.AssignBoostTask('XGHO2', 450);
-            //         this.AssignBoostTask('XUH2O', 1350);
-            //         this.AssignBoostTask('XLHO2', 1200);
-            //         this.AssignBoostTask('XZHO2', 600);
-            //     }
-            // }
-        } else if (this.level == 7) {
-            const attackDefender = Object.values(Game.creeps)
-                .filter(creep => creep.room.name == this.name &&
-                    creep.memory.role == 'defend-attack') as any;
-            const SpawnMissionNum = this.getSpawnMissionNum() || {};
-            let attackQueueNum = SpawnMissionNum[this.name]['defend-attack'] || 0;
-            if (hostiles.length > 0 && (attackDefender.length + attackQueueNum) < 1) {
-                let mustBoost = false;
-                if (this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) {
-                    mustBoost = true;
-                }
-                this.SpawnMissionAdd('', [], -1, 'defend-attack', {home: this.name, mustBoost} as any);
-                if (mustBoost) {
-                    this.AssignBoostTask('XUH2O', 1200);
-                    this.AssignBoostTask('XZHO2', 300);
-                }
-            }
-        } else {
-            const attackDefender = Object.values(Game.creeps)
-                .filter(creep => creep.room.name == this.name &&
-                    creep.memory.role == 'defend-attack') as any;
-            const SpawnMissionNum = this.getSpawnMissionNum() || {};
-            let attackQueueNum = SpawnMissionNum[this.name]['defend-attack'] || 0;
-            if (attackDefender.length + attackQueueNum < 1) {
-                this.SpawnMissionAdd('', [], -1, 'defend-attack', {home: this.name} as any)
+        
+        const threatLevel = hostiles.reduce((sum: number, c: Creep) => 
+            sum + c.body.filter(p => p.type === ATTACK || p.type === RANGED_ATTACK || p.type === WORK).length, 0);
+
+        const attackDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-attack');
+        const rangedDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-ranged');
+        
+        const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
+        const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
+        const rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
+
+        if (hostiles.some((c: Creep) => c.body.some(p => p.type == ATTACK || p.type == WORK)) && 
+            (attackDefender.length + attackQueueNum < 1)) {
+            
+            const body = this.getDefenderBody('attack', this.energyCapacityAvailable, threatLevel);
+            let mustBoost = false;
+            if (threatLevel > 20 && this.level >= 7 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
+            
+            this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
+            if (mustBoost) {
+                this.AssignBoostTask('XUH2O', 1200);
+                this.AssignBoostTask('XZHO2', 300);
             }
         }
+
+        if (hostiles.some((c: Creep) => c.body.some(p => p.type == RANGED_ATTACK)) && 
+            (rangedDefender.length + rangedQueueNum < 1)) {
+            
+            const body = this.getDefenderBody('ranged', this.energyCapacityAvailable, threatLevel);
+            let mustBoost = false;
+            if (threatLevel > 20 && this.level >= 7 && this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
+
+            this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
+            if (mustBoost) {
+                this.AssignBoostTask('XKHO2', 1200);
+                this.AssignBoostTask('XZHO2', 300);
+            }
+        }
+    }
+
+    getDefenderBody(type: 'attack' | 'ranged', energyAvailable: number, threatLevel: number): (BodyPartConstant | number)[][] {
+        const body: (BodyPartConstant | number)[][] = [];
+        if (type === 'attack') {
+            let partCount = Math.floor(energyAvailable / 130);
+            partCount = Math.min(partCount, 25);
+            if (threatLevel < 5) partCount = Math.min(partCount, 2);
+            else if (threatLevel < 15) partCount = Math.min(partCount, 10);
+            if (partCount < 1) partCount = 1;
+            body.push([ATTACK, partCount], [MOVE, partCount]);
+        } else if (type === 'ranged') {
+            let partCount = Math.floor(energyAvailable / 200);
+            partCount = Math.min(partCount, 25);
+            if (threatLevel < 5) partCount = Math.min(partCount, 2);
+            else if (threatLevel < 15) partCount = Math.min(partCount, 10);
+            if (partCount < 1) partCount = 1;
+            body.push([RANGED_ATTACK, partCount], [MOVE, partCount]);
+        }
+        return body;
     }
 
     // 获取防御用CostMatrix

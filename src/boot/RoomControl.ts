@@ -3,7 +3,13 @@
  */
 export const roomControl = function (room: Room) {
     // 定期更新建筑缓存
-    if (Game.time % 50 == 0) room.update();
+    let updateInterval = 100;
+    // 如果有工地，更新频率提高
+    if (room.find(FIND_CONSTRUCTION_SITES).length > 0) updateInterval = 20;
+    // 低等级房间更新频率较高
+    else if (room.level < 8) updateInterval = 50;
+    
+    if (Game.time % updateInterval == 0) room.update();
 
     // 只运行自己的房间
     if (!room || !room.controller?.my) return;

@@ -40,7 +40,8 @@ export default class AutoBuild extends Room {
 const plannerCreateSite = function (room: Room, layoutMemory: any) {
     // 现有工地到达上限时不处理
     const allSite = room.find(FIND_CONSTRUCTION_SITES);
-    if (allSite.length >= 100) return;
+    // 限制单房间并发工地数量，平摊CPU消耗
+    if (allSite.length >= 10) return;
     // 遍历布局各个建筑类型的坐标数组
     for (const s in layoutMemory) {
         // 当前RCL能造的数量为最大建造数
@@ -152,4 +153,3 @@ function checkSkipBuild(room: Room, structureType: string, LOOK_STRUCT: Structur
     
     return false;
 }
-

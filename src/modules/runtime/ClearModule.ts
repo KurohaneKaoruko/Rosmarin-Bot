@@ -48,6 +48,20 @@ function  memoryClear() {
         if (Mem['MemoryClearCount'] < 10) continue;
         delete Memory.rooms[roomName];
     }
+    if (global.CreepNum) {
+        for (let roomName in global.CreepNum) {
+            if (!Game.rooms[roomName] || !Game.rooms[roomName].my) {
+                delete global.CreepNum[roomName];
+            }
+        }
+    }
+    if (global.SpawnMissionNum) {
+        for (let roomName in global.SpawnMissionNum) {
+            if (!Game.rooms[roomName] || !Game.rooms[roomName].my) {
+                delete global.SpawnMissionNum[roomName];
+            }
+        }
+    }
 }
 
 // 清理订单
