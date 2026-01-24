@@ -163,7 +163,6 @@ export class PriorityQueue extends BaseQueue {
 			}
 		};
 		// @ts-ignore
-		// eslint-disable-next-line prefer-const
 		let useWasm = false;
 		try {
 			const wasmModule = getWasModule();

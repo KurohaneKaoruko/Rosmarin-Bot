@@ -12,7 +12,8 @@ const secret = JSON.parse(fs.readFileSync('./.secret.json', 'utf-8'));
 const config = secret[process.env.DEST];
 
 const filePath = {
-    algo_wasm_priorityqueue: 'src/modules/utils/algo_wasm_priorityqueue.wasm'
+    wasmDir: 'src/modules/wasm',
+    wasmGlob: 'src/modules/wasm/**/*'
 }
 
 // 根据指定的目标获取对应的配置项
@@ -27,7 +28,7 @@ const runCopy = () => {
                 dest: config.copyPath
             },
             {
-                src: filePath.algo_wasm_priorityqueue,
+                src: filePath.wasmGlob,
                 dest: config.copyPath
             },
             {
@@ -69,7 +70,7 @@ export default {
         copy({
             targets: [
                 {
-                    src: filePath.algo_wasm_priorityqueue,
+                    src: filePath.wasmGlob,
                     dest: 'dist'
                 }
             ]
@@ -77,5 +78,5 @@ export default {
         // 执行上传或者复制
         pluginDeploy
     ],
-    external: [filePath.algo_wasm_priorityqueue]
+    external: (id) => id.startsWith(filePath.wasmDir)
 };

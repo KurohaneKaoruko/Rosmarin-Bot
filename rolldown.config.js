@@ -4,7 +4,33 @@ import screeps from './plugins/plugin-screeps.js';
 import { defineConfig } from 'rolldown';
 
 const filePath = {
-	algo_wasm_priorityqueue: 'src/modules/utils/algo_wasm_priorityqueue.wasm'
+	wasmDir: 'src/modules/wasm'
+};
+
+const collectFiles = (dir) => {
+	if (!fs.existsSync(dir)) return [];
+	const entries = fs.readdirSync(dir, { withFileTypes: true });
+	const files = [];
+	for (const entry of entries) {
+		const fullPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			files.push(...collectFiles(fullPath));
+		} else {
+			files.push(fullPath);
+		}
+	}
+	return files;
+};
+
+const copyFiles = ({ fromDir, toDir }) => {
+	const sourceDir = path.resolve(process.cwd(), fromDir);
+	const files = collectFiles(sourceDir);
+	for (const file of files) {
+		const relative = path.relative(sourceDir, file);
+		const target = path.join(toDir, relative);
+		fs.mkdirSync(path.dirname(target), { recursive: true });
+		fs.copyFileSync(file, target);
+	}
 };
 
 const loadSecret = () => {
@@ -28,9 +54,7 @@ const copyWasmToDistPlugin = ({ distDir }) => {
 	return {
 		name: 'copy-wasm-to-dist',
 		writeBundle() {
-			const from = path.resolve(process.cwd(), filePath.algo_wasm_priorityqueue);
-			const to = path.join(distDir, path.basename(from));
-			fs.copyFileSync(from, to);
+			copyFiles({ fromDir: filePath.wasmDir, toDir: distDir });
 		}
 	};
 };
@@ -42,11 +66,9 @@ const copyToLocalClientPlugin = ({ outputFile, copyPath }) => {
 			const distMain = path.resolve(process.cwd(), outputFile);
 			const distMap = `${distMain}.map`;
 
-			const wasmFrom = path.resolve(process.cwd(), filePath.algo_wasm_priorityqueue);
-
 			fs.mkdirSync(copyPath, { recursive: true });
 			fs.copyFileSync(distMain, path.join(copyPath, path.basename(distMain)));
-			fs.copyFileSync(wasmFrom, path.join(copyPath, path.basename(wasmFrom)));
+			copyFiles({ fromDir: filePath.wasmDir, toDir: copyPath });
 
 			const mapContent = fs.readFileSync(distMap, 'utf8');
 			const prefix = 'module.exports = ';
@@ -92,10 +114,9 @@ export default defineConfig(() => {
 			copyWasmToDistPlugin({ distDir }),
 			pluginDeploy
 		].filter(Boolean),
-		external: [
-			filePath.algo_wasm_priorityqueue,
-			'algo_wasm_priorityqueue',
-			'algo_wasm_priorityqueue.wasm'
-		]
+		external: (id) => {
+			const wasmDirAbs = path.resolve(process.cwd(), filePath.wasmDir);
+			return id.startsWith(filePath.wasmDir) || id.startsWith(wasmDirAbs);
+		}
 	};
 });
