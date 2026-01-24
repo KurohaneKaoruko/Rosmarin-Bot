@@ -12,6 +12,7 @@ export default class Mission extends Room {
     declare BuildRepairMissionCheck: () => void;
     declare UpdateMineMission: () => void;
     declare UpdateHighwayScan: () => void;
+    declare UpdateBoostMission: () => void;
 
     /**
      * 任务更新主循环
@@ -21,11 +22,12 @@ export default class Mission extends Room {
         const schedule: Array<{ interval: number; offset: number; run: () => void }> = [
             { interval: 10, offset: 0, run: () => this.UpdateSpawnMission() },
             { interval: 20, offset: 1, run: () => this.UpdateTransportMission() },
-            { interval: 30, offset: 2, run: () => this.UpdateManageMission() },
-            { interval: 50, offset: 3, run: () => this.UpdateBuildRepairMission() },
-            { interval: 50, offset: 4, run: () => this.UpdateWallRepairMission() },
-            { interval: 100, offset: 5, run: () => this.TransportMissionCheck() },
-            { interval: 200, offset: 6, run: () => this.BuildRepairMissionCheck() },
+            { interval: 20, offset: 2, run: () => this.UpdateBoostMission() },
+            { interval: 30, offset: 3, run: () => this.UpdateManageMission() },
+            { interval: 50, offset: 4, run: () => this.UpdateBuildRepairMission() },
+            { interval: 50, offset: 5, run: () => this.UpdateWallRepairMission() },
+            { interval: 100, offset: 6, run: () => this.TransportMissionCheck() },
+            { interval: 200, offset: 7, run: () => this.BuildRepairMissionCheck() },
             { interval: 1, offset: 0, run: () => this.UpdateMineMission() },
             { interval: 1, offset: 0, run: () => this.UpdateHighwayScan() },
         ];

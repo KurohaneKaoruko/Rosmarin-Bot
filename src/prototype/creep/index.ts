@@ -1,6 +1,7 @@
 import { assignPrototype } from "@/utils"
 import BaseFunction from "./function/baseFunction"
 import MoveFunction from "./function/moveFuntion"
+import BoostFunction from "./function/boostFunction"
 import WorkFunction from "./function/workFunction"
 import SourceFunction from "./function/sourceFunction"
 import DoubleAction from "./function/doubleAction"
@@ -12,6 +13,7 @@ import CreepExecute from "./execute"
 const plugins = [
     BaseFunction,
     MoveFunction,
+    BoostFunction,
     WorkFunction,
     SourceFunction,
     DoubleAction,

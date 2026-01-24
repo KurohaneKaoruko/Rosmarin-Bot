@@ -299,6 +299,14 @@ interface Room {
      * @description 检查房间内是否有足够的boost资源来强化指定体型
      */
     CheckBoostRes(bodypart: (BodyPartConstant | number)[][], boostmap: { [bodypart: string]: MineralBoostConstant }): boolean;
+
+    /**
+     * 获取可用于 Boost 的 Lab
+     * @param mineral - 需要的 boost 资源类型
+     * @returns 存有该资源且准备就绪的 Lab，无可用 Lab 返回 null
+     * @description 优先返回存有该资源的 Lab，其次返回空闲 Lab
+     */
+    getBoostLab(mineral: ResourceConstant): StructureLab | null;
     
     /** 
      * 根据体型和boost配置分配boot任务
@@ -313,20 +321,28 @@ interface Room {
      * 给lab分配boost任务
      * @param mineral - boost资源类型
      * @param amount - 需要的资源数量（部件数*30）
+     * @param ownerId - 可选，预定资源的所有者ID（TeamID或CreepName）
      * @returns true表示分配成功，false表示没有可用lab
      * @description 找到空闲的lab并分配boost任务，如无可用lab则加入队列
      */
-    AssignBoostTask(mineral: ResourceConstant, amount: number): boolean;
+    AssignBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string): boolean;
 
     /** 
      * 提交lab boost任务
      * @param mineral - boost资源类型
      * @param amount - 已使用的资源数量
+     * @param ownerId - 可选，预定资源的所有者ID（TeamID或CreepName）
      * @returns OK表示成功，ERR_NOT_FOUND表示未找到对应任务
      * @description 当creep完成boost后调用，减少任务中的剩余量
      */
-    SubmitBoostTask(mineral: string, amount: number): ScreepsReturnCode;
-    
+    SubmitBoostTask(mineral: string, amount: number, ownerId?: string): ScreepsReturnCode;
+
+    /** 
+     * 清理无效的 boost 任务
+     * @description 检查所有 boost 任务的所有者，清理超时或无效的预定
+     */
+    CleanBoostTask(): void;
+
     /** 
      * 取消lab boost任务
      * @param mineral - boost资源类型

@@ -35,7 +35,8 @@ export default class MissionPools extends Room {
             'repair',
             'terminal',
             'spawn',
-            'mine'
+            'mine',
+            'boost'
         ]
         for (const type of Object.keys(Pools)) { if(!PoolTypes.includes(type)) delete Pools[type] }
         for (const type of PoolTypes) { if(!Pools[type]) Pools[type] = [] }

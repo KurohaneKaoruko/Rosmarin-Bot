@@ -307,15 +307,10 @@ interface StructControlMemory {
 
     /**
      * Boost 任务登记
-     * @description 动态分配的 boost 任务，key 为 Lab ID
+     * @description 动态分配的 boost 任务，key 为 Lab ID，value 为 boost 使用的矿物类型
      */
     boostRes?: {
-        [labId: string]: {
-            /** boost 使用的矿物类型 */
-            mineral: ResourceConstant;
-            /** 需要的矿物数量 */
-            amount: number;
-        };
+        [labId: string]: ResourceConstant;
     };
 
     /**

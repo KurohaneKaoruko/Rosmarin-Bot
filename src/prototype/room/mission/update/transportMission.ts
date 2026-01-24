@@ -99,7 +99,7 @@ export default class TransportMission extends Room {
         this.UpdateEnergyMission();
         this.UpdatePowerMission();
         this.UpdateLabMission();
-        this.UpdateLabBoostMission();
+        // Boost 逻辑已迁移至 UpdateBoostMission
         this.UpdateNukerMission();
     }
 
@@ -201,27 +201,39 @@ export default class TransportMission extends Room {
             })
         }
 
-        const state = room.memory.energyState || room.updateEnergyState?.(false);
-        if (state === 'LOW' || state === 'CRITICAL') return;
+        if (room.level >= 6 && room.lab) {
+            // 对能量极低 (<2000) 的 Lab 取消频率限制，其他 Lab 保持频率限制
+            const checkAllLabs = Game.time % 20 === 0;
+            const labs = room.lab.filter((l: StructureLab) => {
+                if (!l) return false;
+                const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
+                if (freeCap <= 0) return false;
+                // 能量不足 2000 的优先填充，或者到了定期检查时间
+                return l.store[RESOURCE_ENERGY] < 2000 || checkAllLabs;
+            });
 
-        if(room.getResAmount(RESOURCE_ENERGY) < 10000) return;
-
-        if (Game.time % 20 === 0 && room.level >= 6 && room.lab) {
-            const labs = room.lab
-                .filter((l: StructureLab) => l && l.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
             labs.forEach((l: StructureLab) => {
-                const amount = l.store.getFreeCapacity(RESOURCE_ENERGY);
-                if(energy < amount) return;
-                energy -= amount;
+                const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
+                // 实际填充量取：剩余可用能量 和 Lab空余容量 的较小值
+                const fillAmount = Math.min(freeCap, energy);
+                
+                if (fillAmount <= 0) return;
+                
+                energy -= fillAmount;
                 this.addTransportMission(this.TransportLevel('labEnergy'), {
                     pos: l,
                     source: storage.id,
                     target: l.id,
                     resourceType: RESOURCE_ENERGY,
-                    amount,
+                    amount: fillAmount,
                 });
             })
         }
+
+        const state = room.memory.energyState || room.updateEnergyState?.(false);
+        if (state === 'LOW' || state === 'CRITICAL') return;
+
+        if(room.getResAmount(RESOURCE_ENERGY) < 10000) return;
 
         let center = Memory['RoomControlData'][room.name].center;
         let centerPos: RoomPosition;
@@ -444,88 +456,6 @@ export default class TransportMission extends Room {
                     resourceType: reactionProduct,
                     amount: lab.store[reactionProduct],
                 });
-            }
-        });
-    }
-
-    /**
-     * Lab Boost 搬运
-     * @description 按 boostRes/boostTypes 配置向指定 lab 补充强化资源，并清理非法配置
-     */
-    UpdateLabBoostMission() {
-        const room = this;
-        const storage = room.storage;
-        const terminal = room.terminal;
-        if (!storage && !terminal) return;
-        const storeTarget = storage || terminal;
-        
-        const botmem = Memory['StructControlData'][room.name];
-        if (!botmem['boostRes']) return;
-        if (!room.lab || room.lab.length === 0) return;
-
-        if (!botmem['boostQueue']) botmem['boostQueue'] = {};
-        if (Object.keys(botmem['boostQueue']).length) {
-            room.lab.filter(lab => !this.isSpecialLab(lab.id, botmem))
-                .forEach(lab => {
-                    const mineral = Object.keys(botmem['boostQueue'])[0] as ResourceConstant;
-                    if (!mineral) return;
-                    
-                    botmem['boostRes'][lab.id] = {
-                        mineral: mineral,
-                        amount: botmem['boostQueue'][mineral],
-                    }
-                    delete botmem['boostQueue'][mineral];
-                })
-        }
-
-        room.lab.forEach(lab => {
-            const boostConfig = botmem['boostRes'][lab.id];
-            let mineral = boostConfig?.mineral || botmem['boostTypes']?.[lab.id];
-
-            if (boostConfig && (!mineral || !RESOURCES_ALL.includes(mineral))) {
-                delete botmem['boostRes'][lab.id];
-                return;
-            }
-            
-            if (boostConfig && (lab.id === botmem.labA || lab.id === botmem.labB)) {
-                botmem['boostQueue'][mineral] = (botmem['boostQueue'][mineral] || 0) + boostConfig.amount;
-                delete botmem['boostRes'][lab.id];
-                return;
-            }
-
-            if (boostConfig && (boostConfig.amount || 0) <= 0) {
-                delete botmem['boostRes'][lab.id];
-                return;
-            }
-
-            if (!mineral) return;
-
-            if (lab.mineralType && lab.mineralType !== mineral && lab.store[lab.mineralType] > 0) {
-                this.addTransportMission(this.TransportLevel('boost'), {
-                    pos: lab,
-                    source: lab.id,
-                    target: storeTarget.id,
-                    resourceType: lab.mineralType,
-                    amount: lab.store[lab.mineralType],
-                });
-                return;
-            }
-
-            const targetAmount = boostConfig ? Math.min(TransportMission.LAB_FILL_AMOUNT, boostConfig.amount) : TransportMission.LAB_FILL_AMOUNT;
-            
-            if (lab.store[mineral] < targetAmount) {
-                const need = targetAmount - lab.store[mineral];
-                const target = [storage, terminal].find(t => t && t.store[mineral] > 0);
-                
-                if (target) {
-                    this.addTransportMission(this.TransportLevel('boost'), {
-                        pos: lab,
-                        source: target.id,
-                        target: lab.id,
-                        resourceType: mineral,
-                        amount: Math.min(need, target.store[mineral]),
-                    });
-                }
             }
         });
     }

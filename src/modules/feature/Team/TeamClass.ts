@@ -16,27 +16,9 @@ class Team {
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
     moved: boolean;       // 本tick是否移动过
-    private _dirty = false; // 是否需要保存
 
     // 构造函数
     constructor(teamData: TeamMemory) {
-        this.reload(teamData);
-        this.updateLiveObjects(teamData);
-    }
-
-    // 每 tick 更新动态对象（Creep/Flag）
-    updateLiveObjects(teamData: TeamMemory): void {
-        this.flag = Game.flags[`Team-${this.name}`];
-        this.moved = false;
-        
-        // 即使是缓存的对象，也需要从 memory 中获取最新的 creep 列表（因为可能有成员死亡被移除）
-        const creepIds = teamData.creeps || [];
-        const liveCreeps = creepIds.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
-        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
-    }
-
-    // 从 Memory 重新加载数据
-    reload(teamData: TeamMemory): void {
         const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache } = teamData;
         this.name = name;
         this.status = status;
@@ -46,19 +28,17 @@ class Team {
         this.targetRoom = targetRoom;
         this.moveMode = moveMode;
         this.cache = cache || {};
-        this._dirty = false;
-    }
-
-    // 标记数据为脏
-    markDirty(): void {
-        this._dirty = true;
+        this.flag = Game.flags[`Team-${this.name}`];
+        this.moved = false;
+        
+        // 即使是缓存的对象，也需要从 memory 中获取最新的 creep 列表（因为可能有成员死亡被移除）
+        const creepIds = teamData.creeps || [];
+        const liveCreeps = creepIds.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
+        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
     }
 
     // 保存数据
     save(): void {
-        // 只有数据变动过才保存
-        if (!this._dirty && !this.moved) return;
-        
         const teamData = Memory['TeamData'][this.name];
         if (!teamData) return;
 
@@ -74,8 +54,6 @@ class Team {
                 teamData.room = this.creeps[0].room.name;
             }
         }
-        
-        this._dirty = false;
     }
 
     // 更新数据
@@ -83,11 +61,9 @@ class Team {
         // 没有旗帜则创建, 目标房间不一致则更新
         if (!this.flag && this.creeps && this.creeps.length > 0) {
             this.creeps[0].pos.createFlag(`Team-${this.name}`);
-            this.markDirty();
         }
         else if (this.flag && this.targetRoom != this.flag.pos.roomName) {
             this.targetRoom = this.flag.pos.roomName;
-            this.markDirty();
         }
 
         if (!this.creeps) return;
@@ -110,7 +86,6 @@ class Team {
             })
         }
 
-        const oldStatus = this.status;
         if (this.flag?.secondaryColor === COLOR_PURPLE) {
             // rush模式, 不算伤
             this.status = 'attack'
@@ -129,8 +104,6 @@ class Team {
                 this.status = 'flee'
             }
         }
-        
-        if (oldStatus !== this.status) this.markDirty();
 
         // 实际奶
         TeamBattle.canHealInNTick(this, 0);

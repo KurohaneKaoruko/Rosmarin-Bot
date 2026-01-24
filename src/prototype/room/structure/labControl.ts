@@ -64,16 +64,16 @@ export default class LabControl extends Room {
         if (!RESOURCES_ALL.includes(labProduct)) return;
 
         // boost设置
-        const boostmem = Memory['StructControlData'][this.name]['boostRes'];
-        const boostmem2 = Memory['StructControlData'][this.name]['boostTypes'];
+        const boostRes = memory.boostRes;
+        const boostTypes = memory.boostTypes;
 
         // 遍历其他lab进行合成
         for (let lab of this.lab) {
             if (lab.cooldown || !lab) continue;
             if (lab.id === memory.labA || lab.id === memory.labB) continue;
-            // 如果有boost设置，则跳过
-            if (boostmem && boostmem[lab.id]) continue;
-            if (boostmem2 && boostmem2[lab.id]) continue;
+            // 如果有boost设置（被征用），则跳过
+            if (boostRes && boostRes[lab.id]) continue;
+            if (boostTypes && boostTypes[lab.id]) continue;
             // 检查lab中是否存在与合成产物不同的资源
             if (lab.mineralType &&
                 lab.mineralType !== labProduct) {

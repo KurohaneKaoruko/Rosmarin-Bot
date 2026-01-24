@@ -72,6 +72,15 @@ export default class TeamSpawner {
                 }
             }
 
+            // 生成小队ID
+            let genTeamID = () => {
+                let id = (Game.time * 36 * 36 + Math.floor(Math.random() * 36 * 36))
+                    .toString(36).slice(-4).toUpperCase();
+                if (Memory['TeamData'][id]) return genTeamID();
+                return id;
+            }
+            const teamID = genTeamID();
+
             if (RES_MAP && Object.keys(RES_MAP).length) {
                 if (!Object.keys(RES_MAP).every(res => {
                     if (room[res] > RES_MAP[res]) return true;
@@ -81,22 +90,13 @@ export default class TeamSpawner {
                     flag.remove();
                     continue;
                 }
-                // 给lab分配boost任务
+                
+                // 给lab分配boost任务 (传入 Team-teamID)
                 for (const m in RES_MAP) {
-                    room.AssignBoostTask(m as ResourceConstant, RES_MAP[m]);
+                    room.AssignBoostTask(m as ResourceConstant, RES_MAP[m], `Team-${teamID}`);
                 }
-
             }
 
-            // 生成小队ID
-            let genTeamID = () => {
-                let id = (Game.time * 36 * 36 + Math.floor(Math.random() * 36 * 36))
-                    .toString(36).slice(-4).toUpperCase();
-                if (Memory['TeamData'][id]) return genTeamID();
-                return id;
-            }
-
-            const teamID = genTeamID();
             // 创建小队
             Memory['TeamData'][teamID] = {
                 'name': teamID,

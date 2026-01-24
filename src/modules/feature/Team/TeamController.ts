@@ -42,10 +42,16 @@ export default class TeamController {
 
             // 检查小队成员是否齐全
             if (teamData.status === 'ready') {
+                // 清理无效 Creep ID
+                teamData.creeps = teamData.creeps.filter(id => Game.getObjectById(id));
+
                 // 检查小队是否超时未集结
-                if (Game.time - teamData['time'] > 50000) {
+                // 1. 长期超时 (50000 tick)
+                // 2. 空队超时 (5000 tick): 如果 creep 死光了还没组建好，说明失败
+                if (Game.time - teamData['time'] > 50000 || 
+                   (teamData.creeps.length === 0 && Game.time - teamData['time'] > 5000)) {
                     delete Memory['TeamData'][teamID];
-                    console.log(`${teamID}小队因组建超时已解散.`);
+                    console.log(`${teamID}小队因组建超时或失败已解散.`);
                     Game.flags[`Team-${teamID}`]?.remove();
                     continue;
                 }
@@ -72,14 +78,7 @@ export default class TeamController {
                 continue;
             }
 
-            // Get or create Team instance from cache
-            let team = TeamController.teamCache[teamID];
-            if (!team) {
-                team = new Team(teamData);
-                TeamController.teamCache[teamID] = team;
-            } else {
-                team.updateLiveObjects(teamData);
-            }
+            let team = new Team(teamData);
 
             // 检查小队是否全部死亡
             if (!team.creeps || team.creeps.length === 0) {

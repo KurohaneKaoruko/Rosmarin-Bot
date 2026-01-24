@@ -26,6 +26,7 @@ import SpawnMission from "./mission/update/spawnMission"
 import ManageMission from "./mission/update/manageMission"
 import WorkMission from "./mission/update/workMission"
 import MineMission from "./mission/update/mineMission"
+import BoostMission from "./mission/update/boostMission"
 import TransportMission from "./mission/update/transportMission"
 
 import RoomExecute from "./execute"
@@ -58,6 +59,7 @@ const plugins = [
     ManageMission,  // 管理任务
     WorkMission,    // 工作任务
     MineMission,    // 采矿任务
+    BoostMission,   // 强化任务
     TransportMission,   // 运输任务
     
 

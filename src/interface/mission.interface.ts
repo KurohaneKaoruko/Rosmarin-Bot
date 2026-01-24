@@ -391,13 +391,13 @@ interface Task {
      * 任务类型
      * @description 用于区分不同类型的任务处理逻辑
      */
-    type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit';
+    type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit' | 'boost';
     
     /** 
      * 任务数据
      * @description 根据任务类型存储不同的数据结构
      */
-    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | PowerMineTask | DepositMineTask | any;
+    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | PowerMineTask | DepositMineTask | BoostTask | any;
     
     /** 
      * 任务是否被锁定
@@ -612,4 +612,29 @@ interface DepositMineTask {
     num: number;
     /** 任务是否激活 */
     active: boolean;
+}
+
+/**
+ * Boost任务数据
+ * @description 用于管理Lab Boost资源的任务
+ */
+interface BoostTask {
+    /** 资源类型 */
+    mineral: ResourceConstant;
+    /** 总需求量 */
+    totalAmount: number;
+    /** 
+     * 需求者列表 
+     */
+    owners: {
+        [ownerId: string]: {
+            /** 需求量 */
+            amount: number;
+            /** 提交时间 */
+            time: number;
+        }
+    }
+    
+    /** 任务是否激活 */
+    active?: boolean;
 }

@@ -130,13 +130,14 @@ interface Creep {
     /** 
      * 根据给定配置boost
      * @param boostmap - 部件到boost资源的映射，如{ work: 'XUH2O', tough: 'XGHO2' }
+     * @param options - 可选的强化选项
      * @returns 0表示完成，1表示下一tick继续，-1表示资源不足，-2表示找不到lab
      * @description 移动到lab并进行boost强化
      * @example 
      * const result = creep.Boost({ work: 'XUH2O', tough: 'XGHO2' });
      * if (result === 0) { // boost完成，执行后续逻辑 }
      */
-    Boost(boostmap: { [part: string]: string }): number;
+    Boost(boostmap: { [part: string]: string }, options?: { must?: boolean }): number;
     
     /** 
      * boost creep
@@ -146,7 +147,7 @@ interface Creep {
      * @returns true表示boost完成或不需要boost，false表示正在进行
      * @description 按优先级顺序进行boost，失败5次后放弃
      */
-    goBoost(boostTypes: string[], must?: boolean, reserve?: boolean): boolean;
+    goBoost(boostTypes: string[], must?: boolean ): boolean;
     
     /** 
      * 解除boost

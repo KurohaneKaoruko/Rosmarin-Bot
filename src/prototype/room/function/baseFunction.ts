@@ -351,71 +351,140 @@ export default class BaseFunction extends Room {
     }
 
     /** 给lab分配boost任务 */
-    AssignBoostTask(mineral: ResourceConstant, amount: number) {
-        const boostmem = Memory['StructControlData'][this.name];
-        if (!boostmem['boostRes']) boostmem['boostRes'] = {};
-        const stores = [this.storage, this.terminal, ...this.lab]
-        if (stores.reduce((pre, cur) => pre + cur.store[mineral], 0) < amount) return false;
-        // 如果已有相同任务, 则增加其数量
-        const lab = this.lab.find(lab => boostmem['boostRes'][lab.id] && boostmem['boostRes'][lab.id].mineral === mineral);
-        if (lab) {
-            boostmem['boostRes'][lab.id].amount += amount;
-            // console.log(`增加boost任务: ${mineral} ${amount} 到 ${lab.id}`);
-            // console.log(`当前boost任务量: ${mineral} - ${boostmem['boostRes'][lab.id].amount}`);
-            return true;
-        }
-        // 找到未被分配boost任务，并且非底物的lab
-        const labs = this.lab.filter(lab => !boostmem['boostRes'][lab.id] &&
-            !boostmem['boostTypes'][lab.id] && lab.id !== boostmem.labA && lab.id !== boostmem.labB);
-        if (labs.length) {
-            const lab = labs[0];
-            boostmem['boostRes'][lab.id] = {
-                mineral: mineral,
-                amount: amount
-            };
-            // console.log(`分配boost任务: ${mineral} ${amount} 到 ${lab.id}`);
-            return true;
+    AssignBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string) {
+        // 检查房间内资源是否足够
+        const stores = [this.storage, this.terminal, ...this.lab];
+        const totalResource = stores.reduce((sum, s) => sum + (s?.store[mineral] || 0), 0);
+        if (totalResource < amount) return false;
+
+        // 检查是否已有相同资源的 Boost 任务
+        // 注意：BoostTask 的 data 结构 { mineral, totalAmount, owners }
+        // checkSameMissionInPool 需要匹配 data 的每个 key。但这里只需要匹配 mineral
+        // 所以我们手动查找
+        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        let task = boostPool?.find(t => (t.data as BoostTask).mineral === mineral);
+
+        if (task) {
+            // 更新现有任务
+            const data = task.data as BoostTask;
+            data.totalAmount += amount;
+            if (ownerId) {
+                if (!data.owners[ownerId]) {
+                    data.owners[ownerId] = { amount: 0, time: Game.time };
+                }
+                data.owners[ownerId].amount += amount;
+                data.owners[ownerId].time = Game.time;
+            }
+            // 提交更新到内存 (虽然引用修改已经生效，但为了规范)
+            this.updateMissionPool('boost', task.id, { data });
         } else {
-            // 没有就暂时放进队列
-            if (!boostmem['boostQueue']) boostmem['boostQueue'] = {};
-            boostmem['boostQueue'][mineral] = (boostmem['boostQueue'][mineral] || 0) + amount;
-            console.log(`没有可用的lab，暂时将boost任务: ${mineral} ${amount} 放进队列`);
-            return false;
+            // 创建新任务
+            const data: BoostTask = {
+                mineral,
+                totalAmount: amount,
+                owners: {},
+                active: true
+            };
+            if (ownerId) {
+                data.owners[ownerId] = { amount, time: Game.time };
+            }
+            this.addMissionToPool('boost', 'boost', 0, data);
         }
+
+        return true;
     }
 
     /** 提交lab boost已完成量 */
-    SubmitBoostTask(mineral: string, amount: number) {
-        const boostmem = Memory['StructControlData'][this.name];
-        if  (!boostmem['boostRes']) return ERR_NOT_FOUND;
-        const lab = this.lab.find(lab => boostmem['boostRes'][lab.id] &&
-            boostmem['boostRes'][lab.id].mineral === mineral);
-        if (!lab) return OK;
+    SubmitBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string) {
+        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        if (!boostPool) return ERR_NOT_FOUND;
         
-        boostmem['boostRes'][lab.id].amount -= amount;
-        if (boostmem['boostRes'][lab.id].amount <= 0) {
-            delete boostmem['boostRes'][lab.id];
+        const task = boostPool.find(t => (t.data as BoostTask).mineral === mineral);
+        if (!task) return ERR_NOT_FOUND;
+
+        const data = task.data as BoostTask;
+
+        // 如果指定了 ownerId，则必须在 owners 中存在才扣减
+        // 否则不扣减任务配额，避免未注册的 Creep 消耗任务量
+        if (ownerId) {
+            if (data.owners && data.owners[ownerId]) {
+                data.owners[ownerId].amount -= amount;
+                if (data.owners[ownerId].amount <= 0) {
+                    delete data.owners[ownerId];
+                }
+                // 只有当确认是有效的 owner 时，才扣减总任务量
+                data.totalAmount -= amount;
+            } else {
+                // 如果 ownerId 不在 owners 列表中，则认为是“未注册”的消耗，不影响任务总数
+                // 这样 Team Creep 就不会因为被抢占而无法完成任务
+                return ERR_INVALID_TARGET;
+            }
+        } else {
+            // 如果没提供 ownerId，为了安全起见，也不扣减 totalAmount
+            // 或者，我们可以允许“匿名”提交扣减 totalAmount？
+            // 考虑到任务池主要是为注册者服务的，匿名消耗应该被视为“意外”
+            return ERR_INVALID_ARGS;
         }
+
+        // 任务完成判断逻辑交给 UpdateBoostMission 或 submitMission 的 deleteFunc
+        // 但这里我们手动调用 submitMission 来更新
+        const deleteFunc = (d: BoostTask) => d.totalAmount <= 0;
+        this.submitMission('boost', task.id, data, deleteFunc);
+
         return OK;
+    }
+
+    /** 
+     * 获取可用于 Boost 的 Lab
+     * @description 优先返回存有该资源的 Lab，其次返回空闲 Lab
+     */
+    getBoostLab(mineral: ResourceConstant): StructureLab | null {
+        if (!this.lab || this.lab.length === 0) return null;
+        
+        const botmem = Memory['StructControlData'][this.name];
+        
+        // 1. 优先找已经有该资源的 Lab
+        const readyLab = this.lab.find(l => 
+            l.mineralType === mineral && 
+            l.store[mineral] >= 30 && 
+            l.store[RESOURCE_ENERGY] >= 20
+        );
+        if (readyLab) return readyLab;
+
+        // 2. 找已经有该资源但可能能量不足或量不足的 Lab (正在准备中)
+        const preparingLab = this.lab.find(l => l.mineralType === mineral);
+        if (preparingLab) return preparingLab;
+
+        // 3. 找被 boostRes 预定给该资源的 Lab (即使它是空的，或者正在清理)
+        if (botmem && botmem['boostRes']) {
+            const reservedLabId = Object.keys(botmem['boostRes']).find(id => botmem['boostRes'][id] === mineral);
+            if (reservedLabId) {
+                const reservedLab = Game.getObjectById(reservedLabId as Id<StructureLab>);
+                if (reservedLab) return reservedLab;
+            }
+        }
+
+        // 4. 找完全空闲且未被占用的 Lab (作为备选，但这通常由 Transport 模块分配)
+        // Creep 不应该主动去一个没资源的空 Lab 等待，除非 Transport 已经分配了任务。
+        // 所以这里主要返回已经有资源的 Lab。
+        // 如果 Transport 还没运到，Creep 应该等待或者去排队。
+        // 为了避免 Creep 找不到目标，我们可以返回一个“即将”拥有该资源的 Lab
+        // 这需要 Transport 模块标记 Lab 的用途，目前我们简化为：只返回已有资源的 Lab
+        return null;
     }
 
     /** 删除lab boost任务 */
     RemoveBoostTask(mineral: string) {
-        const boostmem = Memory['StructControlData'][this.name];
-        if  (!boostmem['boostRes']) return ERR_NOT_FOUND;
-        const lab = this.lab.find(lab => boostmem['boostRes'][lab.id] &&
-                    boostmem['boostRes'][lab.id].mineral === mineral);
-        if (lab) {
-            delete boostmem['boostRes'][lab.id];
-            console.log(`删除boost任务: ${mineral} ${lab.id}`);
+        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        if (!boostPool) return ERR_NOT_FOUND;
+        
+        const task = boostPool.find(t => (t.data as BoostTask).mineral === mineral);
+        if (task) {
+            this.deleteMissionFromPool('boost', task.id);
+            console.log(`删除boost任务: ${mineral}`);
             return OK;
-        } else {
-            if (boostmem['boostQueue'] && boostmem['boostQueue'][mineral]) {
-                delete boostmem['boostQueue'][mineral];
-                console.log(`已从队列中删除boost任务: ${mineral}`);
-                return OK;
-            }
         }
+        return ERR_NOT_FOUND;
     }
 
     /** 寻找敌方creep */
