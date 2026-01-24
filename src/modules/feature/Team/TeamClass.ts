@@ -15,12 +15,29 @@ class Team {
     creeps: Creep[] | undefined;     // 成员数组
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
-    moved = false;       // 本tick是否移动过
+    moved: boolean;       // 本tick是否移动过
+    private _dirty = false; // 是否需要保存
 
     // 构造函数
     constructor(teamData: TeamMemory) {
-        const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache, creeps } = teamData;
+        this.reload(teamData);
+        this.updateLiveObjects(teamData);
+    }
+
+    // 每 tick 更新动态对象（Creep/Flag）
+    updateLiveObjects(teamData: TeamMemory): void {
+        this.flag = Game.flags[`Team-${this.name}`];
+        this.moved = false;
         
+        // 即使是缓存的对象，也需要从 memory 中获取最新的 creep 列表（因为可能有成员死亡被移除）
+        const creepIds = teamData.creeps || [];
+        const liveCreeps = creepIds.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
+        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
+    }
+
+    // 从 Memory 重新加载数据
+    reload(teamData: TeamMemory): void {
+        const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache } = teamData;
         this.name = name;
         this.status = status;
         this.toward = toward;
@@ -29,32 +46,51 @@ class Team {
         this.targetRoom = targetRoom;
         this.moveMode = moveMode;
         this.cache = cache || {};
-        this.flag = Game.flags[`Team-${name}`];
-        
-        const liveCreeps = creeps.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
-        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
+        this._dirty = false;
+    }
+
+    // 标记数据为脏
+    markDirty(): void {
+        this._dirty = true;
     }
 
     // 保存数据
     save(): void {
+        // 只有数据变动过才保存
+        if (!this._dirty && !this.moved) return;
+        
         const teamData = Memory['TeamData'][this.name];
+        if (!teamData) return;
+
         teamData.status = this.status;
         teamData.toward = this.toward;
         teamData.formation = this.formation;
         teamData.targetRoom = this.targetRoom;
         teamData.moveMode = this.moveMode;
         teamData.cache = this.cache as any;
-        teamData.creeps = this.creeps.map((c: Creep) => c.id);
-        teamData.room = this.creeps[0].room.name;
+        if (this.creeps) {
+            teamData.creeps = this.creeps.map((c: Creep) => c.id);
+            if (this.creeps.length > 0) {
+                teamData.room = this.creeps[0].room.name;
+            }
+        }
+        
+        this._dirty = false;
     }
 
     // 更新数据
     execUpdate(): void {
         // 没有旗帜则创建, 目标房间不一致则更新
-        if (!this.flag) this.creeps[0].pos.createFlag(`Team-${this.name}`);
-        else if (this.targetRoom != this.flag.pos.roomName) {
-            this.targetRoom = this.flag.pos.roomName;
+        if (!this.flag && this.creeps && this.creeps.length > 0) {
+            this.creeps[0].pos.createFlag(`Team-${this.name}`);
+            this.markDirty();
         }
+        else if (this.flag && this.targetRoom != this.flag.pos.roomName) {
+            this.targetRoom = this.flag.pos.roomName;
+            this.markDirty();
+        }
+
+        if (!this.creeps) return;
 
         // 防止队形被对穿打散
         if (this.formation === 'quad' && TeamUtils.isQuad(this)) {
@@ -74,6 +110,7 @@ class Team {
             })
         }
 
+        const oldStatus = this.status;
         if (this.flag?.secondaryColor === COLOR_PURPLE) {
             // rush模式, 不算伤
             this.status = 'attack'
@@ -93,6 +130,7 @@ class Team {
             }
         }
         
+        if (oldStatus !== this.status) this.markDirty();
 
         // 实际奶
         TeamBattle.canHealInNTick(this, 0);
@@ -103,8 +141,6 @@ class Team {
         // 绘制状态
         TeamVisual.drawTeamStatus(this)
         TeamVisual.drawCreepHealNeed(this)
-        
-
     }
 
     // 索敌攻击与规避

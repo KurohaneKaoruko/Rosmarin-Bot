@@ -32,22 +32,25 @@ export default class TeamBattle {
 
         // 搜索 n tick 后会攻击到自己的敌人
         creeps.forEach((creep) => {
+            // 优化：先通过简单的范围判断过滤，减少 touchableNTickInRange 的调用
             // 三格的蓝球敌人
             creep._ra_enemys = creep.room.find(FIND_HOSTILE_CREEPS).filter((e) => {
-                return (
-                    e.pos.inRangeTo(creep.pos, 3 + tick) &&
-                    TeamCalc.hasBodyPart(e, RANGED_ATTACK) &&
-                    TeamAction.touchableNTickInRange(e, creep.pos, tick, 3)
-                )
+                if (!e.pos.inRangeTo(creep.pos, 3 + tick)) return false;
+                if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK)) return false;
+                // 如果敌人疲劳，可能无法移动，简化判断
+                if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 3)) return true;
+                
+                return TeamAction.touchableNTickInRange(e, creep.pos, tick, 3)
             })
 
             // 一格的蓝球或者红球敌人
             creep._ra_atk_enemys = creep.room.find(FIND_HOSTILE_CREEPS).filter((e) => {
-                return (
-                    e.pos.inRangeTo(creep.pos, 1 + tick) &&
-                    (TeamCalc.hasBodyPart(e, RANGED_ATTACK) || TeamCalc.hasBodyPart(e, ATTACK)) &&
-                    TeamAction.touchableNTickInRange(e, creep.pos, tick, 1)
-                )
+                if (!e.pos.inRangeTo(creep.pos, 1 + tick)) return false;
+                if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK) && !TeamCalc.hasBodyPart(e, ATTACK)) return false;
+                // 如果敌人疲劳，可能无法移动，简化判断
+                if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 1)) return true;
+
+                return TeamAction.touchableNTickInRange(e, creep.pos, tick, 1)
             })
 
             // 被集火的伤害，即假设周围的爬都打到自己的伤害
@@ -289,7 +292,7 @@ export default class TeamBattle {
             }
 
             if (creep.getActiveBodyparts(RANGED_ATTACK)) {
-                // 先找爬中生命最小的，再找建筑最近的
+                // 目标评分：血量越低分越高，有治疗部件分越高，有伤害部件分越高
                 let target: Creep | Structure
                 const targetCreeps: Creep[] = []
                 const targetStructures: Structure[] = []
@@ -303,7 +306,19 @@ export default class TeamBattle {
                 })
 
                 if (targetCreeps.length && !team.cache.forceStructure) {
-                    target = targetCreeps.reduce((pre, cur) => (pre.hits < cur.hits ? pre : cur))
+                    target = targetCreeps.reduce((best, cur) => {
+                        const getScore = (c: Creep) => {
+                            let score = 0;
+                            // 优先打残血 (0-100分)
+                            score += (1 - c.hits / c.hitsMax) * 100;
+                            // 优先打奶妈
+                            if (TeamCalc.hasBodyPart(c, HEAL)) score += 50;
+                            // 优先打输出
+                            if (TeamCalc.hasBodyPart(c, ATTACK) || TeamCalc.hasBodyPart(c, RANGED_ATTACK)) score += 30;
+                            return score;
+                        }
+                        return getScore(best) > getScore(cur) ? best : cur;
+                    })
                 } else {
                     target = targetStructures.reduce((pre, cur) => (pre['_range']! < cur['_range']! ? pre : cur))
                 }

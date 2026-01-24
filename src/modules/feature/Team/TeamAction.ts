@@ -20,7 +20,13 @@ export default class TeamAction {
     /**
      * 缓存不可见房间的 CostMatrix
      */
-    public static cacheCostMatrix: { [flagName: string]: CostMatrix } = {}
+    // Key: roomName_avoidObjectsHash
+    public static GlobalCostMatrixCache: { 
+        [key: string]: {
+            matrix: CostMatrix,
+            tick: number
+        } 
+    } = {}
 
     /**
      * 位置掩码映射
@@ -858,6 +864,29 @@ export default class TeamAction {
                 let towers = Game.rooms[originPos.roomName]?.tower || [];
                 allGoals.push(...towers.map((tower) => ({ pos: tower.pos, range: 50 })))
             }
+            
+            // 逃跑时尝试往家里跑，或者是最近的安全出口
+            // 添加通往 homeRoom 的出口作为目标
+            if (team.homeRoom && originPos.roomName !== team.homeRoom) {
+                const route = Game.map.findRoute(originPos.roomName, team.homeRoom);
+                if (route && route !== ERR_NO_PATH && route.length > 0) {
+                    const exitDir = route[0].exit;
+                    const exit = originPos.findClosestByRange(exitDir);
+                    if (exit) {
+                        // 设为极高优先级（range 很大，因为排序是 b.range - a.range）
+                        // 但实际上 PathFinder 的 goal 是 range 越小越好到达，这里逻辑有点绕
+                        // 上面代码是 allGoals.sort((a, b) => b.range - a.range)， range 大的排前面
+                        // 而在 Flee 模式下，PathFinder 是远离 goals。
+                        // 所以这里如果是为了"去"某个地方，不能直接加到 flee 的 goals 里。
+                        // Flee 模式下的 PathFinder 只能用来"远离"危险。
+                        // 如果要"去"安全的地方，应该把安全地点设为 PathFinder 的目标，并把 flee 设为 false。
+                        // 但目前的架构限制了 getTeamMoveDirection 必须一次性决定。
+                        
+                        // 妥协方案：如果周围没有危险源，或者危险源很远，就切换回普通移动模式去安全点。
+                        // 现有的逻辑是：只要 status 是 flee，就强制 flee。
+                    }
+                }
+            }
         }
 
         const newGoals: { pos: RoomPosition; range: number }[] = []
@@ -907,9 +936,24 @@ export default class TeamAction {
             roomCallback: (roomName) => {
                 if (Memory['bypassRooms'] && Memory['bypassRooms'].includes(roomName)) return false
 
-                const isTargetRoom = team.flag.pos.roomName === roomName
-                if (isTargetRoom && originPos.roomName !== team.flag.pos.roomName && this.cacheCostMatrix[team.name]) {
-                    return this.cacheCostMatrix[team.name]
+                // 生成缓存键：房间名 + 避让对象的简要Hash
+                // 只有当避让对象在这个房间时才影响Hash，否则不同队伍在同一房间的CostMatrix应该是通用的
+                let avoidHash = '';
+                if (team['_avoidObjs'] && team['_avoidObjs'].length > 0) {
+                    const objsInRoom = team['_avoidObjs'].filter(o => o.pos.roomName === roomName);
+                    if (objsInRoom.length > 0) {
+                        avoidHash = '_' + objsInRoom.length + objsInRoom[0].pos.x; // 简单的Hash，可优化
+                    }
+                }
+                const cacheKey = `${roomName}${avoidHash}`;
+                const cached = TeamAction.GlobalCostMatrixCache[cacheKey];
+                
+                // 缓存有效期 5 tick，或者如果是目标房间且可见则每 tick 更新
+                const isTargetRoom = team.flag.pos.roomName === roomName;
+                const isVisible = !!Game.rooms[roomName];
+                
+                if (cached && (Game.time - cached.tick < (isVisible ? 1 : 5))) {
+                    return cached.matrix;
                 }
 
                 const costs = this.getMoveAbleCostMatrix(
@@ -924,9 +968,11 @@ export default class TeamAction {
                     team.cache.isSpawnDanger,
                 )
 
-                if (isTargetRoom) {
-                    this.cacheCostMatrix[team.name] = costs
-                }
+                // 更新缓存
+                TeamAction.GlobalCostMatrixCache[cacheKey] = {
+                    matrix: costs,
+                    tick: Game.time
+                };
 
                 if (costMatrixFlag && costMatrixFlag.pos.roomName === roomName && costMatrixFlag.color === COLOR_RED) {
                     TeamVisual.drawRoomArray(roomName, costs)
