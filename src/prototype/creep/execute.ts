@@ -15,7 +15,6 @@ export default class CreepExecute extends Creep {
         } else if(roledata.work) {
             const func = workRegistry[roledata.work];
             if (!func) return;
-            if (!this.memory.cache) { this.memory.cache = {} };
             if (func.prepare && !this.memory.ready) {
                 this.memory.ready = func.prepare(this);
             }

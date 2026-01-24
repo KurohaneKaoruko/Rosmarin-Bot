@@ -136,20 +136,14 @@ const HarvesterAction = {
             this.chooseNextAction(creep);
             return;
         }
-        const source = creep.getBoundSource();
-        if (!source) {
-            creep.memory.ready = false;
-            return;
-        }
-        const target = findTransferLink(creep, source) || findTransferContainer(creep, source);
-        if (!target) {
-            if (stayAndBuildNearby(creep)) return;
-            creep.drop(RESOURCE_ENERGY);
+
+        if (creep.transferToSourceStructure()) {
             this.chooseNextAction(creep);
             return;
         }
-        const result = creep.goTransfer(target, RESOURCE_ENERGY);
-        if (!result) return;
+
+        if (stayAndBuildNearby(creep)) return;
+        creep.drop(RESOURCE_ENERGY);
         this.chooseNextAction(creep);
     },
     /**
@@ -162,47 +156,17 @@ const HarvesterAction = {
             return;
         }
 
-        const constructionSites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER
-        });
-        const constructionSite = creep.pos.findClosestByRange(constructionSites);
-        if (constructionSite) {
-            creep.build(constructionSite);
+        // 尝试维护或建造
+        if (creep.maintainSourceContainer()) {
             return;
         }
-
-        // 如果容器已存在，则不建造
-        const containers = creep.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: s => s.structureType === STRUCTURE_CONTAINER
-        });
-        const container = creep.pos.findClosestByRange(containers);
-        if (container) {
-            this.chooseNextAction(creep);
-            return;
-        }
-
-        // 如果link存在，则不建造
-        const links = creep.pos.findInRange(FIND_STRUCTURES, 2, {
-            filter: s => s.structureType === STRUCTURE_LINK
-        })
-        const link = creep.pos.findClosestByRange(links);
-        if (link) {
-            this.chooseNextAction(creep);
-            return;
-        }
-
+        
+        // 如果无法维护（例如距离不够，或者已经有容器/Link了），则切换状态
         const targetSource = creep.getBoundSource();
-        if (!targetSource) {
-            creep.memory.ready = false;
-            return;
+        if (targetSource && !creep.pos.inRangeTo(targetSource, SOURCE_RANGE)) {
+             creep.moveTo(targetSource);
+             return;
         }
-        if (!creep.pos.inRangeTo(targetSource, SOURCE_RANGE)) {
-            creep.moveTo(targetSource);
-            return;
-        }
-
-        const result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
-        if (result !== OK) creep.drop(RESOURCE_ENERGY);
 
         this.chooseNextAction(creep);
     },

@@ -72,6 +72,7 @@ export default class SpawnControl extends Room {
 
         let name = GenCreepName(data.name||RoleData[role].code);
 
+        if (!data.memory.cache) data.memory.cache = {};
         return {
             bodypart,
             name,
@@ -155,7 +156,7 @@ export default class SpawnControl extends Room {
             spawn.spawnCreep(
                 this.GenerateBodys(RoleData['universal'].bodypart),
                 GenCreepName(RoleData['universal'].code),
-                { memory: { role: 'universal', home: this.name } as CreepMemory }
+                { memory: { role: 'universal', home: this.name, cache: {} } as CreepMemory }
             );
             global.log(`房间 ${this.name} 没有且不足以孵化 ${role}，已紧急孵化 universal。`);
             

@@ -284,6 +284,18 @@ interface Creep {
      */
     sitOnSourceContainer(): boolean;
 
+    /**
+     * 维护 Source 旁的 Container (建造/修理)
+     * @returns 是否进行了动作
+     */
+    maintainSourceContainer(): boolean;
+
+    /**
+     * 将能量转移到 Source 旁的 Link 或 Container
+     * @returns 是否成功转移
+     */
+    transferToSourceStructure(): boolean;
+
 
     // ==================== 建造功能 (BuildFunction) ====================
     /** 

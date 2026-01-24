@@ -80,4 +80,66 @@ export default class SourceFunction extends Creep {
         this.moveTo(sourceContainer, { range: 0 });
         return false;
     }
+
+    /**
+     * 维护 Source 旁的 Container (建造/修理)
+     * @returns 是否进行了动作
+     */
+    maintainSourceContainer(): boolean {
+        if (this.store[RESOURCE_ENERGY] === 0) return false;
+        
+        const container = this.getNearbySourceContainer(1);
+        if (container) {
+            if (container.hits < container.hitsMax * 0.8) {
+                this.repair(container);
+                return true;
+            }
+            return false;
+        }
+
+        // 寻找或创建工地
+        const source = this.getBoundSource();
+        if (!source) return false;
+        
+        let site = source.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER
+        })[0];
+        
+        if (!site) {
+            // 如果附近有 Link，则不建造 Container (视逻辑而定，这里参考 harvester.ts)
+            if (source.pos.findInRange(FIND_STRUCTURES, 2, { filter: s => s.structureType === STRUCTURE_LINK }).length > 0) {
+                return false;
+            }
+            // 在当前位置创建（需确保在范围内）
+            if (this.pos.inRangeTo(source, 1)) {
+                this.pos.createConstructionSite(STRUCTURE_CONTAINER);
+            }
+            return false; // 下一 tick 才能建造
+        }
+        
+        this.build(site);
+        return true;
+    }
+
+    /**
+     * 将能量转移到 Source 旁的 Link 或 Container
+     * @returns 是否成功转移
+     */
+    transferToSourceStructure(): boolean {
+        if (this.store[RESOURCE_ENERGY] === 0) return false;
+        
+        const link = this.getNearbySourceLink();
+        if (link && link.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            this.transfer(link, RESOURCE_ENERGY);
+            return true;
+        }
+        
+        const container = this.getNearbySourceContainer();
+        if (container && container.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            this.transfer(container, RESOURCE_ENERGY);
+            return true;
+        }
+        
+        return false;
+    }
 }
