@@ -12,28 +12,27 @@ class Team {
     moveMode: string;    // 移动模式
     homeRoom: string;    // 孵化房间
     targetRoom: string;  // 目标房间
-    creeps: Creep[];     // 成员数组
+    creeps: Creep[] | undefined;     // 成员数组
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
     moved = false;       // 本tick是否移动过
 
     // 构造函数
     constructor(teamData: TeamMemory) {
-        this.name = teamData.name;
-        this.status = teamData.status;
-        this.toward = teamData.toward;
-        this.formation = teamData.formation;
-        this.homeRoom = teamData.homeRoom;
-        this.targetRoom = teamData.targetRoom;
-        this.moveMode = teamData.moveMode;
-        this.cache = teamData.cache || {};
-        this.flag = Game.flags[`Team-${this.name}`];
-        this.creeps = teamData.creeps.map(Game.getObjectById).filter(Boolean) as Creep[];
-        if (this.creeps.length == 0) {
-            // 没有成员，则解散
-            this.creeps = undefined;
-            return;
-        }
+        const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache, creeps } = teamData;
+        
+        this.name = name;
+        this.status = status;
+        this.toward = toward;
+        this.formation = formation;
+        this.homeRoom = homeRoom;
+        this.targetRoom = targetRoom;
+        this.moveMode = moveMode;
+        this.cache = cache || {};
+        this.flag = Game.flags[`Team-${name}`];
+        
+        const liveCreeps = creeps.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
+        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
     }
 
     // 保存数据
