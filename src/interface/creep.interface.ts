@@ -143,7 +143,6 @@ interface Creep {
      * boost creep
      * @param boostTypes - 强化的资源类型数组，如['XUH2O', 'XGHO2']
      * @param must - 可选，是否必须boost，默认false
-     * @param reserve - 可选，是否为预定的boost，默认false
      * @returns true表示boost完成或不需要boost，false表示正在进行
      * @description 按优先级顺序进行boost，失败5次后放弃
      */

@@ -248,8 +248,8 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     // --- Pre-calculate Height ---
     let totalHeight = 0;
     
-    // Header (Room+RCL, CPU) - 2 rows
-    totalHeight += lineHeight * 2;
+    // Header (Room+RCL, CPU, QoS/Perf) - 3 rows
+    totalHeight += lineHeight * 3;
     
     // GCL & GPL (2 rows + padding)
     totalHeight += 0.8 * 2;
@@ -269,10 +269,10 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     
     // Creeps (1 or 2 rows)
     const creepCount = stats.creepCount || 0;
-    const roleSummary = getTopRolesSummary(stats.creeps);
+    const roleSummaryLines = getTopRolesSummaryLines(stats.creeps);
     totalHeight += lineHeight; 
-    if (roleSummary) {
-        totalHeight += lineHeight; 
+    if (roleSummaryLines.length > 0) {
+        totalHeight += lineHeight * roleSummaryLines.length; 
     }
     
     totalHeight += 0.2;
@@ -308,6 +308,14 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     
     visual.text(`CPU: ${cpu.toFixed(1)} / ${avgCpu.toFixed(1)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
     visual.text(`Bkt: ${formatK(bucket)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
+    y += lineHeight;
+
+    // QoS/perf 由框架层写入（createApp），这里只负责展示
+    const qosLevel = stats.qos?.level || '-';
+    const perfTotal = stats.perf?.last?.total;
+    const perfStr = typeof perfTotal === 'number' ? perfTotal.toFixed(1) : '-';
+    visual.text(`QoS: ${qosLevel}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
+    visual.text(`T: ${perfStr}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
     y += lineHeight;
 
     // --- Global Progress: GCL & GPL (Vertical Stack) ---
@@ -372,9 +380,11 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     // Row: Creeps
     visual.text(`Creeps: ${creepCount}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
     y += lineHeight;
-    if (roleSummary) {
-        visual.text(roleSummary, x, y + 0.2, { align: 'left', font: '0.6 monospace', color: STYLE.colorSub });
-        y += lineHeight;
+    if (roleSummaryLines.length > 0) {
+        for (const line of roleSummaryLines) {
+            visual.text(line, x, y + 0.2, { align: 'left', font: '0.6 monospace', color: STYLE.colorSub });
+            y += lineHeight;
+        }
     }
 }
 
@@ -399,8 +409,8 @@ function drawProgressBar(visual: RoomVisual, x: number, y: number, w: number, h:
     }
 }
 
-function getTopRolesSummary(creepsByRole: any): string {
-    if (!creepsByRole) return '';
+function getTopRolesSummaryLines(creepsByRole: any): string[] {
+    if (!creepsByRole) return [];
     
     // Aggregate by abbreviation
     const aggregated: Record<string, number> = {};
@@ -411,13 +421,17 @@ function getTopRolesSummary(creepsByRole: any): string {
     }
     
     const entries = Object.entries(aggregated);
-    if (entries.length <= 0) return '';
+    if (entries.length <= 0) return [];
     
     // Sort by count descending
     entries.sort((a, b) => b[1] - a[1]);
     
-    // Show ALL roles
-    return entries.map(([code, count]) => `${code}:${count}`).join(' ');
+    const tokens = entries.map(([code, count]) => `${code}:${count}`);
+    const lines: string[] = [];
+    for (let i = 0; i < tokens.length; i += 8) {
+        lines.push(tokens.slice(i, i + 8).join(' '));
+    }
+    return lines;
 }
 
 function formatSigned(n: number): string {

@@ -1347,11 +1347,11 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
             const xBucket = globalPathCache[startKey];
             if (!xBucket) continue;
 
-            // 遍历 EndSum 范围
-            for (let endSum = minY; endSum <= maxY; endSum++) {
-                if (xBucket[endSum]) {
-                    if (visit(xBucket[endSum])) return true;
-                }
+            // 遍历 bucket 内已有的 key，而不是做数值区间扫描，避免在 range 较大时 O(n) 扫描抖动
+            for (let combinedYKey in xBucket) {
+                let combinedY = +combinedYKey;
+                if (combinedY < minY || combinedY > maxY) continue;
+                if (visit(xBucket[combinedY])) return true;
             }
         }
     }
