@@ -21,6 +21,17 @@
 
 import { decompress } from "@/modules/utils/compress";
 
+const PoolTypes = [
+    'transport',
+    'manage',
+    'build',
+    'repair',
+    'terminal',
+    'spawn',
+    'mine',
+    'boost'
+]
+
 /** 通用的任务池模块 */
 export default class MissionPools extends Room {
     // 任务池初始化
@@ -28,16 +39,6 @@ export default class MissionPools extends Room {
         if(!Memory.MissionPools) Memory.MissionPools = {}
         if(!Memory.MissionPools[this.name]) Memory.MissionPools[this.name] = {}
         const Pools = Memory.MissionPools[this.name];
-        const PoolTypes = [
-            'transport',
-            'manage',
-            'build',
-            'repair',
-            'terminal',
-            'spawn',
-            'mine',
-            'boost'
-        ]
         for (const type of Object.keys(Pools)) { if(!PoolTypes.includes(type)) delete Pools[type] }
         for (const type of PoolTypes) { if(!Pools[type]) Pools[type] = [] }
         return OK;
@@ -45,41 +46,41 @@ export default class MissionPools extends Room {
 
     // (私有方法) 获取任务池
     private getPool(PoolName: string) {
-        const memory = Memory.MissionPools[this.name];
-        if(!memory) return null;
-        if(memory[PoolName]) return memory[PoolName];
-        console.log(`房间 ${this.name} 的任务池 ${PoolName} 不存在`);
-        return null;
+        let memory = Memory.MissionPools[this.name];
+        if(!memory) {
+            this.initMissionPool();
+            memory = Memory.MissionPools[this.name];
+        }
+        if(!PoolTypes.includes(PoolName)) {
+            console.log(`任务池 ${PoolName} 不存在`);
+            return null;
+        }
+        if(!memory[PoolName]) memory[PoolName] = [];
+        return memory[PoolName];
     }
     
     // (私有方法) 添加任务到任务池
     private pushTaskToPool(PoolName: string, task: Task) {
-        if(!Memory.MissionPools[this.name][PoolName]) {
-            console.log(`任务池 ${PoolName} 不存在`);
-            return ERR_NOT_FOUND;
-        }
         if(!task) return ERR_NOT_FOUND;
-        Memory.MissionPools[this.name][PoolName].push(task);
+        const pool = this.getPool(PoolName);
+        if(!pool) return ERR_NOT_FOUND;
+        pool.push(task);
         return OK;
     }
 
     // (私有方法) 删除任务池中的任务
     private removeTaskFromPool(PoolName: string, index: number) {
-        if(!Memory.MissionPools[this.name][PoolName]) {
-            console.log(`任务池 ${PoolName} 不存在`);
-            return ERR_NOT_FOUND;
-        }
-        Memory.MissionPools[this.name][PoolName].splice(index, 1);
+        const pool = this.getPool(PoolName);
+        if(!pool) return ERR_NOT_FOUND;
+        pool.splice(index, 1);
         return OK;
     }
 
     // (私有方法) 修改任务池中的任务
     private modifyTaskInPool(PoolName: string, index: number, task: Task) {
-        if(!Memory.MissionPools[this.name][PoolName]) {
-            console.log(`任务池 ${PoolName} 不存在`);
-            return ERR_NOT_FOUND;
-        }
-        Memory.MissionPools[this.name][PoolName][index] = task;
+        const pool = this.getPool(PoolName);
+        if(!pool) return ERR_NOT_FOUND;
+        pool[index] = task;
         return OK;
     }
 
@@ -113,7 +114,7 @@ export default class MissionPools extends Room {
     // 获取任务池中的任务
     public getMissionFromPool(PoolName: string, pos?: number, filter?: (task: Task) => boolean) {
         const tasks = this.getPool(PoolName);
-        if (!tasks || tasks.length === 0) return null;
+        if (!tasks) return null;
 
         // 默认过滤器
         const check = filter || (() => true);
@@ -169,7 +170,7 @@ export default class MissionPools extends Room {
     public getMissionFromPoolRandom(PoolName: string) {
         const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
-        if (tasks.length === 0) return null; // 如果没有任务，返回null
+        if (!tasks.length) return null; // 如果没有任务，返回null
         return tasks[Math.floor(Math.random() * tasks.length)];
     }
 
@@ -182,7 +183,7 @@ export default class MissionPools extends Room {
     public getMissionFromPoolById(PoolName: string, id: Task["id"]) {
         const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
-        if (tasks.length === 0) return null; // 如果没有任务，返回null
+        if (!tasks.length) return null; // 如果没有任务，返回null
         return tasks.find(t => t.id === id);
     }
 
@@ -220,7 +221,7 @@ export default class MissionPools extends Room {
 
     // 锁定任务池中的任务
     public lockMissionInPool(PoolName: string, id: Task["id"], creepId: Id<Creep>) {
-        const tasks = Memory.MissionPools[this.name][PoolName];
+        const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
         if (tasks.length === 0) return; // 如果没有任务，不处理
 
@@ -234,7 +235,7 @@ export default class MissionPools extends Room {
 
     // 解锁任务池中的任务
     public unlockMissionInPool(PoolName: string, id: Task["id"]) {
-        const tasks = Memory.MissionPools[this.name][PoolName];
+        const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
         if (!tasks.length) return; // 如果没有任务，不处理
 
@@ -248,14 +249,14 @@ export default class MissionPools extends Room {
 
     // 更新任务池中的任务
     public updateMissionPool(PoolName: string, id: Task["id"], {level, data, lock}: {level?: Task["level"], data?: Task["data"], lock?: Task["lock"]}) {
-        const tasks = Memory.MissionPools[this.name][PoolName];
+        const tasks = this.getPool(PoolName);
         if (!tasks) { return; }
         if (!tasks.length) return; // 如果没有任务，不处理
 
         const taskIndex = tasks.findIndex(t => t.id === id);
         if (taskIndex == -1) { console.log(`任务 ${id} 不存在`); return;}
 
-        const task = Memory.MissionPools[this.name][PoolName][taskIndex]
+        const task = tasks[taskIndex];
         if (level !== undefined) {
             task.level = level;
         }
