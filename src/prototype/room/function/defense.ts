@@ -4,79 +4,176 @@ export default class RoomDefense extends Room {
         if (this.controller.safeMode) return;
 
         // 处于防御时, 检查是否需要激活安全模式
-        if (this.memory.defend) {
-            let RuinCount = this.find(FIND_RUINS, {filter: (e: any) => e.structure.owner &&
-                    e.structure.owner.username==this.controller.owner.username
-                    &&e.structure.structureType!=STRUCTURE_ROAD
-                    &&e.structure.structureType!=STRUCTURE_CONTAINER
-                    &&e.structure.structureType!=STRUCTURE_WALL
-                    &&e.structure.structureType!=STRUCTURE_RAMPART
-                    &&e.structure.structureType!=STRUCTURE_EXTRACTOR
-                    &&e.structure.structureType!=STRUCTURE_LINK
-                    &&e.structure.ticksToDecay<=500
-                }).length
-            if (RuinCount && this.controller.safeModeAvailable &&
-                !this.controller.safeModeCooldown &&
-                !this.controller.upgradeBlocked
-            ) {
-                this.controller.activateSafeMode();
-                return;
-            }
-        }
+        if (this.memory.defend && this.activateSafeMode()) return true;
 
         // 关于主动防御的检查
         if (Game.time % 5) return;
         
         if (!Memory['whitelist']) Memory['whitelist'] = [];
-        let hostiles = this.findEnemyCreeps({
-            filter: c => c.owner.username != 'Invader'&&
-                (this.level<7||c.body?.some(b=>b.boost))
-        });
-        let hostileCount = hostiles.filter(c => c.body.some(b=>b.type==HEAL)).length
+        const roomHostiles = this.findEnemyCreeps({
+            filter: c => c.owner.username !== 'Invader' &&
+                c.body?.some(b =>
+                    b.type === ATTACK ||
+                    b.type === RANGED_ATTACK ||
+                    b.type === WORK ||
+                    b.type === HEAL ||
+                    b.type === CLAIM
+                )
+        }) as any as Creep[];
+        const powerHostiles = this.find(FIND_HOSTILE_POWER_CREEPS, {
+            filter: hostile => !hostile.isWhiteList()
+        }) as any;
+        const threats = roomHostiles.concat(powerHostiles);
 
-        if(!hostileCount) {
-            // 如果没有敌人，则退出防御状态
-            this.memory.defend = false;
+        if (!global.Hostiles) global.Hostiles = {};
+
+        if (threats.length === 0) {
+            global.Hostiles[this.name] = [];
+            if (this.memory['defendUntil'] && this.memory['defendUntil'] > Game.time) {
+                this.memory.defend = true;
+            } else {
+                this.memory.defend = false;
+                delete this.memory['defendUntil'];
+            }
             return;
-        } else {
-            // 进入防御状态
-            this.memory.defend = true;
         }
+
+        // 进入防御状态（避免频繁抖动：按威胁强度延长一段时间）
+        this.memory.defend = true;
+        const threatScore = threats.reduce((sum: number, c: any) => {
+            if (!c?.body) return sum + 5;
+            let s = 0;
+            for (const p of c.body) {
+                if (p.type === HEAL) s += 3;
+                else if (p.type === RANGED_ATTACK) s += 2;
+                else if (p.type === ATTACK || p.type === WORK) s += 1;
+                else if (p.type === CLAIM) s += 3;
+            }
+            return sum + s;
+        }, 0);
+        this.memory['defendUntil'] = Game.time + Math.min(200, 50 + threatScore * 2);
 
         // 如果房间等级小于4，则不进行主动防御
         if (this.level < 4) return;
         
         // 搜索有威胁的敌人
-        hostiles = hostiles.filter(c => c.body.some(b =>
-            b.type == ATTACK || b.type == RANGED_ATTACK ||
-            b.type == WORK || b.type == HEAL)
-        ) as any;
-        let power_hostiles = this.find(FIND_HOSTILE_POWER_CREEPS, {
-            filter: hostile => !hostile.isWhiteList()
-        }) as any;
-        hostiles = hostiles.concat(power_hostiles);
-        if(!global.Hostiles) global.Hostiles = {};
-        if (hostiles.length == 0) {
-            global.Hostiles[this.name] = [];
-            return;
-        }
+        const hostiles = threats.filter((c: any) => c) as any[];
 
         /** --------主动防御孵化-------- */
         // 40A红球 或 40R蓝球
         global.Hostiles[this.name] = hostiles.map((hostile: Creep) => hostile.id);
         
-        const threatLevel = hostiles.reduce((sum: number, c: Creep) => 
-            sum + c.body.filter(p => p.type === ATTACK || p.type === RANGED_ATTACK || p.type === WORK).length, 0);
+        const threatLevel = hostiles.reduce((sum: number, c: any) => {
+            if (!c?.body) return sum + 5;
+            return sum + c.body.filter((p: BodyPartDefinition) =>
+                p.type === ATTACK ||
+                p.type === RANGED_ATTACK ||
+                p.type === WORK ||
+                p.type === HEAL ||
+                p.type === CLAIM
+            ).length;
+        }, 0);
+
+        if (Array.isArray(this[STRUCTURE_RAMPART]) && this[STRUCTURE_RAMPART].length > 0) {
+            const costs = this.getDefenseCostMatrix(false);
+
+            let breached = false;
+            for (const c of hostiles as any[]) {
+                if (!c?.pos) continue;
+                if (c.pos.roomName !== this.name) continue;
+                if (costs.get(c.pos.x, c.pos.y) < 254) {
+                    breached = true;
+                    break;
+                }
+            }
+            this.memory['breached'] = breached;
+
+            let sumX = 0;
+            let sumY = 0;
+            let count = 0;
+            for (const c of hostiles as any[]) {
+                if (!c?.pos) continue;
+                if (c.pos.roomName !== this.name) continue;
+                sumX += c.pos.x;
+                sumY += c.pos.y;
+                count++;
+            }
+            const meanX = count > 0 ? Math.round(sumX / count) : 25;
+            const meanY = count > 0 ? Math.round(sumY / count) : 25;
+            const meanPos = new RoomPosition(meanX, meanY, this.name);
+
+            const rampartCandidates = (this[STRUCTURE_RAMPART] as StructureRampart[])
+                .filter(r => r?.my && r.hits >= 1e6 && costs.get(r.pos.x, r.pos.y) === 1)
+                .filter(r => {
+                    const lookStructure = this.lookForAt(LOOK_STRUCTURES, r.pos);
+                    if (lookStructure.length && lookStructure.some(structure =>
+                        structure.structureType !== STRUCTURE_RAMPART &&
+                        structure.structureType !== STRUCTURE_ROAD &&
+                        structure.structureType !== STRUCTURE_CONTAINER)) {
+                        return false;
+                    }
+                    return true;
+                });
+
+            const scored = rampartCandidates.map(r => {
+                const dist = r.pos.getRangeTo(meanPos);
+                const meleeScore = -dist;
+                const rangedScore = -Math.abs(dist - 3) - dist * 0.05;
+                return { id: r.id, meleeScore, rangedScore };
+            });
+            scored.sort((a, b) => b.meleeScore - a.meleeScore);
+            const melee = scored.slice(0, 10).map(s => s.id);
+            scored.sort((a, b) => b.rangedScore - a.rangedScore);
+            const ranged = scored.slice(0, 10).map(s => s.id);
+
+            this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged };
+        } else {
+            delete this.memory['defenseRamparts'];
+            delete this.memory['breached'];
+        }
 
         const attackDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-attack');
         const rangedDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-ranged');
+        const doubleAttackDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-2attack');
+        const doubleHealDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-2heal');
         
         const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
         const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
         const rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
+        const doubleAttackQueueNum = SpawnMissionNum['defend-2attack'] || 0;
+        const doubleHealQueueNum = SpawnMissionNum['defend-2heal'] || 0;
 
-        if (hostiles.some((c: Creep) => c.body.some(p => p.type == ATTACK || p.type == WORK)) && 
-            (attackDefender.length + attackQueueNum < 1)) {
+        const hasMeleeThreat = hostiles.some((c: any) => c?.body && c.body.some((p: BodyPartDefinition) =>
+            p.type == ATTACK || p.type == WORK || p.type == CLAIM
+        ));
+        const hasRangedThreat = hostiles.some((c: any) => c?.body && c.body.some((p: BodyPartDefinition) => p.type == RANGED_ATTACK));
+        const hasHealThreat = hostiles.some((c: any) => c?.body && c.body.some((p: BodyPartDefinition) => p.type == HEAL));
+        const hasBoostedThreat = hostiles.some((c: any) => c?.body && c.body.some((p: BodyPartDefinition) => p.boost));
+        const breached = !!this.memory['breached'];
+
+        const canDoubleAttackBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000;
+        const canDoubleHealBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XLHO2'] >= 3000 && this['XZHO2'] >= 3000;
+        const useDouble = this.level >= 7 &&
+            (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat) &&
+            canDoubleAttackBoost && canDoubleHealBoost;
+
+        if (useDouble) {
+            if (doubleAttackDefender.length + doubleAttackQueueNum < 1) {
+                const body = this.GetRoleBodys('defend-2attack');
+                this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
+                this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+            }
+            if (doubleHealDefender.length + doubleHealQueueNum < 1) {
+                const body = this.GetRoleBodys('defend-2heal');
+                this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
+                this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+            }
+        }
+
+        const desiredAttack = useDouble ? 0 : (hasMeleeThreat ? (breached ? 2 : 1) : 0);
+        const desiredRanged = useDouble ? 0 : (hasRangedThreat ? (threatLevel >= 25 ? 2 : 1) : 0);
+
+        if (desiredAttack > 0 && (attackDefender.length + attackQueueNum < desiredAttack)) {
             
             const body = this.getDefenderBody('attack', this.energyCapacityAvailable, threatLevel);
             let mustBoost = false;
@@ -84,13 +181,11 @@ export default class RoomDefense extends Room {
             
             this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
             if (mustBoost) {
-                this.AssignBoostTask('XUH2O', 1200);
-                this.AssignBoostTask('XZHO2', 300);
+                this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
 
-        if (hostiles.some((c: Creep) => c.body.some(p => p.type == RANGED_ATTACK)) && 
-            (rangedDefender.length + rangedQueueNum < 1)) {
+        if (desiredRanged > 0 && (rangedDefender.length + rangedQueueNum < desiredRanged)) {
             
             const body = this.getDefenderBody('ranged', this.energyCapacityAvailable, threatLevel);
             let mustBoost = false;
@@ -98,10 +193,28 @@ export default class RoomDefense extends Room {
 
             this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
             if (mustBoost) {
-                this.AssignBoostTask('XKHO2', 1200);
-                this.AssignBoostTask('XZHO2', 300);
+                this.AssignBoostTaskByBody(body, { [RANGED_ATTACK]: 'XKHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
+    }
+
+    activateSafeMode() {
+        if (this.controller.safeModeAvailable) return;
+        if (this.controller.safeModeCooldown) return;
+        if (this.controller.upgradeBlocked) return;
+        let RuinCount = this.find(FIND_RUINS, {filter: (e: any) => e.structure.owner &&
+            e.structure.owner.username==this.controller.owner.username
+            &&e.structure.structureType!=STRUCTURE_ROAD
+            &&e.structure.structureType!=STRUCTURE_CONTAINER
+            &&e.structure.structureType!=STRUCTURE_WALL
+            &&e.structure.structureType!=STRUCTURE_RAMPART
+            &&e.structure.structureType!=STRUCTURE_EXTRACTOR
+            &&e.structure.structureType!=STRUCTURE_LINK
+            &&e.structure.ticksToDecay<=500
+        }).length
+        if (!RuinCount)  return;
+        this.controller.activateSafeMode();
+        return true;
     }
 
     getDefenderBody(type: 'attack' | 'ranged', energyAvailable: number, threatLevel: number): (BodyPartConstant | number)[][] {

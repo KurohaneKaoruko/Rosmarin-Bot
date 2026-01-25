@@ -431,6 +431,19 @@ export const RoleLevelData = {
         7: { bodypart: [[ATTACK, 40], [MOVE, 10]], num: 0 },
         8: { bodypart: [[ATTACK, 40], [MOVE, 10]], num: 0 },
     },
+    "defend-ranged": {
+        6: { bodypart: [[RANGED_ATTACK, 10], [MOVE, 10]], num: 0 },
+        7: { bodypart: [[RANGED_ATTACK, 30], [MOVE, 10]], num: 0 },
+        8: { bodypart: [[RANGED_ATTACK, 40], [MOVE, 10]], num: 0 },
+    },
+    "defend-2attack": {
+        7: { bodypart: [[TOUGH, 5], [ATTACK, 35], [MOVE, 10]], num: 0 },
+        8: { bodypart: [[TOUGH, 5], [ATTACK, 35], [MOVE, 10]], num: 0 },
+    },
+    "defend-2heal": {
+        7: { bodypart: [[TOUGH, 5], [HEAL, 20], [MOVE, 10]], num: 0 },
+        8: { bodypart: [[TOUGH, 5], [HEAL, 35], [MOVE, 10]], num: 0 },
+    },
     "aid-build": {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
         2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 0 },

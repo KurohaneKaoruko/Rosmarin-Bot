@@ -1,54 +1,59 @@
 const autoDefend = function (creep: Creep) {
-    const roomName = creep.room.name;
-    // 查找当前房间的所有满足条件的 rampart
-    const ramparts = creep.room.rampart.filter((rampart) => {
-        // 存在不可通过的建筑,则跳过
-        const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, rampart.pos);
-        if(lookStructure.length && lookStructure.some(structure => 
-            structure.structureType !== STRUCTURE_RAMPART &&
-            structure.structureType !== STRUCTURE_ROAD &&
-            structure.structureType !== STRUCTURE_CONTAINER)) {
-            return false;
-        }
-        return rampart.hits >= 1e6;
-    });
-    // 如果没有 rampart，则直接返回或执行其他逻辑
-    if (ramparts.length === 0) {
-        // 可以添加日志或其他处理逻辑
-        return;
-    }
-    // 查找当前房间的所有敌对 creep
-    const hostileCreeps = Game.rooms[roomName].find(FIND_HOSTILE_CREEPS);
-    // 如果没有敌对 creep，也可以考虑是否继续执行或返回
-    if (hostileCreeps.length === 0) {
-        // 可以添加日志或其他处理逻辑
-        return;
-    }
+    const hostileCreeps = creep.findHostileCreeps();
+    if (hostileCreeps.length === 0) return;
     
-    // 初始化最近的 rampart 和其距离
-    let closestRampart = null;
-    let minDistance = Infinity;
-    
-    // 遍历每个 rampart，找到距离敌人最近的 rampart
-    for (const rampart of ramparts) {
-        let minEnemyDistance = Infinity;
-        const distance = rampart.pos.getRangeTo(hostileCreeps[0].pos);
-        if (distance < minEnemyDistance) {
-            minEnemyDistance = distance;
-        }
-        const totalDistance = minEnemyDistance;
-        if (totalDistance < minDistance) {
-            minDistance = totalDistance;
-            closestRampart = rampart;
+    const mem = creep.room.memory['defenseRamparts'];
+    let targetRampart: StructureRampart | null = null;
+    if (mem && mem.tick && mem.tick + 15 >= Game.time && Array.isArray(mem.ranged) && mem.ranged.length > 0) {
+        for (const id of mem.ranged) {
+            const r = Game.getObjectById(id as Id<StructureRampart>);
+            if (!r || !r.my || r.hits < 1e6) continue;
+            const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, r.pos);
+            if (lookStructure.length && lookStructure.some(structure =>
+                structure.structureType !== STRUCTURE_RAMPART &&
+                structure.structureType !== STRUCTURE_ROAD &&
+                structure.structureType !== STRUCTURE_CONTAINER)) {
+                continue;
+            }
+            targetRampart = r;
+            break;
         }
     }
-    
-    // 如果有找到最近的 rampart，则前往该位置
-    if (closestRampart) {
-        creep.moveTo(closestRampart.pos, { visualizePathStyle: { stroke: '#ff0000' } });
-    } else {
+
+    if (!targetRampart) {
+        const ramparts = creep.room.rampart.filter((rampart) => {
+            const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, rampart.pos);
+            if (lookStructure.length && lookStructure.some(structure =>
+                structure.structureType !== STRUCTURE_RAMPART &&
+                structure.structureType !== STRUCTURE_ROAD &&
+                structure.structureType !== STRUCTURE_CONTAINER)) {
+                return false;
+            }
+            return rampart.hits >= 1e6;
+        });
+
+        let best: StructureRampart | null = null;
+        let bestScore = -Infinity;
+        for (const r of ramparts) {
+            let minDist = Infinity;
+            for (const e of hostileCreeps) {
+                const d = r.pos.getRangeTo(e.pos);
+                if (d < minDist) minDist = d;
+            }
+            const score = -Math.abs(minDist - 3) - minDist * 0.05;
+            if (score > bestScore) {
+                bestScore = score;
+                best = r;
+            }
+        }
+        targetRampart = best;
     }
-    const target = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+
+    if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
+        creep.moveTo(targetRampart.pos, { visualizePathStyle: { stroke: '#ff0000' } });
+    }
+
+    const target = creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
         // creep.attack(target)
             // 检查 creep 是否携带 ATTACK 部件
@@ -77,7 +82,7 @@ const flagDefend = function (creep: Creep, flag: Flag) {
     if(!creep.pos.isEqual(flag.pos)) {
         creep.moveTo(flag.pos, { visualizePathStyle: { stroke: '#ff0000' } });
     }
-    const target = creep.pos.findClosestByRange(FIND_HOSTILE_CREEPS);
+    const target = creep.pos.findClosestByRange(creep.findHostileCreeps());
     if(target) {
         // creep.attack(target)
             // 检查 creep 是否携带 ATTACK 部件

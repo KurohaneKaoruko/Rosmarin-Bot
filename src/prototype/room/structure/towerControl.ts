@@ -66,6 +66,23 @@ export default class TowerControl extends Room {
         else return 150;
     }
 
+    private TowerPowerScale(tower: StructureTower): number {
+        let scale = 1;
+        const effects = (tower.effects || []) as any[];
+        for (const effect of effects) {
+            const power = effect?.power ?? effect?.effect;
+            if (power !== PWR_OPERATE_TOWER && power !== PWR_DISRUPT_TOWER) continue;
+            const list = (POWER_INFO as any)[power]?.effect;
+            if (!Array.isArray(list) || list.length === 0) continue;
+            const level = Math.max(1, Number(effect.level || 1));
+            const idx = Math.min(list.length - 1, level - 1);
+            let mult = list[idx];
+            if (effect.ticksRemaining === 1) mult = (1 + mult) / 2;
+            scale *= mult;
+        }
+        return scale;
+    }
+
     /**
      * 计算全部tower对某一点的伤害总值
      * @param {RoomPosition} pos 要计算伤害的点
@@ -75,13 +92,7 @@ export default class TowerControl extends Room {
         if(this.name != pos.roomName) return 0;
         return _.sum(this.tower, tower => {
             if (tower.store.energy < 10) return 0;
-            let ratio = 1;
-            if (tower.effects && tower.effects.length) {
-                tower.effects.forEach(effect => {
-                    if (effect.effect !== PWR_OPERATE_TOWER) return;
-                    ratio = POWER_INFO[effect.effect].effect[effect.level];
-                });
-            }
+            const ratio = this.TowerPowerScale(tower);
             return this.TowerDamage(tower.pos.getRangeTo(pos)) * ratio;
         });
     }
@@ -118,8 +129,8 @@ export default class TowerControl extends Room {
         });
         if (towerDamage > 0) realDamage += towerDamage;
         // 治疗量
-        const healers = creep.pos.findInRange(FIND_CREEPS, 1, {
-            filter: c => creep.owner.username == c.owner.username && c.body.some(b => b.type == HEAL)
+        const healers = creep.pos.findInRange(FIND_CREEPS, 3, {
+            filter: c => creep.owner.username == c.owner.username && c.getActiveBodyparts(HEAL) > 0
         }) || [];
         let totalHeal = 0;
         const BOOST_POWER = {
@@ -128,19 +139,17 @@ export default class TowerControl extends Room {
             'XLHO2': 4,
         }
         healers.forEach(c => {
-            if (c['_heal']) {
-                totalHeal += c['_heal'];
-                return;
-            }
+            const range = c.pos.getRangeTo(creep.pos);
+            const base = range <= 1 ? 12 : (range <= 3 ? 4 : 0);
+            if (base <= 0) return;
             let h = 0;
             c.body.forEach(part => {
                 if (part.type !== HEAL || part.hits <= 0) return;
-                else if (!part.boost) h += 12
-                else h += 12 * BOOST_POWER[part.boost];
-            })
-            c['_heal'] = h
+                if (!part.boost) h += base;
+                else h += base * (BOOST_POWER as any)[part.boost];
+            });
             totalHeal += h;
-        })
+        });
         creep['_towerDamage'] = realDamage - totalHeal;
         this.visual.text(
             `${creep['_towerDamage']}`,
@@ -276,6 +285,12 @@ export default class TowerControl extends Room {
     // 处理普通修复任务, 修复建筑物
     TowerTaskRepair() {
         if (Game.cpu.bucket < 1000) return false;
+        if (typeof this.memory['towerRepairSleep'] !== 'number') this.memory['towerRepairSleep'] = 0;
+        if (this.memory['towerRepairSleep'] > 0) {
+            this.memory['towerRepairSleep'] -= 1;
+            return false;
+        }
+
         if (!global.towerRepairTarget) global.towerRepairTarget = {};
         let targetCache = global.towerRepairTarget;
         if (Game.time % 20 == 0) {
@@ -299,11 +314,24 @@ export default class TowerControl extends Room {
         }
         const target = Game.getObjectById(targetCache[this.name]) as Structure;
         if(target) {
+            const towerEnergyCap = _.sum(this.tower, t => t.store.getCapacity(RESOURCE_ENERGY) || 0);
+            const towerEnergy = _.sum(this.tower, t => t.store[RESOURCE_ENERGY] || 0);
+            const ratio = towerEnergyCap > 0 ? towerEnergy / towerEnergyCap : 0;
+            if (this.memory.defend && ratio < 0.8) {
+                this.memory['towerRepairSleep'] = 10;
+                return false;
+            }
+            if (!this.memory.defend && ratio < 0.6) {
+                this.memory['towerRepairSleep'] = 10;
+                return false;
+            }
+
             this.tower.forEach(t => {
                 // 如果塔的能量不足，则不执行修复逻辑
-                if(t.store[RESOURCE_ENERGY] < 500) return;
+                if (t.store[RESOURCE_ENERGY] < (t.store.getCapacity(RESOURCE_ENERGY) || 0) * 0.75) return;
                 t.repair(target);
             });
+            this.memory['towerRepairSleep'] = 5 + Math.min(50, this.level * this.level);
             return true;
         }
         return false;
