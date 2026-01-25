@@ -10,6 +10,7 @@ import LinkControl from "./structure/linkControl"
 import TerminalControl from "./structure/terminalControl"
 import FactoryControl from "./structure/factoryControl"
 import PowerSpawnControl from "./structure/powerSpawnControl"
+import NukerControl from "./structure/nukerControl"
 
 import AutoMarket from "./auto/autoMarket"
 import AutoBuild from "./auto/autoBuild"
@@ -44,6 +45,7 @@ const plugins = [
     TerminalControl,    // Terminal控制
     FactoryControl,     // Factory控制
     PowerSpawnControl,  // PowerSpawn控制
+    NukerControl,       // Nuker控制
     
     AutoMarket,     // 自动市场交易
     AutoBuild,      // 自动建筑

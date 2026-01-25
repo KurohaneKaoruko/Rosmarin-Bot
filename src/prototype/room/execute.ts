@@ -1,6 +1,6 @@
 export default class RoomExecute extends Room {
     exec() {
-        this.updateEnergyState?.(false);
+        this.updateEnergyState(false);
         // 更新任务池
         this.MissionUpdate();
 

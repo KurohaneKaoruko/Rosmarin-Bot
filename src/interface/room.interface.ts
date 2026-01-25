@@ -48,6 +48,33 @@ interface Room {
      * @description 缓存房间内的核弹发射井
      */
     nuker: StructureNuker;
+
+    /**
+     * 判断本房间 nuker 是否已满足发射资源条件
+     * @returns true 表示资源足够，false 表示不足或无 nuker
+     */
+    NukerHasEnoughResource(): boolean;
+
+    /**
+     * 判断本房间 nuker 是否在目标房间的可发射距离内
+     * @param target 目标位置或目标房间名
+     * @returns true 表示在射程内，false 表示不在
+     */
+    NukerInLaunchRange(target: RoomPosition | string): boolean;
+
+    /**
+     * 判断本房间是否可以向目标位置发射核弹
+     * @description 一次性判断：有 nuker / 无冷却 / 资源足够 / 目标在射程内
+     * @param targetPos 目标位置
+     */
+    NukerCanLaunchTo(targetPos: RoomPosition): boolean;
+
+    /**
+     * 尝试向目标位置发射核弹
+     * @description 内部会进行完整校验并返回对应错误码
+     * @param targetPos 目标位置
+     */
+    NukerLaunchTo(targetPos: RoomPosition): ScreepsReturnCode;
     
     /** 
      * 房间中的lab数组

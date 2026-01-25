@@ -4,31 +4,28 @@ export default {
             const cpu0 = Game.cpu.getUsed();
             const flags = Object.keys(Game.flags).filter(flagName => flagName.startsWith('nuke-'));
             for (const flagName of flags) {
-                const launchNukeMatch = flagName.match(/^nuke[-_](\d+)/);
+                const launchNukeMatch = flagName.match(/^nuke[-_](\d+)?$/);
                 if (!launchNukeMatch) continue;
                 // 获取目标
                 const targetPos = Game.flags[flagName].pos;
                 const targetRoomName = targetPos.roomName;
-                // 获取符合发射条件的房间
-                if(!rooms || rooms.length === 0) rooms = Object.keys(Game.rooms);
-                const nearbyRooms = rooms.filter(room =>
-                    Game.map.getRoomLinearDistance(room, targetRoomName, true) <= 10 &&
-                    Game.rooms[room] &&
-                    Game.rooms[room].my &&
-                    Game.rooms[room].nuker &&
-                    Game.rooms[room].nuker.cooldown === 0 &&
-                    Game.rooms[room].nuker.store[RESOURCE_GHODIUM] == 5000 &&
-                    Game.rooms[room].nuker.store[RESOURCE_ENERGY] == 300000
-                )
                 // 获取发射数量，默认为1
-                const amount = launchNukeMatch[1] ? parseInt(launchNukeMatch[1]) : 1;
+                const amount = Math.max(1, Number(launchNukeMatch[1] || 1));
                 let launchedCount = 0; // 已发射数量
-                for (const room of nearbyRooms) {
-                    // 获取该房间的核弹发射器
-                    const nuker = Game.rooms[room].nuker;
-                    nuker.launchNuke(targetPos);    // 发射核弹
+                // 获取符合发射条件的房间
+                const roomNames = rooms.length > 0 ? rooms : Object.keys(Game.rooms);
+                for (const roomName of roomNames) {
+                    const roomObj = Game.rooms[roomName];
+                    if (!roomObj || !roomObj.my) continue;
+                    if (!roomObj.NukerCanLaunchTo(targetPos)) continue;
+
+                    const code = roomObj.NukerLaunchTo(targetPos);
+                    if (code !== OK) {
+                        console.log(`房间 ${roomName} 发射核弹失败，code: ${code}`);
+                        continue;
+                    }
                     launchedCount++;    // 已发射数量加1
-                    console.log(`从房间 ${nuker.room.name} 发射核弹到 ${targetRoomName} (x:${targetPos.x}  y:${targetPos.y})`);
+                    console.log(`从房间 ${roomName} 发射核弹到 ${targetRoomName} (x:${targetPos.x}  y:${targetPos.y})`);
                     if (launchedCount >= amount) break; // 达到发射数量后退出循环
                 }
                 Game.flags[flagName].remove();
