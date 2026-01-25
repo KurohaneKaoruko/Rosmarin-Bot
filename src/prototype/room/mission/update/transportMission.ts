@@ -27,6 +27,34 @@ export default class TransportMission extends Room {
     private static LAB_TRIGGER_AMOUNT = 1000;
     private static LAB_MIN_CAPACITY = 100;
 
+    private static getNukeDemandCache() {
+        const g = global as any;
+        const cached = g._nukeDemandCache;
+        if (cached && cached.tick === Game.time) return cached as { tick: number; all: boolean; rooms: Set<string> };
+
+        const rooms = new Set<string>();
+        let all = false;
+        for (const name in Game.flags) {
+            if (!(name.startsWith('nuke-') || name.startsWith('nuke_'))) continue;
+            const flag = Game.flags[name];
+            const list = flag?.memory?.['rooms'];
+            if (!Array.isArray(list) || list.length === 0) {
+                all = true;
+                break;
+            }
+            for (const r of list) rooms.add(r);
+        }
+
+        const next = { tick: Game.time, all, rooms };
+        g._nukeDemandCache = next;
+        return next;
+    }
+
+    private static hasNukeDemandForRoom(roomName: string) {
+        const cache = TransportMission.getNukeDemandCache();
+        return cache.all || cache.rooms.has(roomName);
+    }
+
     /**
      * 将业务 key 映射为 transport 任务优先级
      * @param key - 优先级类别
@@ -254,16 +282,22 @@ export default class TransportMission extends Room {
             }
         }
 
-        if(room.getResAmount(RESOURCE_ENERGY) < 100000) return;
+        const urgentNukeEnergy = TransportMission.hasNukeDemandForRoom(room.name);
+        if(room.getResAmount(RESOURCE_ENERGY) < (urgentNukeEnergy ? 300000 : 100000)) return;
 
-        if(Game.time % 20 === 0 && room.level == 8 && room.nuker) {
+        if(room.level == 8 && room.nuker) {
             const nuker = room.nuker;
-            const amount = Math.min(nuker.store.getFreeCapacity(RESOURCE_ENERGY), 3000);
-            if(nuker && amount > 0 && energy >= amount) {
+            const urgent = urgentNukeEnergy;
+            const shouldFill = urgent ? (Game.time % 10 === 0) : (Game.time % 20 === 0);
+            if (!shouldFill) return OK;
+
+            const cap = nuker.store.getFreeCapacity(RESOURCE_ENERGY);
+            const amount = urgent ? cap : Math.min(cap, 3000);
+            if(amount > 0 && energy >= amount) {
                 energy -= amount;
                 this.addTransportMission(this.TransportLevel('nuker'), {
                     pos: nuker,
-                    source: storage.id,
+                    source: storageOrTerminal.id,
                     target: nuker.id,
                     resourceType: RESOURCE_ENERGY,
                     amount,

@@ -11,6 +11,34 @@
 // 全局 Memory 接口
 // ============================================================
 
+/**
+ * 核弹打击相关 Memory
+ * @description 用于记录核弹落点时间，避免同一房间重复发射
+ */
+interface NukeMemory {
+    /**
+     * 目标房间核弹落点时间（Game.time）
+     * @description key 为目标房间名，value 为预计落点 tick
+     */
+    landTime: { [targetRoomName: string]: number };
+
+    requests?: NukeRequest[];
+}
+
+interface NukeRequest {
+    id: string;
+    roomName: string;
+    x: number;
+    y: number;
+    amount: number;
+    rooms?: string[];
+    createdTick: number;
+    ttl: number;
+    flagName?: string;
+    lastError?: number;
+    lastErrorTick?: number;
+}
+
 interface Memory {
     // ========================================================
     // 系统数据 - System Data
@@ -51,6 +79,12 @@ interface Memory {
      * - 暂停自动建筑
      */
     warmode: boolean;
+
+    /**
+     * 核弹打击数据
+     * @description 记录核弹落点时间等数据，用于避免重复 nuke
+     */
+    nuke?: NukeMemory;
 
     // ========================================================
     // 房间控制数据 - Room Control Data

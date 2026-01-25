@@ -14,6 +14,7 @@ import { FlagSpawn } from '@/modules/runtime/flagSpawn';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
+import { NukeModule } from '@/modules/runtime/NukeModule';
 
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
@@ -35,6 +36,7 @@ App.on(EventModule);    // 事件模块
 App.on(TeamModule);     // 小队模块
 App.on(FlagSpawn);      // 旗帜触发孵化
 App.on(ResourceManage); // 资源调度管理
+App.on(NukeModule);     // 核弹打击
 App.on(ClearModule);    // 过期数据清理
 App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
@@ -51,5 +53,4 @@ export const loop = App.run;
 // export const loop = function() {
 //     profiler.wrap(App.run);
 // }
-
 

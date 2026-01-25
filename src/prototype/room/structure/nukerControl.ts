@@ -34,7 +34,8 @@ export default class NukerControl extends Room {
      */
     NukerCanLaunchTo(targetPos: RoomPosition) {
         const nuker = this.nuker;
-        if (!nuker) return false;
+        if (!nuker || !nuker.my) return false;
+        if (!nuker.isActive()) return false;
         if (nuker.cooldown !== 0) return false;
         if (!this.NukerHasEnoughResource()) return false;
         if (!this.NukerInLaunchRange(targetPos)) return false;
@@ -50,10 +51,16 @@ export default class NukerControl extends Room {
     NukerLaunchTo(targetPos: RoomPosition): ScreepsReturnCode {
         const nuker = this.nuker;
         if (!nuker) return ERR_NOT_FOUND;
+        if (!nuker.isActive()) return ERR_RCL_NOT_ENOUGH;
         if (nuker.cooldown !== 0) return ERR_TIRED;
         if (!this.NukerHasEnoughResource()) return ERR_NOT_ENOUGH_RESOURCES;
         if (!this.NukerInLaunchRange(targetPos)) return ERR_NOT_IN_RANGE;
-        return nuker.launchNuke(targetPos);
+        const code = nuker.launchNuke(targetPos);
+        if (code === OK) {
+            if (!Memory.nuke) Memory.nuke = { landTime: {} };
+            Memory.nuke.landTime[targetPos.roomName] = Game.time + NUKE_LAND_TIME;
+        }
+        return code;
     }
 }
 

@@ -1,4 +1,5 @@
 import mountCreep from './Creep'
+import mountFlag from './Flag'
 import mountRoom from './Room'
 import mountPowerCreep from './PowerCreep'
 import mountRoomPosition from './RoomPosition'
@@ -8,6 +9,7 @@ import mountRoomVisual from './RoomVisual'
 export const PrototypeExtension = function () {
     // 挂载全部拓展
     mountCreep();
+    mountFlag();
     mountRoom();
     mountPowerCreep();
     mountRoomPosition();
