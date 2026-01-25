@@ -115,13 +115,13 @@ const Transport = {
         // 提前做好下一个任务的移动
         const missionMove = function(nextTickResAmount?: number,resType?: ResourceConstant) {
             const { sourceObj, targetObj, resourceType, amount } = getMissionData();
-            if (resType != resourceType || nextTickResAmount < amount) {
+            if ((resType != resourceType || nextTickResAmount < amount) && sourceObj) {
                 creep.moveTo(sourceObj, {
                     visualizePathStyle: { stroke: '#ffaa00' },
                     maxRooms: 1,
                     range: 1
                 });
-            } else {
+            } else if (targetObj) {
                 creep.moveTo(targetObj, {
                     visualizePathStyle: { stroke: '#ffffff' },
                     maxRooms: 1,
