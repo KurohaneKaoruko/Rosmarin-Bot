@@ -17,36 +17,11 @@ export const assignPrototype = function(obj1: any, obj2: any) {
  */
 export function log(type: string, text: string, ...args: any[]) {
     if (!type) type = `${global.BOT_NAME}`;
-    if (text[0] == '[') {
-        console.log(`<span style="color: #D0CAE0;"><b>[${type}]</b></span>${text}`, ...args);
+    const str = `<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`
+    if (console['logUnsafe'] && typeof console['logUnsafe'] === 'function') {
+        console['logUnsafe'](str, ...args);
     } else {
-        console.log(`<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`, ...args);
-    }
-}
-
-/** 获取一个方向的反方向
- * @param direction 方向常量
- * @returns 反方向常量
- */
-export function getOppositeDirection(direction): DirectionConstant {
-    if (direction == TOP) {
-        return BOTTOM;
-    } else if (direction == TOP_RIGHT) {
-        return BOTTOM_LEFT;
-    } else if (direction == RIGHT) {
-        return LEFT;
-    } else if (direction == BOTTOM_RIGHT) {
-        return TOP_LEFT;
-    } else if (direction == BOTTOM) {
-        return TOP;
-    } else if (direction == BOTTOM_LEFT) {
-        return TOP_RIGHT;
-    } else if (direction == LEFT) {
-        return RIGHT;
-    } else if (direction == TOP_LEFT) {
-        return BOTTOM_RIGHT;
-    } else {
-        return direction;
+        console.log(str, ...args);
     }
 }
 

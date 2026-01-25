@@ -3,16 +3,8 @@ import { BASE_CONFIG } from '@/constant/config';
 /**
  * 初始化Memory
  */
-const MEMORY_VERSION = 1;
 let MemoryDataInit = () => {
     if (global.lastMemoryInitTime === Game.time) return;
-    if (Memory['version'] === undefined) {
-        Memory['version'] = MEMORY_VERSION;
-        console.log(`[System] Memory version initialized to ${MEMORY_VERSION}`);
-    } else if (Memory['version'] !== MEMORY_VERSION) {
-        console.log(`[System] Memory version mismatch! Expected ${MEMORY_VERSION}, got ${Memory['version']}`);
-        Memory['version'] = MEMORY_VERSION;
-    }
     if(!Memory['RoomControlData']) Memory['RoomControlData'] = {};
     if(!Memory['StructControlData']) Memory['StructControlData'] = {};
     if(!Memory['LayoutData']) Memory['LayoutData'] = {};
