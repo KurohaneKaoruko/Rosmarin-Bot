@@ -231,3 +231,85 @@ export function GenCreepName(code: string) {
         return name;
     }
 }
+
+/** 生成结构布局签名（用于缓存失效）
+ * - 目的：在不排序的前提下，快速得到“结构集合是否发生变化”的稳定签名
+ * - 特性：使用 sum/xor/count 的可交换聚合，避免结构遍历顺序变化导致签名抖动
+ * - 注意：sig 是 32-bit 近似签名（可能存在极小概率碰撞）；必要时可同时比对 sum/xor/count
+ * - Rampart/Wall：可选加入“是否跨阈值”的 bucket（默认 rampart 开启、wall 关闭），避免 hits 每 tick 微变导致频繁失效
+ * @param structures 任意可迭代结构集合（支持数组、生成器、Set 等），元素需包含 { pos: {x,y}, structureType }
+ * @param options rampartMinHits: \u003e0 时将 rampart “是否跨阈值”纳入签名；\u003c=0 时不纳入。wallMinHits: \u003e0 时将 wall “是否跨阈值”纳入签名；\u003c=0 时不纳入
+ */
+export function getStructureSignature(
+    structures: Iterable<any>,
+    options?: { rampartMinHits?: number; wallMinHits?: number }
+): { sig: number; sum: number; xor: number; count: number } {
+    const rampartMinHits = options?.rampartMinHits ?? 1e6;
+    const wallMinHits = options?.wallMinHits ?? 0;
+
+    let sum = 0 >>> 0;
+    let xor = 0 >>> 0;
+    let count = 0;
+
+    // 将常见 structureType 映射为小整数，便于压缩进 token
+    const typeCode = (structureType: any) => {
+        switch (structureType) {
+            case 'spawn':
+                return 1;
+            case 'extension':
+                return 2;
+            case 'tower':
+                return 3;
+            case 'link':
+                return 4;
+            case 'lab':
+                return 5;
+            case 'rampart':
+                return 6;
+            case 'constructedWall':
+                return 7;
+            case 'terminal':
+                return 8;
+            case 'storage':
+                return 9;
+            case 'nuker':
+                return 10;
+            case 'factory':
+                return 11;
+            case 'extractor':
+                return 12;
+            case 'observer':
+                return 13;
+            case 'powerSpawn':
+                return 14;
+            default:
+                return 0;
+        }
+    };
+
+    for (const s of structures) {
+        if (!s?.pos) continue;
+        const x = s.pos.x;
+        const y = s.pos.y;
+        if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+        // Screeps 房间坐标 0-49，可压缩成 12-bit：xy = (x<<6)|y
+        const xy = ((x << 6) | y) >>> 0;
+        const t = typeCode(s.structureType) >>> 0;
+        // token: [typeCode(<=14)] + [xy(<=3199)]
+        let token = ((t << 12) | xy) >>> 0;
+        if (rampartMinHits > 0 && s.structureType === 'rampart') {
+            const bucket = (s.my && s.hits >= rampartMinHits) ? 1 : 0;
+            token = (token ^ (bucket << 20)) >>> 0;
+        } else if (wallMinHits > 0 && s.structureType === 'constructedWall') {
+            const bucket = (s.hits >= wallMinHits) ? 1 : 0;
+            token = (token ^ (bucket << 20)) >>> 0;
+        }
+        sum = (sum + token) >>> 0;
+        xor = (xor ^ token) >>> 0;
+        count++;
+    }
+
+    // 用 sum/xor/count 做一次混合，得到最终 32-bit 签名
+    const sig = (((sum ^ (Math.imul(xor, 2654435761) >>> 0)) + (Math.imul(count, 1013904223) >>> 0)) >>> 0);
+    return { sig, sum, xor, count };
+}

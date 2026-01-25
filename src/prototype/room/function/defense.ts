@@ -1,3 +1,5 @@
+import { getStructureSignature } from '@/utils';
+
 export default class RoomDefense extends Room {
     activeDefense() {
         // 如果处于安全模式，则不进行后续处理
@@ -274,85 +276,182 @@ export default class RoomDefense extends Room {
     // 做了相当多的优化, 消耗大约1~5CPU每次
     getDefenseCostMatrix(show: boolean = false): CostMatrix {
         if (!global.DefenseCostMatrix) global.DefenseCostMatrix = {};
-        let dcm = global.DefenseCostMatrix[this.name];
-        if (dcm && dcm.tick + 20 > Game.time) return dcm.costMatrix;
-        global.DefenseCostMatrix[this.name] = {}; // 清空缓存
+        const dcm = global.DefenseCostMatrix[this.name];
+        if (dcm && dcm.costMatrix &&
+            typeof dcm.lastCheckTick === 'number' &&
+            dcm.lastCheckTick + 5 > Game.time) {
+            return dcm.costMatrix;
+        }
+
+        const RAM_MIN_HITS = 1e6;
+        const room = this;
+        const structuresIterable = (function* () {
+            const iterArr = function* (arr: any) {
+                if (!arr || !arr.length) return;
+                for (let i = 0; i < arr.length; i++) yield arr[i];
+            };
+
+            yield* iterArr(room[STRUCTURE_SPAWN]);
+            yield* iterArr(room[STRUCTURE_EXTENSION]);
+            yield* iterArr(room[STRUCTURE_TOWER]);
+            yield* iterArr(room[STRUCTURE_LINK]);
+            yield* iterArr(room[STRUCTURE_LAB]);
+            yield* iterArr(room[STRUCTURE_RAMPART]);
+            yield* iterArr(room[STRUCTURE_WALL]);
+            yield room[STRUCTURE_TERMINAL];
+            yield room[STRUCTURE_STORAGE];
+            yield room[STRUCTURE_NUKER];
+            yield room[STRUCTURE_FACTORY];
+            yield room[STRUCTURE_EXTRACTOR];
+            yield room[STRUCTURE_OBSERVER];
+            yield room[STRUCTURE_POWER_SPAWN];
+        })();
+        const structSig = getStructureSignature(structuresIterable, { rampartMinHits: RAM_MIN_HITS }).sig;
+
+        if (dcm && dcm.sig === structSig) {
+            dcm.lastCheckTick = Game.time;
+            return dcm.costMatrix;
+        }
+
+        if (!global['DefenseCostMatrixBase']) global['DefenseCostMatrixBase'] = {};
+        let base = global['DefenseCostMatrixBase'][this.name];
+        if (!base) {
+            if (!global['ROOM_EXITS']) global['ROOM_EXITS'] = {};
+            let exits = global['ROOM_EXITS'][this.name];
+            let visitedEXITS = !exits ? {
+                [LEFT]: new Uint8Array(50),
+                [RIGHT]: new Uint8Array(50),
+                [TOP]: new Uint8Array(50),
+                [BOTTOM]: new Uint8Array(50)
+            } : null;
+            exits = exits || [];
+
+            const baseCosts = new PathFinder.CostMatrix();
+            const baseAvoidArea = new Uint8Array(3200);
+            const terrain = this.getTerrain();
+            for (let x = 0; x < 50; x++) {
+            for (let y = 0; y < 50; y++) {
+                const xy = (x << 6) | y;
+                if (terrain.get(x, y) == TERRAIN_MASK_WALL) {
+                    baseCosts.set(x, y, 255);
+                    baseAvoidArea[xy] = 1;
+                    continue;
+                }
+                if (x > 0 && x < 49 && y > 0 && y < 49) continue;
+                baseCosts.set(x, y, 255);
+                baseAvoidArea[xy] = 1;
+                if (visitedEXITS) {
+                    const p = (x == 0) ? LEFT : (x == 49) ? RIGHT : (y == 0) ? TOP : BOTTOM;
+                    const p2 = (p == LEFT || p == RIGHT) ? y : x;
+                    visitedEXITS[p][p2] = 1;
+                    if (visitedEXITS[p][p2 - 1]) continue;
+                    exits.push([x, y]);
+                }
+            }}
+            if (visitedEXITS) {
+                global['ROOM_EXITS'][this.name] = exits;
+                visitedEXITS = null;
+            }
+
+            base = global['DefenseCostMatrixBase'][this.name] = {
+                costMatrix: baseCosts,
+                avoidArea: baseAvoidArea,
+            };
+        }
+
+        if (!global['DefenseCostMatrixScratch']) global['DefenseCostMatrixScratch'] = {};
+        let scratch = global['DefenseCostMatrixScratch'][this.name];
+        if (!scratch) {
+            scratch = global['DefenseCostMatrixScratch'][this.name] = {
+                avoidArea: new Uint8Array(3200),
+                rampartCost1: new Uint8Array(3200),
+                visitedMark: new Uint8Array(3200),
+                visitedList: new Uint16Array(3200),
+                barrierSeen: new Uint8Array(3200),
+                barrierList: new Uint16Array(3200),
+                queuePacked: new Uint16Array(3200),
+                rampartPacked: new Uint16Array(3200),
+                visitedLen: 0,
+                barrierLen: 0,
+                rampartLen: 0,
+            };
+        }
 
         const CPU_start = Game.cpu.getUsed();
-        const costs = new PathFinder.CostMatrix();
-        const avoidArea = new Uint8Array(3200); // 记录已经标记为不可通行的点位
+        const costs = base.costMatrix.clone();
+        const avoidArea: Uint8Array = scratch.avoidArea;
+        const rampartCost1: Uint8Array = scratch.rampartCost1;
+        const visitedMark: Uint8Array = scratch.visitedMark;
+        const visitedList: Uint16Array = scratch.visitedList;
+        const barrierSeen: Uint8Array = scratch.barrierSeen;
+        const barrierList: Uint16Array = scratch.barrierList;
+        const queuePacked: Uint16Array = scratch.queuePacked;
+        const rampartPacked: Uint16Array = scratch.rampartPacked;
 
-        if (!global['ROOM_EXITS']) global['ROOM_EXITS'] = {};
-        let cacheExits = global['ROOM_EXITS'][this.name];
-        let exits = cacheExits || [];
-        let visitedEXITS = !cacheExits ? {
-            [LEFT]: new Uint8Array(50),
-            [RIGHT]: new Uint8Array(50),
-            [TOP]: new Uint8Array(50),
-            [BOTTOM]: new Uint8Array(50)
-        } : null;
-        // 标记不可通过的地形, 并记录出入口点位
-        const terrain = this.getTerrain();
-        for (let x = 0; x < 50; x++) {
-        for (let y = 0; y < 50; y++) {
-            let xy = (x << 6) + y;
-            if (terrain.get(x, y) == TERRAIN_MASK_WALL) {
-                costs.set(x, y, 255);
-                avoidArea[xy] = 1;
-                continue;
-            }
-            if (x > 0 && x < 49 && y > 0 && y < 49) continue;
-            costs.set(x, y, 255);
-            avoidArea[xy] = 1;
-            if (cacheExits) continue;
-            // 判断该出入口的前一个点位是否已经被标记过(已标记代表前一个点位也是出入口)
-            let p = (x == 0) ? LEFT : (x == 49) ? RIGHT : (y == 0) ? TOP : BOTTOM;
-            let p2 = (p == LEFT || p == RIGHT) ? y : x;
-            visitedEXITS[p][p2] = 1;
-            if (visitedEXITS[p][p2-1]) continue;
-            exits.push([x, y]);
-        }}
-        if (!cacheExits) {
-            global['ROOM_EXITS'][this.name] = exits;
-            visitedEXITS = null; // 释放
+        avoidArea.set(base.avoidArea);
+        rampartCost1.fill(0);
+        if (scratch.visitedLen) {
+            const len = scratch.visitedLen;
+            for (let i = 0; i < len; i++) visitedMark[visitedList[i]] = 0;
+            scratch.visitedLen = 0;
         }
-        
-        // 使用建筑缓存
-        let structs = [
-            ...this[STRUCTURE_SPAWN], ...this[STRUCTURE_EXTENSION], ...this[STRUCTURE_TOWER],
-            ...this[STRUCTURE_LINK], ...this[STRUCTURE_LAB], ...this[STRUCTURE_RAMPART],
-            ...this[STRUCTURE_WALL], this[STRUCTURE_TERMINAL], this[STRUCTURE_STORAGE],
-             this[STRUCTURE_NUKER], this[STRUCTURE_FACTORY], this[STRUCTURE_EXTRACTOR],
-            this[STRUCTURE_OBSERVER], this[STRUCTURE_POWER_SPAWN]
-        ].filter(s => s);
-        const RAM_MIN_HITS = 1e6;
-        // 标记不可通过的建筑
-        structs.forEach(s => {
+        if (scratch.barrierLen) {
+            const len = scratch.barrierLen;
+            for (let i = 0; i < len; i++) barrierSeen[barrierList[i]] = 0;
+            scratch.barrierLen = 0;
+        }
+        scratch.rampartLen = 0;
+        const exits = global['ROOM_EXITS'][this.name] || [];
+        const markStruct = (s: any) => {
+            if (!s) return;
             if (s.structureType === STRUCTURE_RAMPART && s.my) {
                 if (s.hits < RAM_MIN_HITS) return;
                 if (costs.get(s.pos.x, s.pos.y) > 0) return;
-                costs.set(s.pos.x, s.pos.y, 1); // 设置 rampart 为 1
-            } else {
-                let xy = (s.pos.x << 6) + s.pos.y;
-                if (avoidArea[xy]) return; // 已标记则跳过
-                costs.set(s.pos.x, s.pos.y, 255);
-                avoidArea[xy] = 1;
+                costs.set(s.pos.x, s.pos.y, 1);
+                const xy = (s.pos.x << 6) | s.pos.y;
+                rampartCost1[xy] = 1;
+                rampartPacked[scratch.rampartLen++] = xy as any;
+                return;
             }
-        });
-        structs = null; // 释放
+            const xy = (s.pos.x << 6) | s.pos.y;
+            if (avoidArea[xy]) return;
+            costs.set(s.pos.x, s.pos.y, 255);
+            avoidArea[xy] = 1;
+        };
+        const markStructArray = (arr: any) => {
+            if (!arr || !arr.length) return;
+            for (let i = 0; i < arr.length; i++) markStruct(arr[i]);
+        };
+        markStructArray(this[STRUCTURE_SPAWN]);
+        markStructArray(this[STRUCTURE_EXTENSION]);
+        markStructArray(this[STRUCTURE_TOWER]);
+        markStructArray(this[STRUCTURE_LINK]);
+        markStructArray(this[STRUCTURE_LAB]);
+        markStructArray(this[STRUCTURE_RAMPART]);
+        markStructArray(this[STRUCTURE_WALL]);
+        markStruct(this[STRUCTURE_TERMINAL]);
+        markStruct(this[STRUCTURE_STORAGE]);
+        markStruct(this[STRUCTURE_NUKER]);
+        markStruct(this[STRUCTURE_FACTORY]);
+        markStruct(this[STRUCTURE_EXTRACTOR]);
+        markStruct(this[STRUCTURE_OBSERVER]);
+        markStruct(this[STRUCTURE_POWER_SPAWN]);
 
         const CPU_bfs = Game.cpu.getUsed();
 
         // BFS
-        const barriers = [];
-        let visited = new Uint8Array(3200);
-        const queue = [...exits];
-        let length = queue.length;
-        for (let idx = 0; idx < length; idx++) {
-            const p = queue[idx];
-            const x = p[0], y = p[1];
+        let head = 0;
+        let tail = 0;
+        for (let i = 0; i < exits.length; i++) {
+            const p = exits[i];
+            queuePacked[tail++] = ((p[0] << 6) | p[1]) as any;
+        }
+        for (; head < tail; head++) {
+            const xy = queuePacked[head];
+            const x = xy >> 6;
+            const y = xy & 0b111111;
             costs.set(x, y, 255);
-            avoidArea[(x << 6) | y] = 1;
+            avoidArea[xy] = 1;
             for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx == 0 && dy == 0) continue;
@@ -360,15 +459,25 @@ export default class RoomDefense extends Room {
                 if (nx < 1 || nx > 48 || ny < 1 || ny > 48) continue;
                 const nextXY = (nx << 6) | ny;
                 // 访问过的, 则跳过
-                if (visited[nextXY]) continue;
-                // 如果此处大于0, 表示到达了不可移动的位置(255的墙或1的rampart)
-                else if (avoidArea[nextXY] || costs.get(nx, ny)) barriers.push(nextXY);
-                else { queue.push([nx, ny]); length++; }
-                visited[nextXY] = 1;
+                if (visitedMark[nextXY]) continue;
+                visitedMark[nextXY] = 1;
+                visitedList[scratch.visitedLen++] = nextXY as any;
+                if (avoidArea[nextXY] || rampartCost1[nextXY]) {
+                    if (!barrierSeen[nextXY]) {
+                        barrierSeen[nextXY] = 1;
+                        barrierList[scratch.barrierLen++] = nextXY as any;
+                    }
+                }
+                else queuePacked[tail++] = nextXY as any;
             }}
         }
+        const externalSearchCount = tail;
+        for (let i = 0; i < scratch.visitedLen; i++) visitedMark[visitedList[i]] = 0;
+        scratch.visitedLen = 0;
 
-        for (let p of barriers) {
+        for (let i = 0; i < scratch.barrierLen; i++) {
+            const p = barrierList[i];
+            barrierSeen[p] = 0;
             const x = p >> 6, y = p & 0b111111;
             for (let dx = -2; dx <= 2; dx++) {
             for (let dy = -2; dy <= 2; dy++) {
@@ -380,51 +489,62 @@ export default class RoomDefense extends Room {
                 else costs.set(nx, ny, 10);
             }}
         }
+        scratch.barrierLen = 0;
 
         const CPU_ramBFS = Game.cpu.getUsed();
         // 对ram广搜, 将与安全区相邻的标记为安全, 否则为危险
-        visited.fill(0);
         let ram_BFS_length = 0;
-        const ramPos = [...this[STRUCTURE_RAMPART].map(r => [r.pos.x, r.pos.y])];
-        for (let p of ramPos) {
-            const xy = (p[0] << 6) | p[1];
-            if (visited[xy]) continue;
-            visited[xy] = 1;
-            const queue = [[p[0], p[1]]];
+        const rampartLen = scratch.rampartLen;
+        for (let i = 0; i < rampartLen; i++) {
+            const startXY = rampartPacked[i];
+            if (!rampartCost1[startXY]) continue;
+            if (visitedMark[startXY]) continue;
+            visitedMark[startXY] = 1;
+            visitedList[scratch.visitedLen++] = startXY as any;
+            head = 0;
+            tail = 0;
+            queuePacked[tail++] = startXY as any;
             let safe = false;
-            for (let idx = 0; idx < queue.length; idx++) {
+            for (; head < tail; head++) {
                 ram_BFS_length++;
-                const p = queue[idx];
-                const x = p[0], y = p[1];
+                const xy = queuePacked[head];
+                const x = xy >> 6;
+                const y = xy & 0b111111;
                 for (let dx = -1; dx <= 1; dx++) {
                 for (let dy = -1; dy <= 1; dy++) {
                     if (dx == 0 && dy == 0) continue;
                     const nx = x + dx, ny = y + dy;
-                    let nextXY = (nx << 6) | ny;
+                    const nextXY = (nx << 6) | ny;
                     if (avoidArea[nextXY]) continue;
-                    if (visited[nextXY]) continue;
-                    if (costs.get(nx, ny) == 1) queue.push([nx, ny]);
+                    if (visitedMark[nextXY]) continue;
+                    visitedMark[nextXY] = 1;
+                    visitedList[scratch.visitedLen++] = nextXY as any;
+                    if (rampartCost1[nextXY]) queuePacked[tail++] = nextXY as any;
                     else safe = true;
-                    visited[nextXY] = 1;
                 }}
             }
-            if (!safe) queue.forEach(p => costs.set(p[0], p[1], 255));
+            if (!safe) {
+                for (let j = 0; j < tail; j++) {
+                    const xy = queuePacked[j];
+                    costs.set(xy >> 6, xy & 0b111111, 255);
+                    rampartCost1[xy] = 0;
+                }
+            }
         }
+        for (let i = 0; i < scratch.visitedLen; i++) visitedMark[visitedList[i]] = 0;
+        scratch.visitedLen = 0;
 
         const CPU_end = Game.cpu.getUsed();
 
         if (show) {
             console.log(`[${this.name}] DefenseCostMatrix生成开销:`);
             console.log('- 地形建筑开销:', (CPU_bfs - CPU_start).toFixed(2));
-            console.log('- BFS开销:', (CPU_ramBFS - CPU_bfs).toFixed(2), '外部搜索量:', length);
+            console.log('- BFS开销:', (CPU_ramBFS - CPU_bfs).toFixed(2), '外部搜索量:', externalSearchCount);
             console.log('- RAM BFS开销:', (CPU_end - CPU_ramBFS).toFixed(2), 'RAM搜索量:', ram_BFS_length);
             console.log('- 总开销:', (CPU_end - CPU_start).toFixed(4));
         }
-        
-        global.DefenseCostMatrix[this.name] = {
-            tick: Game.time,
-            costMatrix: costs
-        };
+
+        global.DefenseCostMatrix[this.name] = { sig: structSig, costMatrix: costs, lastCheckTick: Game.time };
         return costs;
     }
 
@@ -439,19 +559,19 @@ export default class RoomDefense extends Room {
             // 根据不同的成本值绘制不同颜色
             if (cost >= 254) {
                 // 红色：不可通行区域（建筑/外部区域）
-                this.visual.circle(x, y, { fill: 'red', opacity: 0.25, radius: 0.5, stroke: 'red' });
+                this.visual.circle(x, y, { fill: 'red', opacity: 0.2, radius: 0.5, stroke: 'red' });
             } else if (cost == 10) {
                 // 黄色：rampart 内侧缓冲区
-                this.visual.circle(x, y, { fill: 'yellow', opacity: 0.25, radius: 0.5, stroke: 'yellow' });
+                this.visual.circle(x, y, { fill: 'yellow', opacity: 0.2, radius: 0.5, stroke: 'yellow' });
             } else if (cost == 1) {
                 // 蓝色：rampart 位置
-                this.visual.circle(x, y, { fill: 'blue', opacity: 0.25, radius: 0.5, stroke: 'blue' });
+                this.visual.circle(x, y, { fill: 'blue', opacity: 0.2, radius: 0.5, stroke: 'blue' });
             } else if (cost == 0) {
                 // 绿色：默认可通行区域
-                this.visual.circle(x, y, { fill: 'green', opacity: 0.25, radius: 0.5, stroke: 'green' });
+                this.visual.circle(x, y, { fill: 'green', opacity: 0.2, radius: 0.5, stroke: 'green' });
             } else {
                 // 灰色：意外Cost区域
-                this.visual.circle(x, y, { fill: 'gray', opacity: 0.25, radius: 0.5, stroke: 'gray' });
+                this.visual.circle(x, y, { fill: 'gray', opacity: 0.2, radius: 0.5, stroke: 'gray' });
             }
         }}
     }
