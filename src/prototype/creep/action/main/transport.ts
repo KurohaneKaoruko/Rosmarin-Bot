@@ -1,6 +1,28 @@
 
 const Transport = {
     run: function(creep: Creep) {
+        const roomAny = creep.room as any;
+        const canAutoStore = (s: AnyStoreStructure, resource: ResourceConstant) => {
+            if (!s) return false;
+            switch (s.structureType) {
+                case STRUCTURE_POWER_SPAWN:
+                    return resource === RESOURCE_ENERGY || resource === RESOURCE_POWER;
+                case STRUCTURE_NUKER:
+                    return resource === RESOURCE_ENERGY || resource === RESOURCE_GHODIUM;
+                case STRUCTURE_LAB:
+                    return resource === RESOURCE_ENERGY;
+                case STRUCTURE_FACTORY:
+                    return resource === RESOURCE_ENERGY;
+                case STRUCTURE_CONTAINER:
+                    return !isSourceContainer(s);
+                default:
+                    return true;
+            }
+        };
+        const isSourceContainer = (s: AnyStoreStructure) => {
+            if (!s || s.structureType !== STRUCTURE_CONTAINER) return false;
+            return creep.room.source?.some((src: Source) => src && s.pos.inRangeTo(src.pos, 2));
+        };
         // 如果没有任务，则接取任务. 如果即将死亡，则不接取任务
         if (!creep.memory.mission && creep.ticksToLive > 20) {
             creep.memory.mission = creep.room.getTransportMission(creep);
@@ -9,11 +31,30 @@ const Transport = {
         // 如果接取不到任务，检查身上是否有资源，如果有则运输回storage. 如果即将死亡，则立刻运输回storage
         if (!creep.memory.mission || creep.ticksToLive < 20) {
             if(creep.store.getUsedCapacity() === 0) return;
-            const storage = creep.room.storage;
-            if(!storage) return;
-            const resource = Object.keys(creep.store)[0];
-            if (creep.transfer(storage, resource as ResourceConstant) === ERR_NOT_IN_RANGE) {
-                creep.moveTo(storage, {range:1});
+            const resource = Object.keys(creep.store)[0] as ResourceConstant;
+            if (!resource) return;
+
+            const candidates: AnyStoreStructure[] = [
+                creep.room.storage,
+                creep.room.terminal,
+                roomAny.factory,
+                roomAny.powerSpawn,
+                roomAny.nuker,
+                ...(roomAny.lab || []),
+                ...(roomAny.container || []),
+            ].filter(Boolean) as AnyStoreStructure[];
+
+            const target = candidates.find(s => canAutoStore(s, resource) && s.store?.getFreeCapacity(resource) > 0) || null;
+            if (!target) {
+                creep.drop(resource);
+                return;
+            }
+
+            const result = creep.transfer(target, resource);
+            if (result === ERR_NOT_IN_RANGE) {
+                creep.moveTo(target, { range: 1 });
+            } else if (result === ERR_FULL) {
+                creep.drop(resource);
             }
             return;
         }
@@ -51,10 +92,21 @@ const Transport = {
         if (creep.store.getUsedCapacity() > 0 && Object.keys(creep.store).some(r => r !== resourceType)) {
             for (let resource in creep.store) {
                 if (resource === resourceType) continue;
-                if (storage.store.getFreeCapacity() > 0) {
-                    creep.goTransfer(storage, resource as ResourceConstant);
-                } else if (terminal) {
-                    creep.goTransfer(terminal, resource as ResourceConstant);
+                const res = resource as ResourceConstant;
+                const candidates: AnyStoreStructure[] = [
+                    storage,
+                    terminal,
+                    roomAny.factory,
+                    roomAny.powerSpawn,
+                    roomAny.nuker,
+                    ...(roomAny.lab || []),
+                    ...(roomAny.container || []),
+                ].filter(Boolean) as AnyStoreStructure[];
+                const extraTarget = candidates.find(s => !isSourceContainer(s) && canAutoStore(s, res) && s.store?.getFreeCapacity(res) > 0) || null;
+                if (extraTarget) {
+                    creep.goTransfer(extraTarget, res);
+                } else if (creep.store[res] > 0) {
+                    creep.drop(res);
                 }
                 return;
             }

@@ -89,20 +89,19 @@ function handleOtherResources(creep: Creep, targetType: ResourceConstant): boole
     if (!resourceType) return false;
 
     const storage = creep.room.storage;
-    if (storage && storage.store.getFreeCapacity() > 0) {
+    if (storage && storage.store.getFreeCapacity(resourceType) > 0) {
         creep.goTransfer(storage, resourceType);
         return true;
     }
 
     const terminal = creep.room.terminal;
-    if (terminal && terminal.store.getFreeCapacity() > 0) {
+    if (terminal && terminal.store.getFreeCapacity(resourceType) > 0) {
         creep.goTransfer(terminal, resourceType);
         return true;
     }
 
-    creep.say('FULL');
-
-    return false;
+    creep.drop(resourceType);
+    return true;
 }
 
 
@@ -193,8 +192,12 @@ const ManagerAction = {
 
         // 将身上的资源存放到storage、terminal中
         const resourceType = Object.keys(creep.store)[0] as ResourceConstant;
-        const target = storage?.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? storage :
-                        terminal?.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? terminal : null;
+        const target = (storage && storage.store.getFreeCapacity(resourceType) > 0) ? storage :
+                        (terminal && terminal.store.getFreeCapacity(resourceType) > 0) ? terminal : null;
+        if (resourceType && creep.store[resourceType] > 0 && !target) {
+            creep.drop(resourceType);
+            return true;
+        }
         if (target && resourceType && creep.store[resourceType] > 0) {
             creep.goTransfer(target, resourceType);
             return true;

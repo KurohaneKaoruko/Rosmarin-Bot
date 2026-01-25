@@ -233,6 +233,24 @@ export default class ManageMission extends Room {
         if(!source || !target || !resourceType || !amount) return false;
         if(typeof amount !== 'number' || amount <= 0) return false;
 
+        const sourceObj = (this as any)[source] as AnyStoreStructure | AnyStoreStructure[] | null;
+        const targetObj = (this as any)[target] as AnyStoreStructure | AnyStoreStructure[] | null;
+        if (!sourceObj || !targetObj) return false;
+        if (Array.isArray(sourceObj) || Array.isArray(targetObj)) return false;
+
+        const sourceAmount = sourceObj.store?.[resourceType] || 0;
+        if (sourceAmount <= 0) return false;
+
+        const free = targetObj.store?.getFreeCapacity(resourceType) || 0;
+        if (free <= 0) {
+            const existingTaskId = this.checkSameMissionInPool('manage', 'manage', {source, target, resourceType} as ManageTask);
+            if (existingTaskId) this.deleteMissionFromPool('manage', existingTaskId);
+            return false;
+        }
+
+        amount = Math.min(amount, free, sourceAmount);
+        if (amount <= 0) return false;
+
         let existingTaskId = this.checkSameMissionInPool('manage', 'manage', {source, target, resourceType} as ManageTask);
         if (existingTaskId) {
             return this.updateMissionPool('manage', existingTaskId,

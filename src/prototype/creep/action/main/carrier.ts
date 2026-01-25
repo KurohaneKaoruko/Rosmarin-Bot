@@ -186,6 +186,27 @@ const carry = (creep: Creep) => {
     const { memory, store, room, pos } = creep;
     const roomAny = room as any;
     const cache = memory.cache as { targetId?: Id<any>; resourceType?: ResourceConstant };
+    const canAutoStore = (s: AnyStoreStructure, resource: ResourceConstant) => {
+        if (!s) return false;
+        switch (s.structureType) {
+            case STRUCTURE_POWER_SPAWN:
+                return resource === RESOURCE_ENERGY || resource === RESOURCE_POWER;
+            case STRUCTURE_NUKER:
+                return resource === RESOURCE_ENERGY || resource === RESOURCE_GHODIUM;
+            case STRUCTURE_LAB:
+                return resource === RESOURCE_ENERGY;
+            case STRUCTURE_FACTORY:
+                return resource === RESOURCE_ENERGY;
+            case STRUCTURE_CONTAINER:
+                return !isSourceContainer(s);
+            default:
+                return true;
+        }
+    };
+    const isSourceContainer = (s: AnyStoreStructure) => {
+        if (!s || s.structureType !== STRUCTURE_CONTAINER) return false;
+        return room.source?.some((src: Source) => src && s.pos.inRangeTo(src.pos, 2));
+    };
 
     let target = Game.getObjectById(cache.targetId) as AnyStoreStructure | null;
 
@@ -221,21 +242,40 @@ const carry = (creep: Creep) => {
             target = controllerContainer;
         } else {
             // 存入 storage/terminal
-            target = [room.storage, room.terminal].find(s => s?.store.getFreeCapacity() > 0) || null;
+            const resourceType = Object.keys(store)[0] as ResourceConstant;
+            const candidates: AnyStoreStructure[] = [
+                room.storage,
+                room.terminal,
+                roomAny.factory,
+                roomAny.powerSpawn,
+                roomAny.nuker,
+                ...(roomAny.lab || []),
+                ...(roomAny.container || []),
+            ].filter(Boolean) as AnyStoreStructure[];
+            target = candidates.find(s => canAutoStore(s, resourceType) && s.store?.getFreeCapacity(resourceType) > 0) || null;
             if (target) {
                 cache.targetId = target.id;
-                cache.resourceType = Object.keys(store)[0] as ResourceConstant;
+                cache.resourceType = resourceType;
             }
         }
     }
 
-    if (!target) return;
+    if (!target) {
+        const resourceType = Object.keys(store)[0] as ResourceConstant;
+        if (resourceType && store[resourceType] > 0) {
+            creep.drop(resourceType);
+        }
+        delete cache.targetId;
+        delete cache.resourceType;
+        return;
+    }
 
     if (pos.inRangeTo(target, 1)) {
         const isStorage = target.structureType === STRUCTURE_STORAGE || target.structureType === STRUCTURE_TERMINAL;
         const resourceType = isStorage ? (Object.keys(store)[0] as ResourceConstant) : RESOURCE_ENERGY;
         
-        if (creep.transfer(target, resourceType) === OK) {
+        const transferResult = creep.transfer(target, resourceType);
+        if (transferResult === OK) {
             delete cache.targetId;
             delete cache.resourceType;
             // 检查是否完成所有资源转移
@@ -243,6 +283,13 @@ const carry = (creep: Creep) => {
             if (storeKeys.length === 1 && target.store.getFreeCapacity(resourceType) >= store[resourceType]) {
                 return true;
             }
+        } else if (transferResult === ERR_FULL) {
+            const dropType = Object.keys(store)[0] as ResourceConstant;
+            if (dropType && store[dropType] > 0) {
+                creep.drop(dropType);
+            }
+            delete cache.targetId;
+            delete cache.resourceType;
         }
     } else {
         creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
