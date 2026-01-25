@@ -64,6 +64,7 @@ export default class TeamVisual {
      */
     public static drawTargets(team: Team) {
         team['_targets']?.forEach((target) => {
+            if (!target?.pos) return
             target.room?.visual.circle(target.pos.x, target.pos.y, { fill: '#6141cc', radius: 0.5 })
         })
     }
@@ -78,4 +79,3 @@ export default class TeamVisual {
         })
     }
 }
-

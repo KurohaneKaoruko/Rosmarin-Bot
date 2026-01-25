@@ -174,7 +174,7 @@ class Team {
         }
 
         // 线性队形移动
-        if (this.formation === 'line' && this['_targets'].length) {
+        if (this.formation === 'line' && this['_targets']?.[0]?.pos) {
             TeamAction.LinearMove(this, this['_targets'][0].pos);
             this.moved = true;
         }

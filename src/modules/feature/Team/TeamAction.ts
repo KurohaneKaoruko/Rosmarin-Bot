@@ -801,11 +801,13 @@ export default class TeamAction {
         const isFlee = status === 'flee'
         const oldMoveMode = team.moveMode
         const isFourTeam = creeps.length >= 3
+        const teamFlag = team.flag
+        const safeGoals = (goals || []).filter((g: any) => g && g.pos) as { pos: RoomPosition }[]
         team.moveMode = status
 
         // 和上一 tick 的移动模式相同，并且不需要避让，则检查缓存并按缓存移动
         if (!needAvoid && status === oldMoveMode &&
-            originPos.roomName !== team.flag.pos.roomName &&
+            teamFlag && originPos.roomName !== teamFlag.pos.roomName &&
             this.checkCachePath(team)
         ) {
             return this.getDirectionByCachePath(team)
@@ -815,7 +817,7 @@ export default class TeamAction {
 
 
         // 和爬相邻的目标
-        const nearGoals = goals.filter((goal) => creeps.find((creep) => creep.pos.isNearTo(goal.pos)))
+        const nearGoals = safeGoals.filter((goal) => creeps.find((creep) => creep.pos.isNearTo(goal.pos)))
         if (!needAvoid && nearGoals.length) {
             // 当第一个目标是旗帜，代表没有其他目标
             if (nearGoals[0] instanceof Flag) {
@@ -834,7 +836,7 @@ export default class TeamAction {
 
         const allGoals: { pos: RoomPosition; range: number }[] = []
         // 修改范围，逃跑模式下避开有攻击力的爬
-        goals.forEach((goal) => {
+        safeGoals.forEach((goal: any) => {
             // 逃跑状态只避开爬和塔
             if (isFlee && !(goal instanceof Creep) && !(goal instanceof StructureTower)) return
 
@@ -851,8 +853,9 @@ export default class TeamAction {
 
             // 调整 spawn 的范围，避免被踩死
             if (goal instanceof StructureSpawn &&
-                !(goal.pos.x == team.flag.pos.x && goal.pos.y == team.flag.pos.y) &&
-                !(team.flag.color == COLOR_RED || team.flag.color == COLOR_PURPLE)) {
+                teamFlag &&
+                !(goal.pos.x == teamFlag.pos.x && goal.pos.y == teamFlag.pos.y) &&
+                !(teamFlag.color == COLOR_RED || teamFlag.color == COLOR_PURPLE)) {
                 goal['_range'] = 2
             }
             allGoals.push({ pos: goal.pos, range: goal['_range'] })
