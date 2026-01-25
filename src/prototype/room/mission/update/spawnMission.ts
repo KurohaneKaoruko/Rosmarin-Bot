@@ -155,10 +155,25 @@ export default class SpawnMission extends Room {
         
         const CreepNum = this.getCreepNum();
         const SpawnMissionNum = this.getSpawnMissionNum();
+        const state = getEnergyState(this);
+        const shouldRecover = state === 'NORMAL' || state === 'SURPLUS';
+        const downgradedCount: Record<string, number> = {};
+        if (shouldRecover) {
+            for (const creep of Object.values(Game.creeps)) {
+                if (!creep || creep.ticksToLive < creep.body.length * 3) continue;
+                const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
+                if (home !== this.name) continue;
+                if (!creep.memory.downgraded) continue;
+                const role = creep.memory.role;
+                if (role !== 'transport' && role !== 'carrier' && role !== 'manager') continue;
+                downgradedCount[role] = (downgradedCount[role] || 0) + 1;
+            }
+        }
     
         for (const role in RoleSpawnCheck) {
             const current = (CreepNum[role] || 0) + (SpawnMissionNum[role] || 0);
-            if (RoleSpawnCheck[role](this, current)) {
+            const adjusted = shouldRecover ? Math.max(0, current - (downgradedCount[role] || 0)) : current;
+            if (RoleSpawnCheck[role](this, adjusted)) {
                 this.SpawnMissionAdd(
                     RoleData[role].code,
                     '',

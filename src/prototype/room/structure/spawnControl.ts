@@ -120,6 +120,9 @@ export default class SpawnControl extends Room {
                 const bodypart = this.GenerateBodys(config, role);
                 const cost = this.CalculateEnergy(bodypart);
                 if (bodypart.length > 0 && cost > 0 && cost <= this.energyAvailable) {
+                    if (role === 'transport' || role === 'carrier' || role === 'manager') {
+                        data.memory.downgraded = true;
+                    }
                     const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
                     if (emergencyResult === OK) {
                         if (!global.CreepNum) global.CreepNum = {};
