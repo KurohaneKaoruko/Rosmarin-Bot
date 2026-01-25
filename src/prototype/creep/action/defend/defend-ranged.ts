@@ -3,11 +3,12 @@ const autoDefend = function (creep: Creep) {
     if (hostileCreeps.length === 0) return;
     
     const mem = creep.room.memory['defenseRamparts'];
+    const minHits = (mem && mem.minHits) ? mem.minHits : (creep.room.memory['breached'] ? 1e5 : 1e6);
     let targetRampart: StructureRampart | null = null;
     if (mem && mem.tick && mem.tick + 15 >= Game.time && Array.isArray(mem.ranged) && mem.ranged.length > 0) {
         for (const id of mem.ranged) {
             const r = Game.getObjectById(id as Id<StructureRampart>);
-            if (!r || !r.my || r.hits < 1e6) continue;
+            if (!r || !r.my || r.hits < minHits) continue;
             const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, r.pos);
             if (lookStructure.length && lookStructure.some(structure =>
                 structure.structureType !== STRUCTURE_RAMPART &&
@@ -29,7 +30,7 @@ const autoDefend = function (creep: Creep) {
                 structure.structureType !== STRUCTURE_CONTAINER)) {
                 return false;
             }
-            return rampart.hits >= 1e6;
+            return rampart.hits >= minHits;
         });
 
         let best: StructureRampart | null = null;
@@ -50,58 +51,35 @@ const autoDefend = function (creep: Creep) {
     }
 
     if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
-        creep.moveTo(targetRampart.pos, { visualizePathStyle: { stroke: '#ff0000' } });
+        creep.moveTo(targetRampart.pos, {
+            visualizePathStyle: { stroke: '#ff0000' },
+            costCallback: (roomName: string, costMatrix: CostMatrix) => {
+                if (roomName !== creep.room.name) return costMatrix;
+                return creep.room.getDefenseCostMatrix();
+            }
+        });
+        return;
     }
 
     const target = creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
-        // creep.attack(target)
-            // 检查 creep 是否携带 ATTACK 部件
-        const hasAttackPart = creep.body.some(part => part.type === ATTACK);
-        // 检查 creep 是否携带 RANGED_ATTACK 部件
-        const hasRangedAttackPart = creep.body.some(part => part.type === RANGED_ATTACK);
-    
-        // 根据携带的部件类型进行攻击
-        if (hasAttackPart && !hasRangedAttackPart || // 如果有 ATTACK 且没有 RANGED_ATTACK
-            (hasAttackPart && hasRangedAttackPart && creep.pos.getRangeTo(target) <= 3)) { // 或者两者都有但距离足够近以进行近战
-            const result = creep.attack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        } else if (hasRangedAttackPart) { // 如果有 RANGED_ATTACK
-            if (creep.pos.isNearTo(target)) {
+        const range = creep.pos.getRangeTo(target);
+        if (range <= 1) {
+            const nearHostiles = hostileCreeps.filter(h => creep.pos.isNearTo(h)).length;
+            if (nearHostiles >= 2) {
                 creep.rangedMassAttack();
                 creep.room.CallTowerAttack(target);
-            } else if (creep.pos.inRangeTo(target, 3)) {
-                creep.rangedAttack(target);
-                creep.room.CallTowerAttack(target);
+            } else {
+                const result = creep.rangedAttack(target);
+                if (result == OK) creep.room.CallTowerAttack(target);
             }
+            return;
         }
-    }
-}
-
-const flagDefend = function (creep: Creep, flag: Flag) {
-    if(!creep.pos.isEqual(flag.pos)) {
-        creep.moveTo(flag.pos, { visualizePathStyle: { stroke: '#ff0000' } });
-    }
-    const target = creep.pos.findClosestByRange(creep.findHostileCreeps());
-    if(target) {
-        // creep.attack(target)
-            // 检查 creep 是否携带 ATTACK 部件
-        const hasAttackPart = creep.body.some(part => part.type === ATTACK);
-        // 检查 creep 是否携带 RANGED_ATTACK 部件
-        const hasRangedAttackPart = creep.body.some(part => part.type === RANGED_ATTACK);
-        // 根据携带的部件类型进行攻击
-        if (hasAttackPart && !hasRangedAttackPart || // 如果有 ATTACK 且没有 RANGED_ATTACK
-            (hasAttackPart && hasRangedAttackPart && creep.pos.getRangeTo(target) <= 3)) { // 或者两者都有但距离足够近以进行近战
-            const result = creep.attack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
-        } else if (hasRangedAttackPart) { // 如果有 RANGED_ATTACK
+        if (range <= 3) {
             const result = creep.rangedAttack(target);
-            if(result == OK) creep.room.CallTowerAttack(target);
+            if (result == OK) creep.room.CallTowerAttack(target);
+            return;
         }
-    }
-    
-    if(flag && (creep.ticksToLive < 10 || creep.hits < 200)){
-        flag.remove();
     }
 }
 
@@ -115,10 +93,7 @@ const defend_ranged = {
             creep.memory.boosted = creep.goBoost(boosts, creep.memory['mustBoost']);
             return
         }
-        const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
-        const flag = Game.flags[name+'-defend'];
-        if (!flag) autoDefend(creep);
-        else flagDefend(creep, flag);
+        autoDefend(creep);
     }
 }
 

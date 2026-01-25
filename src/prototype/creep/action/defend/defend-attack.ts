@@ -7,11 +7,12 @@ const autoDefend = function (creep: Creep) {
     }
 
     const mem = creep.room.memory['defenseRamparts'];
+    const minHits = (mem && mem.minHits) ? mem.minHits : (creep.room.memory['breached'] ? 1e5 : 1e6);
     let targetRampart: StructureRampart | null = null;
     if (mem && mem.tick && mem.tick + 15 >= Game.time && Array.isArray(mem.melee) && mem.melee.length > 0) {
         for (const id of mem.melee) {
             const r = Game.getObjectById(id as Id<StructureRampart>);
-            if (!r || !r.my || r.hits < 1e6) continue;
+            if (!r || !r.my || r.hits < minHits) continue;
             const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, r.pos);
             if (lookStructure.length && lookStructure.some(structure =>
                 structure.structureType !== STRUCTURE_RAMPART &&
@@ -33,7 +34,7 @@ const autoDefend = function (creep: Creep) {
                 structure.structureType !== STRUCTURE_CONTAINER)) {
                 return false;
             }
-            return rampart.hits >= 1e6;
+            return rampart.hits >= minHits;
         });
 
         let best: StructureRampart | null = null;
@@ -54,34 +55,24 @@ const autoDefend = function (creep: Creep) {
     }
 
     if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
-        creep.moveTo(targetRampart.pos, { visualizePathStyle: { stroke: '#ff0000' } });
+        creep.moveTo(targetRampart.pos, {
+            visualizePathStyle: { stroke: '#ff0000' },
+            costCallback: (roomName: string, costMatrix: CostMatrix) => {
+                if (roomName !== creep.room.name) return costMatrix;
+                return creep.room.getDefenseCostMatrix();
+            }
+        });
+        return;
     }
 
-    // 使用 autoAttack 方法自动攻击最近的敌人
     const target = creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
-        const result = creep.autoAttack(target);
-        if(result == OK) creep.room.CallTowerAttack(target);
-    }
-}
-
-const flagDefend = function (creep: Creep, flag: Flag) {
-    if(!creep.pos.isEqual(flag.pos)) {
-        creep.moveTo(flag.pos, { visualizePathStyle: { stroke: '#ff0000' } });
-    }
-
-    // 使用 findHostileCreeps 方法查找敌对 creep
-    const hostileCreeps = creep.findHostileCreeps();
-    const target = creep.pos.findClosestByRange(hostileCreeps);
-    
-    if(target) {
-        // 使用 autoAttack 方法自动攻击
-        const result = creep.autoAttack(target);
-        if(result == OK) creep.room.CallTowerAttack(target);
-    }
-    
-    if(flag && (creep.ticksToLive < 10 || creep.hits < 200)){
-        flag.remove();
+        if (creep.pos.isNearTo(target)) {
+            const result = creep.attack(target);
+            if(result == OK) creep.room.CallTowerAttack(target);
+        } else {
+            creep.room.CallTowerAttack(target);
+        }
     }
 }
 
@@ -94,10 +85,7 @@ const defend_attack = {
             creep.memory.boosted = creep.goBoost(boosts, creep.memory['mustBoost']);
             return
         }
-        const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
-        const flag = Game.flags[name+'-defend'];
-        if (!flag) autoDefend(creep);
-        else flagDefend(creep, flag);
+        autoDefend(creep);
     }
 }
 

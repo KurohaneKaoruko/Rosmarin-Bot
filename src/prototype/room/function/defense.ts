@@ -87,6 +87,7 @@ export default class RoomDefense extends Room {
                 }
             }
             this.memory['breached'] = breached;
+            const rampartMinHits = breached ? 1e5 : 1e6;
 
             let sumX = 0;
             let sumY = 0;
@@ -103,7 +104,7 @@ export default class RoomDefense extends Room {
             const meanPos = new RoomPosition(meanX, meanY, this.name);
 
             const rampartCandidates = (this[STRUCTURE_RAMPART] as StructureRampart[])
-                .filter(r => r?.my && r.hits >= 1e6 && costs.get(r.pos.x, r.pos.y) === 1)
+                .filter(r => r?.my && r.hits >= rampartMinHits && costs.get(r.pos.x, r.pos.y) === 1)
                 .filter(r => {
                     const lookStructure = this.lookForAt(LOOK_STRUCTURES, r.pos);
                     if (lookStructure.length && lookStructure.some(structure =>
@@ -126,7 +127,7 @@ export default class RoomDefense extends Room {
             scored.sort((a, b) => b.rangedScore - a.rangedScore);
             const ranged = scored.slice(0, 10).map(s => s.id);
 
-            this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged };
+            this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged, minHits: rampartMinHits };
         } else {
             delete this.memory['defenseRamparts'];
             delete this.memory['breached'];
@@ -153,9 +154,10 @@ export default class RoomDefense extends Room {
 
         const canDoubleAttackBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000;
         const canDoubleHealBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XLHO2'] >= 3000 && this['XZHO2'] >= 3000;
-        const useDouble = this.level >= 7 &&
-            (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat) &&
-            canDoubleAttackBoost && canDoubleHealBoost;
+        // const useDouble = this.level >= 7 &&
+        //     (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat) &&
+        //     canDoubleAttackBoost && canDoubleHealBoost;
+        const useDouble = false;
 
         if (useDouble) {
             if (doubleAttackDefender.length + doubleAttackQueueNum < 1) {
@@ -170,15 +172,67 @@ export default class RoomDefense extends Room {
             }
         }
 
-        const desiredAttack = useDouble ? 0 : (hasMeleeThreat ? (breached ? 2 : 1) : 0);
-        const desiredRanged = useDouble ? 0 : (hasRangedThreat ? (threatLevel >= 25 ? 2 : 1) : 0);
+        const enemyStats = hostiles.reduce((acc: any, c: any) => {
+            if (!c?.body) {
+                acc.other += 1;
+                return acc;
+            }
+            for (const p of c.body as BodyPartDefinition[]) {
+                if (p.type === ATTACK || p.type === WORK || p.type === CLAIM) acc.melee += 1;
+                else if (p.type === RANGED_ATTACK) acc.ranged += 1;
+                else if (p.type === HEAL) acc.heal += 1;
+                if (p.boost) acc.boosted = true;
+            }
+            acc.count += 1;
+            return acc;
+        }, { count: 0, melee: 0, ranged: 0, heal: 0, boosted: false, other: 0 });
+
+        const enemyPressure =
+            enemyStats.melee * 1 +
+            enemyStats.ranged * 1.25 +
+            enemyStats.heal * 1.8 +
+            (enemyStats.boosted ? 8 : 0) +
+            enemyStats.other * 3;
+
+        let desiredAttack = 0;
+        let desiredRanged = 0;
+        if (enemyPressure > 0) {
+            // 近战为主，远程为辅：优先补齐近战（站 rampart，不追击）来压制入口
+            const needMeleeMain =
+                hasMeleeThreat ||
+                breached ||
+                enemyStats.count >= 1;
+
+            if (needMeleeMain) {
+                desiredAttack = 1;
+                if (breached || enemyStats.boosted || enemyStats.heal > 0 || enemyStats.count >= 2 || enemyPressure >= 25) {
+                    desiredAttack = 2;
+                }
+                if (breached && (enemyStats.boosted || enemyStats.heal >= 10 || enemyStats.count >= 3 || enemyPressure >= 40)) {
+                    desiredAttack = 3;
+                }
+            }
+
+            // 远程仅作为辅助位：用于对付远程/高治疗/boost，默认不强制出
+            const needRangedSupport =
+                hasRangedThreat ||
+                enemyStats.heal > 0 ||
+                enemyStats.boosted ||
+                breached;
+
+            if (needRangedSupport) {
+                desiredRanged = 1;
+                if (breached && (enemyStats.boosted || enemyStats.heal >= 15 || enemyStats.ranged >= 20)) {
+                    desiredRanged = 2;
+                }
+            }
+        }
 
         if (desiredAttack > 0 && (attackDefender.length + attackQueueNum < desiredAttack)) {
-            
-            const body = this.getDefenderBody('attack', this.energyCapacityAvailable, threatLevel);
+            const body = this.GetRoleBodys('defend-attack');
             let mustBoost = false;
-            if (threatLevel > 20 && this.level >= 7 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-            
+            if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
+                this.level >= 7 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
             this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
             if (mustBoost) {
                 this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
@@ -186,11 +240,10 @@ export default class RoomDefense extends Room {
         }
 
         if (desiredRanged > 0 && (rangedDefender.length + rangedQueueNum < desiredRanged)) {
-            
-            const body = this.getDefenderBody('ranged', this.energyCapacityAvailable, threatLevel);
+            const body = this.GetRoleBodys('defend-ranged');
             let mustBoost = false;
-            if (threatLevel > 20 && this.level >= 7 && this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-
+            if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
+                this.level >= 7 && this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
             this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
             if (mustBoost) {
                 this.AssignBoostTaskByBody(body, { [RANGED_ATTACK]: 'XKHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
@@ -215,26 +268,6 @@ export default class RoomDefense extends Room {
         if (!RuinCount)  return;
         this.controller.activateSafeMode();
         return true;
-    }
-
-    getDefenderBody(type: 'attack' | 'ranged', energyAvailable: number, threatLevel: number): (BodyPartConstant | number)[][] {
-        const body: (BodyPartConstant | number)[][] = [];
-        if (type === 'attack') {
-            let partCount = Math.floor(energyAvailable / 130);
-            partCount = Math.min(partCount, 25);
-            if (threatLevel < 5) partCount = Math.min(partCount, 2);
-            else if (threatLevel < 15) partCount = Math.min(partCount, 10);
-            if (partCount < 1) partCount = 1;
-            body.push([ATTACK, partCount], [MOVE, partCount]);
-        } else if (type === 'ranged') {
-            let partCount = Math.floor(energyAvailable / 200);
-            partCount = Math.min(partCount, 25);
-            if (threatLevel < 5) partCount = Math.min(partCount, 2);
-            else if (threatLevel < 15) partCount = Math.min(partCount, 10);
-            if (partCount < 1) partCount = 1;
-            body.push([RANGED_ATTACK, partCount], [MOVE, partCount]);
-        }
-        return body;
     }
 
     // 获取防御用CostMatrix

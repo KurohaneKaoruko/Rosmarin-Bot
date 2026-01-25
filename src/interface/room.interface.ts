@@ -387,10 +387,11 @@ interface Room {
     
     /** 
      * 生成主防cost矩阵
+     * @param show - 可选，是否在房间中可视化cost矩阵
      * @returns PathFinder.CostMatrix对象，用于防御路径规划
      * @description 生成考虑防御建筑的cost矩阵
      */
-    getDefenseCostMatrix(): CostMatrix;
+    getDefenseCostMatrix(show?: boolean): CostMatrix;
     
     /** 
      * 可视化主防cost矩阵
