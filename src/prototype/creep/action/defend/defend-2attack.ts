@@ -12,7 +12,7 @@ const double_defender = {
                 'XUH2O', 'UH2O', 'UH',
                 'XZHO2', 'ZHO2', 'ZO'
             ];
-            creep.memory.boosted = creep.goBoost(boosts, true, true);
+            creep.memory.boosted = creep.goBoost(boosts, true);
             return
         }
     

@@ -17,7 +17,7 @@ const double_heal = {
                     'XLHO2', 'LHO2', 'LO',
                     'XZHO2', 'ZHO2', 'ZO'
                 ];
-                creep.memory.boosted = creep.goBoost(boosts, true, true);
+                creep.memory.boosted = creep.goBoost(boosts, true);
             }
             return;
         }

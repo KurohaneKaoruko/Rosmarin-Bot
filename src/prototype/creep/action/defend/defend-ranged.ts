@@ -107,7 +107,7 @@ const defend_ranged = {
         if (!creep.memory.boosted) {
             const boosts = creep.memory['mustBoost'] ? ['XKHO2', 'XZHO2'] :
                             ['XKHO2', 'KHO2', 'KO', 'XZHO2', 'ZHO2', 'ZO'];
-            creep.memory.boosted = creep.goBoost(boosts, creep.memory['mustBoost'], creep.memory['mustBoost']);
+            creep.memory.boosted = creep.goBoost(boosts, creep.memory['mustBoost']);
             return
         }
         const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;

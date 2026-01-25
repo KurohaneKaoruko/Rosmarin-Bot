@@ -8,7 +8,7 @@ const power_heal = {
         if(!creep.memory.boosted) {
             const boostLevel = creep.memory['boostLevel'];
             if (boostLevel == 1) {
-                creep.memory.boosted = creep.goBoost(['LO'], true, true);
+                creep.memory.boosted = creep.goBoost(['LO'], true);
             } else {
                 creep.memory.boosted = true;
             }

@@ -30,9 +30,9 @@ const power_attack = {
         if(!creep.memory.boosted) {
             const boostLevel = creep.memory['boostLevel'];
             if (boostLevel == 1) {
-                creep.memory.boosted = creep.goBoost(['UH', 'GO'], true, true);
+                creep.memory.boosted = creep.goBoost(['UH', 'GO'], true);
             } else if (boostLevel == 2) {
-                creep.memory.boosted = creep.goBoost(['UH2O', 'GHO2'], true, true);
+                creep.memory.boosted = creep.goBoost(['UH2O', 'GHO2'], true);
             } else {
                 creep.memory.boosted = true;
             }
