@@ -1,7 +1,7 @@
 /**
  * 房间控制
  */
-export const roomControl = function (room: Room) {
+export const roomRunner = function (room: Room) {
     // 定期更新建筑缓存
     let updateInterval = 100;
     // 如果有工地，更新频率提高

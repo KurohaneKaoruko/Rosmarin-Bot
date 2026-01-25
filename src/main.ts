@@ -2,10 +2,10 @@ import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
 import { MemoryInit, GlobalInit } from '@/init';
-import { roomControl } from '@/boot/RoomControl';
-import { creepControl } from '@/boot/CreepControl';
-import { powerCreepControl } from '@/boot/PowerCreepControl';
-import { flagControl } from '@/boot/FlagControl';
+import { roomRunner } from '@/boot/RoomRunner';
+import { creepRunner } from '@/boot/CreepRunner';
+import { powerCreepRunner } from '@/boot/PowerCreepRunner';
+import { flagRunner } from '@/boot/FlagRunner';
 import { EventModule } from '@/modules/runtime/event';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
 import { GeneratePixel } from '@/modules/runtime/Pixel';
@@ -25,10 +25,10 @@ ConsoleExtension();      // 控制台命令拓展
 
 const App = createApp();
 
-App.set('room', roomControl);     // room控制
-App.set('creep', creepControl);   // creep控制
-App.set('powerCreep', powerCreepControl);   // powerCreep控制
-App.set('flag', flagControl);     // flag控制
+App.set('room', roomRunner);             // room运行
+App.set('creep', creepRunner);           // creep运行
+App.set('powerCreep', powerCreepRunner); // powerCreep运行
+App.set('flag', flagRunner);             // flag运行
 
 App.on(MemoryInit);     // 初始化内存
 App.on(GlobalInit);     // 全局初始化
