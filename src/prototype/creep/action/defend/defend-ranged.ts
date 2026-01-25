@@ -55,7 +55,13 @@ const autoDefend = function (creep: Creep) {
             visualizePathStyle: { stroke: '#ff0000' },
             costCallback: (roomName: string, costMatrix: CostMatrix) => {
                 if (roomName !== creep.room.name) return costMatrix;
-                return creep.room.getDefenseCostMatrix();
+                const base = creep.room.getDefenseCostMatrix();
+                const matrix = base.clone();
+                for (const other of creep.room.find(FIND_CREEPS)) {
+                    if (other.name === creep.name) continue;
+                    matrix.set(other.pos.x, other.pos.y, 255);
+                }
+                return matrix;
             }
         });
         return;
