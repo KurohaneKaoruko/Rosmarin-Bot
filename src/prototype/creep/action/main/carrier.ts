@@ -1,22 +1,116 @@
-// 查找最近的未被其他 carrier 占用的资源
-const findClosestUnclaimedResource = (creep: Creep, findConstant: FindConstant, minAmount = 0): Tombstone | Ruin | null => {
-    const hasStorage = !!creep.room.storage;
-    const resources = creep.room.find(findConstant, {
-        filter: (r: Tombstone | Ruin) => 
-            (hasStorage ? r.store.getUsedCapacity() : r.store[RESOURCE_ENERGY]) > minAmount
-    }) as (Tombstone | Ruin)[];
-    
-    const closest = creep.pos.findClosestByRange(resources);
-    if (!closest) return null;
-    
-    // 检查是否有其他 carrier 已锁定该目标
-    for (const name in Memory.creeps) {
-        const mem = Memory.creeps[name];
-        if (mem.role === 'carrier' && mem.cache?.targetId === closest.id) {
-            return null;
+type CarrierLockEntry = {
+    name: string;
+    expire: number;
+};
+
+type CarrierCache = {
+    sourceId?: Id<any>;
+    sourceKind?: 'dropped' | 'tombstone' | 'ruin' | 'container' | 'link' | 'storage' | 'terminal';
+    targetId?: Id<any>;
+    resourceType?: ResourceConstant;
+};
+
+const getCarrierCache = (creep: Creep): CarrierCache => {
+    if (!creep.memory.cache) creep.memory.cache = {};
+    return creep.memory.cache as CarrierCache;
+};
+
+const getRoomCarrierLocks = (roomName: string): Record<string, CarrierLockEntry> => {
+    const roomMem = ((Memory.rooms as any)[roomName] ||= {});
+    return (roomMem.carrierLocks ||= {}) as Record<string, CarrierLockEntry>;
+};
+
+const cleanupRoomCarrierLocks = (roomName: string) => {
+    const locks = getRoomCarrierLocks(roomName);
+    for (const id in locks) {
+        if (locks[id].expire <= Game.time) delete locks[id];
+    }
+};
+
+const isLockedByOtherCarrier = (roomName: string, id: string, creepName: string): boolean => {
+    const lock = getRoomCarrierLocks(roomName)[id];
+    return !!lock && lock.expire > Game.time && lock.name !== creepName;
+};
+
+const lockCarrierTarget = (roomName: string, id: string, creepName: string, ttl: number) => {
+    const locks = getRoomCarrierLocks(roomName);
+    locks[id] = { name: creepName, expire: Game.time + ttl };
+};
+
+// 兼容老逻辑：其他 carrier 仍然只写 cache.targetId，这里统一做一次归一化读取
+const getClaimedTargetIdsByCarrier = (() => {
+    const cache: Record<string, { time: number; ids: Set<string> }> = {};
+    return (roomName: string): Set<string> => {
+        const hit = cache[roomName];
+        if (hit && hit.time === Game.time) return hit.ids;
+
+        const ids = new Set<string>();
+        for (const name in Memory.creeps) {
+            const mem = Memory.creeps[name];
+            if (mem?.role !== 'carrier') continue;
+            const live = Game.creeps[name];
+            if (live && live.room.name !== roomName) continue;
+            if (!live && mem?.home && mem.home !== roomName) continue;
+            const id = mem.cache?.targetId || mem.cache?.sourceId;
+            if (id) ids.add(id);
+        }
+        cache[roomName] = { time: Game.time, ids };
+        return ids;
+    };
+})();
+
+const getPositiveStoreTypes = (store: StoreDefinition): ResourceConstant[] => {
+    return (Object.keys(store) as ResourceConstant[]).filter(t => (store as any)[t] > 0);
+};
+
+const canCarryResourceSafely = (creep: Creep, resourceType: ResourceConstant): boolean => {
+    if (resourceType === RESOURCE_ENERGY) return true;
+    if (!creep.room.storage && !creep.room.terminal) return false;
+    return !!creep.findBestStoreTarget(resourceType);
+};
+
+const getCreepCarryTypesSorted = (creep: Creep): ResourceConstant[] => {
+    const types = getPositiveStoreTypes(creep.store);
+    if (types.length <= 1) return types;
+
+    const urgentEnergy = creep.room.CheckSpawnAndTower();
+
+    types.sort((a, b) => {
+        if (urgentEnergy) {
+            if (a === RESOURCE_ENERGY && b !== RESOURCE_ENERGY) return -1;
+            if (b === RESOURCE_ENERGY && a !== RESOURCE_ENERGY) return 1;
+        } else {
+            if (a === RESOURCE_ENERGY && b !== RESOURCE_ENERGY) return 1;
+            if (b === RESOURCE_ENERGY && a !== RESOURCE_ENERGY) return -1;
+        }
+        return (creep.store[b] || 0) - (creep.store[a] || 0);
+    });
+
+    return types;
+};
+
+const pickBestWithdrawTypeFromStore = (
+    creep: Creep,
+    store: StoreDefinition,
+    prefer?: 'energy' | 'nonEnergy'
+): ResourceConstant | null => {
+    const types = getPositiveStoreTypes(store);
+    if (types.length === 0) return null;
+
+    if (prefer === 'energy' && (store as any)[RESOURCE_ENERGY] > 0) return RESOURCE_ENERGY;
+
+    if (prefer === 'nonEnergy') {
+        const candidates = types.filter(t => t !== RESOURCE_ENERGY && canCarryResourceSafely(creep, t));
+        if (candidates.length > 0) {
+            candidates.sort((a, b) => ((store as any)[b] || 0) - ((store as any)[a] || 0));
+            return candidates[0];
         }
     }
-    return closest;
+
+    if ((store as any)[RESOURCE_ENERGY] > 0) return RESOURCE_ENERGY;
+
+    const fallback = types.find(t => canCarryResourceSafely(creep, t));
+    return fallback || null;
 };
 
 // 获取 storage 或 terminal 作为能量来源
@@ -56,14 +150,20 @@ const checkAndFillNearbyExtensions = (creep: Creep) => {
     const { pos, room, store, memory } = creep;
     const energyAvailable = store[RESOURCE_ENERGY];
     
-    if (energyAvailable <= 50 || !room.storage || pos.getRangeTo(room.storage) > 10) {
+    if (energyAvailable <= 50) {
+        return false;
+    }
+
+    const urgentEnergy = room.CheckSpawnAndTower();
+    const nearStorage = !!room.storage && pos.getRangeTo(room.storage) <= 10;
+    if (!urgentEnergy && !nearStorage) {
         return false;
     }
 
     const lastPos = memory.lastCheckPos as { x: number; y: number } | undefined;
     const moved = lastPos ? Math.abs(lastPos.x - pos.x) + Math.abs(lastPos.y - pos.y) : 2;
 
-    // 移动超过1格时重新扫描附近 extension
+    // 移动超过1格时重新扫描附近可补能目标
     if (!memory.nearbyExtensions || moved > 1) {
         const structures = room.lookForAtArea(
             LOOK_STRUCTURES,
@@ -73,17 +173,22 @@ const checkAndFillNearbyExtensions = (creep: Creep) => {
         );
         memory.nearbyExtensions = structures
             .filter(item => 
-                item.structure.structureType === STRUCTURE_EXTENSION && 
-                (item.structure as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                (item.structure.structureType === STRUCTURE_EXTENSION ||
+                    item.structure.structureType === STRUCTURE_SPAWN ||
+                    (urgentEnergy && item.structure.structureType === STRUCTURE_TOWER) ||
+                    (urgentEnergy && item.structure.structureType === STRUCTURE_POWER_SPAWN)) &&
+                (item.structure as AnyStoreStructure).store.getFreeCapacity(RESOURCE_ENERGY) > 0
             )
             .map(item => item.structure.id);
         memory.lastCheckPos = { x: pos.x, y: pos.y };
     }
 
-    const extensions = memory.nearbyExtensions as Id<StructureExtension>[];
+    const extensions = memory.nearbyExtensions as Id<AnyStoreStructure>[];
     for (let i = 0; i < extensions.length; i++) {
-        const ext = Game.getObjectById(extensions[i]);
-        if (ext?.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        const ext = Game.getObjectById(extensions[i]) as AnyStoreStructure | null;
+        if (!ext) continue;
+        if (ext.structureType === STRUCTURE_TOWER && ext.store.getFreeCapacity(RESOURCE_ENERGY) <= 100) continue;
+        if (ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
             if (creep.transfer(ext, RESOURCE_ENERGY) === OK) {
                 extensions.splice(i, 1);
                 if (extensions.length === 0) delete memory.nearbyExtensions;
@@ -94,110 +199,175 @@ const checkAndFillNearbyExtensions = (creep: Creep) => {
     return false;
 };
 
-// 收集资源阶段
-const withdraw = (creep: Creep) => {
-    const { pos, store, memory, room } = creep;
-    const roomAny = room as any;
-    const cache = memory.cache as { targetId?: Id<any>; resourceType?: ResourceConstant };
+type WithdrawPlan = {
+    id: Id<any>;
+    kind: CarrierCache['sourceKind'];
+    resourceType?: ResourceConstant;
+    lockTtl?: number;
+};
 
-    // 优先收集掉落资源（前提是有地方可以存放）
-    if (room.storage) {
-        // 非能量资源优先
-        const nonEnergy = pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-            filter: (r: Resource) => r.resourceType !== RESOURCE_ENERGY
+const scoreByRange = (range: number) => Math.max(0, 30 - range * 2);
+
+const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
+    const { room, pos, store } = creep;
+    const roomAny = room as any;
+
+    cleanupRoomCarrierLocks(room.name);
+
+    const claimed = getClaimedTargetIdsByCarrier(room.name);
+
+    const urgentEnergy = room.CheckSpawnAndTower();
+    const hasStorage = !!room.storage || !!room.terminal;
+    const freeCap = store.getFreeCapacity();
+
+    const candidates: { score: number; plan: WithdrawPlan }[] = [];
+
+    // 优先级1：掉落资源（能量随时可收；非能量需要中心仓保障可存放）
+    const dropped = room.find(FIND_DROPPED_RESOURCES, {
+        filter: (r: Resource) => r.amount > 0
+    });
+
+    for (const r of dropped) {
+        if (!canCarryResourceSafely(creep, r.resourceType)) continue;
+        if (claimed.has(r.id) || isLockedByOtherCarrier(room.name, r.id, creep.name)) continue;
+
+        const base = r.resourceType === RESOURCE_ENERGY ? 50 : 80;
+        const amountScore = Math.min(30, Math.floor(r.amount / 100));
+        const rangeScore = scoreByRange(pos.getRangeTo(r));
+
+        // 能量掉落只有在数量较大时才抢占优先级，避免反复捡小堆
+        if (r.resourceType === RESOURCE_ENERGY && r.amount < 200) continue;
+
+        candidates.push({
+            score: base + amountScore + rangeScore,
+            plan: { id: r.id, kind: 'dropped', resourceType: r.resourceType, lockTtl: 3 }
         });
-        if (nonEnergy) {
-            if (!creep.findBestStoreTarget(nonEnergy.resourceType)) return false;
-            creep.goPickup(nonEnergy);
-            return pos.inRangeTo(nonEnergy, 1) && nonEnergy.amount >= store.getFreeCapacity();
-        }
-        // 大量能量 (>500)
-        if (creep.findBestStoreTarget(RESOURCE_ENERGY) &&
-            creep.collectDroppedResource(RESOURCE_ENERGY, 500)) {
-            return;
+    }
+
+    // 优先级2：墓碑/废墟（回收衰减资源）
+    const tombstones = room.find(FIND_TOMBSTONES, {
+        filter: (t: Tombstone) => t.store.getUsedCapacity() > 0
+    });
+    for (const t of tombstones) {
+        if (claimed.has(t.id) || isLockedByOtherCarrier(room.name, t.id, creep.name)) continue;
+        const type = pickBestWithdrawTypeFromStore(creep, t.store, urgentEnergy ? 'energy' : 'nonEnergy');
+        if (!type) continue;
+        const amount = t.store.getUsedCapacity(type);
+        if (type === RESOURCE_ENERGY && amount < 100) continue;
+
+        candidates.push({
+            score: 75 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(t)),
+            plan: { id: t.id, kind: 'tombstone', resourceType: type, lockTtl: 5 }
+        });
+    }
+
+    const ruins = room.find(FIND_RUINS, {
+        filter: (r: Ruin) => r.store.getUsedCapacity() > 0
+    });
+    for (const r of ruins) {
+        if (claimed.has(r.id) || isLockedByOtherCarrier(room.name, r.id, creep.name)) continue;
+        const type = pickBestWithdrawTypeFromStore(creep, r.store, urgentEnergy ? 'energy' : 'nonEnergy');
+        if (!type) continue;
+        const amount = r.store.getUsedCapacity(type);
+        if (type === RESOURCE_ENERGY && amount < 100) continue;
+
+        candidates.push({
+            score: 70 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(r)),
+            plan: { id: r.id, kind: 'ruin', resourceType: type, lockTtl: 5 }
+        });
+    }
+
+    // 优先级3：link/container
+    const controller = room.controller;
+    if (urgentEnergy || !hasStorage) {
+        const links = (roomAny.link || []).filter((l: StructureLink) => l?.store[RESOURCE_ENERGY] > 0) as StructureLink[];
+        for (const l of links) {
+            if (claimed.has(l.id) || isLockedByOtherCarrier(room.name, l.id, creep.name)) continue;
+            candidates.push({
+                score: 55 + Math.min(35, Math.floor((l.store[RESOURCE_ENERGY] || 0) / 100)) + scoreByRange(pos.getRangeTo(l)),
+                plan: { id: l.id, kind: 'link', resourceType: RESOURCE_ENERGY, lockTtl: 2 }
+            });
         }
     }
 
-    if (!Game.getObjectById(cache.targetId)) {
+    const containers = (roomAny.container || []).filter((c: StructureContainer) => c && c.store?.getUsedCapacity?.() > 0) as StructureContainer[];
+    for (const c of containers) {
+        if (controller && c.pos.inRangeTo(controller, 1) && (urgentEnergy || !hasStorage)) continue;
+        if (claimed.has(c.id) || isLockedByOtherCarrier(room.name, c.id, creep.name)) continue;
+
+        const prefer = urgentEnergy || !hasStorage ? 'energy' : 'nonEnergy';
+        const type = pickBestWithdrawTypeFromStore(creep, c.store, prefer);
+        if (!type) continue;
+
+        const amount = c.store.getUsedCapacity(type);
+        const min = Math.min(666, freeCap);
+        if (amount < Math.min(min, type === RESOURCE_ENERGY ? 150 : 50)) continue;
+
+        candidates.push({
+            score: 45 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(c)),
+            plan: { id: c.id, kind: 'container', resourceType: type, lockTtl: 3 }
+        });
+    }
+
+    // 优先级4：从 storage/terminal 取能量（仅用于补能模式的兜底）
+    if (urgentEnergy && freeCap > 0) {
+        const source = getStorageOrTerminal(creep) as (StructureStorage | StructureTerminal | null);
+        if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > 1000) {
+            candidates.push({
+                score: 20 + Math.min(20, Math.floor(source.store.getUsedCapacity(RESOURCE_ENERGY) / 1000)) + scoreByRange(pos.getRangeTo(source)),
+                plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : 'storage', resourceType: RESOURCE_ENERGY, lockTtl: 1 }
+            });
+        }
+    }
+
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => b.score - a.score);
+    return candidates[0].plan;
+};
+
+// 收集资源阶段
+const withdraw = (creep: Creep) => {
+    const { pos, store, room } = creep;
+    const cache = getCarrierCache(creep);
+
+    const targetId = cache.sourceId || cache.targetId;
+    if (targetId && !Game.getObjectById(targetId)) {
+        cache.sourceId = undefined;
+        cache.sourceKind = undefined;
         cache.targetId = undefined;
         cache.resourceType = undefined;
     }
 
-    // 从建筑收集资源
-    if (!cache.targetId) {
-        // 优先墓碑和废墟
-        const tombstone = findClosestUnclaimedResource(creep, FIND_TOMBSTONES, 100);
-        const ruin = !tombstone ? findClosestUnclaimedResource(creep, FIND_RUINS) : null;
-        const target = tombstone || ruin;
-        
-        if (target) {
-            cache.targetId = target.id as Id<any>;
-            cache.resourceType = Object.keys(target.store)[0] as ResourceConstant;
-        } else {
-            const minAmount = Math.min(666, store.getFreeCapacity());
+    if (!cache.sourceId && !cache.targetId) {
+        const plan = selectWithdrawPlan(creep);
+        if (!plan) return false;
 
-            if (!room.storage) {
-                const links = (roomAny.link || []).filter((l: StructureLink) =>
-                    l && l.store[RESOURCE_ENERGY] > 0
-                ) as StructureLink[];
-                const linkTarget = pos.findClosestByRange(links);
-                if (linkTarget) {
-                    cache.targetId = linkTarget.id as Id<StructureLink>;
-                    cache.resourceType = RESOURCE_ENERGY;
-                } else {
-                    const containerMin = Math.min(300, minAmount);
-                    if (creep.collectFromContainer(containerMin, RESOURCE_ENERGY, true)) return;
-                }
-            } else {
-                // 有 storage 时收集任意资源（仅当有存放空间时）
-                const containers = (roomAny.container || []).filter((c: StructureContainer) =>
-                    c && !c.pos.inRangeTo(room.controller!, 1) && c.store.getUsedCapacity() > minAmount
-                ) as StructureContainer[];
-                const containerTarget = pos.findClosestByRange(containers);
-                if (containerTarget) {
-                    const resType = Object.keys(containerTarget.store)[0] as ResourceConstant;
-                    if (creep.findBestStoreTarget(resType)) {
-                        cache.targetId = containerTarget.id;
-                        cache.resourceType = resType;
-                    }
-                }
-            }
-            
-            // 尝试从 storage/terminal 收集（仅当有存放空间时）
-            if (!cache.targetId) {
-                const storageTarget = getStorageOrTerminal(creep);
-                if (storageTarget) {
-                    const resType = Object.keys(storageTarget.store)[0] as ResourceConstant;
-                    if (creep.findBestStoreTarget(resType)) {
-                        cache.targetId = storageTarget.id;
-                        cache.resourceType = resType;
-                    }
-                }
-            }
+        cache.sourceId = plan.id;
+        cache.targetId = plan.id;
+        cache.sourceKind = plan.kind;
+        cache.resourceType = plan.resourceType;
 
-            // 最后尝试从掉落的能量收集
-            if (!cache.targetId) {
-                const droppedEnergy = pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
-                    filter: (r: Resource) => r.resourceType === RESOURCE_ENERGY
-                });
-                if (droppedEnergy) {
-                    cache.targetId = droppedEnergy.id;
-                    cache.resourceType = RESOURCE_ENERGY;
-                }
-            }
+        if (plan.lockTtl) {
+            lockCarrierTarget(room.name, plan.id, creep.name, plan.lockTtl);
         }
     }
 
-    const target = Game.getObjectById(cache.targetId);
+    const target = Game.getObjectById(cache.sourceId || cache.targetId);
     if (!target) {
-        delete cache.targetId;
+        cache.sourceId = undefined;
+        cache.sourceKind = undefined;
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
         return false;
     }
 
     if ((target as Resource).amount !== undefined) {
         const res = target as Resource;
         if (res.amount <= 0) {
-            delete cache.targetId;
+            cache.sourceId = undefined;
+            cache.sourceKind = undefined;
+            cache.targetId = undefined;
+            cache.resourceType = undefined;
             return false;
         }
         if (pos.inRangeTo(res, 1)) {
@@ -205,7 +375,7 @@ const withdraw = (creep: Creep) => {
             return result === OK && res.amount >= store.getFreeCapacity();
         }
         creep.moveTo(res, { visualizePathStyle: { stroke: '#ffaa00' } });
-        return;
+        return false;
     }
 
     const storeTarget = target as any;
@@ -213,7 +383,10 @@ const withdraw = (creep: Creep) => {
     const used = storeTarget.store?.getUsedCapacity?.(resourceType) ?? 0;
     if (used <= 0) {
         if (storeTarget.structureType !== STRUCTURE_LINK || pos.inRangeTo(storeTarget, 1)) {
-            delete cache.targetId;
+            cache.sourceId = undefined;
+            cache.sourceKind = undefined;
+            cache.targetId = undefined;
+            cache.resourceType = undefined;
             return false;
         }
     }
@@ -228,93 +401,99 @@ const withdraw = (creep: Creep) => {
 
 // 运送资源阶段
 const carry = (creep: Creep) => {
-    const { memory, store, room, pos } = creep;
+    const { store, room, pos } = creep;
     const roomAny = room as any;
-    const cache = memory.cache as { targetId?: Id<any>; resourceType?: ResourceConstant };
+    const cache = getCarrierCache(creep);
 
-    let target = Game.getObjectById(cache.targetId) as AnyStoreStructure | null;
+    const carryTypes = getCreepCarryTypesSorted(creep);
+    if (carryTypes.length === 0) return true;
 
-    // 寻找目标
-    if (!target || !store[cache.resourceType!] || !target.store.getFreeCapacity(cache.resourceType)) {
+    const currentType = cache.resourceType && store[cache.resourceType] > 0 ? cache.resourceType : undefined;
+    const currentTarget = cache.targetId ? (Game.getObjectById(cache.targetId) as AnyStoreStructure | null) : null;
+
+    const needNewTarget =
+        !currentType ||
+        !currentTarget ||
+        currentTarget.store.getFreeCapacity(currentType) <= 0;
+
+    let target: AnyStoreStructure | null = currentTarget;
+    let resourceType: ResourceConstant = currentType || carryTypes[0];
+
+    if (needNewTarget) {
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
+
+        const urgentEnergy = room.CheckSpawnAndTower();
         const controllerContainer = roomAny.container?.find((c: StructureContainer) =>
             c.pos.inRangeTo(room.controller, 1));
         const controllerLink = roomAny.link?.find((l: StructureLink) =>
             l.pos.inRangeTo(room.controller, 2));
 
-        if (store[RESOURCE_ENERGY] > 0 && room.CheckSpawnAndTower()) {
-            // 填充 spawn/extension/tower
-            const spawnExtensions = [...(roomAny.spawn || []), ...(roomAny.extension || [])]
-                .filter((e: StructureSpawn | StructureExtension) => e?.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
-            
-            target = pos.findClosestByRange(spawnExtensions) ||
-                     pos.findClosestByRange((roomAny.tower || [])
-                        .filter((t: StructureTower) => t?.store.getFreeCapacity(RESOURCE_ENERGY) > 100));
-            
-            if (!target && roomAny.powerSpawn?.store.getFreeCapacity(RESOURCE_ENERGY) > 100) {
-                target = roomAny.powerSpawn;
+        for (const t of carryTypes) {
+            if (t === RESOURCE_ENERGY) {
+                if (urgentEnergy) {
+                    const spawnExtensions = [...(roomAny.spawn || []), ...(roomAny.extension || [])]
+                        .filter((e: StructureSpawn | StructureExtension) => e?.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
+
+                    target = pos.findClosestByRange(spawnExtensions) ||
+                        pos.findClosestByRange((roomAny.tower || [])
+                            .filter((tw: StructureTower) => tw?.store.getFreeCapacity(RESOURCE_ENERGY) > 100));
+
+                    if (!target && roomAny.powerSpawn?.store.getFreeCapacity(RESOURCE_ENERGY) > 100) {
+                        target = roomAny.powerSpawn;
+                    }
+                } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
+                    target = controllerContainer;
+                }
+
+                if (!target) target = creep.findBestStoreTarget(RESOURCE_ENERGY);
+            } else {
+                target = creep.findBestStoreTarget(t);
             }
-            
-            if (target) {
+
+            if (target && target.store.getFreeCapacity(t) > 0) {
+                resourceType = t;
                 cache.targetId = target.id;
-                cache.resourceType = RESOURCE_ENERGY;
-            }
-        } else if (!controllerLink && controllerContainer && 
-                   store[RESOURCE_ENERGY] > 0 && controllerContainer.store.getFreeCapacity() > 0) {
-            // 填充控制器容器
-            cache.targetId = controllerContainer.id;
-            cache.resourceType = RESOURCE_ENERGY;
-            target = controllerContainer;
-        } else {
-            // 存入 storage/terminal
-            const resourceType = Object.keys(store)[0] as ResourceConstant;
-            target = creep.findBestStoreTarget(resourceType);
-            if (target) {
-                cache.targetId = target.id;
-                cache.resourceType = resourceType;
+                cache.resourceType = t;
+                break;
             }
         }
     }
 
     if (!target) {
-        const resourceType = Object.keys(store)[0] as ResourceConstant;
-        if (resourceType && store[resourceType] > 0) {
-            creep.drop(resourceType);
+        const dropType = carryTypes.find(t => store[t] > 0);
+        if (!dropType) return true;
+
+        const anchor = room.storage || room.terminal || pos.findClosestByRange(roomAny.spawn || []);
+        if (anchor && pos.getRangeTo(anchor) > 2) {
+            creep.moveTo(anchor, { visualizePathStyle: { stroke: '#ffffff' } });
+            return;
         }
-        delete cache.targetId;
-        delete cache.resourceType;
+        creep.drop(dropType);
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
         return;
     }
 
     if (pos.inRangeTo(target, 1)) {
-        const isStorage = target.structureType === STRUCTURE_STORAGE || target.structureType === STRUCTURE_TERMINAL;
-        const resourceType = isStorage ? (Object.keys(store)[0] as ResourceConstant) : RESOURCE_ENERGY;
-        
         const transferResult = creep.transfer(target, resourceType);
         if (transferResult === OK) {
-            delete cache.targetId;
-            delete cache.resourceType;
-            // 检查是否完成所有资源转移
-            const storeKeys = Object.keys(store);
-            if (storeKeys.length === 1 && target.store.getFreeCapacity(resourceType) >= store[resourceType]) {
-                return true;
-            }
-        } else if (transferResult === ERR_FULL) {
-            const newTarget = creep.findBestStoreTarget(resourceType);
-            if (newTarget && newTarget.id !== target.id) {
-                cache.targetId = newTarget.id;
-                cache.resourceType = resourceType;
-            } else {
-                const dropType = Object.keys(store)[0] as ResourceConstant;
-                if (dropType && store[dropType] > 0) {
-                    creep.drop(dropType);
-                }
-                delete cache.targetId;
-                delete cache.resourceType;
-            }
+            cache.targetId = undefined;
+            cache.resourceType = undefined;
+            if (creep.store.getUsedCapacity() === 0) return true;
+            return;
         }
-    } else {
-        creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
+        if (transferResult === ERR_FULL) {
+            cache.targetId = undefined;
+            cache.resourceType = undefined;
+            return;
+        }
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
+        return;
     }
+
+    creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
 };
 
 // 生成安全模式
