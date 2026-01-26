@@ -51,31 +51,46 @@ export default class BaseFunction extends Creep {
         };
 
         const findStructureTarget = () => {
-            const target = [];
+            const targets: (StructureStorage | StructureTerminal | StructureLink | StructureContainer)[] = [];
             const storage = this.room.storage;
             const terminal = this.room.terminal;
             const link = this.room.link;
             const container = this.room.container;
-            if (storage && storage.store[RESOURCE_ENERGY] >= 5000) {
-                target.push(storage);
-            }
-            if (terminal && terminal.store[RESOURCE_ENERGY] >= 5000) {
-                target.push(terminal);
+
+            // 1. 优先中心 link
+            const center = Memory.RoomControlData?.[this.room.name]?.center;
+            if (center && link && link.length) {
+                const centerLink = link.find(l =>
+                    l &&
+                    l.pos.inRangeTo(center.x, center.y, 1) &&
+                    l.store[RESOURCE_ENERGY] >= 400    // 阈值可按你需求调整
+                );
+                if (centerLink) {
+                    return { id: centerLink.id, type: 'structure' };
+                }
             }
 
-            for(const l of link) {
+            // 2. storage / terminal / 其它 link / container（沿用现有阈值）
+            if (storage && storage.store[RESOURCE_ENERGY] >= 5000) {
+                targets.push(storage);
+            }
+            if (terminal && terminal.store[RESOURCE_ENERGY] >= 5000) {
+                targets.push(terminal);
+            }
+            for (const l of link) {
                 if (l && l.store[RESOURCE_ENERGY] >= 400) {
-                    target.push(l);
+                    targets.push(l);
                 }
             }
-            for(const c of container) {
+            for (const c of container) {
                 if (c && c.store[RESOURCE_ENERGY] >= 500) {
-                    target.push(c);
+                    targets.push(c);
                 }
             }
-            const closestTarget = this.pos.findClosestByRange(target);
-            return closestTarget ? { id: closestTarget.id, type: 'structure' } : null;
-        }
+
+            const closest = this.pos.findClosestByRange(targets);
+            return closest ? { id: closest.id, type: 'structure' } : null;
+        };
 
         const findDroppedResourceTarget = (amount = 50) => {
             const droppedResources = this.room.find(FIND_DROPPED_RESOURCES, {

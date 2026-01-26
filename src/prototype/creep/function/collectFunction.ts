@@ -38,8 +38,7 @@ export default class CollectFunction extends Creep {
         const target = this.pos.findClosestByRange(droppedResources);
         if (!target) return false;
 
-        this.goPickup(target);
-        return true;
+        return this.goPickup(target) !== null;
     }
 
     /**
@@ -67,8 +66,7 @@ export default class CollectFunction extends Creep {
         
         if (!withdrawType) return false;
 
-        this.goWithdraw(target, withdrawType);
-        return true;
+        return this.goWithdraw(target, withdrawType) !== null;
     }
 
     /**
@@ -96,8 +94,7 @@ export default class CollectFunction extends Creep {
         
         if (!withdrawType) return false;
 
-        this.goWithdraw(target, withdrawType);
-        return true;
+        return this.goWithdraw(target, withdrawType) !== null;
     }
 
     /**
@@ -131,8 +128,7 @@ export default class CollectFunction extends Creep {
         const target = this.pos.findClosestByRange(validContainers);
         if (!target) return false;
 
-        this.goWithdraw(target, resourceType);
-        return true;
+        return this.goWithdraw(target, resourceType) !== null;
     }
 
     /**

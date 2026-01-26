@@ -66,25 +66,48 @@ const RoleSpawnCheck = {
     },
     'worker': (room: Room, current: number) => {
         if (Memory['warmode']) return false;
+
         const state = getEnergyState(room);
         const cap = room.energyCapacityAvailable || 0;
         const totalEnergy = getTotalEnergy(room);
-        if (room.checkMissionInPool('build')) {
-            if (state === 'SURPLUS' || state === 'NORMAL') {
-                if (current < 1) return true;
-                if (current < 2 && room.getMissionNumInPool('build') > 10) return true;
-            } else if (state === 'LOW') {
-                if (current < 1 && totalEnergy >= Math.max(1000, cap * 2)) return true;
+
+        const hasBuildMission = room.checkMissionInPool('build');
+        const hasConstruction = room.find(FIND_MY_CONSTRUCTION_SITES).length > 0;
+        const needBuilder = hasBuildMission || hasConstruction;
+
+        // 1. 只要有建造需求，就先保证至少 1 个 worker
+        if (needBuilder && current < 1) {
+            // 条件可以适当放宽：房间当前能量或总能量至少能支撑一个基础体型
+            if (room.energyAvailable >= 300 || totalEnergy >= cap) {
+                return true;
             }
         }
-        if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
-        if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
-            let WR_Tasks = global.WallRampartRepairMission?.[room.name];
-            if (WR_Tasks && Object.keys(WR_Tasks)?.length > 0) return true;
+
+        // 2. 有大量 build 任务时，根据能量状态扩容 worker 数量
+        if (hasBuildMission) {
+            const buildNum = room.getMissionNumInPool('build');
+            if ((state === 'SURPLUS' || state === 'NORMAL') && buildNum > 10 && current < 2) {
+                return true;
+            }
+            if (state === 'LOW' && current < 1 && totalEnergy >= Math.max(1000, cap * 2)) {
+                // 如果你觉得多余，也可以直接删掉这句，只保留上面的“至少一个”逻辑
+                return true;
+            }
         }
-        if (!room.tower || room.tower.length == 0) {
-            return room.getMissionNumInPool('repair') >= 20;
+
+        // 3. 没有建造需求时，走刷墙逻辑
+        if (!needBuilder) {
+            if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
+
+            if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
+                const WR_Tasks = global.WallRampartRepairMission?.[room.name];
+                if (WR_Tasks && Object.keys(WR_Tasks)?.length > 0) return true;
+            }
+            if (!room.tower || room.tower.length === 0) {
+                return room.getMissionNumInPool('repair') >= 20;
+            }
         }
+
         return false;
     },
     'mineral': (room: Room, current: number) => {

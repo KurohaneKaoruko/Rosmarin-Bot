@@ -25,7 +25,7 @@ export default class HaulFunction extends Creep {
             return resource === RESOURCE_ENERGY;
         }
         if (type === STRUCTURE_CONTAINER) {
-            return !this.isSourceContainer(target);
+            return !this.isSourceContainer(target) && !this.isMineralContainer(target);
         }
         return true;
     }
@@ -42,6 +42,19 @@ export default class HaulFunction extends Creep {
         for (const src of sources) {
             if (src && target.pos.inRangeTo(src.pos, 2)) return true;
         }
+        return false;
+    }
+
+    /**
+     * 判断容器是否为矿物容器（靠近 Mineral 的 container）
+     * @param target 要检查的结构
+     * @returns 是否为矿物容器
+     */
+    isMineralContainer(target: AnyStoreStructure): boolean {
+        if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
+        const mineral = this.room.mineral as Mineral | undefined;
+        if (!mineral) return false;
+        if (target.pos.inRangeTo(mineral.pos, 2)) return true;
         return false;
     }
 

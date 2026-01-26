@@ -100,14 +100,6 @@ const withdraw = (creep: Creep) => {
     const roomAny = room as any;
     const cache = memory.cache as { targetId?: Id<any>; resourceType?: ResourceConstant };
 
-    const controllerContainer = roomAny.container?.find((c: StructureContainer) =>
-        c.pos.inRangeTo(room.controller, 1));
-
-    // 检查是否需要运输
-    if (!room.CheckSpawnAndTower() && !controllerContainer && !room.storage && !room.terminal) {
-        return false;
-    }
-
     // 优先收集掉落资源（前提是有地方可以存放）
     if (room.storage) {
         // 非能量资源优先
@@ -116,17 +108,20 @@ const withdraw = (creep: Creep) => {
         });
         if (nonEnergy) {
             if (!creep.findBestStoreTarget(nonEnergy.resourceType)) return false;
-            memory.dropWithdraw = true;
             creep.goPickup(nonEnergy);
             return pos.inRangeTo(nonEnergy, 1) && nonEnergy.amount >= store.getFreeCapacity();
         }
         // 大量能量 (>500)
-        if (creep.findBestStoreTarget(RESOURCE_ENERGY) && creep.collectDroppedResource(RESOURCE_ENERGY, 500)) {
-            memory.dropWithdraw = true;
+        if (creep.findBestStoreTarget(RESOURCE_ENERGY) &&
+            creep.collectDroppedResource(RESOURCE_ENERGY, 500)) {
             return;
         }
     }
-    if (memory.dropWithdraw) memory.dropWithdraw = false;
+
+    if (!Game.getObjectById(cache.targetId)) {
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
+    }
 
     // 从建筑收集资源
     if (!cache.targetId) {
@@ -140,10 +135,19 @@ const withdraw = (creep: Creep) => {
             cache.resourceType = Object.keys(target.store)[0] as ResourceConstant;
         } else {
             const minAmount = Math.min(666, store.getFreeCapacity());
-            
+
             if (!room.storage) {
-                // 无 storage 时只收集能量
-                if (creep.collectFromContainer(minAmount, RESOURCE_ENERGY, true)) return;
+                const links = (roomAny.link || []).filter((l: StructureLink) =>
+                    l && l.store[RESOURCE_ENERGY] > 0
+                ) as StructureLink[];
+                const linkTarget = pos.findClosestByRange(links);
+                if (linkTarget) {
+                    cache.targetId = linkTarget.id as Id<StructureLink>;
+                    cache.resourceType = RESOURCE_ENERGY;
+                } else {
+                    const containerMin = Math.min(300, minAmount);
+                    if (creep.collectFromContainer(containerMin, RESOURCE_ENERGY, true)) return;
+                }
             } else {
                 // 有 storage 时收集任意资源（仅当有存放空间时）
                 const containers = (roomAny.container || []).filter((c: StructureContainer) =>
@@ -170,22 +174,56 @@ const withdraw = (creep: Creep) => {
                     }
                 }
             }
+
+            // 最后尝试从掉落的能量收集
+            if (!cache.targetId) {
+                const droppedEnergy = pos.findClosestByRange(FIND_DROPPED_RESOURCES, {
+                    filter: (r: Resource) => r.resourceType === RESOURCE_ENERGY
+                });
+                if (droppedEnergy) {
+                    cache.targetId = droppedEnergy.id;
+                    cache.resourceType = RESOURCE_ENERGY;
+                }
+            }
         }
     }
 
     const target = Game.getObjectById(cache.targetId);
-    if (!target || !(target as any).store?.getUsedCapacity()) {
+    if (!target) {
         delete cache.targetId;
+        return false;
+    }
+
+    if ((target as Resource).amount !== undefined) {
+        const res = target as Resource;
+        if (res.amount <= 0) {
+            delete cache.targetId;
+            return false;
+        }
+        if (pos.inRangeTo(res, 1)) {
+            const result = creep.pickup(res);
+            return result === OK && res.amount >= store.getFreeCapacity();
+        }
+        creep.moveTo(res, { visualizePathStyle: { stroke: '#ffaa00' } });
         return;
     }
 
-    if (pos.inRangeTo(target, 1)) {
-        const resourceType = room.storage ? (Object.keys((target as any).store)[0] as ResourceConstant) : RESOURCE_ENERGY;
-        const result = creep.withdraw(target as any, resourceType);
-        return result === OK && (target as any).store[resourceType] >= store.getFreeCapacity();
+    const storeTarget = target as any;
+    const resourceType = cache.resourceType || RESOURCE_ENERGY;
+    const used = storeTarget.store?.getUsedCapacity?.(resourceType) ?? 0;
+    if (used <= 0) {
+        if (storeTarget.structureType !== STRUCTURE_LINK || pos.inRangeTo(storeTarget, 1)) {
+            delete cache.targetId;
+            return false;
+        }
     }
-    
-    creep.moveTo(target, { visualizePathStyle: { stroke: '#ffaa00' } });
+
+    if (pos.inRangeTo(storeTarget, 1)) {
+        const result = creep.withdraw(storeTarget, resourceType);
+        return result === OK && storeTarget.store[resourceType] >= store.getFreeCapacity();
+    }
+
+    creep.moveTo(storeTarget, { visualizePathStyle: { stroke: '#ffaa00' } });
 };
 
 // 运送资源阶段
@@ -203,7 +241,7 @@ const carry = (creep: Creep) => {
         const controllerLink = roomAny.link?.find((l: StructureLink) =>
             l.pos.inRangeTo(room.controller, 2));
 
-        if (!memory.dropWithdraw && store[RESOURCE_ENERGY] > 0 && room.CheckSpawnAndTower()) {
+        if (store[RESOURCE_ENERGY] > 0 && room.CheckSpawnAndTower()) {
             // 填充 spawn/extension/tower
             const spawnExtensions = [...(roomAny.spawn || []), ...(roomAny.extension || [])]
                 .filter((e: StructureSpawn | StructureExtension) => e?.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
@@ -220,7 +258,7 @@ const carry = (creep: Creep) => {
                 cache.targetId = target.id;
                 cache.resourceType = RESOURCE_ENERGY;
             }
-        } else if (!memory.dropWithdraw && !controllerLink && controllerContainer && 
+        } else if (!controllerLink && controllerContainer && 
                    store[RESOURCE_ENERGY] > 0 && controllerContainer.store.getFreeCapacity() > 0) {
             // 填充控制器容器
             cache.targetId = controllerContainer.id;
@@ -320,7 +358,7 @@ const CarrierFunction = {
         if (!creep.moveHomeRoom()) return;
         if (creep.store.getUsedCapacity() === 0) return true;
         if (checkAndFillNearbyExtensions(creep)) return;
-        return carry(creep);
+        return carry(creep);;
     },
 };
 
