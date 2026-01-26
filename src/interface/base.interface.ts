@@ -27,3 +27,11 @@ interface RuntimeModule {
      */
     end?: Function;
 }
+
+interface global {
+    Memory: Memory;
+}
+
+interface RawMemory {
+    _parsed: Memory;
+}

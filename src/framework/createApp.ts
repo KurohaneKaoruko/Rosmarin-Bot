@@ -93,15 +93,11 @@ export const createApp = () => {
     /** 内存缓存器 */
     const cacheMemory = () => {
         if (_MemoryCache && lastTime && Game.time === lastTime + 1) {
-            // @ts-ignore
-            delete global.Memory;
-            // @ts-ignore
-            global.Memory = _MemoryCache;
-            // @ts-ignore
-            RawMemory._parsed = global.Memory;
+            delete (global as any).Memory;
+            (global as any).Memory = _MemoryCache;
+            RawMemory._parsed = (global as any).Memory;
         } else {
-            // @ts-ignore
-            _MemoryCache = global.Memory;
+            _MemoryCache = (global as any).Memory;
         }
         lastTime = Game.time;
     };
