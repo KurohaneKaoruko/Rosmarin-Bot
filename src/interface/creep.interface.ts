@@ -406,6 +406,29 @@ interface Creep {
         minDroppedAmount?: number;
         minContainerAmount?: number;
     }): boolean;
+    
+    /**
+     * 判断指定结构是否适合作为某种资源的存放目标
+     * @param target 目标建筑
+     * @param resource 资源类型
+     * @returns 是否允许将该资源存入目标
+     */
+    canAutoStore(target: AnyStoreStructure, resource: ResourceConstant): boolean;
+    
+    /**
+     * 判断容器是否为采集容器（靠近 Source 的 container）
+     * @param target 要检查的结构
+     * @returns 是否为采集容器
+     */
+    isSourceContainer(target: AnyStoreStructure): boolean;
+    
+    /**
+     * 为指定资源选择当前房间中“最合适”的存放建筑
+     * 会综合考虑结构类型优先级、剩余容量与距离等因素
+     * @param resource 资源类型
+     * @returns 选中的存放目标，找不到则为 null
+     */
+    findBestStoreTarget(resource: ResourceConstant): AnyStoreStructure | null;
 
     // ==================== 战斗功能 (CombatFunction) ====================
     /** 
@@ -633,6 +656,4 @@ interface CreepMemory {
      */
     [key: string]: any;
 }
-
-
 

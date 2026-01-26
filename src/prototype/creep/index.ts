@@ -8,6 +8,7 @@ import DoubleAction from "./function/doubleAction"
 import CollectFunction from "./function/collectFunction"
 import CombatFunction from "./function/combatFunction"
 import BuildFunction from "./function/buildFunction"
+import HaulFunction from "./function/haulFunction"
 import CreepExecute from "./execute"
 
 const plugins = [
@@ -20,6 +21,7 @@ const plugins = [
     CollectFunction,
     CombatFunction,
     BuildFunction,
+    HaulFunction,
     CreepExecute,
 ]
 
