@@ -213,7 +213,7 @@ export function GenCreepName(code: string) {
  * - 注意：sig 是 32-bit 近似签名（可能存在极小概率碰撞）；必要时可同时比对 sum/xor/count
  * - Rampart/Wall：可选加入“是否跨阈值”的 bucket（默认 rampart 开启、wall 关闭），避免 hits 每 tick 微变导致频繁失效
  * @param structures 任意可迭代结构集合（支持数组、生成器、Set 等），元素需包含 { pos: {x,y}, structureType }
- * @param options rampartMinHits: \u003e0 时将 rampart “是否跨阈值”纳入签名；\u003c=0 时不纳入。wallMinHits: \u003e0 时将 wall “是否跨阈值”纳入签名；\u003c=0 时不纳入
+ * @param options rampartMinHits: >0 时将 rampart “是否跨阈值”纳入签名；<=0 时不纳入。wallMinHits: >0 时将 wall “是否跨阈值”纳入签名；<=0 时不纳入
  */
 export function getStructureSignature(
     structures: Iterable<any>,

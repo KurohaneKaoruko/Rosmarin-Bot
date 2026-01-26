@@ -230,14 +230,14 @@ export const RoleData: RoleConfig = {
 // 根据等级的动态部件
 export const RoleLevelData = {
     'harvester': {
-        1: { bodypart: [[WORK, 2], [MOVE, 2]], num: 0 },
-        2: { bodypart: [[WORK, 4], [CARRY, 1], [MOVE, 1]], num: 0 },
-        3: { bodypart: [[WORK, 5], [CARRY, 1], [MOVE, 2]], num: 0 },
-        4: { bodypart: [[WORK, 5], [CARRY, 2], [MOVE, 3]], num: 0 },
-        5: { bodypart: [[WORK, 8], [CARRY, 4], [MOVE, 4]], num: 0 },
-        6: { bodypart: [[WORK, 8], [CARRY, 4], [MOVE, 4]], num: 0 },
-        7: { bodypart: [[WORK, 10], [CARRY, 4], [MOVE, 5]], num: 0 },
-        8: { bodypart: [[WORK, 10], [CARRY, 4], [MOVE, 5]], num: 0,
+        1: { bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]], num: 0 },
+        2: { bodypart: [[WORK, 3], [CARRY, 1], [MOVE, 1]], num: 0 },
+        3: { bodypart: [[WORK, 5], [CARRY, 1], [MOVE, 3]], num: 0 },
+        4: { bodypart: [[WORK, 6], [CARRY, 1], [MOVE, 3]], num: 0 },
+        5: { bodypart: [[WORK, 8], [CARRY, 2], [MOVE, 4]], num: 0 },
+        6: { bodypart: [[WORK, 10], [CARRY, 2], [MOVE, 5]], num: 0 },
+        7: { bodypart: [[WORK, 10], [CARRY, 2], [MOVE, 5]], num: 0 },
+        8: { bodypart: [[WORK, 10], [CARRY, 2], [MOVE, 5]], num: 0,
              upbodypart: [[WORK, 20], [CARRY, 4], [MOVE, 10]] },
     },
     'carrier': {
