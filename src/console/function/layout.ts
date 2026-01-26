@@ -26,7 +26,7 @@ export default {
             return OK;
         },
         // 开关自动建筑
-        auto(roomName: string) {
+        auto(roomName: string, enable?: boolean) {
             const room = Game.rooms[roomName];
             const BotMemRooms = Memory['RoomControlData'];
             if (!room || !room.my || !BotMemRooms[roomName]) {
@@ -41,7 +41,7 @@ export default {
                 return Error(`房间  ${roomName} 未设置布局中心。`);
             }
             const memory = BotMemRooms[roomName];
-            memory.autobuild = !memory.autobuild;
+            memory.autobuild = enable ?? !memory.autobuild;
             global.log(`已${memory.autobuild ? '开启' : '关闭'} ${roomName} 的自动建筑.`);
             return OK;
         },
@@ -52,14 +52,21 @@ export default {
             return OK;
         },
         // 构建布局
-        build(roomName: string) {
+        // overwriteMemory: 是否覆盖已有布局 memory（默认不覆盖，避免误操作）
+        build(roomName: string, overwriteMemory: boolean = false) {
             const BotMemRooms = Memory['RoomControlData'];
             if (!BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 未添加到控制列表。`);
             }
+            if (!Memory['LayoutData']) Memory['LayoutData'] = {};
             const layoutMemory = Memory['LayoutData'][roomName];
             if (layoutMemory && Object.keys(layoutMemory).length) {
-                console.log(`房间 ${roomName} 的布局memory已存在，将覆盖原memory。`);
+                if (!overwriteMemory) {
+                    console.log(`房间 ${roomName} 的布局memory已存在，未开启覆盖，已取消本次生成。`);
+                    console.log(`如需覆盖，请执行 layout.build('${roomName}', true)`);
+                    return Error('布局Memory已存在');
+                }
+                console.log(`房间 ${roomName} 的布局memory已存在，已开启覆盖，将删除并重新生成。`);
                 delete Memory['LayoutData'][roomName];
             }
             const layoutType = BotMemRooms[roomName]['layout'];

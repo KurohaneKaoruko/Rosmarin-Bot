@@ -18,7 +18,7 @@ const Base = {
             // 构建布局
             global.layout.build(roomName);
             // 开启自动建造
-            global.layout.auto(roomName);
+            global.layout.auto(roomName, true);
             return OK;
         },
     },
