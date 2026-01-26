@@ -53,9 +53,9 @@
 // DD 系统使用的 segment ID
 const DD_SEGMENT_ID = 98
 const DD_HISTORY_SEGMENT_ID = 99
-const DEFAULT_KEY = 'dDomination'
 const POLL_INTERVAL = 3 // 每 3 tick 请求一次
 const HISTORY_RETENTION = 1000 // 历史记录保留 1000 tick
+const DEFAULT_SECRET_KEY = 'dd3_default_secret_key_change_me_32'
 
 // 消息接口
 interface DDMessage {
@@ -63,17 +63,18 @@ interface DDMessage {
     msg: string         // 消息内容
     time: number        // 游戏时间戳
     to?: string // 指定接收人
+    id: string // 消息唯一标识
 }
 
-// 内存扩展
-// 内存扩展
 interface DDMemory {
     lastSendTick?: number
     nextIndex?: number
     watchedIds?: string[]
     lastAlert?: Record<string, number>
     username?: string // 缓存自己的名字
-    secretKey?: string // 私有通讯密钥
+    secretKey?: string // 私有通讯密钥（3.0 起必须设置，否则不收发通讯）
+    seq?: number // 本地发送自增序列（用于生成更稳定的消息 id）
+    keyWarned?: boolean // 是否提示过默认密钥风险
 }
 
 // ==================== Global Cache & Buffer ====================
@@ -128,60 +129,376 @@ function initCommands() {
 // ==================== 加密/解密 ====================
 
 function getCipherKey(): string {
-    if (Memory.dd && Memory.dd.secretKey) return Memory.dd.secretKey
-    return DEFAULT_KEY
-}
-
-// 简单的 XOR 加密/解密
-function xorCipher(text: string, key: string): string {
-    let result = ''
-    for (let i = 0; i < text.length; i++) {
-        result += String.fromCharCode(text.charCodeAt(i) ^ key.charCodeAt(i % key.length))
+    const mem = getDDMemory()
+    const key = mem.secretKey
+    if (key && key.length >= 16) return key
+    if (!mem.secretKey) {
+        mem.secretKey = DEFAULT_SECRET_KEY
+        cachedSecretKey = null
+        cachedEncKey = null
+        cachedMacKey = null
+        if (!mem.keyWarned) {
+            mem.keyWarned = true
+            console.log('[DD] 已自动设置默认私钥。为确保安全，请尽快使用 dd.genKey() 生成新私钥并同步给盟友。')
+        }
+        return mem.secretKey
     }
-    return result
+    return ''
 }
 
-// 这里的 XOR 产生的是 binary string，直接 Base64 可能会有问题，
-// 我们简单点，直接把 charCode 转 hex string，虽然体积大一倍但绝对安全且兼容
-function toHex(str: string): string {
-    let hex = ''
+// 3.0 协议：dd3:nonce.cipher.tag
+// - nonce: 12 bytes base64
+// - cipher: ChaCha20 加密后的 ciphertext base64
+// - tag: BLAKE2s(keyed) 16 bytes，用于校验消息完整性与密钥正确性
+const DD_V3_PREFIX = 'dd3:'
+const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+const BASE64_LOOKUP = (() => {
+    const table = new Int16Array(128)
+    table.fill(-1)
+    for (let i = 0; i < BASE64_ALPHABET.length; i++) {
+        table[BASE64_ALPHABET.charCodeAt(i)] = i
+    }
+    return table
+})()
+
+function generateSecretKey(length: number = 32): string {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_'
+    let out = ''
+    let x = ((Math.random() * 0xffffffff) >>> 0) ^ Game.time
+    for (let i = 0; i < length; i++) {
+        x ^= (x << 13) >>> 0
+        x ^= (x >>> 17) >>> 0
+        x ^= (x << 5) >>> 0
+        const idx = x % chars.length
+        out += chars[idx]
+    }
+    return out
+}
+
+function utf8Encode(str: string): Uint8Array {
+    const bytes: number[] = []
     for (let i = 0; i < str.length; i++) {
-        hex += ('000' + str.charCodeAt(i).toString(16)).slice(-4)
+        let codePoint = str.charCodeAt(i)
+        if (codePoint >= 0xd800 && codePoint <= 0xdbff && i + 1 < str.length) {
+            const next = str.charCodeAt(i + 1)
+            if (next >= 0xdc00 && next <= 0xdfff) {
+                codePoint = 0x10000 + ((codePoint - 0xd800) << 10) + (next - 0xdc00)
+                i++
+            }
+        }
+        if (codePoint <= 0x7f) {
+            bytes.push(codePoint)
+        } else if (codePoint <= 0x7ff) {
+            bytes.push(0xc0 | (codePoint >> 6))
+            bytes.push(0x80 | (codePoint & 0x3f))
+        } else if (codePoint <= 0xffff) {
+            bytes.push(0xe0 | (codePoint >> 12))
+            bytes.push(0x80 | ((codePoint >> 6) & 0x3f))
+            bytes.push(0x80 | (codePoint & 0x3f))
+        } else {
+            bytes.push(0xf0 | (codePoint >> 18))
+            bytes.push(0x80 | ((codePoint >> 12) & 0x3f))
+            bytes.push(0x80 | ((codePoint >> 6) & 0x3f))
+            bytes.push(0x80 | (codePoint & 0x3f))
+        }
     }
-    return hex
+    return new Uint8Array(bytes)
 }
 
-function fromHex(hex: string): string {
-    let str = ''
-    for (let i = 0; i < hex.length; i += 4) {
-        str += String.fromCharCode(parseInt(hex.substr(i, 4), 16))
+function utf8Decode(bytes: Uint8Array): string {
+    let out = ''
+    for (let i = 0; i < bytes.length; ) {
+        const b0 = bytes[i++]
+        if (b0 < 0x80) {
+            out += String.fromCharCode(b0)
+            continue
+        }
+        if ((b0 & 0xe0) === 0xc0) {
+            const b1 = bytes[i++] & 0x3f
+            const cp = ((b0 & 0x1f) << 6) | b1
+            out += String.fromCharCode(cp)
+            continue
+        }
+        if ((b0 & 0xf0) === 0xe0) {
+            const b1 = bytes[i++] & 0x3f
+            const b2 = bytes[i++] & 0x3f
+            const cp = ((b0 & 0x0f) << 12) | (b1 << 6) | b2
+            out += String.fromCharCode(cp)
+            continue
+        }
+        const b1 = bytes[i++] & 0x3f
+        const b2 = bytes[i++] & 0x3f
+        const b3 = bytes[i++] & 0x3f
+        let cp = ((b0 & 0x07) << 18) | (b1 << 12) | (b2 << 6) | b3
+        cp -= 0x10000
+        out += String.fromCharCode(0xd800 + (cp >> 10), 0xdc00 + (cp & 0x3ff))
     }
-    return str
+    return out
 }
 
-/**
- * 加密 (指定 Key，默认使用首选 Key)
- */
-function encrypt(text: string, key?: string): string {
+function base64Encode(bytes: Uint8Array): string {
+    let out = ''
+    for (let i = 0; i < bytes.length; i += 3) {
+        const b0 = bytes[i]
+        const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0
+        const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0
+        const n = (b0 << 16) | (b1 << 8) | b2
+        out += BASE64_ALPHABET[(n >> 18) & 63]
+        out += BASE64_ALPHABET[(n >> 12) & 63]
+        out += i + 1 < bytes.length ? BASE64_ALPHABET[(n >> 6) & 63] : '='
+        out += i + 2 < bytes.length ? BASE64_ALPHABET[n & 63] : '='
+    }
+    return out
+}
+
+function base64Decode(input: string): Uint8Array {
+    const clean = input.replace(/[^A-Za-z0-9+/=]/g, '')
+    const bytes: number[] = []
+    for (let i = 0; i < clean.length; i += 4) {
+        const c0 = clean[i]
+        const c1 = clean[i + 1]
+        const c2 = clean[i + 2]
+        const c3 = clean[i + 3]
+        if (!c0 || !c1) break
+        const n0 = BASE64_LOOKUP[c0.charCodeAt(0)]
+        const n1 = BASE64_LOOKUP[c1.charCodeAt(0)]
+        if (n0 < 0 || n1 < 0) break
+        const n2 = c2 === '=' ? 0 : BASE64_LOOKUP[c2.charCodeAt(0)]
+        const n3 = c3 === '=' ? 0 : BASE64_LOOKUP[c3.charCodeAt(0)]
+        if (n2 < 0 || n3 < 0) break
+        const n = (n0 << 18) | (n1 << 12) | (n2 << 6) | n3
+        bytes.push((n >> 16) & 0xff)
+        if (c2 !== '=') bytes.push((n >> 8) & 0xff)
+        if (c3 !== '=') bytes.push(n & 0xff)
+    }
+    return new Uint8Array(bytes)
+}
+
+interface DDPackedV3 {
+    v: 3
+    i: string
+    t: number
+    f: string
+    o?: string
+    m: string
+}
+
+function readU32LE(bytes: Uint8Array, offset: number): number {
+    return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0
+}
+
+function writeU32LE(bytes: Uint8Array, offset: number, value: number): void {
+    bytes[offset] = value & 0xff
+    bytes[offset + 1] = (value >>> 8) & 0xff
+    bytes[offset + 2] = (value >>> 16) & 0xff
+    bytes[offset + 3] = (value >>> 24) & 0xff
+}
+
+function rotr32(x: number, n: number): number {
+    return ((x >>> n) | (x << (32 - n))) >>> 0
+}
+
+function blake2s(input: Uint8Array, key: Uint8Array | null, outLen: number): Uint8Array {
+    const IV = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19])
+    const SIGMA = [
+        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+        [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
+        [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
+        [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
+        [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
+        [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
+        [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
+        [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
+        [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
+        [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
+    ] as const
+
+    const keyLen = key ? key.length : 0
+    const h = new Uint32Array(8)
+    for (let i = 0; i < 8; i++) h[i] = IV[i]
+    h[0] ^= 0x01010000 ^ (keyLen << 8) ^ outLen
+
+    const block = new Uint8Array(64)
+    let offset = 0
+    let t0 = 0
+    let t1 = 0
+
+    const G = (v: Uint32Array, a: number, b: number, c: number, d: number, x: number, y: number) => {
+        v[a] = (v[a] + v[b] + x) >>> 0
+        v[d] = rotr32(v[d] ^ v[a], 16)
+        v[c] = (v[c] + v[d]) >>> 0
+        v[b] = rotr32(v[b] ^ v[c], 12)
+        v[a] = (v[a] + v[b] + y) >>> 0
+        v[d] = rotr32(v[d] ^ v[a], 8)
+        v[c] = (v[c] + v[d]) >>> 0
+        v[b] = rotr32(v[b] ^ v[c], 7)
+    }
+
+    const compress = (blockBytes: Uint8Array, isLast: boolean) => {
+        const m = new Uint32Array(16)
+        for (let i = 0; i < 16; i++) m[i] = readU32LE(blockBytes, i * 4)
+        const v = new Uint32Array(16)
+        for (let i = 0; i < 8; i++) v[i] = h[i]
+        for (let i = 0; i < 8; i++) v[i + 8] = IV[i]
+        v[12] ^= t0
+        v[13] ^= t1
+        if (isLast) v[14] = (~v[14]) >>> 0
+        for (let r = 0; r < 10; r++) {
+            const s = SIGMA[r]
+            G(v, 0, 4, 8, 12, m[s[0]], m[s[1]])
+            G(v, 1, 5, 9, 13, m[s[2]], m[s[3]])
+            G(v, 2, 6, 10, 14, m[s[4]], m[s[5]])
+            G(v, 3, 7, 11, 15, m[s[6]], m[s[7]])
+            G(v, 0, 5, 10, 15, m[s[8]], m[s[9]])
+            G(v, 1, 6, 11, 12, m[s[10]], m[s[11]])
+            G(v, 2, 7, 8, 13, m[s[12]], m[s[13]])
+            G(v, 3, 4, 9, 14, m[s[14]], m[s[15]])
+        }
+        for (let i = 0; i < 8; i++) h[i] = (h[i] ^ v[i] ^ v[i + 8]) >>> 0
+    }
+
+    if (key && keyLen > 0) {
+        block.fill(0)
+        block.set(key.slice(0, 32))
+        t0 = (t0 + 64) >>> 0
+        if (t0 === 0) t1 = (t1 + 1) >>> 0
+        compress(block, false)
+        block.fill(0)
+    }
+
+    while (offset + 64 <= input.length) {
+        block.set(input.subarray(offset, offset + 64))
+        offset += 64
+        t0 = (t0 + 64) >>> 0
+        if (t0 === 0) t1 = (t1 + 1) >>> 0
+        compress(block, false)
+    }
+
+    const remaining = input.length - offset
+    block.fill(0)
+    if (remaining > 0) block.set(input.subarray(offset))
+    t0 = (t0 + remaining) >>> 0
+    if (t0 < remaining) t1 = (t1 + 1) >>> 0
+    compress(block, true)
+
+    const out = new Uint8Array(outLen)
+    const tmp = new Uint8Array(32)
+    for (let i = 0; i < 8; i++) writeU32LE(tmp, i * 4, h[i])
+    out.set(tmp.subarray(0, outLen))
+    return out
+}
+
+function chacha20Xor(plaintext: Uint8Array, key: Uint8Array, nonce: Uint8Array, counter: number): Uint8Array {
+    const out = new Uint8Array(plaintext.length)
+    const state = new Uint32Array(16)
+    state[0] = 0x61707865
+    state[1] = 0x3320646e
+    state[2] = 0x79622d32
+    state[3] = 0x6b206574
+    for (let i = 0; i < 8; i++) state[4 + i] = readU32LE(key, i * 4)
+    state[12] = counter >>> 0
+    state[13] = readU32LE(nonce, 0)
+    state[14] = readU32LE(nonce, 4)
+    state[15] = readU32LE(nonce, 8)
+
+    const working = new Uint32Array(16)
+    const block = new Uint8Array(64)
+
+    const quarter = (x: Uint32Array, a: number, b: number, c: number, d: number) => {
+        x[a] = (x[a] + x[b]) >>> 0; x[d] ^= x[a]; x[d] = rotr32(x[d], 16)
+        x[c] = (x[c] + x[d]) >>> 0; x[b] ^= x[c]; x[b] = rotr32(x[b], 12)
+        x[a] = (x[a] + x[b]) >>> 0; x[d] ^= x[a]; x[d] = rotr32(x[d], 8)
+        x[c] = (x[c] + x[d]) >>> 0; x[b] ^= x[c]; x[b] = rotr32(x[b], 7)
+    }
+
+    let offset = 0
+    while (offset < plaintext.length) {
+        for (let i = 0; i < 16; i++) working[i] = state[i]
+        for (let i = 0; i < 10; i++) {
+            quarter(working, 0, 4, 8, 12)
+            quarter(working, 1, 5, 9, 13)
+            quarter(working, 2, 6, 10, 14)
+            quarter(working, 3, 7, 11, 15)
+            quarter(working, 0, 5, 10, 15)
+            quarter(working, 1, 6, 11, 12)
+            quarter(working, 2, 7, 8, 13)
+            quarter(working, 3, 4, 9, 14)
+        }
+        for (let i = 0; i < 16; i++) working[i] = (working[i] + state[i]) >>> 0
+        for (let i = 0; i < 16; i++) writeU32LE(block, i * 4, working[i])
+        const len = Math.min(64, plaintext.length - offset)
+        for (let i = 0; i < len; i++) out[offset + i] = plaintext[offset + i] ^ block[i]
+        offset += len
+        state[12] = (state[12] + 1) >>> 0
+    }
+    return out
+}
+
+let cachedSecretKey: string | null = null
+let cachedEncKey: Uint8Array | null = null
+let cachedMacKey: Uint8Array | null = null
+function getCryptoKeys(secretKey: string): { encKey: Uint8Array; macKey: Uint8Array } {
+    if (cachedSecretKey === secretKey && cachedEncKey && cachedMacKey) return { encKey: cachedEncKey, macKey: cachedMacKey }
+    const sk = blake2s(utf8Encode(secretKey), null, 32)
+    cachedEncKey = blake2s(utf8Encode('dd3-enc'), sk, 32)
+    cachedMacKey = blake2s(utf8Encode('dd3-mac'), sk, 32)
+    cachedSecretKey = secretKey
+    return { encKey: cachedEncKey, macKey: cachedMacKey }
+}
+
+function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
+    if (a.length !== b.length) return false
+    let diff = 0
+    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
+    return diff === 0
+}
+
+function makeNonce12(seed: number): Uint8Array {
+    let x = seed >>> 0
+    const out = new Uint8Array(12)
+    for (let i = 0; i < out.length; i++) {
+        x ^= (x << 13) >>> 0
+        x ^= (x >>> 17) >>> 0
+        x ^= (x << 5) >>> 0
+        out[i] = x & 0xff
+    }
+    return out
+}
+
+function encodeDD3(packed: DDPackedV3, secretKey: string, nonce: Uint8Array): string {
+    const { encKey, macKey } = getCryptoKeys(secretKey)
+    const plain = utf8Encode(JSON.stringify(packed))
+    const cipher = chacha20Xor(plain, encKey, nonce, 1)
+    const macInput = new Uint8Array(nonce.length + cipher.length)
+    macInput.set(nonce, 0)
+    macInput.set(cipher, nonce.length)
+    const tag = blake2s(macInput, macKey, 16)
+    return `${DD_V3_PREFIX}${base64Encode(nonce)}.${base64Encode(cipher)}.${base64Encode(tag)}`
+}
+
+function decodeDD3(encrypted: string, secretKey: string): DDPackedV3 | null {
+    if (!encrypted.startsWith(DD_V3_PREFIX)) return null
+    const body = encrypted.slice(DD_V3_PREFIX.length)
+    const parts = body.split('.')
+    if (parts.length !== 3) return null
+    const nonce = base64Decode(parts[0])
+    const cipher = base64Decode(parts[1])
+    const tag = base64Decode(parts[2])
+    if (nonce.length !== 12 || tag.length !== 16) return null
+    const { encKey, macKey } = getCryptoKeys(secretKey)
+    const macInput = new Uint8Array(nonce.length + cipher.length)
+    macInput.set(nonce, 0)
+    macInput.set(cipher, nonce.length)
+    const expected = blake2s(macInput, macKey, 16)
+    if (!timingSafeEqual(tag, expected)) return null
+    const plain = chacha20Xor(cipher, encKey, nonce, 1)
     try {
-        const k = key || getCipherKey()
-        const xored = xorCipher(text, k)
-        return toHex(xored)
-    } catch (e) {
-        return ''
-    }
-}
-
-/**
- * 解密 (指定 Key，默认使用首选 Key)
- */
-function decrypt(text: string, key?: string): string {
-    try {
-        if (!/^[0-9a-fA-F]+$/.test(text) || text.length % 4 !== 0) return text
-        const xored = fromHex(text)
-        return xorCipher(xored, key || getCipherKey())
-    } catch (e) {
-        return text
+        const obj = JSON.parse(utf8Decode(plain))
+        if (!obj || obj.v !== 3 || !obj.i || !obj.t || !obj.f || !obj.m) return null
+        return obj as DDPackedV3
+    } catch {
+        return null
     }
 }
 
@@ -219,23 +536,31 @@ function getMyUsername(): string | undefined {
  */
 function sendMessage(message: string, to?: string): string {
     try {
-        // 1. 构造消息
-        const msg: DDMessage = {
-            from: 'me',
-            msg: message,
-            time: Game.time
-        }
-        if (to && to !== 'all') msg.to = to
-
-        // 2. 决定密钥
+        const myName = getMyUsername()
+        if (!myName) return '[DD] 发送失败: 无法获取自己的用户名'
+        const mem = getDDMemory()
+        mem.seq = (mem.seq || 0) + 1
+        const id = `${Game.time}_${mem.seq.toString(36)}`
         const key = getCipherKey()
-        const encryptedData = encrypt(JSON.stringify(msg), key)
+        if (!key) return '[DD] 发送失败: 未设置私有密钥或密钥长度不足（至少 16 字符）'
+
+        const seed = ((Math.random() * 0xffffffff) >>> 0) ^ Game.time ^ mem.seq
+        const nonce = makeNonce12(seed)
+        const packed: DDPackedV3 = {
+            v: 3,
+            i: id,
+            t: Game.time,
+            f: myName,
+            m: message
+        }
+        if (to && to !== 'all') packed.o = to
+        const encryptedData = encodeDD3(packed, key, nonce)
 
         // 3. 入队
         currentTickBuffer.push(encryptedData)
 
         // 4. 更新发送时间
-        getDDMemory().lastSendTick = Game.time
+        mem.lastSendTick = Game.time
 
         return `[DD] 消息已入队${(to && to !== 'all') ? ' -> ' + to : ''}: "${message}"`
     } catch (e) {
@@ -267,31 +592,24 @@ function flushMessages(): void {
     currentTickBuffer = []
 }
 
-/**
- * 尝试解密单条数据 (尝试所有可用 Keys)
- */
-function tryDecryptAndParse(encrypted: string): DDMessage | null {
-    const keysToTry = [DEFAULT_KEY]
-    if (Memory.dd && Memory.dd.secretKey && Memory.dd.secretKey !== DEFAULT_KEY) {
-        keysToTry.unshift(Memory.dd.secretKey) // 优先尝试私钥
+function tryDecodeForeignMessage(encrypted: string, foreignUsername: string): DDMessage | null {
+    const key = getCipherKey()
+    if (!key) return null
+    const packed = decodeDD3(encrypted, key)
+    if (!packed) return null
+    if (packed.f !== foreignUsername) return null
+    if (packed.t < Game.time - HISTORY_RETENTION) return null
+    if (packed.o && packed.o !== 'all') {
+        const myName = getMyUsername()
+        if (myName && packed.o !== myName) return null
     }
-
-    for (const key of keysToTry) {
-        try {
-            const temp = decrypt(encrypted, key)
-            const msg = JSON.parse(temp)
-            // 验证格式
-            if (msg && msg.msg && msg.time && msg.from) return msg
-        } catch (e) { }
+    return {
+        id: packed.i,
+        from: foreignUsername,
+        msg: packed.m,
+        time: packed.t,
+        to: packed.o
     }
-
-    // 尝试明文 (旧兼容/未加密)
-    try {
-        const msg = JSON.parse(encrypted)
-        if (msg && msg.msg) return msg
-    } catch (e) { }
-
-    return null
 }
 
 /**
@@ -302,8 +620,9 @@ function processForeignSegment(): void {
     const username = RawMemory.foreignSegment.username
     const rawData = RawMemory.foreignSegment.data
 
-    if (!isWhitelisted(username)) return
+    if (!isCommEnabled(username)) return
     if (!rawData) return
+    if (!getCipherKey()) return
 
     let messages: string[] = []
 
@@ -321,7 +640,7 @@ function processForeignSegment(): void {
 
     // 2. 遍历处理
     for (const encryptedItem of messages) {
-        const msg = tryDecryptAndParse(encryptedItem)
+        const msg = tryDecodeForeignMessage(encryptedItem, username)
 
         if (msg) {
             // 隐私检查
@@ -330,7 +649,7 @@ function processForeignSegment(): void {
                 if (myName && msg.to !== myName) continue // 忽略他人的私信
             }
 
-            const msgId = `${username}_${msg.time}_${msg.msg}`
+            const msgId = `${username}_${msg.id}`
             if (processedMessages.has(msgId)) continue
             processedMessages.add(msgId)
 
@@ -582,6 +901,9 @@ export function checkDDMessages(): void {
     // 0. CPU 保护
     if (Game.cpu.bucket < 500) return
 
+    // 0.1 运行期缓存保护：避免全局去重集合长期增长
+    if (processedMessages.size > 5000) processedMessages.clear()
+
     // 1. 处理接收消息
     processForeignSegment()
 
@@ -684,17 +1006,38 @@ export const ddTools = {
     // --- Security ---
     setKey(key: string): string {
         const mem = getDDMemory()
-        if (!key || key === DEFAULT_KEY) {
+        if (!key) {
             delete mem.secretKey
-            return `[DD] 已恢复默认密钥 (${DEFAULT_KEY})`
+            cachedSecretKey = null
+            cachedEncKey = null
+            cachedMacKey = null
+            return `[DD] 已清除私有密钥（通讯已停用）`
         }
+        if (key.length < 16) return `[DD] 密钥长度不足：至少 16 字符`
         mem.secretKey = key
-        return `[DD] 已设置私有密钥: ${key} (请确保盟友也使用了相同的 Key)`
+        cachedSecretKey = null
+        cachedEncKey = null
+        cachedMacKey = null
+        return `[DD] 已设置私有密钥 (长度: ${key.length})，请确保盟友也使用相同的 Key`
     },
 
     getKey(): string {
         const mem = getDDMemory()
-        return `[DD] 当前密钥: ${mem.secretKey || DEFAULT_KEY} (${mem.secretKey ? '私有' : '默认'})`
+        if (!mem.secretKey) return `[DD] 当前未设置私有密钥（通讯停用）`
+        const tail = mem.secretKey.slice(-4)
+        return `[DD] 当前密钥: ****${tail} (长度: ${mem.secretKey.length})`
+    },
+
+    genKey(length: number = 32): string {
+        const mem = getDDMemory()
+        const len = Math.max(16, Math.min(64, Math.floor(length || 32)))
+        const key = generateSecretKey(len)
+        mem.secretKey = key
+        cachedSecretKey = null
+        cachedEncKey = null
+        cachedMacKey = null
+        mem.keyWarned = true
+        return `[DD] 已生成新私钥: ${key} (长度: ${len})，请同步给盟友`
     },
 
     // --- Whitelist Management ---
@@ -735,14 +1078,16 @@ export const ddTools = {
 
     help(): string {
         return `
-[DD 系统 2.0]
+[DD 系统 3.0]
   dd.add('user', true)  添加好友+开启通讯 (自动问候)
   dd.add('user', false) 添加好友+关闭通讯
   dd.remove('user')     移除好友
   dd.list()             查看列表
   dd.exec('code')       执行指令 (如 war, greet)
-  dd.setKey('key')      设置私有密钥
-  dd.getKey()           查看当前密钥
+  dd.setKey('key')      设置私有密钥 (至少16字符)
+  dd.setKey('')         清除私有密钥 (停用通讯)
+  dd.getKey()           查看当前密钥(脱敏)
+  dd.genKey(32)         生成新私钥并直接启用
   dd.send('msg', 'to?') 发送消息 (支持混发: all/User)
   dd.history()          查看历史
 `.trim()
