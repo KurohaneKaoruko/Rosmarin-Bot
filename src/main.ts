@@ -10,7 +10,6 @@ import { EventModule } from '@/modules/runtime/event';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
 import { GeneratePixel } from '@/modules/runtime/Pixel';
 import { Statistics } from '@/modules/runtime/Statistics'
-import { FlagSpawn } from '@/modules/runtime/flagSpawn';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
@@ -34,7 +33,6 @@ App.on(MemoryInit);     // 初始化内存
 App.on(GlobalInit);     // 全局初始化
 App.on(EventModule);    // 事件模块
 App.on(TeamModule);     // 小队模块
-App.on(FlagSpawn);      // 旗帜触发孵化
 App.on(ResourceManage); // 资源调度管理
 App.on(NukeModule);     // 核弹打击
 App.on(ClearModule);    // 过期数据清理
@@ -53,4 +51,3 @@ export const loop = App.run;
 // export const loop = function() {
 //     profiler.wrap(App.run);
 // }
-

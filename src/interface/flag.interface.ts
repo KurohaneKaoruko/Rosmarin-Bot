@@ -4,5 +4,7 @@ interface Flag {
 
     // 核弹打击旗帜（处理 nuke-* / nuke_*）
     handleNukeFlag(): boolean;
-}
 
+    // 旗帜触发孵化（CLAIM/RESERVE/CLEAN/ACLAIM/AID-*）
+    handleSpawnFlag(): boolean;
+}
