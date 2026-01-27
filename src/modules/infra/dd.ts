@@ -131,26 +131,19 @@ function initCommands() {
 function getCipherKey(): string {
     const mem = getDDMemory()
     const key = mem.secretKey
-    if (key && key.length >= 16) return key
+    if (key === '') return ''
+    if (key) return key
     if (!mem.secretKey) {
         mem.secretKey = DEFAULT_SECRET_KEY
-        cachedSecretKey = null
-        cachedEncKey = null
-        cachedMacKey = null
         if (!mem.keyWarned) {
             mem.keyWarned = true
-            console.log('[DD] 已自动设置默认私钥。为确保安全，请尽快使用 dd.genKey() 生成新私钥并同步给盟友。')
+            console.log('[DD] 已自动设置默认密钥。建议使用 dd.genKey() 生成新密钥并同步给盟友。')
         }
         return mem.secretKey
     }
     return ''
 }
 
-// 3.0 协议：dd3:nonce.cipher.tag
-// - nonce: 12 bytes base64
-// - cipher: ChaCha20 加密后的 ciphertext base64
-// - tag: BLAKE2s(keyed) 16 bytes，用于校验消息完整性与密钥正确性
-const DD_V3_PREFIX = 'dd3:'
 const BASE64_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
 
 const BASE64_LOOKUP = (() => {
@@ -275,14 +268,7 @@ function base64Decode(input: string): Uint8Array {
     return new Uint8Array(bytes)
 }
 
-interface DDPackedV3 {
-    v: 3
-    i: string
-    t: number
-    f: string
-    o?: string
-    m: string
-}
+const DD_V4_PREFIX = 'DD4:'
 
 function readU32LE(bytes: Uint8Array, offset: number): number {
     return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0
@@ -295,216 +281,184 @@ function writeU32LE(bytes: Uint8Array, offset: number, value: number): void {
     bytes[offset + 3] = (value >>> 24) & 0xff
 }
 
-function rotr32(x: number, n: number): number {
-    return ((x >>> n) | (x << (32 - n))) >>> 0
+function readU16LE(bytes: Uint8Array, offset: number): number {
+    return (bytes[offset] | (bytes[offset + 1] << 8)) >>> 0
 }
 
-function blake2s(input: Uint8Array, key: Uint8Array | null, outLen: number): Uint8Array {
-    const IV = new Uint32Array([0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19])
-    const SIGMA = [
-        [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
-        [14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3],
-        [11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4],
-        [7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8],
-        [9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13],
-        [2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9],
-        [12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11],
-        [13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10],
-        [6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5],
-        [10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0],
-    ] as const
+function writeU16LE(bytes: Uint8Array, offset: number, value: number): void {
+    bytes[offset] = value & 0xff
+    bytes[offset + 1] = (value >>> 8) & 0xff
+}
 
-    const keyLen = key ? key.length : 0
-    const h = new Uint32Array(8)
-    for (let i = 0; i < 8; i++) h[i] = IV[i]
-    h[0] ^= 0x01010000 ^ (keyLen << 8) ^ outLen
-
-    const block = new Uint8Array(64)
-    let offset = 0
-    let t0 = 0
-    let t1 = 0
-
-    const G = (v: Uint32Array, a: number, b: number, c: number, d: number, x: number, y: number) => {
-        v[a] = (v[a] + v[b] + x) >>> 0
-        v[d] = rotr32(v[d] ^ v[a], 16)
-        v[c] = (v[c] + v[d]) >>> 0
-        v[b] = rotr32(v[b] ^ v[c], 12)
-        v[a] = (v[a] + v[b] + y) >>> 0
-        v[d] = rotr32(v[d] ^ v[a], 8)
-        v[c] = (v[c] + v[d]) >>> 0
-        v[b] = rotr32(v[b] ^ v[c], 7)
+function fnv1a32(str: string): number {
+    let hash = 2166136261 >>> 0
+    const bytes = utf8Encode(str)
+    for (let i = 0; i < bytes.length; i++) {
+        hash ^= bytes[i]
+        hash = Math.imul(hash, 16777619) >>> 0
     }
+    return hash >>> 0
+}
 
-    const compress = (blockBytes: Uint8Array, isLast: boolean) => {
-        const m = new Uint32Array(16)
-        for (let i = 0; i < 16; i++) m[i] = readU32LE(blockBytes, i * 4)
-        const v = new Uint32Array(16)
-        for (let i = 0; i < 8; i++) v[i] = h[i]
-        for (let i = 0; i < 8; i++) v[i + 8] = IV[i]
-        v[12] ^= t0
-        v[13] ^= t1
-        if (isLast) v[14] = (~v[14]) >>> 0
-        for (let r = 0; r < 10; r++) {
-            const s = SIGMA[r]
-            G(v, 0, 4, 8, 12, m[s[0]], m[s[1]])
-            G(v, 1, 5, 9, 13, m[s[2]], m[s[3]])
-            G(v, 2, 6, 10, 14, m[s[4]], m[s[5]])
-            G(v, 3, 7, 11, 15, m[s[6]], m[s[7]])
-            G(v, 0, 5, 10, 15, m[s[8]], m[s[9]])
-            G(v, 1, 6, 11, 12, m[s[10]], m[s[11]])
-            G(v, 2, 7, 8, 13, m[s[12]], m[s[13]])
-            G(v, 3, 4, 9, 14, m[s[14]], m[s[15]])
+function splitmix32(seed: number): number {
+    let z = (seed + 0x9e3779b9) >>> 0
+    z = Math.imul(z ^ (z >>> 16), 0x85ebca6b) >>> 0
+    z = Math.imul(z ^ (z >>> 13), 0xc2b2ae35) >>> 0
+    return (z ^ (z >>> 16)) >>> 0
+}
+
+function xorshift32(x: number): number {
+    x >>>= 0
+    x ^= (x << 13) >>> 0
+    x ^= (x >>> 17) >>> 0
+    x ^= (x << 5) >>> 0
+    return x >>> 0
+}
+
+let crc32Table: Uint32Array | null = null
+function getCrc32Table(): Uint32Array {
+    if (crc32Table) return crc32Table
+    const table = new Uint32Array(256)
+    for (let i = 0; i < 256; i++) {
+        let c = i
+        for (let j = 0; j < 8; j++) {
+            c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1)
         }
-        for (let i = 0; i < 8; i++) h[i] = (h[i] ^ v[i] ^ v[i + 8]) >>> 0
+        table[i] = c >>> 0
     }
-
-    if (key && keyLen > 0) {
-        block.fill(0)
-        block.set(key.slice(0, 32))
-        t0 = (t0 + 64) >>> 0
-        if (t0 === 0) t1 = (t1 + 1) >>> 0
-        compress(block, false)
-        block.fill(0)
-    }
-
-    while (offset + 64 <= input.length) {
-        block.set(input.subarray(offset, offset + 64))
-        offset += 64
-        t0 = (t0 + 64) >>> 0
-        if (t0 === 0) t1 = (t1 + 1) >>> 0
-        compress(block, false)
-    }
-
-    const remaining = input.length - offset
-    block.fill(0)
-    if (remaining > 0) block.set(input.subarray(offset))
-    t0 = (t0 + remaining) >>> 0
-    if (t0 < remaining) t1 = (t1 + 1) >>> 0
-    compress(block, true)
-
-    const out = new Uint8Array(outLen)
-    const tmp = new Uint8Array(32)
-    for (let i = 0; i < 8; i++) writeU32LE(tmp, i * 4, h[i])
-    out.set(tmp.subarray(0, outLen))
-    return out
+    crc32Table = table
+    return table
 }
 
-function chacha20Xor(plaintext: Uint8Array, key: Uint8Array, nonce: Uint8Array, counter: number): Uint8Array {
-    const out = new Uint8Array(plaintext.length)
-    const state = new Uint32Array(16)
-    state[0] = 0x61707865
-    state[1] = 0x3320646e
-    state[2] = 0x79622d32
-    state[3] = 0x6b206574
-    for (let i = 0; i < 8; i++) state[4 + i] = readU32LE(key, i * 4)
-    state[12] = counter >>> 0
-    state[13] = readU32LE(nonce, 0)
-    state[14] = readU32LE(nonce, 4)
-    state[15] = readU32LE(nonce, 8)
+function crc32(bytes: Uint8Array, offset: number = 0, length: number = bytes.length - offset): number {
+    const table = getCrc32Table()
+    let crc = 0xffffffff >>> 0
+    const end = offset + length
+    for (let i = offset; i < end; i++) {
+        crc = (crc >>> 8) ^ table[(crc ^ bytes[i]) & 0xff]
+    }
+    return (crc ^ 0xffffffff) >>> 0
+}
 
-    const working = new Uint32Array(16)
-    const block = new Uint8Array(64)
+export type DD4LiteEncodeOptions = {
+    secretKey: string
+    nonceSeed: number
+    time: number
+    seq: number
+    to?: string | 'all'
+    enableCrc?: boolean
+}
 
-    const quarter = (x: Uint32Array, a: number, b: number, c: number, d: number) => {
-        x[a] = (x[a] + x[b]) >>> 0; x[d] ^= x[a]; x[d] = rotr32(x[d], 16)
-        x[c] = (x[c] + x[d]) >>> 0; x[b] ^= x[c]; x[b] = rotr32(x[b], 12)
-        x[a] = (x[a] + x[b]) >>> 0; x[d] ^= x[a]; x[d] = rotr32(x[d], 8)
-        x[c] = (x[c] + x[d]) >>> 0; x[b] ^= x[c]; x[b] = rotr32(x[b], 7)
+export type DD4LiteDecoded = {
+    time: number
+    seq: number
+    to?: string
+    msg: string
+}
+
+export function encodeDD4Lite(message: string, opts: DD4LiteEncodeOptions): string {
+    const enableCrc = opts.enableCrc !== false
+    const to = opts.to && opts.to !== 'all' ? opts.to : undefined
+    const toBytes = to ? utf8Encode(to) : null
+    const msgBytes = utf8Encode(message)
+    const toLen = toBytes ? Math.min(31, toBytes.length) : 0
+    const msgLen = Math.min(1000, msgBytes.length)
+
+    const headerLen = 15
+    const cipherLen = toLen + msgLen
+    const totalLen = headerLen + cipherLen + (enableCrc ? 4 : 0)
+    const out = new Uint8Array(totalLen)
+
+    const flags = toLen > 0 ? 1 : 0
+    const time = opts.time >>> 0
+    const seq = (opts.seq & 0xffff) >>> 0
+    const nonce = splitmix32((opts.nonceSeed ^ time ^ seq) >>> 0)
+
+    out[0] = 4
+    out[1] = flags
+    writeU32LE(out, 2, time)
+    writeU16LE(out, 6, seq)
+    out[8] = toLen
+    writeU16LE(out, 9, msgLen)
+    writeU32LE(out, 11, nonce)
+
+    let state = (fnv1a32(opts.secretKey) ^ nonce ^ time ^ ((seq << 16) >>> 0)) >>> 0
+    state = (state | 1) >>> 0
+
+    let cipherOff = headerLen
+    for (let i = 0; i < cipherLen; i++) {
+        if ((i & 3) === 0) state = xorshift32(state)
+        const keyByte = (state >>> (8 * (i & 3))) & 0xff
+        let plainByte: number
+        if (i < toLen) plainByte = (toBytes as Uint8Array)[i]
+        else plainByte = msgBytes[i - toLen]
+        out[cipherOff + i] = plainByte ^ keyByte
     }
 
-    let offset = 0
-    while (offset < plaintext.length) {
-        for (let i = 0; i < 16; i++) working[i] = state[i]
-        for (let i = 0; i < 10; i++) {
-            quarter(working, 0, 4, 8, 12)
-            quarter(working, 1, 5, 9, 13)
-            quarter(working, 2, 6, 10, 14)
-            quarter(working, 3, 7, 11, 15)
-            quarter(working, 0, 5, 10, 15)
-            quarter(working, 1, 6, 11, 12)
-            quarter(working, 2, 7, 8, 13)
-            quarter(working, 3, 4, 9, 14)
-        }
-        for (let i = 0; i < 16; i++) working[i] = (working[i] + state[i]) >>> 0
-        for (let i = 0; i < 16; i++) writeU32LE(block, i * 4, working[i])
-        const len = Math.min(64, plaintext.length - offset)
-        for (let i = 0; i < len; i++) out[offset + i] = plaintext[offset + i] ^ block[i]
-        offset += len
-        state[12] = (state[12] + 1) >>> 0
+    if (enableCrc) {
+        const c = crc32(out, 0, headerLen + cipherLen)
+        writeU32LE(out, headerLen + cipherLen, c)
     }
-    return out
+
+    return `${DD_V4_PREFIX}${base64Encode(out)}`
 }
 
-let cachedSecretKey: string | null = null
-let cachedEncKey: Uint8Array | null = null
-let cachedMacKey: Uint8Array | null = null
-function getCryptoKeys(secretKey: string): { encKey: Uint8Array; macKey: Uint8Array } {
-    if (cachedSecretKey === secretKey && cachedEncKey && cachedMacKey) return { encKey: cachedEncKey, macKey: cachedMacKey }
-    const sk = blake2s(utf8Encode(secretKey), null, 32)
-    cachedEncKey = blake2s(utf8Encode('dd3-enc'), sk, 32)
-    cachedMacKey = blake2s(utf8Encode('dd3-mac'), sk, 32)
-    cachedSecretKey = secretKey
-    return { encKey: cachedEncKey, macKey: cachedMacKey }
-}
-
-function timingSafeEqual(a: Uint8Array, b: Uint8Array): boolean {
-    if (a.length !== b.length) return false
-    let diff = 0
-    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i]
-    return diff === 0
-}
-
-function makeNonce12(seed: number): Uint8Array {
-    let x = seed >>> 0
-    const out = new Uint8Array(12)
-    for (let i = 0; i < out.length; i++) {
-        x ^= (x << 13) >>> 0
-        x ^= (x >>> 17) >>> 0
-        x ^= (x << 5) >>> 0
-        out[i] = x & 0xff
-    }
-    return out
-}
-
-function encodeDD3(packed: DDPackedV3, secretKey: string, nonce: Uint8Array): string {
-    const { encKey, macKey } = getCryptoKeys(secretKey)
-    const plain = utf8Encode(JSON.stringify(packed))
-    const cipher = chacha20Xor(plain, encKey, nonce, 1)
-    const macInput = new Uint8Array(nonce.length + cipher.length)
-    macInput.set(nonce, 0)
-    macInput.set(cipher, nonce.length)
-    const tag = blake2s(macInput, macKey, 16)
-    return `${DD_V3_PREFIX}${base64Encode(nonce)}.${base64Encode(cipher)}.${base64Encode(tag)}`
-}
-
-function decodeDD3(encrypted: string, secretKey: string): DDPackedV3 | null {
-    if (!encrypted.startsWith(DD_V3_PREFIX)) return null
-    const body = encrypted.slice(DD_V3_PREFIX.length)
-    const parts = body.split('.')
-    if (parts.length !== 3) return null
-    const nonce = base64Decode(parts[0])
-    const cipher = base64Decode(parts[1])
-    const tag = base64Decode(parts[2])
-    if (nonce.length !== 12 || tag.length !== 16) return null
-    const { encKey, macKey } = getCryptoKeys(secretKey)
-    const macInput = new Uint8Array(nonce.length + cipher.length)
-    macInput.set(nonce, 0)
-    macInput.set(cipher, nonce.length)
-    const expected = blake2s(macInput, macKey, 16)
-    if (!timingSafeEqual(tag, expected)) return null
-    const plain = chacha20Xor(cipher, encKey, nonce, 1)
+export function decodeDD4Lite(encrypted: string, opts: { secretKey: string; now: number; enableCrc?: boolean }): DD4LiteDecoded | null {
+    if (!encrypted.startsWith(DD_V4_PREFIX)) return null
+    const body = encrypted.slice(DD_V4_PREFIX.length)
+    let bytes: Uint8Array
     try {
-        const obj = JSON.parse(utf8Decode(plain))
-        if (!obj || obj.v !== 3 || !obj.i || !obj.t || !obj.f || !obj.m) return null
-        return obj as DDPackedV3
+        bytes = base64Decode(body)
     } catch {
         return null
     }
+
+    const headerLen = 15
+    if (bytes.length < headerLen) return null
+    if (bytes[0] !== 4) return null
+
+    const flags = bytes[1] >>> 0
+    const time = readU32LE(bytes, 2)
+    const seq = readU16LE(bytes, 6) & 0xffff
+    const toLen = bytes[8] >>> 0
+    const msgLen = readU16LE(bytes, 9) >>> 0
+    const nonce = readU32LE(bytes, 11)
+
+    if (toLen > 31) return null
+    if (msgLen > 1000) return null
+    if ((flags & 1) === 0 && toLen !== 0) return null
+
+    const cipherLen = toLen + msgLen
+    const withCrcLen = headerLen + cipherLen + 4
+    const withoutCrcLen = headerLen + cipherLen
+    const hasCrc = bytes.length === withCrcLen
+    if (bytes.length !== withCrcLen && bytes.length !== withoutCrcLen) return null
+
+    const enableCrc = opts.enableCrc !== false
+    if (enableCrc && hasCrc) {
+        const expected = readU32LE(bytes, headerLen + cipherLen)
+        const actual = crc32(bytes, 0, headerLen + cipherLen)
+        if (expected !== actual) return null
+    }
+
+    let state = (fnv1a32(opts.secretKey) ^ nonce ^ time ^ (((seq & 0xffff) << 16) >>> 0)) >>> 0
+    state = (state | 1) >>> 0
+
+    const plain = new Uint8Array(cipherLen)
+    const cipherOff = headerLen
+    for (let i = 0; i < cipherLen; i++) {
+        if ((i & 3) === 0) state = xorshift32(state)
+        const keyByte = (state >>> (8 * (i & 3))) & 0xff
+        plain[i] = bytes[cipherOff + i] ^ keyByte
+    }
+
+    const toBytes = toLen ? plain.subarray(0, toLen) : null
+    const msgBytes2 = plain.subarray(toLen, toLen + msgLen)
+    const to = toBytes && toBytes.length ? utf8Decode(toBytes) : undefined
+    const msg = utf8Decode(msgBytes2)
+
+    return { time, seq, to, msg }
 }
-
-// ... (whitelist etc)
-
-// ... (mountDD etc)
 
 function getMyUsername(): string | undefined {
     // 优先从 Memory 读取
@@ -536,25 +490,20 @@ function getMyUsername(): string | undefined {
  */
 function sendMessage(message: string, to?: string): string {
     try {
-        const myName = getMyUsername()
-        if (!myName) return '[DD] 发送失败: 无法获取自己的用户名'
         const mem = getDDMemory()
         mem.seq = (mem.seq || 0) + 1
-        const id = `${Game.time}_${mem.seq.toString(36)}`
         const key = getCipherKey()
-        if (!key) return '[DD] 发送失败: 未设置私有密钥或密钥长度不足（至少 16 字符）'
+        if (!key) return '[DD] 发送失败: 未设置密钥'
 
         const seed = ((Math.random() * 0xffffffff) >>> 0) ^ Game.time ^ mem.seq
-        const nonce = makeNonce12(seed)
-        const packed: DDPackedV3 = {
-            v: 3,
-            i: id,
-            t: Game.time,
-            f: myName,
-            m: message
-        }
-        if (to && to !== 'all') packed.o = to
-        const encryptedData = encodeDD3(packed, key, nonce)
+        const encryptedData = encodeDD4Lite(message, {
+            secretKey: key,
+            nonceSeed: seed,
+            time: Game.time,
+            seq: mem.seq,
+            to,
+            enableCrc: true
+        })
 
         // 3. 入队
         currentTickBuffer.push(encryptedData)
@@ -595,20 +544,20 @@ function flushMessages(): void {
 function tryDecodeForeignMessage(encrypted: string, foreignUsername: string): DDMessage | null {
     const key = getCipherKey()
     if (!key) return null
-    const packed = decodeDD3(encrypted, key)
-    if (!packed) return null
-    if (packed.f !== foreignUsername) return null
-    if (packed.t < Game.time - HISTORY_RETENTION) return null
-    if (packed.o && packed.o !== 'all') {
+    const decoded = decodeDD4Lite(encrypted, { secretKey: key, now: Game.time })
+    if (!decoded) return null
+    if (decoded.time < Game.time - HISTORY_RETENTION) return null
+    if (decoded.to && decoded.to !== 'all') {
         const myName = getMyUsername()
-        if (myName && packed.o !== myName) return null
+        if (myName && decoded.to !== myName) return null
     }
+    const id = `${decoded.time}_${decoded.seq.toString(36)}`
     return {
-        id: packed.i,
+        id,
         from: foreignUsername,
-        msg: packed.m,
-        time: packed.t,
-        to: packed.o
+        msg: decoded.msg,
+        time: decoded.time,
+        to: decoded.to
     }
 }
 
@@ -718,14 +667,14 @@ function isCommEnabled(username: string): boolean {
 
 // ==================== Prototype 重写 (Friend/Hostile & Notify) ====================
 
-const originalFind = Room.prototype.find
-const originalLookForAt = Room.prototype.lookForAt
-const originalLookForAtArea = Room.prototype.lookForAtArea
+const originalFind = (typeof Room !== 'undefined' ? Room.prototype.find : undefined) as any
+const originalLookForAt = (typeof Room !== 'undefined' ? Room.prototype.lookForAt : undefined) as any
+const originalLookForAtArea = (typeof Room !== 'undefined' ? Room.prototype.lookForAtArea : undefined) as any
 
 // 备份原始 notifyWhenAttacked
-const originalStructureNotify = Structure.prototype.notifyWhenAttacked
-const originalCreepNotify = Creep.prototype.notifyWhenAttacked
-const originalPowerCreepNotify = PowerCreep.prototype.notifyWhenAttacked
+const originalStructureNotify = (typeof Structure !== 'undefined' ? Structure.prototype.notifyWhenAttacked : undefined) as any
+const originalCreepNotify = (typeof Creep !== 'undefined' ? Creep.prototype.notifyWhenAttacked : undefined) as any
+const originalPowerCreepNotify = (typeof PowerCreep !== 'undefined' ? PowerCreep.prototype.notifyWhenAttacked : undefined) as any
 
 function updateWatchList(id: string, enabled: boolean) {
     if (!Memory.dd) Memory.dd = {}
@@ -782,6 +731,7 @@ function filterAreaResult(result: any, asArray: boolean | undefined, filterFn: (
 }
 
 export function mountDD(): void {
+    if (typeof Room === 'undefined') return
     // 预加载
     getWhitelist()
 
@@ -1007,17 +957,10 @@ export const ddTools = {
     setKey(key: string): string {
         const mem = getDDMemory()
         if (!key) {
-            delete mem.secretKey
-            cachedSecretKey = null
-            cachedEncKey = null
-            cachedMacKey = null
+            mem.secretKey = ''
             return `[DD] 已清除私有密钥（通讯已停用）`
         }
-        if (key.length < 16) return `[DD] 密钥长度不足：至少 16 字符`
         mem.secretKey = key
-        cachedSecretKey = null
-        cachedEncKey = null
-        cachedMacKey = null
         return `[DD] 已设置私有密钥 (长度: ${key.length})，请确保盟友也使用相同的 Key`
     },
 
@@ -1030,12 +973,9 @@ export const ddTools = {
 
     genKey(length: number = 32): string {
         const mem = getDDMemory()
-        const len = Math.max(16, Math.min(64, Math.floor(length || 32)))
+        const len = Math.max(8, Math.min(64, Math.floor(length || 32)))
         const key = generateSecretKey(len)
         mem.secretKey = key
-        cachedSecretKey = null
-        cachedEncKey = null
-        cachedMacKey = null
         mem.keyWarned = true
         return `[DD] 已生成新私钥: ${key} (长度: ${len})，请同步给盟友`
     },
@@ -1078,13 +1018,13 @@ export const ddTools = {
 
     help(): string {
         return `
-[DD 系统 3.0]
+[DD 系统 4.0]
   dd.add('user', true)  添加好友+开启通讯 (自动问候)
   dd.add('user', false) 添加好友+关闭通讯
   dd.remove('user')     移除好友
   dd.list()             查看列表
   dd.exec('code')       执行指令 (如 war, greet)
-  dd.setKey('key')      设置私有密钥 (至少16字符)
+  dd.setKey('key')      设置私有密钥
   dd.setKey('')         清除私有密钥 (停用通讯)
   dd.getKey()           查看当前密钥(脱敏)
   dd.genKey(32)         生成新私钥并直接启用
