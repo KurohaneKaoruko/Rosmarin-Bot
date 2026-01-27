@@ -100,6 +100,9 @@ export default defineConfig(() => {
 	return {
 		input: 'src/main.ts',
 		tsconfig: './tsconfig.json',
+		checks: {
+			pluginTimings: false
+		},
 		transform: {
 			target: 'es2017'
 		},

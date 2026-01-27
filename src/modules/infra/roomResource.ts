@@ -386,8 +386,7 @@ let pro = {
         
         html += `</div>`;
         
-        console.log(html.replace(/[\r\n]/g, ""));
-        return `CPU用时: ${(Game.cpu.getUsed() - time).toFixed(2)}`;
+        return html.replace(/[\r\n]/g, "");
     },
     
     showRoomRes(){
@@ -503,8 +502,7 @@ let pro = {
         </div>
         `;
 
-        console.log(html.replace(/[\r\n]/g, ""));
-        return "房间资源信息已输出";
+        return console.log(html.replace(/[\r\n]/g, ""));
     }
 }
 
