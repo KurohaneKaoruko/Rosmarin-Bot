@@ -141,18 +141,17 @@ export default class RoomDefense extends Room {
                 const meanY = count > 0 ? Math.round(sumY / count) : 25;
                 const meanPos = new RoomPosition(meanX, meanY, this.name);
 
+                const blockedDefenseRampartPos = new Set<number>();
+                const allStructures = this.find(FIND_STRUCTURES);
+                for (const s of allStructures as Structure[]) {
+                    const st = s.structureType;
+                    if (st === STRUCTURE_RAMPART || st === STRUCTURE_ROAD || st === STRUCTURE_CONTAINER) continue;
+                    blockedDefenseRampartPos.add((s.pos.x << 6) | s.pos.y);
+                }
+
                 const rampartCandidates = (this[STRUCTURE_RAMPART] as StructureRampart[])
                     .filter(r => r?.my && r.hits >= rampartMinHits && costs.get(r.pos.x, r.pos.y) === 1)
-                    .filter(r => {
-                        const lookStructure = this.lookForAt(LOOK_STRUCTURES, r.pos);
-                        if (lookStructure.length && lookStructure.some(structure =>
-                            structure.structureType !== STRUCTURE_RAMPART &&
-                            structure.structureType !== STRUCTURE_ROAD &&
-                            structure.structureType !== STRUCTURE_CONTAINER)) {
-                            return false;
-                        }
-                        return true;
-                    });
+                    .filter(r => !blockedDefenseRampartPos.has((r.pos.x << 6) | r.pos.y));
 
                 const scored = rampartCandidates.map(r => {
                     const dist = r.pos.getRangeTo(meanPos);
@@ -194,18 +193,21 @@ export default class RoomDefense extends Room {
 
         const canDoubleAttackBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000;
         const canDoubleHealBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XLHO2'] >= 3000 && this['XZHO2'] >= 3000;
-        // const useDouble = this.level >= 7 &&
-        //     (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat) &&
-        //     canDoubleAttackBoost && canDoubleHealBoost;
-        const useDouble = false;
+        // const useDouble =
+        //     this.level >= 7 &&
+        //     canDoubleAttackBoost &&
+        //     canDoubleHealBoost &&
+        //     (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat);
 
+        const useDouble = false;
         if (useDouble) {
-            if (doubleAttackDefenderNum + doubleAttackQueueNum < 1) {
+            const desiredDouble = 1;
+            if (doubleAttackDefenderNum + doubleAttackQueueNum < desiredDouble) {
                 const body = this.GetRoleBodys('defend-2attack');
                 this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
                 this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
-            if (doubleHealDefenderNum + doubleHealQueueNum < 1) {
+            if (doubleHealDefenderNum + doubleHealQueueNum < desiredDouble) {
                 const body = this.GetRoleBodys('defend-2heal');
                 this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
                 this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
@@ -266,6 +268,10 @@ export default class RoomDefense extends Room {
                     desiredRanged = 2;
                 }
             }
+        }
+        if (useDouble) {
+            desiredAttack = Math.min(desiredAttack, 1);
+            desiredRanged = Math.min(desiredRanged, 1);
         }
 
         if (desiredAttack > 0 && (attackDefenderNum + attackQueueNum < desiredAttack)) {
