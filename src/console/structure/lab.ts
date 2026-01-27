@@ -1,4 +1,5 @@
 import {LabMap} from '@/constant/ResourceConstant'
+import { compress } from '@/modules/utils/compress';
 
 export default {
     lab: {
@@ -52,11 +53,15 @@ export default {
             const labAflag = Game.flags[`labA`] || Game.flags[`lab-A`];
             const labBflag = Game.flags[`labB`] || Game.flags[`lab-B`];
             if(labAflag && labBflag && labAflag.pos.roomName === roomName && labBflag.pos.roomName === roomName) {
-                const labA = labAflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab;
-                const labB = labBflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab;
-                BotMemStructures[roomName]['labA'] = labA.id;
-                BotMemStructures[roomName]['labB'] = labB.id;
-                global.log(`[${roomName}] 已设置底物lab为 ${labA.id} 和 ${labB.id}。`);
+                const labA = labAflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab | undefined;
+                const labB = labBflag.pos.lookFor(LOOK_STRUCTURES).find(s => s.structureType === STRUCTURE_LAB) as StructureLab | undefined;
+                if (!labA || !labB) {
+                    global.log(`[${roomName}] 未找到 labA/labB 旗帜所在位置的 Lab。`);
+                } else {
+                    BotMemStructures[roomName]['labA'] = compress(labA.pos.x, labA.pos.y);
+                    BotMemStructures[roomName]['labB'] = compress(labB.pos.x, labB.pos.y);
+                    global.log(`[${roomName}] 已设置底物lab为 (${labA.pos.x},${labA.pos.y}) 和 (${labB.pos.x},${labB.pos.y})。`);
+                }
                 labAflag.remove();
                 labBflag.remove();
             }

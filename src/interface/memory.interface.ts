@@ -328,16 +328,16 @@ interface StructControlMemory {
     labBtype?: ResourceConstant;
 
     /**
-     * 底物 Lab A 的 ID
-     * @description 存放底物 A 的 Lab 建筑 ID
+     * 底物 Lab A 的坐标（压缩）
+     * @description 存放底物 A 的 Lab 坐标，使用 compress(x,y) 压缩后的 number
      */
-    labA?: Id<StructureLab>;
+    labA?: number | Id<StructureLab>;
 
     /**
-     * 底物 Lab B 的 ID
-     * @description 存放底物 B 的 Lab 建筑 ID
+     * 底物 Lab B 的坐标（压缩）
+     * @description 存放底物 B 的 Lab 坐标，使用 compress(x,y) 压缩后的 number
      */
-    labB?: Id<StructureLab>;
+    labB?: number | Id<StructureLab>;
 
     /**
      * Boost 任务登记

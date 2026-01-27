@@ -1,4 +1,5 @@
 import { compress } from '@/modules/utils/compress';
+import { getLabAB } from '@/modules/utils/labAB';
 
 
 
@@ -392,8 +393,9 @@ export default class TransportMission extends Room {
      * - A/B 反应原料 lab
      * - boostRes/boostTypes 指定的 boost lab
      */
-    private isSpecialLab(labId: Id<StructureLab>, botmem: any): boolean {
-        if (labId === botmem.labA || labId === botmem.labB) return true;
+    private isSpecialLab(labId: Id<StructureLab>, labAId: string | null, labBId: string | null, botmem: any): boolean {
+        if (labAId && labId === labAId) return true;
+        if (labBId && labId === labBId) return true;
         if (botmem['boostRes']?.[labId]) return true;
         if (botmem['boostTypes']?.[labId]) return true;
         return false;
@@ -416,16 +418,15 @@ export default class TransportMission extends Room {
         if (!BotMemStructures['boostRes']) BotMemStructures['boostRes'] = {};
         if (!BotMemStructures['boostTypes']) BotMemStructures['boostTypes'] = {};
 
+        const { labA, labB, labAId, labBId } = getLabAB(room.name, room);
         const labAtype = BotMemStructures.labAtype;
         const labBtype = BotMemStructures.labBtype;
-        const labA = Game.getObjectById(BotMemStructures.labA) as StructureLab;
-        const labB = Game.getObjectById(BotMemStructures.labB) as StructureLab;
 
         const isShutDown = !BotMemStructures.lab || !labA || !labB || !labAtype || !labBtype;
 
         room.lab.forEach(lab => {
             if (isShutDown) {
-                if (this.isSpecialLab(lab.id, BotMemStructures)) return;
+                if (this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
                 if (!lab.store[lab.mineralType] || lab.store[lab.mineralType] === 0) return;
                 
                 this.addTransportMission(this.TransportLevel('lab'), {
@@ -438,8 +439,8 @@ export default class TransportMission extends Room {
                 return;
             }
 
-            if (lab.id === labA.id || lab.id === labB.id) {
-                const type = (lab.id === labA.id) ? labAtype : labBtype;
+            if ((labAId && lab.id === labAId) || (labBId && lab.id === labBId)) {
+                const type = (labAId && lab.id === labAId) ? labAtype : labBtype;
                 
                 if (lab.mineralType && lab.mineralType !== type && lab.store[lab.mineralType] > 0) {
                     this.addTransportMission(this.TransportLevel('lab'), {
@@ -467,7 +468,7 @@ export default class TransportMission extends Room {
                 return;
             }
 
-            if (this.isSpecialLab(lab.id, BotMemStructures)) return;
+            if (this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
 
             const reactionProduct = REACTIONS[labAtype][labBtype];
             

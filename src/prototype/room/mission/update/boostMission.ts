@@ -1,4 +1,5 @@
 import TransportMission from "./transportMission";
+import { getLabAB } from '@/modules/utils/labAB';
 
 export default class BoostMission extends TransportMission {
     /**
@@ -22,6 +23,7 @@ export default class BoostMission extends TransportMission {
         }
 
         const botmem = Memory['StructControlData'][this.name];
+        const { labAId, labBId } = getLabAB(this.name, this);
         if (!this.lab || this.lab.length === 0) return;
         if (!botmem['boostRes']) botmem['boostRes'] = {};
 
@@ -59,8 +61,8 @@ export default class BoostMission extends TransportMission {
         if (neededMinerals.length > 0) {
             // 排除 A/B Lab
             const availableLabs = this.lab.filter(lab => 
-                lab.id !== botmem.labA && 
-                lab.id !== botmem.labB
+                lab.id !== labAId && 
+                lab.id !== labBId
             );
 
             for (const mineral of neededMinerals) {

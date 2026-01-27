@@ -1,3 +1,5 @@
+import { getLabAB } from '@/modules/utils/labAB';
+
 export default class PowerCreepUsePower extends PowerCreep {
     Generate_OPS() {
         const powers = this.powers;
@@ -140,10 +142,8 @@ export default class PowerCreepUsePower extends PowerCreep {
 
         const botmem =  Memory['StructControlData'][this.room.name];
         if (!botmem || !botmem.lab) return;
-        if (!botmem.labA || !botmem.labB) return;
-        let labA = Game.getObjectById(botmem.labA) as StructureLab;
-        let labB = Game.getObjectById(botmem.labB) as StructureLab;
-        if (!labA || !labB) return;
+        const { labA, labB, labAId, labBId } = getLabAB(this.room.name, this.room);
+        if (!labA || !labB || !labAId || !labBId) return;
         const labAtype = botmem.labAtype;
         const labBtype = botmem.labBtype;
         if (!labAtype || !labBtype ||
@@ -156,9 +156,9 @@ export default class PowerCreepUsePower extends PowerCreep {
 
         if (!labAtype || !labBtype) return;
         const lab = this.room.lab.find(l => {
-            if(l.id == botmem.labA || l.id == botmem.labB) return false;
-            if(botmem['boostRes'][l.id]) return false;
-            if(botmem['boostTypes'][l.id]) return false;
+            if(l.id === labAId || l.id === labBId) return false;
+            if(botmem['boostRes']?.[l.id]) return false;
+            if(botmem['boostTypes']?.[l.id]) return false;
             if(l.mineralType != product) return false;
             return !l.effects || l.effects.every(e => e.effect != PWR_OPERATE_LAB)
         });

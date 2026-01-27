@@ -1,9 +1,11 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
+import { ensureLabAB, getLabAB } from '@/modules/utils/labAB';
 
 export default class LabControl extends Room {
     LabWork() {
         // 没有lab不处理
         if (!this.lab) return;
+        ensureLabAB(this.name, this);
 
         // 可视化
         this.VisualLabInfo();
@@ -16,6 +18,7 @@ export default class LabControl extends Room {
     
     VisualLabInfo() {
         if (Game.cpu.bucket < 1000) return;
+        const { labA, labB } = getLabAB(this.name, this);
         this.lab.forEach(lab => {
             if (!lab.mineralType) return;
             this.visual.text(lab.mineralType,
@@ -26,7 +29,25 @@ export default class LabControl extends Room {
                   strokeWidth: 0.05,
                   font: '0.24 inter' }
             )
-        })
+        });
+        if (labA) {
+            this.visual.circle(labA.pos, {
+                radius: 0.42,
+                fill: 'transparent',
+                stroke: '#ff4fd8',
+                opacity: 0.7,
+                strokeWidth: 0.08
+            });
+        }
+        if (labB) {
+            this.visual.circle(labB.pos, {
+                radius: 0.42,
+                fill: 'transparent',
+                stroke: '#4fd8ff',
+                opacity: 0.7,
+                strokeWidth: 0.08
+            });
+        }
     }
 
     RunReaction() {
@@ -38,20 +59,13 @@ export default class LabControl extends Room {
         // lab关停时不合成
         const memory =  Memory['StructControlData'][this.name];
         if (!memory || !memory.lab) return;
-        // 没有设置底物lab时不合成
-        if (!memory.labA || !memory.labB) return;
+        const { labA, labB, labAId, labBId } = getLabAB(this.name, this);
+        if (!labA || !labB || !labAId || !labBId) return;
 
         const labAtype = memory.labAtype ;
         const labBtype = memory.labBtype;
         // 没有设置底物类型时不合成
         if (!labAtype || !labBtype) return;
-        
-        let labA = Game.getObjectById(memory.labA) as StructureLab;
-        let labB = Game.getObjectById(memory.labB) as StructureLab;
-        // 底物lab不存在时不合成
-        if (!labA) memory.labA = undefined;
-        if (!labB) memory.labB = undefined;
-        if (!labA || !labB) return;
         
         // 检查labA和labB是否有足够的资源
         if (labA.store[labAtype] < 5 || labB.store[labBtype] < 5) {
@@ -70,7 +84,7 @@ export default class LabControl extends Room {
         // 遍历其他lab进行合成
         for (let lab of this.lab) {
             if (lab.cooldown || !lab) continue;
-            if (lab.id === memory.labA || lab.id === memory.labB) continue;
+            if (lab.id === labAId || lab.id === labBId) continue;
             // 如果有boost设置（被征用），则跳过
             if (boostRes && boostRes[lab.id]) continue;
             if (boostTypes && boostTypes[lab.id]) continue;
