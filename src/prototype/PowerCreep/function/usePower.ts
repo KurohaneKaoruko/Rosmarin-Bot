@@ -1,4 +1,4 @@
-import { getLabAB } from '@/modules/utils/labAB';
+import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 
 export default class PowerCreepUsePower extends PowerCreep {
     Generate_OPS() {
@@ -157,8 +157,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         if (!labAtype || !labBtype) return;
         const lab = this.room.lab.find(l => {
             if(l.id === labAId || l.id === labBId) return false;
-            if(botmem['boostRes']?.[l.id]) return false;
-            if(botmem['boostTypes']?.[l.id]) return false;
+            if(botmem.boostLabs?.[l.id]) return false;
             if(l.mineralType != product) return false;
             return !l.effects || l.effects.every(e => e.effect != PWR_OPERATE_LAB)
         });

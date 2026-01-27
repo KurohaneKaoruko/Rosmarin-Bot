@@ -1,5 +1,5 @@
 import TransportMission from "./transportMission";
-import { getLabAB } from '@/modules/utils/labAB';
+import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 
 export default class BoostMission extends TransportMission {
     /**
@@ -14,18 +14,24 @@ export default class BoostMission extends TransportMission {
         // 1. 清理无效预定
         this.cleanInvalidBoostTasks();
 
-        // 2. 获取当前活跃的 Boost 任务
-        const activeTasks = this.getAllMissionFromPool('boost') as Task[];
-        if (!activeTasks || activeTasks.length === 0) {
-            // 如果没有 Boost 任务，清理所有 Boost 相关的资源和标记
-            this.clearAllBoostData();
-            return;
-        }
-
         const botmem = Memory['StructControlData'][this.name];
         const { labAId, labBId } = getLabAB(this.name, this);
         if (!this.lab || this.lab.length === 0) return;
-        if (!botmem['boostRes']) botmem['boostRes'] = {};
+        // boostLabs：单表预留（task=任务临时征用，fixed=长期固定配置），并在这里完成旧字段迁移
+        const boostLabs = ensureBoostLabs(this.name);
+
+        // 2. 获取当前活跃的 Boost 任务
+        const activeTasks = this.getAllMissionFromPool('boost') as Task[];
+        if (!activeTasks || activeTasks.length === 0) {
+            // 没有 boost 任务时：只清理 task 征用；fixed 仍要持续补能量/补矿以保证随时可用
+            this.clearAllBoostData();
+            for (const labId in boostLabs) {
+                const entry = boostLabs[labId];
+                if (!entry || entry.mode !== 'fixed') continue;
+                this.manageBoostLab(Game.getObjectById(labId), entry.mineral, 3000);
+            }
+            return;
+        }
 
         // 3. 收集需求与当前分配状态
         const neededMineralsMap: Record<string, number> = {};
@@ -38,22 +44,27 @@ export default class BoostMission extends TransportMission {
         const neededMinerals = Object.keys(neededMineralsMap) as ResourceConstant[];
         const assignedLabs = new Set<string>(); // 本轮确认被占用的 Lab
 
-        // 4. 维护现有的分配 (Memory.boostRes)
-        // 检查 Memory.boostRes，如果某个 Lab 分配的资源仍在需求列表中，则保持分配
-        for (const labId in botmem['boostRes']) {
-            const mineral = botmem['boostRes'][labId];
+        for (const labId in boostLabs) {
+            const entry = boostLabs[labId];
+            if (!entry) continue;
+            const mineral = entry.mineral;
+            if (!mineral) {
+                delete boostLabs[labId];
+                continue;
+            }
+            if (entry.mode === 'fixed') {
+                assignedLabs.add(labId);
+                this.manageBoostLab(Game.getObjectById(labId), mineral, 3000);
+                continue;
+            }
             if (neededMinerals.includes(mineral)) {
                 assignedLabs.add(labId);
-                // 执行该 Lab 的搬运逻辑 (清理不匹配资源 / 填充目标资源)
                 this.manageBoostLab(Game.getObjectById(labId), mineral, neededMineralsMap[mineral]);
-                
-                // 从需求列表中移除已分配的资源 (简化逻辑：一种资源对应一个 Lab)
-                // 如果需要多个 Lab 支持同一种资源，这里需要更复杂的计数逻辑
+
                 const index = neededMinerals.indexOf(mineral);
                 if (index > -1) neededMinerals.splice(index, 1);
             } else {
-                // 不再需要该资源，移除标记，以便 AutoLab 回收使用
-                delete botmem['boostRes'][labId];
+                delete boostLabs[labId];
             }
         }
 
@@ -71,7 +82,7 @@ export default class BoostMission extends TransportMission {
                 
                 if (targetLab) {
                     // 标记征用
-                    botmem['boostRes'][targetLab.id] = mineral;
+                    boostLabs[targetLab.id] = { mineral, mode: 'task' };
                     assignedLabs.add(targetLab.id);
                     // 执行搬运逻辑
                     this.manageBoostLab(targetLab, mineral, neededMineralsMap[mineral]);
@@ -239,10 +250,12 @@ export default class BoostMission extends TransportMission {
      */
     private clearAllBoostData() {
         const botmem = Memory['StructControlData'][this.name];
-        if (botmem && botmem['boostRes']) {
-            // 遍历 boostRes，生成清理任务（将资源搬回 Storage）
-            for (const labId in botmem['boostRes']) {
-                const lab = Game.getObjectById(labId) as StructureLab;
+        const boostLabs = botmem?.boostLabs;
+        if (boostLabs) {
+            for (const labId in boostLabs) {
+                const entry = boostLabs[labId];
+                if (!entry || entry.mode !== 'task') continue;
+                const lab = Game.getObjectById(labId) as StructureLab | null;
                 if (lab && lab.mineralType && this.storage) {
                     const exist = this.checkSameMissionInPool('transport', 'transport', {
                         source: lab.id,
@@ -259,8 +272,9 @@ export default class BoostMission extends TransportMission {
                     }
                 }
             }
-            // 清空标记
-            delete botmem['boostRes'];
+            for (const labId in boostLabs) {
+                if (boostLabs[labId]?.mode === 'task') delete boostLabs[labId];
+            }
         }
     }
 

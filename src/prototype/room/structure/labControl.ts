@@ -1,10 +1,11 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
-import { ensureLabAB, getLabAB } from '@/modules/utils/labAB';
+import { ensureLabAB, getLabAB } from '@/modules/utils/labReservations';
 
 export default class LabControl extends Room {
     LabWork() {
         // 没有lab不处理
         if (!this.lab) return;
+
         ensureLabAB(this.name, this);
 
         // 可视化
@@ -59,6 +60,7 @@ export default class LabControl extends Room {
         // lab关停时不合成
         const memory =  Memory['StructControlData'][this.name];
         if (!memory || !memory.lab) return;
+        // 读取 A/B（只读）；若未配置且未通过 LabWork 的 ensure 修正，这里将直接返回空
         const { labA, labB, labAId, labBId } = getLabAB(this.name, this);
         if (!labA || !labB || !labAId || !labBId) return;
 
@@ -77,17 +79,14 @@ export default class LabControl extends Room {
         // 底物lab不存在时不合成
         if (!RESOURCES_ALL.includes(labProduct)) return;
 
-        // boost设置
-        const boostRes = memory.boostRes;
-        const boostTypes = memory.boostTypes;
+        const boostLabs = memory.boostLabs;
 
         // 遍历其他lab进行合成
         for (let lab of this.lab) {
             if (lab.cooldown || !lab) continue;
             if (lab.id === labAId || lab.id === labBId) continue;
             // 如果有boost设置（被征用），则跳过
-            if (boostRes && boostRes[lab.id]) continue;
-            if (boostTypes && boostTypes[lab.id]) continue;
+            if (boostLabs && boostLabs[lab.id]) continue;
             // 检查lab中是否存在与合成产物不同的资源
             if (lab.mineralType &&
                 lab.mineralType !== labProduct) {

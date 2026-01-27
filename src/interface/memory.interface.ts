@@ -339,27 +339,11 @@ interface StructControlMemory {
      */
     labB?: number | Id<StructureLab>;
 
-    /**
-     * Boost 任务登记
-     * @description 动态分配的 boost 任务，key 为 Lab ID，value 为 boost 使用的矿物类型
-     */
-    boostRes?: {
-        [labId: string]: ResourceConstant;
-    };
-
-    /**
-     * Boost Lab 固定配置
-     * @description 固定分配给特定矿物的 Lab，key 为 Lab ID，value 为矿物类型
-     * @example
-     * ```typescript
-     * boostTypes: {
-     *     '5f1234567890abcdef': 'XUH2O',  // 该 Lab 固定用于 XUH2O boost
-     *     '5f0987654321fedcba': 'XGHO2'   // 该 Lab 固定用于 XGHO2 boost
-     * }
-     * ```
-     */
-    boostTypes?: {
-        [labId: string]: ResourceConstant;
+    boostLabs?: {
+        [labId: string]: {
+            mineral: ResourceConstant;
+            mode: 'task' | 'fixed';
+        };
     };
 
     /**

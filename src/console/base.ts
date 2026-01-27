@@ -78,8 +78,11 @@ const Base = {
         },
         boostTask(roomName: string) {
             const boostmem = Memory['StructControlData'][roomName];
-            boostmem['boostRes'] = {};
-            boostmem['boostQueue'] = {};
+            if (boostmem?.boostLabs) {
+                for (const labId of Object.keys(boostmem.boostLabs)) {
+                    if (boostmem.boostLabs[labId]?.mode === 'task') delete boostmem.boostLabs[labId];
+                }
+            }
             log('', `已清空房间 ${roomName} 的 boost 任务`);
             return OK;
         }

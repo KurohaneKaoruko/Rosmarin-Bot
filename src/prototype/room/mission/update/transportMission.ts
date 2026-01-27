@@ -1,5 +1,5 @@
 import { compress } from '@/modules/utils/compress';
-import { getLabAB } from '@/modules/utils/labAB';
+import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 
 
 
@@ -391,13 +391,12 @@ export default class TransportMission extends Room {
      * 判断 lab 是否为“特殊用途”
      * @description
      * - A/B 反应原料 lab
-     * - boostRes/boostTypes 指定的 boost lab
+     * - boostLabs 指定的 boost lab
      */
     private isSpecialLab(labId: Id<StructureLab>, labAId: string | null, labBId: string | null, botmem: any): boolean {
         if (labAId && labId === labAId) return true;
         if (labBId && labId === labBId) return true;
-        if (botmem['boostRes']?.[labId]) return true;
-        if (botmem['boostTypes']?.[labId]) return true;
+        if (botmem?.boostLabs?.[labId]) return true;
         return false;
     }
 
@@ -415,8 +414,6 @@ export default class TransportMission extends Room {
         if (!room.lab || room.lab.length === 0) return;
 
         const BotMemStructures = Memory['StructControlData'][room.name];
-        if (!BotMemStructures['boostRes']) BotMemStructures['boostRes'] = {};
-        if (!BotMemStructures['boostTypes']) BotMemStructures['boostTypes'] = {};
 
         const { labA, labB, labAId, labBId } = getLabAB(room.name, room);
         const labAtype = BotMemStructures.labAtype;

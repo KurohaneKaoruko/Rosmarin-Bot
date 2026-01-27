@@ -1,6 +1,6 @@
 import { LabMap, LabLevel } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
-import { getLabAB } from '@/modules/utils/labAB';
+import { getLabAB } from '@/modules/utils/labReservations';
 
 export default class AutoLab extends Room {
     autoLab() {
@@ -15,6 +15,7 @@ export default class AutoLab extends Room {
                         REACTIONS[botmem.labAtype][botmem.labBtype] : null;
         const amount = botmem.labAmount;    // 产物限额
 
+        // AutoLab 只读取 A/B，不负责推导/写回；A/B 的修正由 LabWork 的 ensureLabAB 负责
         const { labA, labB } = getLabAB(this.name, this);
         if (!labA || !labB) return;
         // 检查库存是否够合成

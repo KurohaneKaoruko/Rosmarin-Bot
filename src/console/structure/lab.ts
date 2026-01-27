@@ -1,5 +1,6 @@
 import {LabMap} from '@/constant/ResourceConstant'
 import { compress } from '@/modules/utils/compress';
+import { ensureBoostLabs } from '@/modules/utils/labReservations';
 
 export default {
     lab: {
@@ -77,10 +78,11 @@ export default {
             }
             const BotMemStructures = Memory['StructControlData'];
             if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
-            if(!BotMemStructures[roomName]['boostTypes']) BotMemStructures[roomName]['boostTypes'] = {};
-            for(const id of Object.keys(BotMemStructures[roomName]['boostTypes'])) {
+            // 手动长期征用：通过旗帜设置某个 lab 固定填充指定 boost 资源（mode: 'fixed'）
+            const boostLabs = ensureBoostLabs(roomName);
+            for(const id of Object.keys(boostLabs)) {
                 const lab = Game.getObjectById(id) as StructureLab;
-                if(!lab) delete BotMemStructures[roomName]['boostTypes'][id];
+                if(!lab) delete boostLabs[id];
             }
             for(const flag of Game.rooms[roomName].find(FIND_FLAGS)) {
                 const labsetMatch = flag.name.match(/^labset[-#/ ](\w+)(?:[-#/ ].*)?$/);
@@ -90,12 +92,12 @@ export default {
                 const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 let resourceType = RES[labsetMatch[1]] || labsetMatch[1];
                 if (!resourceType || !LabMap[resourceType]) {
-                    delete BotMemStructures[roomName]['boostTypes'][lab.id];
+                    delete boostLabs[lab.id];
                     flag.remove();
                     console.log(`在房间 ${roomName} 删除了 lab(${lab.id}) 的强化资源设置`);
                     continue;
                 }
-                BotMemStructures[roomName]['boostTypes'][lab.id] = resourceType,
+                boostLabs[lab.id] = { mineral: resourceType, mode: 'fixed' };
                 console.log(`在房间 ${roomName} 设置了 lab(${lab.id}) 的强化资源: ${resourceType}`);
                 flag.remove();
             }
