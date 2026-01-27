@@ -1,3 +1,5 @@
+import { log } from "@/utils";
+
 export default class TerminalControl extends Room {
     TerminalWork() {
         if (Game.time % 30 !== 2) return;
@@ -51,12 +53,12 @@ export default class TerminalControl extends Room {
             } else {
                 this.deleteMissionFromPool('terminal', task.id);
             }
-            global.log(`[资源发送] ${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType}, 能量消耗: ${cost}`);
+            log('资源发送', `${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType}, 能量消耗: ${cost}`);
         } else {
             if (result === ERR_INVALID_ARGS) {
                 this.deleteMissionFromPool('terminal', task.id);
             }
-            global.log(`[资源发送] ${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType} 失败，错误代码：${result}`);
+            log('资源发送', `${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType} 失败，错误代码：${result}`);
         }
     }
 }

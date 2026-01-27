@@ -1,3 +1,4 @@
+import { log } from "@/utils";
 
 
 export default {
@@ -24,9 +25,9 @@ export default {
                 const result = terminal.send(type, amount, target);
                 if(result === OK) {
                     cost = Game.market.calcTransactionCost(amount, room, target);
-                    global.log(`[资源发送] ${room} -> ${target}, ${amount} ${type}, 传输成本 ${cost}`);
+                    log('资源发送', `${room} -> ${target}, ${amount} ${type}, 传输成本 ${cost}`);
                 } else {
-                    global.log(`[资源发送] ${room} 发送资源失败，错误代码：${result}`);
+                    log('资源发送', `${room} 发送资源失败，错误代码：${result}`);
                 }
                 return result;
             }
@@ -51,12 +52,12 @@ export default {
                     const result = terminal.send(type, amount, target);
                     if(result === OK) {
                         cost = Game.market.calcTransactionCost(amount, room.name, target);
-                        global.log(`[资源发送] ${room.name} -> ${target}, ${amount} ${type}, 传输成本 ${cost}`);
+                        log('资源发送', `${room.name} -> ${target}, ${amount} ${type}, 传输成本 ${cost}`);
                         total -= amount;
                         if(total <= 0) break;
                     }
                     else {
-                        global.log(`[资源发送] ${room.name} 发送资源失败，错误代码：${result}`);
+                        log('资源发送', `${room.name} 发送资源失败，错误代码：${result}`);
                     }
                 }
                 return OK;
