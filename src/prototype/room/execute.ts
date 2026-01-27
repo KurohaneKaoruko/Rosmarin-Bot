@@ -1,8 +1,13 @@
+import { shouldRun } from '@/modules/infra/qos';
+
 export default class RoomExecute extends Room {
     exec() {
         this.updateEnergyState(false);
         // 更新任务池
         this.MissionUpdate();
+
+        // 主动防御处理
+        this.activeDefense();
 
         // 管理房间中的建筑物
         this.SpawnWork();
@@ -13,6 +18,8 @@ export default class RoomExecute extends Room {
         this.FactoryWork();
         this.PowerSpawnWork();
 
+        if(!shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
+        
         // 自动化处理
         this.autoMarket();       // 自动市场交易
         this.autoBuild();        // 自动建筑
@@ -21,9 +28,8 @@ export default class RoomExecute extends Room {
         this.autoPower();        // 自动Power处理
         this.outMine();          // 外矿采集
         
-        // 主动防御处理
-        this.activeDefense();
-        this.showDefenseCostMatrix(); // 显示防御cost矩阵
+        // 显示防御cost矩阵
+        this.showDefenseCostMatrix();
     }
 
     // 房间初始化
