@@ -1,6 +1,37 @@
 import { getStructureSignature } from '@/utils';
 import { shouldRun } from '@/modules/infra/qos';
 
+type DefenderCounts = {
+    attack: number;
+    ranged: number;
+    doubleAttack: number;
+    doubleHeal: number;
+};
+
+const getDefenderCounts = (() => {
+    const cache: { tick: number; byRoom: Record<string, DefenderCounts> } = { tick: -1, byRoom: {} };
+    return (room: Room): DefenderCounts => {
+        if (cache.tick !== Game.time) {
+            cache.tick = Game.time;
+            cache.byRoom = {};
+        }
+        const hit = cache.byRoom[room.name];
+        if (hit) return hit;
+
+        const counts: DefenderCounts = { attack: 0, ranged: 0, doubleAttack: 0, doubleHeal: 0 };
+        const myCreeps = room.find(FIND_MY_CREEPS);
+        for (const creep of myCreeps as any[]) {
+            const role = creep?.memory?.role;
+            if (role === 'defend-attack') counts.attack++;
+            else if (role === 'defend-ranged') counts.ranged++;
+            else if (role === 'defend-2attack') counts.doubleAttack++;
+            else if (role === 'defend-2heal') counts.doubleHeal++;
+        }
+        cache.byRoom[room.name] = counts;
+        return counts;
+    };
+})();
+
 export default class RoomDefense extends Room {
     activeDefense() {
         // 如果处于安全模式，则不进行后续处理
@@ -141,18 +172,11 @@ export default class RoomDefense extends Room {
             delete this.memory['breached'];
         }
 
-        const myCreeps = this.find(FIND_MY_CREEPS);
-        let attackDefenderNum = 0;
-        let rangedDefenderNum = 0;
-        let doubleAttackDefenderNum = 0;
-        let doubleHealDefenderNum = 0;
-        for (const creep of myCreeps as any[]) {
-            const role = creep?.memory?.role;
-            if (role === 'defend-attack') attackDefenderNum++;
-            else if (role === 'defend-ranged') rangedDefenderNum++;
-            else if (role === 'defend-2attack') doubleAttackDefenderNum++;
-            else if (role === 'defend-2heal') doubleHealDefenderNum++;
-        }
+        const defenderCounts = getDefenderCounts(this);
+        const attackDefenderNum = defenderCounts.attack;
+        const rangedDefenderNum = defenderCounts.ranged;
+        const doubleAttackDefenderNum = defenderCounts.doubleAttack;
+        const doubleHealDefenderNum = defenderCounts.doubleHeal;
         
         const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
         const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
