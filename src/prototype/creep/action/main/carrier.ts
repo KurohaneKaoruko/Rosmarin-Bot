@@ -37,7 +37,6 @@ const lockCarrierTarget = (roomName: string, id: string, creepName: string, ttl:
     locks[id] = { name: creepName, expire: Game.time + ttl };
 };
 
-// 兼容老逻辑：其他 carrier 仍然只写 cache.targetId，这里统一做一次归一化读取
 const getClaimedTargetIdsByCarrier = (() => {
     const cache: Record<string, { time: number; ids: Set<string> }> = {};
     return (roomName: string): Set<string> => {
@@ -45,14 +44,12 @@ const getClaimedTargetIdsByCarrier = (() => {
         if (hit && hit.time === Game.time) return hit.ids;
 
         const ids = new Set<string>();
-        for (const name in Memory.creeps) {
-            const mem = Memory.creeps[name];
-            if (mem?.role !== 'carrier') continue;
-            const live = Game.creeps[name];
-            if (live && live.room.name !== roomName) continue;
-            if (!live && mem?.home && mem.home !== roomName) continue;
-            const id = mem.cache?.targetId || mem.cache?.sourceId;
-            if (id) ids.add(id);
+        for (const creep of Object.values(Game.creeps)) {
+            if (!creep) continue;
+            if (creep.memory?.role !== 'carrier') continue;
+            if (creep.room.name !== roomName) continue;
+            const sourceId = creep.memory.cache?.sourceId;
+            if (sourceId) ids.add(sourceId);
         }
         cache[roomName] = { time: Game.time, ids };
         return ids;
