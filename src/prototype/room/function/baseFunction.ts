@@ -1,4 +1,43 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
+import { getWhitelistSet } from '@/utils';
+
+const getCreepNumByHomeRoom = (() => {
+    let cachedTick = -1;
+    let cached: Record<string, Record<string, number>> = {};
+    return () => {
+        if (cachedTick === Game.time) return cached;
+        cachedTick = Game.time;
+        cached = {};
+        for (const creep of Object.values(Game.creeps) as Creep[]) {
+            if(!creep || creep.ticksToLive < creep.body.length * 3) continue;
+            const role = creep.memory.role;
+            const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
+            if(!role || !home) continue;
+            if (!cached[home]) cached[home] = {};
+            cached[home][role] = (cached[home][role] || 0) + 1;
+        }
+        return cached;
+    };
+})();
+
+const getMyCreepsByRoleByRoom = (() => {
+    let cachedTick = -1;
+    let cached: Record<string, Record<string, Creep[]>> = {};
+    return (room: Room, role: string) => {
+        if (cachedTick !== Game.time) {
+            cachedTick = Game.time;
+            cached = {};
+        }
+        if (!cached[room.name]) cached[room.name] = {};
+        const hit = cached[room.name][role];
+        if (hit) return hit;
+        const creeps = room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => c && c.ticksToLive > 100 && c.memory.role === role
+        }) as Creep[];
+        cached[room.name][role] = creeps;
+        return creeps;
+    };
+})();
 
 /**
  * 一些基础的功能
@@ -6,8 +45,7 @@ import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
 export default class BaseFunction extends Room {
     // 判断是否在白名单中
     isWhiteList() {
-        let whiteList = new Set<string>(Memory['whitelist'] || []);
-        return whiteList.has(this.controller?.owner?.username);
+        return getWhitelistSet().has(this.controller?.owner?.username);
     }
 
     // 获取房间指定资源储备
@@ -22,20 +60,8 @@ export default class BaseFunction extends Room {
 
     // 获取属于该房间的creep数量
     getCreepNum() {
-        if (this['CreepNumChecked'])
-            return global.CreepNum[this.name] ||
-                  (global.CreepNum[this.name] = {});
-        global.CreepNum = {};
-        Object.values(Game.creeps).forEach((creep: Creep) => {
-            if(!creep || creep.ticksToLive < creep.body.length * 3) return;
-            const role = creep.memory.role;
-            const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
-            if(!role || !home) return;
-            if (!global.CreepNum[home]) global.CreepNum[home] = {};
-            global.CreepNum[home][role] = (global.CreepNum[home][role] || 0) + 1;
-        })
-        this['CreepNumChecked'] = true;
-        return global.CreepNum[this.name] || (global.CreepNum[this.name] = {});
+        const byRoom = getCreepNumByHomeRoom();
+        return byRoom[this.name] || (byRoom[this.name] = {});
     }
 
     // 获取当前房间的有效等级，根据可用能量判断
@@ -120,13 +146,20 @@ export default class BaseFunction extends Room {
 
         if(!this.memory.sourcePosCount) this.memory.sourcePosCount = {}
         let terrain = null;
-        let creeps = this.find(FIND_MY_CREEPS, {
-            filter: c => c.id != creep.id && c.ticksToLive > 100 &&
-                    c.memory.role === creep.memory.role
-        }) || [];
+        const role = creep.memory.role;
+        const creeps = role ? getMyCreepsByRoleByRoom(this, role).filter(c => c.id !== creep.id) : [];
+        const boundCounts: Record<string, number> = {};
+        const minTtlBySource: Record<string, number> = {};
+        for (const c of creeps) {
+            const sid = (c.memory as any).targetSourceId;
+            if (!sid) continue;
+            boundCounts[sid] = (boundCounts[sid] || 0) + 1;
+            const ttl = c.ticksToLive || 0;
+            minTtlBySource[sid] = minTtlBySource[sid] == null ? ttl : Math.min(minTtlBySource[sid], ttl);
+        }
         // 找到绑定最少的，有位置的采集点
         this.source.forEach((source: Source) => {
-            let creepCount = creeps.filter(c => c.memory.targetSourceId === source.id).length;
+            let creepCount = boundCounts[source.id] || 0;
             // 该采集点的最大位置
             let maxPosCount: number;
             if (this.memory.sourcePosCount[source.id]) {
@@ -160,13 +193,7 @@ export default class BaseFunction extends Room {
             targetSource = creep.pos.findClosestByRange(leastCrowdedSources);
         } else if (leastCrowdedSources.length > 1) {
             targetSource = leastCrowdedSources.reduce((obj, source) => {
-                const minTickToLive = creeps.reduce((min, c) => {
-                    if (c.memory.targetSourceId === source.id) {
-                        return Math.min(min, c.ticksToLive);
-                    } else {
-                        return min;
-                    }
-                }, Infinity);
+                const minTickToLive = minTtlBySource[source.id] ?? Infinity;
                 if (!obj) return { source, minTickToLive };
                 if (obj.minTickToLive > minTickToLive) {
                     return { source, minTickToLive }
@@ -490,7 +517,7 @@ export default class BaseFunction extends Room {
     /** 寻找敌方creep */
     findEnemyCreeps(opts?: any) {
         if (this['EnemyCreeps']) return this['EnemyCreeps']; 
-        let whiteList = new Set<string>(Memory['whitelist'] || []);
+        const whiteList = getWhitelistSet();
         let EnemyCreeps = this.find(FIND_HOSTILE_CREEPS, opts).filter((c: any) => !whiteList.has(c.owner.username));
         return this['EnemyCreeps'] = [...EnemyCreeps];
     }
@@ -498,7 +525,7 @@ export default class BaseFunction extends Room {
     /** 寻找敌方PowerCreep */
     findEnemyPowerCreeps(opts?: any) {
         if (this['EnemyPowerCreeps']) return this['EnemyPowerCreeps']; 
-        let whiteList = new Set<string>(Memory['whitelist'] || []);
+        const whiteList = getWhitelistSet();
         let EnemyPowerCreeps = this.find(FIND_HOSTILE_POWER_CREEPS, opts).filter((c: any) => !whiteList.has(c.owner.username));
         return this['EnemyPowerCreeps'] = [...EnemyPowerCreeps];
     }
@@ -508,7 +535,7 @@ export default class BaseFunction extends Room {
      */
     findEnemyStructures(opts?: any) {
         if (this['EnemyStructures']) return this['EnemyStructures']; 
-        let whiteList = new Set<string>(Memory['whitelist'] || []);
+        const whiteList = getWhitelistSet();
         let EnemyStructures = this.find(FIND_HOSTILE_STRUCTURES, opts).filter((c: any) => !whiteList.has(c.owner.username));
         this['EnemyStructures'] = [...EnemyStructures];
         return [...EnemyStructures];
@@ -538,5 +565,3 @@ function AddList(list: any[], num: number, type: any) {
     }
     return list
 }
-
-

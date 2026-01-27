@@ -2,6 +2,8 @@
  * 战斗功能类
  * 提供战斗相关方法的原型扩展
  */
+import { getWhitelistSet } from '@/utils';
+
 export default class CombatFunction extends Creep {
     /**
      * 查找敌对 creep
@@ -26,8 +28,7 @@ export default class CombatFunction extends Creep {
             ...options
         };
 
-        // 获取白名单
-        const whiteList = new Set<string>(Memory['whitelist'] || []);
+        const whiteList = getWhitelistSet();
 
         const filter = (creep: Creep): boolean => {
             // 排除白名单玩家

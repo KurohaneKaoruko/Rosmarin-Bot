@@ -1535,6 +1535,25 @@ function direction2Pos(pos, target) {
  */
 function wrapFn(fn, name) {
     return function () {
+        if (name === 'moveTo') {
+            const last = this && this._bmMoveToDedup;
+            if (last && last.tick === Game.time) {
+                const arg0 = arguments[0];
+                let key = '';
+                if (typeof arg0 === 'object' && arg0) {
+                    const p = arg0.pos || arg0;
+                    const roomName = p.roomName || p.room?.name || this.pos.roomName;
+                    key = `${roomName}|${p.x}|${p.y}`;
+                    const opts = arguments[1];
+                    if (opts && typeof opts === 'object') key += `|r${opts.range ?? ''}|mr${opts.maxRooms ?? ''}`;
+                } else {
+                    key = `${this.pos.roomName}|${arguments[0]}|${arguments[1]}`;
+                    const opts = arguments[2];
+                    if (opts && typeof opts === 'object') key += `|r${opts.range ?? ''}|mr${opts.maxRooms ?? ''}`;
+                }
+                if (key && last.key === key) return last.ret;
+            }
+        }
         startTime = Game.cpu.getUsed();     // 0.0015cpu
         if (obTick < Game.time) {
             obTick = Game.time;
@@ -1547,6 +1566,22 @@ function wrapFn(fn, name) {
             const bucket = analyzeCPU[name] || (analyzeCPU[name] = { sum: 0, calls: 0 });
             bucket.sum += endTime - startTime;
             bucket.calls++;
+        }
+        if (name === 'moveTo') {
+            const arg0 = arguments[0];
+            let key = '';
+            if (typeof arg0 === 'object' && arg0) {
+                const p = arg0.pos || arg0;
+                const roomName = p.roomName || p.room?.name || this.pos.roomName;
+                key = `${roomName}|${p.x}|${p.y}`;
+                const opts = arguments[1];
+                if (opts && typeof opts === 'object') key += `|r${opts.range ?? ''}|mr${opts.maxRooms ?? ''}`;
+            } else {
+                key = `${this.pos.roomName}|${arguments[0]}|${arguments[1]}`;
+                const opts = arguments[2];
+                if (opts && typeof opts === 'object') key += `|r${opts.range ?? ''}|mr${opts.maxRooms ?? ''}`;
+            }
+            this._bmMoveToDedup = { tick: Game.time, key, ret: code };
         }
         return code;
     }

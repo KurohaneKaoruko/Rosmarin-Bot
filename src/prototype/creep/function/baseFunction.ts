@@ -1,6 +1,79 @@
 /**
  * 一些基础的功能
  */
+import { getWhitelistSet } from '@/utils';
+
+type TakeTargetType = 'dropped' | 'structure' | 'ruin';
+type TakeTarget = { id: Id<any>; type: TakeTargetType };
+
+type EnergyPickupSnapshot = {
+    centerLink: StructureLink | null;
+    providers: AnyStoreStructure[];
+    dropped: Resource<RESOURCE_ENERGY>[];
+    droppedLarge: Resource<RESOURCE_ENERGY>[];
+    ruins: Ruin[];
+};
+
+const getEnergyPickupSnapshot = (() => {
+    let cachedTick = -1;
+    let cachedByRoom: Record<string, EnergyPickupSnapshot> = {};
+    return (room: Room) => {
+        if (cachedTick !== Game.time) {
+            cachedTick = Game.time;
+            cachedByRoom = {};
+        }
+        const hit = cachedByRoom[room.name];
+        if (hit) return hit;
+
+        const snapshot: EnergyPickupSnapshot = {
+            centerLink: null,
+            providers: [],
+            dropped: [],
+            droppedLarge: [],
+            ruins: [],
+        };
+
+        const center = Memory.RoomControlData?.[room.name]?.center;
+        const linkArr = (room as any).link as StructureLink[] | undefined;
+        if (center && linkArr && linkArr.length) {
+            snapshot.centerLink = linkArr.find(l =>
+                l &&
+                l.pos.inRangeTo(center.x, center.y, 1) &&
+                l.store[RESOURCE_ENERGY] >= 400
+            ) || null;
+        } else {
+            snapshot.centerLink = null;
+        }
+
+        const storage = room.storage;
+        const terminal = room.terminal;
+        if (storage && storage.store[RESOURCE_ENERGY] >= 5000) snapshot.providers.push(storage);
+        if (terminal && terminal.store[RESOURCE_ENERGY] >= 5000) snapshot.providers.push(terminal);
+        if (linkArr && linkArr.length) {
+            for (const l of linkArr) {
+                if (l && l.store[RESOURCE_ENERGY] >= 400) snapshot.providers.push(l);
+            }
+        }
+        const contArr = (room as any).container as StructureContainer[] | undefined;
+        if (contArr && contArr.length) {
+            for (const c of contArr) {
+                if (c && c.store[RESOURCE_ENERGY] >= 500) snapshot.providers.push(c);
+            }
+        }
+
+        snapshot.dropped = room.find(FIND_DROPPED_RESOURCES, {
+            filter: resource => resource.resourceType === RESOURCE_ENERGY && resource.amount >= 100
+        }) as Resource<RESOURCE_ENERGY>[];
+        snapshot.droppedLarge = snapshot.dropped.filter(r => r.amount >= 1000);
+        snapshot.ruins = room.find(FIND_RUINS, {
+            filter: r => r && r.store[RESOURCE_ENERGY] > 0
+        }) as Ruin[];
+
+        cachedByRoom[room.name] = snapshot;
+        return snapshot;
+    };
+})();
+
 export default class BaseFunction extends Creep {
     /**
      * 获取能量
@@ -9,10 +82,32 @@ export default class BaseFunction extends Creep {
         const updateTakeTarget = () => {
             if (this.memory.cache.takeTarget) return false;
 
-            const target =  (pickup ? findDroppedResourceTarget(1000) : null) ||
-                            findStructureTarget() ||
-                            (pickup ? findDroppedResourceTarget(100) : null) ||
-                            findRuinTarget();
+            const snapshot = getEnergyPickupSnapshot(this.room);
+
+            const findDropped = (minAmount: number): TakeTarget | null => {
+                if (!pickup) return null;
+                const list = minAmount >= 1000 ? snapshot.droppedLarge : snapshot.dropped;
+                const closest = list && list.length ? this.pos.findClosestByRange(list) : null;
+                return closest ? { id: closest.id, type: 'dropped' } : null;
+            };
+
+            const findStructureTarget = (): TakeTarget | null => {
+                if (snapshot.centerLink) return { id: snapshot.centerLink.id, type: 'structure' };
+                const closest = snapshot.providers && snapshot.providers.length ? this.pos.findClosestByRange(snapshot.providers) : null;
+                return closest ? { id: closest.id, type: 'structure' } : null;
+            };
+
+            const findRuinTarget = (): TakeTarget | null => {
+                if (!pickup) return null;
+                const closest = snapshot.ruins && snapshot.ruins.length ? this.pos.findClosestByRange(snapshot.ruins) : null;
+                return closest ? { id: closest.id, type: 'ruin' } : null;
+            };
+
+            const target =
+                findDropped(1000) ||
+                findStructureTarget() ||
+                findDropped(100) ||
+                findRuinTarget();
 
             if (target) {
                 this.memory.cache.takeTarget = target;
@@ -50,68 +145,6 @@ export default class BaseFunction extends Creep {
             return false;
         };
 
-        const findStructureTarget = () => {
-            const targets: (StructureStorage | StructureTerminal | StructureLink | StructureContainer)[] = [];
-            const storage = this.room.storage;
-            const terminal = this.room.terminal;
-            const link = this.room.link;
-            const container = this.room.container;
-
-            // 1. 优先中心 link
-            const center = Memory.RoomControlData?.[this.room.name]?.center;
-            if (center && link && link.length) {
-                const centerLink = link.find(l =>
-                    l &&
-                    l.pos.inRangeTo(center.x, center.y, 1) &&
-                    l.store[RESOURCE_ENERGY] >= 400    // 阈值可按你需求调整
-                );
-                if (centerLink) {
-                    return { id: centerLink.id, type: 'structure' };
-                }
-            }
-
-            // 2. storage / terminal / 其它 link / container（沿用现有阈值）
-            if (storage && storage.store[RESOURCE_ENERGY] >= 5000) {
-                targets.push(storage);
-            }
-            if (terminal && terminal.store[RESOURCE_ENERGY] >= 5000) {
-                targets.push(terminal);
-            }
-            for (const l of link) {
-                if (l && l.store[RESOURCE_ENERGY] >= 400) {
-                    targets.push(l);
-                }
-            }
-            for (const c of container) {
-                if (c && c.store[RESOURCE_ENERGY] >= 500) {
-                    targets.push(c);
-                }
-            }
-
-            const closest = this.pos.findClosestByRange(targets);
-            return closest ? { id: closest.id, type: 'structure' } : null;
-        };
-
-        const findDroppedResourceTarget = (amount = 50) => {
-            const droppedResources = this.room.find(FIND_DROPPED_RESOURCES, {
-                filter: resource => resource.resourceType === RESOURCE_ENERGY && resource.amount >= amount
-            });
-            const closestDroppedEnergy = this.pos.findClosestByRange(droppedResources);
-            return closestDroppedEnergy
-                ? { id: closestDroppedEnergy.id, type: 'dropped' }
-                : null;
-        };
-
-        const findRuinTarget = () => {
-            const ruins = this.room.find(FIND_RUINS, {
-                filter: r => r && r.store[RESOURCE_ENERGY] > 0
-            });
-            const closestRuin = this.pos.findClosestByRange(ruins);
-            return closestRuin
-                ? { id: closestRuin.id, type: 'ruin' }
-                : null;
-        };
-
         const harvestEnergy = () => {
             // if (this.room.level > 4) return false;
             if (!this.memory.cache.targetSourceId) {
@@ -142,8 +175,7 @@ export default class BaseFunction extends Creep {
 
     // 是否处于白名单中
     isWhiteList() {
-        let whiteList = new Set<string>(Memory['whitelist'] || []);
-        return whiteList.has(this.owner.username);
+        return getWhitelistSet().has(this.owner.username);
     }
 
     /**
