@@ -19,6 +19,18 @@ const getTotalEnergy = (room: Room) => {
     return (room as any).getEnergyProfile?.().totalEnergy ?? (room as any)[RESOURCE_ENERGY] ?? 0;
 }
 
+const hasMyConstructionSitesCached = (room: Room) => {
+    const cachedSites = (room as any).constructionSite as ConstructionSite[] | undefined;
+    if (cachedSites && cachedSites.length > 0) {
+        for (const site of cachedSites) {
+            if ((site as any).my) return true;
+            else site.remove();
+        }
+        return false;
+    }
+    return false;
+}
+
 const getDowngradedLogisticsCountByHomeRoom = (() => {
     let cachedTick = -1;
     let cached: Record<string, Record<string, number>> = {};
@@ -92,7 +104,7 @@ const RoleSpawnCheck = {
         const totalEnergy = getTotalEnergy(room);
 
         const hasBuildMission = room.checkMissionInPool('build');
-        const hasConstruction = room.find(FIND_MY_CONSTRUCTION_SITES).length > 0;
+        const hasConstruction = hasMyConstructionSitesCached(room);
         const needBuilder = hasBuildMission || hasConstruction;
 
         // 1. 只要有建造需求，就先保证至少 1 个 worker
@@ -238,7 +250,7 @@ export default class SpawnMission extends Room {
         }
 
         if(!memory) memory = {} as CreepMemory;
-        else memory = _.cloneDeep(memory);
+        else memory = { ...(memory as any) } as CreepMemory;
         memory.role = role;
         
         if(level < 0) level = RoleData[role].level;
