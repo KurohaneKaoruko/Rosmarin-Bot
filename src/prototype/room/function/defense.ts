@@ -1,4 +1,5 @@
 import { getStructureSignature } from '@/utils';
+import { shouldRun } from '@/modules/infra/qos';
 
 export default class RoomDefense extends Room {
     activeDefense() {
@@ -77,59 +78,64 @@ export default class RoomDefense extends Room {
         }, 0);
 
         if (Array.isArray(this[STRUCTURE_RAMPART]) && this[STRUCTURE_RAMPART].length > 0) {
-            const costs = this.getDefenseCostMatrix(false);
+            const allowHeavyDefenseCalc = shouldRun({ minBucket: 2000, allowLevels: ['normal', 'constrained'] });
+            if (!allowHeavyDefenseCalc) {
+                this.memory['breached'] = true;
+            } else {
+                const costs = this.getDefenseCostMatrix(false);
 
-            let breached = false;
-            for (const c of hostiles as any[]) {
-                if (!c?.pos) continue;
-                if (c.pos.roomName !== this.name) continue;
-                if (costs.get(c.pos.x, c.pos.y) < 254) {
-                    breached = true;
-                    break;
-                }
-            }
-            this.memory['breached'] = breached;
-            const rampartMinHits = breached ? 1e5 : 1e6;
-
-            let sumX = 0;
-            let sumY = 0;
-            let count = 0;
-            for (const c of hostiles as any[]) {
-                if (!c?.pos) continue;
-                if (c.pos.roomName !== this.name) continue;
-                sumX += c.pos.x;
-                sumY += c.pos.y;
-                count++;
-            }
-            const meanX = count > 0 ? Math.round(sumX / count) : 25;
-            const meanY = count > 0 ? Math.round(sumY / count) : 25;
-            const meanPos = new RoomPosition(meanX, meanY, this.name);
-
-            const rampartCandidates = (this[STRUCTURE_RAMPART] as StructureRampart[])
-                .filter(r => r?.my && r.hits >= rampartMinHits && costs.get(r.pos.x, r.pos.y) === 1)
-                .filter(r => {
-                    const lookStructure = this.lookForAt(LOOK_STRUCTURES, r.pos);
-                    if (lookStructure.length && lookStructure.some(structure =>
-                        structure.structureType !== STRUCTURE_RAMPART &&
-                        structure.structureType !== STRUCTURE_ROAD &&
-                        structure.structureType !== STRUCTURE_CONTAINER)) {
-                        return false;
+                let breached = false;
+                for (const c of hostiles as any[]) {
+                    if (!c?.pos) continue;
+                    if (c.pos.roomName !== this.name) continue;
+                    if (costs.get(c.pos.x, c.pos.y) < 254) {
+                        breached = true;
+                        break;
                     }
-                    return true;
+                }
+                this.memory['breached'] = breached;
+                const rampartMinHits = breached ? 1e5 : 1e6;
+
+                let sumX = 0;
+                let sumY = 0;
+                let count = 0;
+                for (const c of hostiles as any[]) {
+                    if (!c?.pos) continue;
+                    if (c.pos.roomName !== this.name) continue;
+                    sumX += c.pos.x;
+                    sumY += c.pos.y;
+                    count++;
+                }
+                const meanX = count > 0 ? Math.round(sumX / count) : 25;
+                const meanY = count > 0 ? Math.round(sumY / count) : 25;
+                const meanPos = new RoomPosition(meanX, meanY, this.name);
+
+                const rampartCandidates = (this[STRUCTURE_RAMPART] as StructureRampart[])
+                    .filter(r => r?.my && r.hits >= rampartMinHits && costs.get(r.pos.x, r.pos.y) === 1)
+                    .filter(r => {
+                        const lookStructure = this.lookForAt(LOOK_STRUCTURES, r.pos);
+                        if (lookStructure.length && lookStructure.some(structure =>
+                            structure.structureType !== STRUCTURE_RAMPART &&
+                            structure.structureType !== STRUCTURE_ROAD &&
+                            structure.structureType !== STRUCTURE_CONTAINER)) {
+                            return false;
+                        }
+                        return true;
+                    });
+
+                const scored = rampartCandidates.map(r => {
+                    const dist = r.pos.getRangeTo(meanPos);
+                    const meleeScore = -dist;
+                    const rangedScore = -Math.abs(dist - 3) - dist * 0.05;
+                    return { id: r.id, meleeScore, rangedScore };
                 });
+                scored.sort((a, b) => b.meleeScore - a.meleeScore);
+                const melee = scored.slice(0, 10).map(s => s.id);
+                scored.sort((a, b) => b.rangedScore - a.rangedScore);
+                const ranged = scored.slice(0, 10).map(s => s.id);
 
-            const scored = rampartCandidates.map(r => {
-                const dist = r.pos.getRangeTo(meanPos);
-                const meleeScore = -dist;
-                const rangedScore = -Math.abs(dist - 3) - dist * 0.05;
-                return { id: r.id, meleeScore, rangedScore };
-            });
-            scored.sort((a, b) => b.meleeScore - a.meleeScore);
-            const melee = scored.slice(0, 10).map(s => s.id);
-            scored.sort((a, b) => b.rangedScore - a.rangedScore);
-            const ranged = scored.slice(0, 10).map(s => s.id);
-
-            this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged, minHits: rampartMinHits };
+                this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged, minHits: rampartMinHits };
+            }
         } else {
             delete this.memory['defenseRamparts'];
             delete this.memory['breached'];
