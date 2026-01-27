@@ -1,5 +1,6 @@
 import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoadBuilder, RoadVisual } from '@/modules/feature/externalRoad';
+import { getQoS, shouldRun } from '@/modules/infra/qos';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
@@ -7,13 +8,20 @@ export default class OutMine extends Room {
         if (this.memory.defend) return;
         if (Memory['warmode']) return;
 
-        RoadVisual.run()
+        const qosLevel = getQoS()?.level || 'normal';
+        if (qosLevel === 'emergency') return;
+
+        if (qosLevel === 'normal' || shouldRun({ every: 5, allowLevels: ['constrained'] })) {
+            RoadVisual.run();
+        }
         this.EnergyMine();
         this.CenterMine();
     }
 
     EnergyMine() { // 能量矿
-        if (Game.time % 20 != 0) return;
+        const qosLevel = getQoS()?.level || 'normal';
+        const interval = qosLevel === 'constrained' ? 40 : 20;
+        if (Game.time % interval != 0) return;
         const Mem = Memory['OutMineData'][this.name]?.['energy'];
         if (!Mem || !Mem.length) return;
         // 孵化任务数统计
@@ -22,7 +30,9 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                scoutSpawn(this, roomName);    // 侦查
+                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                    scoutSpawn(this, roomName);    // 侦查
+                }
                 continue;
             }
 
@@ -32,7 +42,9 @@ export default class OutMine extends Room {
 
             // 造路
             if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
-                RoadBuilder.createRoadSites(this, targetRoom)
+                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                    RoadBuilder.createRoadSites(this, targetRoom)
+                }
             }
 
 
@@ -67,7 +79,9 @@ export default class OutMine extends Room {
             const myUserName = this.controller.owner.username;
             if (controller?.owner && controller.owner.username !== myUserName) continue;
 
-            if (this.level >= 3) outReserverSpawn(this, targetRoom);    // 预定
+            if (this.level >= 3 && (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] }))) {
+                outReserverSpawn(this, targetRoom);    // 预定
+            }
 
             if (controller.reservation &&
                 controller.reservation.username !== myUserName) continue;
@@ -87,12 +101,16 @@ export default class OutMine extends Room {
                 outCarrySpawn(this, targetRoom, sourceNum);
             }
             
-            outBuilderSpawn(this, targetRoom);    // 建造
+            if (qosLevel === 'normal') {
+                outBuilderSpawn(this, targetRoom);    // 建造
+            }
         }
     }
 
     CenterMine() { // 中央九房
-        if (Game.time % 10 != 0) return;
+        const qosLevel = getQoS()?.level || 'normal';
+        const interval = qosLevel === 'constrained' ? 20 : 10;
+        if (Game.time % interval != 0) return;
         const Mem = Memory['OutMineData'][this.name]?.['centerRoom'];
         if (!Mem || !Mem.length) return;
         // 孵化任务数统计
@@ -101,7 +119,9 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                scoutSpawn(this, roomName);    // 侦查
+                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                    scoutSpawn(this, roomName);    // 侦查
+                }
                 continue;
             }
             // 没有房间视野不孵化
@@ -109,7 +129,9 @@ export default class OutMine extends Room {
 
             // 造路
             if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
-                RoadBuilder.createRoadSites(this, targetRoom)
+                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                    RoadBuilder.createRoadSites(this, targetRoom)
+                }
             }
 
             const hostiles = targetRoom.find(FIND_HOSTILE_CREEPS, {
@@ -147,7 +169,9 @@ export default class OutMine extends Room {
                 outMineSpawn(this, targetRoom);
             }    // 采矿
             outCarrySpawn(this, targetRoom, 4);    // 搬运
-            outBuilderSpawn(this, targetRoom);    // 建造
+            if (qosLevel === 'normal') {
+                outBuilderSpawn(this, targetRoom);    // 建造
+            }
         }
     }
 }
