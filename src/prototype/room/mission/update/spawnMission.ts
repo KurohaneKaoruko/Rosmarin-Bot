@@ -19,6 +19,26 @@ const getTotalEnergy = (room: Room) => {
     return (room as any).getEnergyProfile?.().totalEnergy ?? (room as any)[RESOURCE_ENERGY] ?? 0;
 }
 
+const getDowngradedLogisticsCountByHomeRoom = (() => {
+    let cachedTick = -1;
+    let cached: Record<string, Record<string, number>> = {};
+    return () => {
+        if (cachedTick === Game.time) return cached;
+        cachedTick = Game.time;
+        cached = {};
+        for (const creep of Object.values(Game.creeps)) {
+            if (!creep || creep.ticksToLive < creep.body.length * 3) continue;
+            if (!creep.memory?.downgraded) continue;
+            const role = creep.memory.role;
+            if (role !== 'transport' && role !== 'carrier' && role !== 'manager') continue;
+            const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
+            if (!cached[home]) cached[home] = {};
+            cached[home][role] = (cached[home][role] || 0) + 1;
+        }
+        return cached;
+    };
+})();
+
 const RoleSpawnCheck = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
@@ -180,18 +200,9 @@ export default class SpawnMission extends Room {
         const SpawnMissionNum = this.getSpawnMissionNum();
         const state = getEnergyState(this);
         const shouldRecover = state === 'NORMAL' || state === 'SURPLUS';
-        const downgradedCount: Record<string, number> = {};
-        if (shouldRecover) {
-            for (const creep of Object.values(Game.creeps)) {
-                if (!creep || creep.ticksToLive < creep.body.length * 3) continue;
-                const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
-                if (home !== this.name) continue;
-                if (!creep.memory.downgraded) continue;
-                const role = creep.memory.role;
-                if (role !== 'transport' && role !== 'carrier' && role !== 'manager') continue;
-                downgradedCount[role] = (downgradedCount[role] || 0) + 1;
-            }
-        }
+        const downgradedCount: Record<string, number> = shouldRecover
+            ? (getDowngradedLogisticsCountByHomeRoom()[this.name] || {})
+            : {};
     
         for (const role in RoleSpawnCheck) {
             const current = (CreepNum[role] || 0) + (SpawnMissionNum[role] || 0);

@@ -135,10 +135,18 @@ export default class RoomDefense extends Room {
             delete this.memory['breached'];
         }
 
-        const attackDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-attack');
-        const rangedDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-ranged');
-        const doubleAttackDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-2attack');
-        const doubleHealDefender = Object.values(Game.creeps).filter((creep:any) => creep.room.name == this.name && creep.memory.role == 'defend-2heal');
+        const myCreeps = this.find(FIND_MY_CREEPS);
+        let attackDefenderNum = 0;
+        let rangedDefenderNum = 0;
+        let doubleAttackDefenderNum = 0;
+        let doubleHealDefenderNum = 0;
+        for (const creep of myCreeps as any[]) {
+            const role = creep?.memory?.role;
+            if (role === 'defend-attack') attackDefenderNum++;
+            else if (role === 'defend-ranged') rangedDefenderNum++;
+            else if (role === 'defend-2attack') doubleAttackDefenderNum++;
+            else if (role === 'defend-2heal') doubleHealDefenderNum++;
+        }
         
         const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
         const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
@@ -162,12 +170,12 @@ export default class RoomDefense extends Room {
         const useDouble = false;
 
         if (useDouble) {
-            if (doubleAttackDefender.length + doubleAttackQueueNum < 1) {
+            if (doubleAttackDefenderNum + doubleAttackQueueNum < 1) {
                 const body = this.GetRoleBodys('defend-2attack');
                 this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
                 this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
-            if (doubleHealDefender.length + doubleHealQueueNum < 1) {
+            if (doubleHealDefenderNum + doubleHealQueueNum < 1) {
                 const body = this.GetRoleBodys('defend-2heal');
                 this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
                 this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
@@ -230,7 +238,7 @@ export default class RoomDefense extends Room {
             }
         }
 
-        if (desiredAttack > 0 && (attackDefender.length + attackQueueNum < desiredAttack)) {
+        if (desiredAttack > 0 && (attackDefenderNum + attackQueueNum < desiredAttack)) {
             const body = this.GetRoleBodys('defend-attack');
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
@@ -241,7 +249,7 @@ export default class RoomDefense extends Room {
             }
         }
 
-        if (desiredRanged > 0 && (rangedDefender.length + rangedQueueNum < desiredRanged)) {
+        if (desiredRanged > 0 && (rangedDefenderNum + rangedQueueNum < desiredRanged)) {
             const body = this.GetRoleBodys('defend-ranged');
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
