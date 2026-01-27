@@ -261,10 +261,8 @@ rosmarin-bot/
 | 技术 | 版本 | 用途 |
 |------|------|------|
 | TypeScript | 5.x | 主要开发语言 |
-| Rolldown | 1.x(beta) | 模块打包与压缩 |
+| Rolldown | 1.x | 模块打包与压缩 |
 | screeps-api | 1.x | 代码上传 |
-| Vitest | 1.x | 单元测试 |
-| ESLint | 9.x | 代码规范（本地开发） |
 
 ## 🎨 可用布局
 
@@ -295,8 +293,13 @@ rosmarin-bot/
   - 中央九房：6 级
 
 ### Lab 设置
-- 放置 Flag `labA` 和 `labB` 设置底物 Lab
-- 放置 Flag `labset-{资源类型}` 设置 Boost Lab
+- 放置 Flag `labA` 和 `labB` 设置底物 Lab（可选；当房间有 10 个 Lab 且未设置时会自动推导）
+- Boost Lab 长期固定配置（会持续补能量/补矿）：在房间内放置 Flag `labset-{资源类型}`，然后执行 `lab.setboost(roomName)` 读取并写入配置（旗帜会被自动移除）
+- 可视化：底物 Lab 会以圆圈标记（A=粉色圈，B=蓝色圈）
+
+#### Memory 关键字段（高级）
+- `Memory.StructControlData[roomName].labA / labB`: 底物 Lab 的压缩坐标（`compress(x,y)`）
+- `Memory.StructControlData[roomName].boostLabs[labId] = { mineral, mode }`: Boost Lab 预留表（`mode: 'fixed' | 'task'`）
 
 ## 🤝 贡献
 
