@@ -67,19 +67,32 @@ export function resolveLabFromMem(room: Room, value: unknown): { lab: StructureL
 /**
  * 在 10 Lab 布局中推导底物 A/B
  * @description
- * 选择满足“其余 8 个 lab 到 A 与 B 的距离都 <= 2”的一对 (A,B)，并以距离和最小为优先。
+ * 选择满足“其余 8 个 lab 到 A 与 B 的距离都 <= 2”的一对 (A,B)。
+ * 排序优先级：
+ * 1. (如果有 centerPos) A/B 到中心的距离之和最小
+ * 2. 内部距离和（其他 Lab 到 A/B 距离之和）最小
+ * 3. 坐标排序（确定性兜底）
  */
-function pickLabAB(labs: StructureLab[]): { a: StructureLab; b: StructureLab } | null {
+function pickLabAB(labs: StructureLab[], centerPos?: RoomPosition): { a: StructureLab; b: StructureLab } | null {
     if (!labs || labs.length !== 10) return null;
-    let best: { a: StructureLab; b: StructureLab; score: number; ax: number; ay: number; bx: number; by: number } | null = null;
+
+    const candidates: {
+        a: StructureLab;
+        b: StructureLab;
+        internalScore: number;
+        centerScore: number;
+        ax: number; ay: number; bx: number; by: number;
+    }[] = [];
+
     const ordered = labs.slice().sort((l1, l2) => (l1.pos.x - l2.pos.x) || (l1.pos.y - l2.pos.y));
+    
     for (let i = 0; i < ordered.length; i++) {
-        for (let j = 0; j < ordered.length; j++) {
-            if (i === j) continue;
+        for (let j = i + 1; j < ordered.length; j++) {
             const a = ordered[i];
             const b = ordered[j];
             let ok = true;
-            let score = 0;
+            let internalScore = 0;
+
             for (const c of ordered) {
                 if (c.id === a.id || c.id === b.id) continue;
                 const ra = c.pos.getRangeTo(a);
@@ -88,22 +101,41 @@ function pickLabAB(labs: StructureLab[]): { a: StructureLab; b: StructureLab } |
                     ok = false;
                     break;
                 }
-                score += ra + rb;
+                internalScore += ra + rb;
             }
-            if (!ok) continue;
-            const cand = { a, b, score, ax: a.pos.x, ay: a.pos.y, bx: b.pos.x, by: b.pos.y };
-            if (!best) {
-                best = cand;
-                continue;
-            }
-            if (cand.score < best.score) best = cand;
-            else if (cand.score === best.score) {
-                const t1 = (cand.ax - best.ax) || (cand.ay - best.ay) || (cand.bx - best.bx) || (cand.by - best.by);
-                if (t1 < 0) best = cand;
+
+            if (ok) {
+                let centerScore = 0;
+                if (centerPos) {
+                    centerScore = a.pos.getRangeTo(centerPos) + b.pos.getRangeTo(centerPos);
+                }
+                candidates.push({
+                    a, b,
+                    internalScore,
+                    centerScore,
+                    ax: a.pos.x, ay: a.pos.y,
+                    bx: b.pos.x, by: b.pos.y
+                });
             }
         }
     }
-    return best ? { a: best.a, b: best.b } : null;
+
+    if (candidates.length === 0) return null;
+
+    candidates.sort((c1, c2) => {
+        // 1. Center Score (Ascending) - 优先选离中心近的
+        if (c1.centerScore !== c2.centerScore) {
+            return c1.centerScore - c2.centerScore;
+        }
+        // 2. Internal Score (Ascending) - 次选内部紧凑的
+        if (c1.internalScore !== c2.internalScore) {
+            return c1.internalScore - c2.internalScore;
+        }
+        // 3. Coordinate determinism
+        return (c1.ax - c2.ax) || (c1.ay - c2.ay) || (c1.bx - c2.bx) || (c1.by - c2.by);
+    });
+
+    return { a: candidates[0].a, b: candidates[0].b };
 }
 
 /**
@@ -169,7 +201,17 @@ function computeLabAB(roomName: string, room: Room, mode: 'ensure' | 'get'): Lab
 
     if (mode === 'ensure' && (!labA || !labB) && room.lab.length === 10) {
         // 仅在满 10 Lab 且未正确配置时自动推导，并写回 Memory
-        const pair = pickLabAB(room.lab);
+        
+        // 尝试获取布局中心，以便 pickLabAB 优先选择靠近中心的 Lab
+        let centerPos: RoomPosition | undefined;
+        const rcd = (Memory as any)['RoomControlData']?.[roomName];
+        if (rcd?.center) {
+            centerPos = new RoomPosition(rcd.center.x, rcd.center.y, roomName);
+        }
+        if (!centerPos && room.storage) centerPos = room.storage.pos;
+        if (!centerPos && room.terminal) centerPos = room.terminal.pos;
+
+        const pair = pickLabAB(room.lab, centerPos);
         if (pair) {
             labA = pair.a;
             labB = pair.b;
