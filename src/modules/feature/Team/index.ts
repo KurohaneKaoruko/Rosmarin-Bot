@@ -1,4 +1,4 @@
-import TeamSpawner from "./TeamSpawner";
-import TeamController from "./TeamController";
+import TeamSpawner from "./runtime/TeamSpawner";
+import TeamController from "./runtime/TeamController";
 
 export { TeamSpawner, TeamController }

@@ -1,11 +1,7 @@
-import Team from "./TeamClass";
-import TeamCreep from "./TeamCreep";
-import TeamCalc from "./TeamCalc";
+import Team from "../core/TeamClass";
+import TeamCalc from "../infra/TeamCalc";
 
 export default class TeamController {
-    // 全局缓存，用于在 tick 之间复用 Team 实例
-    private static teamCache: Record<string, Team> = {};
-
     static run(): void {
         this.runCreeps();
         this.runTeams();
@@ -17,7 +13,33 @@ export default class TeamController {
             if (!creep || creep.spawning) continue;
             const role = creep.memory.role;
             if (role.startsWith('team')) {
-                TeamCreep.action(creep);
+                // 关闭 notify（只设置一次）
+                if (!creep.memory.notified) {
+                    creep.notifyWhenAttacked(false);
+                    creep.memory.notified = true;
+                }
+
+                // boost
+                if (!creep.memory.boosted) {
+                    if (creep.memory['boostmap']) {
+                        // Team Creep 必须完成 Boost (must: true)，任务配额扣减由 Boost 内部自动处理
+                        const result = creep.Boost(creep.memory['boostmap'], { must: true });
+                        if (result === OK) {
+                            creep.memory.boosted = true;
+                            delete creep.memory['boostmap'];
+                        }
+                    } else creep.memory.boosted = true;
+                    continue;
+                }
+
+                // 归队
+                if (!creep.memory['rejoin']) {
+                    const teamID = creep.memory['teamID'];
+                    const team = Memory['TeamData'][teamID];
+                    if (!team) continue;
+                    team.creeps.push(creep.id);
+                    creep.memory['rejoin'] = true;
+                }
                 const teamID = creep.memory['teamID'];
                 if (!Memory['TeamData'][teamID]) creep.suicide();
             } else continue;
@@ -83,7 +105,6 @@ export default class TeamController {
             // 检查小队是否全部死亡
             if (!team.creeps || team.creeps.length === 0) {
                 delete Memory['TeamData'][teamID];
-                delete TeamController.teamCache[teamID];
                 console.log(`${teamID}小队因成员全部死亡已解散.`);
                 Game.flags[`Team-${teamID}`]?.remove();
                 continue;

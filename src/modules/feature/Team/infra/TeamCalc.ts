@@ -3,6 +3,11 @@
  */
 export default class TeamCalc {
     /**
+     * 供 PathFinder.roomCallback 使用的空 CostMatrix（避免重复 new）
+     */
+    private static emptyCostMatrix = new PathFinder.CostMatrix()
+
+    /**
      * 基础攻击力
      */
     public static BODY_POWER: { [part: string]: number } = {
@@ -28,6 +33,61 @@ export default class TeamCalc {
         if (distance <= 5) return 600
         else if (distance <= 20) return 750 - 30 * distance
         else return 150
+    }
+
+    /**
+     * 计算 tick 步内能否走到目标指定范围内（可达性判定）
+     *
+     * 用途：
+     * - 战斗评估里判断“敌方在 N tick 内是否能摸到我”（简化版，不考虑动态绕路/队形）
+     *
+     * 说明：
+     * - 仅在 roomCallback 可见时构建 CostMatrix；不可见房间直接返回 emptyCostMatrix
+     */
+    public static touchableNTickInRange(
+        creep: Creep,
+        targetPos: RoomPosition,
+        tick: number,
+        range: number,
+        plainCost = 1,
+    ) {
+        if (tick > 100) throw new Error(`tick 数量过大，可能会导致性能问题`)
+        if (tick === 0) return creep.pos.inRangeTo(targetPos, range)
+
+        const username = creep.owner.username
+        const goal = { pos: targetPos, range }
+        const result = PathFinder.search(creep.pos, [goal], {
+            maxCost: tick,
+            plainCost,
+            swampCost: plainCost * 5,
+            // @ts-ignore
+            roomCallback: (roomName) => {
+                const room = Game.rooms[roomName]
+                if (!room) return this.emptyCostMatrix
+
+                if (!Game['_username_costs']) Game['_username_costs'] = {}
+                const id = roomName + username
+
+                if (!Game['_username_costs'][id]) {
+                    const costs = new PathFinder.CostMatrix()
+                    const structures = room.find(FIND_STRUCTURES)
+                    structures.forEach((s) => {
+                        if (s.structureType === STRUCTURE_ROAD) {
+                            const cost = Math.max(1, costs.get(s.pos.x, s.pos.y))
+                            costs.set(s.pos.x, s.pos.y, cost)
+                            return
+                        }
+                        if (s.structureType === STRUCTURE_RAMPART && (s as StructureRampart).my) return
+                        costs.set(s.pos.x, s.pos.y, 255)
+                    })
+                    Game['_username_costs'][id] = costs
+                }
+
+                return Game['_username_costs'][id]
+            },
+        })
+
+        return !result.incomplete
     }
 
     /**

@@ -1,6 +1,6 @@
 import { log } from "@/utils";
 import { compressBodyConfig } from "@/modules/utils/compress";
-import { TEAM_CONFIG } from "@/constant/TeamConfig";
+import { TEAM_CONFIG } from "../config/TeamConfig";
 
 export default class TeamSpawner {
     /**

@@ -1,8 +1,8 @@
-import TeamUtils from './TeamUtils';
-import TeamCache from './TeamCache';
-import TeamCalc from './TeamCalc';
-import TeamVisual from './TeamVisual';
-import RoomArray from './TeamRoomArray'
+import TeamUtils from '../core/TeamUtils';
+import TeamCache from '../infra/TeamCache';
+import TeamCalc from '../infra/TeamCalc';
+import TeamVisual from '../debug/TeamVisual';
+import RoomArray from '../infra/RoomArray'
 import { creepPosBipartiteMatch } from '@/utils'
 
 const emptyCostMatrix = new PathFinder.CostMatrix()
@@ -12,22 +12,6 @@ const tempRoomArray = new RoomArray()
  * 小队行动
  */
 export default class TeamAction {
-    /**
-     * 小队路径缓存
-     */
-    public static cacheTeamPath: { [flagName: string]: RoomPosition[] } = {}
-
-    /**
-     * 缓存不可见房间的 CostMatrix
-     */
-    // Key: roomName_avoidObjectsHash
-    public static GlobalCostMatrixCache: { 
-        [key: string]: {
-            matrix: CostMatrix,
-            tick: number
-        } 
-    } = {}
-
     /**
      * 位置掩码映射
      */
@@ -424,7 +408,6 @@ export default class TeamAction {
             maxCost: tick,
             plainCost,
             swampCost: plainCost * 5,
-            // @ts-ignore
             roomCallback: (roomName) => {
                 const room = Game.rooms[roomName]
                 if (!room) return emptyCostMatrix
@@ -536,7 +519,7 @@ export default class TeamAction {
      */
     public static getDirectionByCachePath(team: Team) {
         const originPos = TeamUtils.getTeamPos(team)!
-        const path = this.cacheTeamPath[team.name]
+        const path = TeamCache.cacheTeamPath[team.name]
 
         if (!path || !path.length) return undefined
 
@@ -949,7 +932,7 @@ export default class TeamAction {
                     }
                 }
                 const cacheKey = `${roomName}${avoidHash}`;
-                const cached = TeamAction.GlobalCostMatrixCache[cacheKey];
+                const cached = TeamCache.globalCostMatrixCache[cacheKey];
                 
                 // 缓存有效期 5 tick，或者如果是目标房间且可见则每 tick 更新
                 const isTargetRoom = team.flag.pos.roomName === roomName;
@@ -972,7 +955,7 @@ export default class TeamAction {
                 )
 
                 // 更新缓存
-                TeamAction.GlobalCostMatrixCache[cacheKey] = {
+                TeamCache.globalCostMatrixCache[cacheKey] = {
                     matrix: costs,
                     tick: Game.time
                 };
@@ -998,7 +981,7 @@ export default class TeamAction {
             return
         }
 
-        this.cacheTeamPath[team.name] = result.path
+        TeamCache.cacheTeamPath[team.name] = result.path
         return originPos.getDirectionTo(result.path.shift()!)
     }
 
@@ -1008,11 +991,11 @@ export default class TeamAction {
      */
     public static checkCachePath(team: Team) {
         const originPos = TeamUtils.getTeamPos(team)
-
+        
         return !!(
-            this.cacheTeamPath[team.name] &&
-            this.cacheTeamPath[team.name].length &&
-            originPos?.isCrossRoomNearTo(this.cacheTeamPath[team.name][0])
+            TeamCache.cacheTeamPath[team.name] &&
+            TeamCache.cacheTeamPath[team.name].length &&
+            originPos?.isCrossRoomNearTo(TeamCache.cacheTeamPath[team.name][0])
         )
     }
 
@@ -1031,6 +1014,87 @@ export default class TeamAction {
      * 删除寻路缓存
      */
     public static clearPathCache(team: Team) {
-        delete this.cacheTeamPath[team.name]
+        delete TeamCache.cacheTeamPath[team.name]
+    }
+    
+    /**
+     * 更新队伍推进目标点（targetPos）：
+     * - 有可攻击目标时，锁定当前焦点目标位置，减少目标频繁切换导致的来回抖动
+     * - 到点但本 tick 没有可攻击目标时，尝试在当前 targets 列表里自动换点推进
+     */
+    public static updateTargetPos(team: Team) {
+        if (!team.creeps?.length) return
+        if (!team.flag) return
+
+        const originPos = TeamUtils.getTeamPos(team)
+        const focusTarget = TeamUtils.focusTarget(team, originPos)
+        const focusPos = focusTarget?.pos || team.flag.pos
+
+        const currentTargetPos = TeamUtils.getCachePos(team, 'targetPos')
+        const hasAttackTargets = !!team['_attackTargets']?.length
+
+        // candidates：当前 tick 可推进/可攻击的有效目标（排除 flag），用于判断当前 targetPos 是否仍有效
+        const candidates = ((team['_targets'] || []) as any[]).filter((t) => t && 'hits' in t && t.pos) as {
+            pos: RoomPosition
+        }[]
+        const candidatePosSet = new Set<number>(candidates.map((t) => t.pos?.hashCode()).filter((v) => v !== undefined) as number[])
+
+        if (!currentTargetPos || (hasAttackTargets && !currentTargetPos.isEqualTo(focusPos))) {
+            TeamUtils.setCachePos(team, 'targetPos', focusPos)
+            delete team.cache.targetPosIndex
+            return
+        }
+
+        if (!hasAttackTargets) {
+            // 当 _targets 退化为 [flag] 或无可攻击目标时，强制回退到旗帜，避免追着历史 targetPos 跑
+            if (!candidates.length) {
+                if (!currentTargetPos.isEqualTo(team.flag.pos)) {
+                    TeamUtils.setCachePos(team, 'targetPos', team.flag.pos)
+                    delete team.cache.targetPosIndex
+                }
+                return
+            }
+
+            const currentInCandidates = candidatePosSet.has(currentTargetPos.hashCode())
+            // 当前缓存不在候选集合内，说明目标已拆/切换或不可达，及时纠正到当前焦点，避免锁死到无效点
+            if (currentTargetPos.isRoomEdge() || !currentInCandidates) {
+                TeamUtils.setCachePos(team, 'targetPos', focusPos)
+                delete team.cache.targetPosIndex
+                return
+            }
+        }
+
+        const reached =
+            currentTargetPos.roomName === originPos.roomName &&
+            originPos.getRangeTo(currentTargetPos) <= 1
+
+        if (!reached || hasAttackTargets) return
+
+        if (!candidates.length) {
+            TeamUtils.setCachePos(team, 'targetPos', team.flag.pos)
+            delete team.cache.targetPosIndex
+            return
+        }
+
+        const posList = candidates.map((t) => t.pos).filter((p) => p && !p.isRoomEdge())
+        const uniqPos: RoomPosition[] = []
+        const visited = new Set<number>()
+        posList.forEach((p) => {
+            const h = p.hashCode()
+            if (visited.has(h)) return
+            visited.add(h)
+            uniqPos.push(p)
+        })
+
+        if (!uniqPos.length) {
+            // 目标都在房间边缘等场景会导致 uniqPos 为空，此时回退到焦点点，避免保留旧 targetPos 产生“锁死”
+            TeamUtils.setCachePos(team, 'targetPos', focusPos)
+            delete team.cache.targetPosIndex
+            return
+        }
+
+        const nextIndex = ((team.cache.targetPosIndex || 0) + 1) % uniqPos.length
+        team.cache.targetPosIndex = nextIndex
+        TeamUtils.setCachePos(team, 'targetPos', uniqPos[nextIndex])
     }
 }

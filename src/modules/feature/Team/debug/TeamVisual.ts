@@ -1,4 +1,5 @@
-import RoomArray from './TeamRoomArray'
+import TeamCache from '../infra/TeamCache'
+import RoomArray from '../infra/RoomArray'
 
 /**
  * 战斗绘制
@@ -15,6 +16,14 @@ export default class TeamVisual {
                 visual.text(value.toString(), x, y, { font: 0.35, color })
             }
         }
+    }
+
+    /**
+     * 绘制塔伤分布图
+     */
+    public static drawTowerDamageMap(roomName: string) {
+        const damageMap = TeamCache.getTowerDamageMap(roomName)
+        this.drawRoomArray(roomName, damageMap, '#ff0000')
     }
 
     /**
@@ -38,6 +47,9 @@ export default class TeamVisual {
             const status = team.status
             if (status) {
                 creep.room.visual.circle(creep.pos.x, creep.pos.y, { fill: colors[status], opacity: 0.4, radius: 0.5 })
+            }
+            if (team.cache?.blockedReorientTick === Game.time) {
+                creep.room.visual.text('BR', creep.pos.x, creep.pos.y - 0.6, { font: 0.4, color: '#00ffff' })
             }
         })
     }
@@ -77,5 +89,17 @@ export default class TeamVisual {
             const visual = new RoomVisual(pos.roomName)
             visual.circle(pos.x, pos.y, { fill: '#ff0000', radius: 0.5 })
         })
+    }
+
+    /**
+     * 绘制推进目标点（targetPos）
+     */
+    public static drawTargetPos(team: Team) {
+        const tp = team.cache?.targetPos
+        if (!tp) return
+        const pos = new RoomPosition(tp.x, tp.y, tp.roomName)
+        const visual = new RoomVisual(pos.roomName)
+        visual.circle(pos.x, pos.y, { stroke: '#00ffff', radius: 0.7, fill: 'transparent' })
+        visual.text(team.name, pos.x, pos.y - 0.6, { font: 0.4, color: '#00ffff' })
     }
 }

@@ -1,6 +1,5 @@
-import RoomArray from './TeamRoomArray'
+import RoomArray from './RoomArray'
 import TeamCalc from './TeamCalc';
-import TeamVisual from './TeamVisual';
 
 /**
  * 小队缓存
@@ -26,6 +25,102 @@ export default class TeamCache {
             hits: number
         }[]
     } = {}
+
+    /**
+     * 小队路径缓存（仅运行期内存，不写入 Memory）
+     *
+     * @remarks
+     * - 该缓存用于减少 PathFinder 调用次数；当路径有效时每 tick 只取下一步方向即可
+     * - Key 用 team.name，而不是 flagName：队伍对象在多个模块间流转时更稳定
+     * - 缓存的 RoomPosition[] 会在使用过程中 shift()，因此属于可变结构
+     */
+    public static cacheTeamPath: { [teamName: string]: RoomPosition[] } = {}
+
+    /**
+     * 缓存不可见房间的 CostMatrix（用于 PathFinder.roomCallback）
+     *
+     * @remarks
+     * - 可见房间：CostMatrix 每 tick 更新（避免地形/creep/建筑变化导致陈旧）
+     * - 不可见房间：允许复用一小段时间（减少跨房寻路的 CPU）
+     * - key 会包含避让对象的短 hash，避免不同避让集合错误命中
+     */
+    public static globalCostMatrixCache: {
+        [key: string]: {
+            matrix: CostMatrix
+            tick: number
+        }
+    } = {}
+
+    private static globalCostMatrixCacheLastCleanupTick = -1
+
+    private static globalCostMatrixCacheCleanup(currentTick: number, maxAge = 5, maxEntries = 300) {
+        if (this.globalCostMatrixCacheLastCleanupTick === currentTick) return
+        this.globalCostMatrixCacheLastCleanupTick = currentTick
+
+        const cache = this.globalCostMatrixCache
+        const keys = Object.keys(cache)
+        if (!keys.length) return
+
+        keys.forEach((key) => {
+            const entry = cache[key]
+            if (!entry || currentTick - entry.tick > maxAge) delete cache[key]
+        })
+
+        const remainingKeys = Object.keys(cache)
+        if (remainingKeys.length <= maxEntries) return
+
+        remainingKeys
+            .map((key) => ({ key, tick: cache[key]?.tick ?? -1 }))
+            .sort((a, b) => a.tick - b.tick)
+            .slice(0, remainingKeys.length - maxEntries)
+            .forEach(({ key }) => delete cache[key])
+    }
+
+    private static hashString(value: string): string {
+        let hash = 0
+        for (let i = 0; i < value.length; i++) {
+            hash = (hash * 31 + value.charCodeAt(i)) | 0
+        }
+        return (hash >>> 0).toString(36)
+    }
+
+    private static getAvoidHash(avoidObjs: { pos: RoomPosition; range?: number }[] | undefined, roomName: string): string {
+        if (!avoidObjs?.length) return ''
+        const objsInRoom = avoidObjs.filter((o) => o.pos.roomName === roomName)
+        if (!objsInRoom.length) return ''
+
+        const signature = objsInRoom
+            .map((o) => ({
+                h: o.pos.hashCode(),
+                x: o.pos.x,
+                y: o.pos.y,
+                r: o.range || 0,
+            }))
+            .sort((a, b) => a.h - b.h)
+            .slice(0, 8)
+            .map((o) => `${o.x},${o.y},${o.r}`)
+            .join('|')
+
+        return `_${objsInRoom.length}_${this.hashString(signature)}`
+    }
+
+    public static getOrBuildGlobalCostMatrix(
+        roomName: string,
+        avoidObjs: { pos: RoomPosition; range?: number }[] | undefined,
+        isVisible: boolean,
+        build: () => CostMatrix,
+    ): CostMatrix {
+        this.globalCostMatrixCacheCleanup(Game.time)
+        const cacheKey = `${roomName}${this.getAvoidHash(avoidObjs, roomName)}`
+        const cached = this.globalCostMatrixCache[cacheKey]
+        if (cached && Game.time - cached.tick < (isVisible ? 1 : 5)) {
+            return cached.matrix
+        }
+
+        const matrix = build()
+        this.globalCostMatrixCache[cacheKey] = { matrix, tick: Game.time }
+        return matrix
+    }
 
     /**
      * 创建塔伤分布图
@@ -138,15 +233,6 @@ export default class TeamCache {
             time: Game.time,
             value: this.createTowerDamageMap(towerInfos),
         }).value
-    }
-
-    /**
-     * 绘制塔伤分布图
-     */
-    public static drawTowerDamageMap(roomName: string) {
-        const damageMap = this.getTowerDamageMap(roomName)
-
-        TeamVisual.drawRoomArray(roomName, damageMap, '#ff0000')
     }
 
     /**

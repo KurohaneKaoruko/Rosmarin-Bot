@@ -1,7 +1,7 @@
 import TeamUtils from './TeamUtils';
-import TeamAction from './TeamAction';
-import TeamBattle from './TeamBattle';
-import TeamVisual from './TeamVisual';
+import TeamAction from '../ai/TeamAction';
+import TeamBattle from '../ai/TeamBattle';
+import TeamVisual from '../debug/TeamVisual';
 
 // 小队类
 class Team {
@@ -12,7 +12,7 @@ class Team {
     moveMode: string;    // 移动模式
     homeRoom: string;    // 孵化房间
     targetRoom: string;  // 目标房间
-    creeps: Creep[] | undefined;     // 成员数组
+    creeps: Creep[];     // 成员数组
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
     moved: boolean;       // 本tick是否移动过
@@ -34,7 +34,7 @@ class Team {
         // 即使是缓存的对象，也需要从 memory 中获取最新的 creep 列表（因为可能有成员死亡被移除）
         const creepIds = teamData.creeps || [];
         const liveCreeps = creepIds.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
-        this.creeps = liveCreeps.length > 0 ? liveCreeps : undefined;
+        this.creeps = liveCreeps;
     }
 
     // 保存数据
@@ -123,10 +123,13 @@ class Team {
         TeamBattle.chooseTargets(this)
         // 自动攻击
         TeamBattle.autoAttack(this)
-        // 添加避让
+        // 添加避让目标
         TeamBattle.addAvoidObjs(this)
+        // 更新推进目标点
+        TeamAction.updateTargetPos(this)
         // 绘制一些信息
         TeamVisual.drawTargets(this)
+        TeamVisual.drawTargetPos(this)
         TeamVisual.drawAvoidObjs(this)
     }
     
@@ -192,7 +195,8 @@ class Team {
             if (isQuad || this.status === 'flee') {
                 if (hasOnEdge || !TeamAction.switchTeam4Pos(this)) {
                     if (!this['_targets']) this['_targets'] = [this.flag];
-                    let direction = TeamAction.getTeamMoveDirection(this, this['_targets'])
+                    let moveGoals: any[] = this['_targets']
+                    let direction = TeamAction.getTeamMoveDirection(this, moveGoals)
                     if (!direction && this.status === 'avoid') {
                         direction = TeamAction.getTeamMoveDirection(this, this['_targets'], 'flee')
                     }
@@ -202,7 +206,7 @@ class Team {
                     }
                 }
             }
-            if (!isQuad) this.moved = TeamAction.Gather(this);
+            if (!this.moved && !isQuad) this.moved = TeamAction.Gather(this);
         }
     }
 

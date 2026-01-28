@@ -3,7 +3,7 @@
  */
 export default class TeamUtils {
     // 获取队伍坐标范围
-    public static getPosRange(team: Team):{ minX: number, maxX: number, minY: number, maxY: number } {
+    public static getPosRange(team: Team): { minX: number; maxX: number; minY: number; maxY: number } | undefined {
         if (team.creeps.length == 0) return undefined;
         let creepPos = team.creeps.map((c: Creep) => c.pos);
         let minX = Math.min(...creepPos.map((p) => p.x));
@@ -14,7 +14,7 @@ export default class TeamUtils {
     }
 
     // 获取队伍全局坐标范围
-    public static getGlobalPosRange(team: Team): { minX: number, maxX: number, minY: number, maxY: number } {
+    public static getGlobalPosRange(team: Team): { minX: number; maxX: number; minY: number; maxY: number } | undefined {
         if (team.creeps.length == 0) return undefined;
         let creepPos = team.creeps.map((c: Creep) => c.pos.toGlobal());
         let minX = Math.min(...creepPos.map((p) => p.x));
@@ -26,7 +26,7 @@ export default class TeamUtils {
 
     // 获取队伍左上角坐标
     public static getTeamPos(team: Team): RoomPosition {
-        if (team['pos']) return team['pos'];
+        if (team['posTick'] === Game.time && team['pos']) return team['pos'];
         let teamPos = null;
         if (team.creeps.length >= 3) {
             let s = Infinity;
@@ -42,12 +42,13 @@ export default class TeamUtils {
         } else teamPos = team.creeps[0].pos;
         
         team['pos'] = teamPos;
+        team['posTick'] = Game.time;
         return teamPos;
     }
 
     // 检查小队成员位置是否构成方形
     public static isQuad(team: Team): boolean {
-        if (team['isQuad']) return true;
+        if (team['isQuadTick'] === Game.time) return !!team['isQuad'];
 
         // 跨房了不检查
         // if (new Set(creeps.map((creep) => creep.room.name)).size > 1) return
@@ -57,11 +58,17 @@ export default class TeamUtils {
             const creep = team.creeps[i]
             for (let j = 0; j < team.creeps.length; j++) {
                 if (i === j) continue
-                if (!creep.pos.isCrossRoomNearTo(team.creeps[j].pos)) return false
+                if (!creep.pos.isCrossRoomNearTo(team.creeps[j].pos)) {
+                    team['isQuad'] = false
+                    team['isQuadTick'] = Game.time
+                    return false
+                }
             }
         }
 
-        return team['isQuad'] = true;
+        team['isQuad'] = true;
+        team['isQuadTick'] = Game.time
+        return true;
     }
 
     // 检查小队成员位置是否线性相连
@@ -109,7 +116,9 @@ export default class TeamUtils {
         if (team.formation !== 'quad') return true;
         if (!this.isQuad(team)) return true;
 
-        const { minX, maxX, minY, maxY } = this.getGlobalPosRange(team);
+        const posRange = this.getGlobalPosRange(team);
+        if (!posRange) return true;
+        const { minX, maxX, minY, maxY } = posRange;
         let [ A1, A2, B1, B2 ] = team.creeps;
         let A1POS = A1?.pos.toGlobal();
         let A2POS = A2?.pos.toGlobal();
@@ -173,5 +182,37 @@ export default class TeamUtils {
         if (team.creeps.length == 0) return false;
         return team.creeps.some((creep) => creep.pos.isRoomEdge())
     }
-}
 
+    public static focusTarget(team: Team, originPos: RoomPosition) {
+        let targets: (Creep | Structure)[] = []
+        if (team['_attackTargets']?.length) {
+            targets = team['_attackTargets']
+        } else if (team['_targets']?.length) {
+            targets = team['_targets'].filter((s) => 'hits' in s) as (Creep | Structure)[]
+        }
+        return originPos.findClosestByRange(targets)
+    }
+
+    /**
+     * 从 team.cache 中读取位置（以纯对象存储，运行时还原为 RoomPosition）
+     */
+    public static getCachePos(team: Team, key: string): RoomPosition | undefined {
+        const data = team?.cache?.[key]
+        if (!data) return undefined
+        const { x, y, roomName } = data as { x: number; y: number; roomName: string }
+        if (typeof x !== 'number' || typeof y !== 'number' || !roomName) return undefined
+        return new RoomPosition(x, y, roomName)
+    }
+
+    /**
+     * 写入位置到 team.cache（避免直接存 RoomPosition 导致 memory 序列化问题）
+     */
+    public static setCachePos(team: Team, key: string, pos: RoomPosition | undefined): void {
+        if (!team.cache) team.cache = {}
+        if (!pos) {
+            delete team.cache[key]
+            return
+        }
+        team.cache[key] = { x: pos.x, y: pos.y, roomName: pos.roomName }
+    }
+}

@@ -1,6 +1,7 @@
-import TeamCalc from "./TeamCalc"
-import TeamCache from "./TeamCache";
+import TeamCalc from "../infra/TeamCalc"
+import TeamCache from "../infra/TeamCache";
 import TeamAction from "./TeamAction";
+import TeamUtils from "../core/TeamUtils";
 
 /**
  * 战斗类
@@ -32,25 +33,35 @@ export default class TeamBattle {
 
         // 搜索 n tick 后会攻击到自己的敌人
         creeps.forEach((creep) => {
+            const room = creep.room as any
+            // 按房间缓存敌人列表：同 tick 内同房间的所有 creep 复用一次 find
+            if (room._team_hostiles_tick !== Game.time) {
+                room._team_hostiles_tick = Game.time
+                room._team_hostiles = creep.room.find(FIND_HOSTILE_CREEPS)
+            }
+            const hostiles = room._team_hostiles as Creep[]
+
             // 优化：先通过简单的范围判断过滤，减少 touchableNTickInRange 的调用
             // 三格的蓝球敌人
-            creep._ra_enemys = creep.room.find(FIND_HOSTILE_CREEPS).filter((e) => {
+            creep._ra_enemys = hostiles.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 3 + tick)) return false;
                 if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK)) return false;
+                if (tick === 0) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 3)) return true;
                 
-                return TeamAction.touchableNTickInRange(e, creep.pos, tick, 3)
+                return TeamCalc.touchableNTickInRange(e, creep.pos, tick, 3)
             })
 
             // 一格的蓝球或者红球敌人
-            creep._ra_atk_enemys = creep.room.find(FIND_HOSTILE_CREEPS).filter((e) => {
+            creep._ra_atk_enemys = hostiles.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 1 + tick)) return false;
                 if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK) && !TeamCalc.hasBodyPart(e, ATTACK)) return false;
+                if (tick === 0) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 1)) return true;
 
-                return TeamAction.touchableNTickInRange(e, creep.pos, tick, 1)
+                return TeamCalc.touchableNTickInRange(e, creep.pos, tick, 1)
             })
 
             // 被集火的伤害，即假设周围的爬都打到自己的伤害
@@ -69,7 +80,7 @@ export default class TeamBattle {
                 // 自己也有红球的话，打别人会造成反伤
                 maxCreepDamage += e._atk_damage * (TeamCalc.hasBodyPart(creep, ATTACK) ? 2 : 1)
                 // TODO: 一格以内的蓝球，对面肯定 mass，需要根据小队人数算出更大的伤害
-                // maxCreepDamage += (e._ra_damage || 0) * BattleCore.rangeNearDamageRate[creeps.length]
+                maxCreepDamage += (e._ra_damage || 0) * this.rangeNearDamageRate[creeps.length]
             })
 
             // 塔伤分布图
@@ -104,6 +115,7 @@ export default class TeamBattle {
         })
 
         // 当前 tick 奶周围的爬（包括自己）
+        const canIssueHealOrder = tick === 0 && team.cache.healOrdersTick !== Game.time
         creeps.forEach((creep) => {
             if (!creep._heal_power) return
 
@@ -125,7 +137,7 @@ export default class TeamBattle {
             }
 
             // tick 为 0 时才是真实情况，其他情况只是模拟未来的，而治疗需要根据真实情况
-            if (tick === 0) {
+            if (canIssueHealOrder) {
                 creep.heal(maxNeedHealCreep)
                 maxNeedHealCreep._been_heal = true;
             }
@@ -136,6 +148,9 @@ export default class TeamBattle {
                 creep.hitsMax,
             )
         })
+        if (tick === 0 && canIssueHealOrder) {
+            team.cache.healOrdersTick = Game.time
+        }
 
         if (creeps.every((creep) => !creep._fired_damage)) {
             return true
@@ -269,6 +284,7 @@ export default class TeamBattle {
 
 
         team.creeps.forEach((creep) => {
+            if ((creep.memory as any)._teamOrderTick === Game.time) return
             // 不是目标房间靠近就打
             if (creep.room.name !== team.targetRoom) {
                 targets = this.getAttackTargets(creep)!
@@ -291,6 +307,7 @@ export default class TeamBattle {
                 return
             }
 
+            let ordered = false
             if (creep.getActiveBodyparts(RANGED_ATTACK)) {
                 // 目标评分：血量越低分越高，有治疗部件分越高，有伤害部件分越高
                 let target: Creep | Structure
@@ -330,6 +347,7 @@ export default class TeamBattle {
                     creep.rangedAttack(target)
                 }
                 team['_attackTargets'].push(target)
+                ordered = true
             }
 
 
@@ -365,6 +383,7 @@ export default class TeamBattle {
                 const target = attackableTargets.reduce((pre, cur) => (pre.hits < cur.hits ? pre : cur))
                 creep.attack(target)
                 team['_attackTargets']?.push(target)
+                ordered = true
             }
 
             if (creep.getActiveBodyparts(WORK)) {
@@ -387,7 +406,10 @@ export default class TeamBattle {
                 const target = targetInOneRange.reduce((pre, cur) => (pre.hits < cur.hits ? pre : cur))
                 creep.dismantle(target)
                 team['_attackTargets']?.push(target)
+                ordered = true
             }
+
+            if (ordered) (creep.memory as any)._teamOrderTick = Game.time
         })
     }
 
@@ -424,4 +446,5 @@ export default class TeamBattle {
             range: range + (e.getActiveBodyparts(RANGED_ATTACK) ? 3 : 1),
         }))
     }
+
 }

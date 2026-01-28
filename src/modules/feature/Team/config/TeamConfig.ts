@@ -70,7 +70,16 @@ const H29R1T10 = {
     bodypart: [[T, 10], [R, 1], [H, 29], [M, 10]],
     boostmap: T3,
 }
-
+const RH_A = {
+    role: 'team-ranged',
+    bodypart: [[R, 10], [T, 10], [R, 10], [H, 10], [M, 10]],
+    boostmap: T3,
+}
+const RH_B = {
+    role: 'team-ranged',
+    bodypart: [[H, 10], [T, 10], [R, 10], [H, 10], [M, 10]],
+    boostmap: T3,
+}
 
 
 const A35T5 = {
@@ -129,6 +138,8 @@ export const TEAM_CONFIG = {
     'W29/4': [ W29T11, W29T11, H29R1T10, H29R1T10 ],
     'A29/4': [ A29T11, A29T11, H29R1T10, H29R1T10 ],
     'R29/4': [ R29T11, R29T11, H29R1T10, H29R1T10 ],
+
+    'RH/4': [ RH_A, RH_A, RH_B, RH_B ],
 
     /** 混搭 */
     'AW/4': [ A25T15, W25T15, H28T12, H28T12 ],
