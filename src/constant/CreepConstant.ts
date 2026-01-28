@@ -276,7 +276,7 @@ export const RoleLevelData = {
         3: { bodypart: [[WORK, 3], [CARRY, 3], [MOVE, 6]], num: 3 },
         4: { bodypart: [[WORK, 4], [CARRY, 4], [MOVE, 8]], num: 2 },
         5: { bodypart: [[WORK, 6], [CARRY, 6], [MOVE, 6]], num: 2 },
-        6: { bodypart: [[WORK, 8], [CARRY, 8], [MOVE, 8]], num: 2 },
+        6: { bodypart: [[WORK, 15], [CARRY, 5], [MOVE, 10]], num: 2 },
         7: { bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]], num: 2 },
         8: { bodypart: [[WORK, 15], [CARRY, 5], [MOVE, 10]], num: 1 },
     },
