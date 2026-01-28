@@ -115,19 +115,28 @@ const Transport = {
         else {
             // 尝试向目标转移资源
             if(creep.pos.isNearTo(targetObj)) {
-                const result = creep.transfer(targetObj, resourceType,
-                    Math.min(amount, creep.store[resourceType], targetObj.store.getFreeCapacity(resourceType)));
+                const transferAmount = Math.min(amount, creep.store[resourceType], targetObj.store.getFreeCapacity(resourceType));
+                if (transferAmount <= 0) {
+                    creep.room.deleteMissionFromPool('transport', mission.id);
+                    delete creep.memory.mission;
+                    const fallbackTarget = creep.findBestStoreTarget(resourceType);
+                    if (fallbackTarget) creep.goTransfer(fallbackTarget, resourceType);
+                    else creep.drop(resourceType);
+                    return;
+                }
+
+                const result = creep.transfer(targetObj, resourceType, transferAmount);
                 if(result === OK) {
                     // 如果任务完成，提交任务并获取新任务
-                    creep.room.submitTransportMission(mission.id, Math.min(amount, creep.store[resourceType]));
+                    creep.room.submitTransportMission(mission.id, transferAmount);
                     creep.memory.mission = creep.room.getTransportMission(creep);
-                    const nextTickResAmount = (creep.store[resourceType] - amount) || 0;
+                    const nextTickResAmount = creep.store[resourceType] || 0;
                     if(creep.memory.mission) missionMove(nextTickResAmount, resourceType);
-                } else if(result === ERR_FULL || result === ERR_INVALID_TARGET) {
+                } else if(result === ERR_FULL || result === ERR_INVALID_TARGET || result === ERR_INVALID_ARGS) {
                     // 如果无法转移, 删除任务并获取新任务
                     creep.room.deleteMissionFromPool('transport', mission.id);
                     creep.memory.mission = creep.room.getTransportMission(creep);
-                    const nextTickResAmount = (creep.store[resourceType] - amount) || 0;
+                    const nextTickResAmount = creep.store[resourceType] || 0;
                     if(creep.memory.mission) missionMove(nextTickResAmount, resourceType);
                 }
             } else {
