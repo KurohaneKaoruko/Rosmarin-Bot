@@ -86,7 +86,7 @@ class Team {
             })
         }
 
-        if (this.flag?.secondaryColor === COLOR_PURPLE) {
+        if (this.flag?.secondaryColor === COLOR_RED) {
             // rush模式, 不算伤
             this.status = 'attack'
         } else {

@@ -21,8 +21,6 @@ export default class FlagBaseFunction extends Flag {
     handleNukeFlag() {
         if (!(this.name.startsWith('nuke-') || this.name.startsWith('nuke_'))) return false;
 
-        if (!shouldRun({ every: 5, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return true;
-
         const nextTryTick = typeof this.memory['nextTryTick'] === 'number' ? this.memory['nextTryTick'] : 0;
         if (nextTryTick && nextTryTick > Game.time) return true;
 
