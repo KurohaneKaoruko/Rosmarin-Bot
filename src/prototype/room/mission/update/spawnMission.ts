@@ -205,7 +205,7 @@ export default class SpawnMission extends Room {
      * @description 按角色规则检查缺口并生成对应孵化任务
      * @returns true 表示已执行检查，false 表示不满足条件（例如无 spawn）
      */
-    UpdateSpawnMission() {
+    UpdateSpawnMission(offset = 0) {
         if (!this.spawn) return false;
         
         const CreepNum = this.getCreepNum();

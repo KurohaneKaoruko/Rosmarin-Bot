@@ -1,5 +1,6 @@
 import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
+import { isTickAligned } from '@/modules/utils/tick';
 
 
 
@@ -121,15 +122,16 @@ export default class TransportMission extends Room {
      * transport 总更新入口
      * @description 依次更新能量、power、lab、boost、nuker 等子逻辑
      */
-    UpdateTransportMission() {
+    UpdateTransportMission(offset = 0) {
         const storage = this.storage;
-        if(!storage) return;
+        const terminal = this.terminal;
+        if(!storage && !terminal) return;
 
-        this.UpdateEnergyMission();
-        this.UpdatePowerMission();
-        this.UpdateLabMission();
+        this.UpdateEnergyMission(offset);
+        this.UpdatePowerMission(offset);
+        this.UpdateLabMission(offset);
         // Boost 逻辑已迁移至 UpdateBoostMission
-        this.UpdateNukerMission();
+        this.UpdateNukerMission(offset);
     }
 
     /**
@@ -167,7 +169,7 @@ export default class TransportMission extends Room {
      * - lab 能量填充
      * - powerSpawn/nuker 能量填充（视布局与能量阈值）
      */
-    UpdateEnergyMission() {
+    UpdateEnergyMission(offset = 0) {
         const room = this;
         const storage = room.storage;
         const terminal = room.terminal;
@@ -232,7 +234,7 @@ export default class TransportMission extends Room {
 
         if (room.level >= 6 && room.lab) {
             // 对能量极低 (<2000) 的 Lab 取消频率限制，其他 Lab 保持频率限制
-            const checkAllLabs = Game.time % 20 === 0;
+            const checkAllLabs = isTickAligned(20, offset);
             const labs = room.lab.filter((l: StructureLab) => {
                 if (!l) return false;
                 const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -241,6 +243,8 @@ export default class TransportMission extends Room {
                 return l.store[RESOURCE_ENERGY] < 2000 || checkAllLabs;
             });
 
+            const labEnergySource = storage || terminal
+            if (!labEnergySource) return
             labs.forEach((l: StructureLab) => {
                 const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
                 // 实际填充量取：剩余可用能量 和 Lab空余容量 的较小值
@@ -251,7 +255,7 @@ export default class TransportMission extends Room {
                 energy -= fillAmount;
                 this.addTransportMission(this.TransportLevel('labEnergy'), {
                     pos: l,
-                    source: storage.id,
+                    source: labEnergySource.id,
                     target: l.id,
                     resourceType: RESOURCE_ENERGY,
                     amount: fillAmount,
@@ -267,7 +271,7 @@ export default class TransportMission extends Room {
         let center = Memory['RoomControlData'][room.name].center;
         let centerPos: RoomPosition;
         if (center) centerPos = new RoomPosition(center.x, center.y, room.name);
-        if (Game.time % 20 === 0 && room.level == 8 && room.powerSpawn &&
+        if (isTickAligned(20, offset) && room.level == 8 && room.powerSpawn && storage &&
             (!centerPos || !room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
             const powerSpawn = room.powerSpawn;
             const amount = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -289,7 +293,7 @@ export default class TransportMission extends Room {
         if(room.level == 8 && room.nuker) {
             const nuker = room.nuker;
             const urgent = urgentNukeEnergy;
-            const shouldFill = urgent ? (Game.time % 10 === 0) : (Game.time % 20 === 0);
+            const shouldFill = urgent ? isTickAligned(10, offset) : isTickAligned(20, offset);
             if (!shouldFill) return OK;
 
             const cap = nuker.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -313,7 +317,7 @@ export default class TransportMission extends Room {
      * PowerSpawn 资源搬运（POWER）
      * @description 当 powerSpawn 不在中心布局时，补充 power 到阈值
      */
-    UpdatePowerMission() {
+    UpdatePowerMission(offset = 0) {
         const room = this;
         if(room.level < 8 || !room.powerSpawn) return;
         let center = Memory['RoomControlData'][room.name].center;
@@ -352,9 +356,9 @@ export default class TransportMission extends Room {
      * Nuker 资源搬运（GHODIUM）
      * @description 周期性检查 nuker 的 GHODIUM，不足则从 storage/terminal 补齐
      */
-    UpdateNukerMission() {
+    UpdateNukerMission(offset = 0) {
         const room = this;
-        if(Game.time % 50 !== 0) return;
+        if (!isTickAligned(50, offset)) return;
         if(room.level < 8) return;
         if(!room.nuker) return;
         const storage = room.storage;
@@ -406,7 +410,7 @@ export default class TransportMission extends Room {
      * - 合成关闭时：将普通 lab 的矿物搬回 storage
      * - 合成开启时：保持 A/B 原料正确，普通 lab 只保留产物并在容量不足时搬出
      */
-    UpdateLabMission() {
+    UpdateLabMission(offset = 0) {
         const room = this;
         const storage = room.storage;
         const terminal = room.terminal;

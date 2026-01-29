@@ -10,7 +10,7 @@ export default class BoostMission extends TransportMission {
      * 3. 生成 Transport 任务 (清理/填充)
      * 4. 回收不再需要的 Boost 资源
      */
-    UpdateBoostMission() {
+    UpdateBoostMission(offset = 0) {
         // 1. 清理无效预定
         this.cleanInvalidBoostTasks();
 
@@ -276,12 +276,5 @@ export default class BoostMission extends TransportMission {
                 if (boostLabs[labId]?.mode === 'task') delete boostLabs[labId];
             }
         }
-    }
-
-    /**
-     * 回收不需要的 Boost 资源 (保留给兼容性调用，实际逻辑已融合)
-     */
-    private recycleBoostResources(neededMinerals: Set<ResourceConstant>) {
-        this.clearAllBoostData(); // 简化处理：如果没有 active 任务，直接清理所有
     }
 }

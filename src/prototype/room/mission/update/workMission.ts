@@ -11,7 +11,7 @@ export default class WorkMission extends Room {
      * - 扫描受损建筑，按紧急/常规优先级入队 repair
      * - 扫描工地，按建筑类型与施工进度计算优先级入队 build
      */
-    UpdateBuildRepairMission() {
+    UpdateBuildRepairMission(offset = 0) {
         const allStructures = this.find(FIND_STRUCTURES, {
             filter: (structure) => structure.hits < structure.hitsMax
         });
@@ -95,7 +95,7 @@ export default class WorkMission extends Room {
      * - 支持核弹防护优先维修
      * - 以耐久百分比映射为优先级分组写入 global.WallRampartRepairMission
      */
-    UpdateWallRepairMission() {
+    UpdateWallRepairMission(offset = 0) {
         let WALL_HITS_MAX_THRESHOLD = 0.9;
         const botMem = Memory['StructControlData'][this.name];
         if (botMem['ram_threshold']) {

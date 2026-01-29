@@ -201,7 +201,7 @@ export default class ManageMission extends Room {
      * manage 更新入口
      * @description 检查终端、工厂、powerSpawn 的资源状态并生成调度任务
      */
-    UpdateManageMission() {
+    UpdateManageMission(offset = 0) {
         // 检查终端资源预留数量，不足则补充，超过则搬出
         CheckTerminalResAmount(this);
         // 检查工厂资源数量，补充或搬出

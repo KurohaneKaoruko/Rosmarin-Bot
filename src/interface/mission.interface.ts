@@ -337,21 +337,21 @@ interface Room {
      */
     MissionUpdate(): void;
 
-    UpdateSpawnMission(): void;
-    UpdateTransportMission(): void;
-    UpdateManageMission(): void;
-    UpdateBuildRepairMission(): void;
-    UpdateWallRepairMission(): void;
+    UpdateSpawnMission(offset?: number): void;
+    UpdateTransportMission(offset?: number): void;
+    UpdateManageMission(offset?: number): void;
+    UpdateBuildRepairMission(offset?: number): void;
+    UpdateWallRepairMission(offset?: number): void;
     TransportMissionCheck(): void;
     BuildRepairMissionCheck(): void;
     UpdateMineMission(): void;
     UpdateHighwayScan(): void;
 
-    UpdateEnergyMission(): void;
-    UpdateLabMission(): void;
-    UpdateLabBoostMission(): void;
-    UpdatePowerMission(): void;
-    UpdateNukerMission(): void;
+    UpdateEnergyMission(offset?: number): void;
+    UpdateLabMission(offset?: number): void;
+    UpdateLabBoostMission(offset?: number): void;
+    UpdatePowerMission(offset?: number): void;
+    UpdateNukerMission(offset?: number): void;
 
     TransportLevel(key: any): number;
     toPosNumber(pos: any): number;
