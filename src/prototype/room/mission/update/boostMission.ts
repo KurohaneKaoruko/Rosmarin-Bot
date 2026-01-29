@@ -19,6 +19,12 @@ export default class BoostMission extends TransportMission {
         if (!this.lab || this.lab.length === 0) return;
         // boostLabs：单表预留（task=任务临时征用，fixed=长期固定配置），并在这里完成旧字段迁移
         const boostLabs = ensureBoostLabs(this.name);
+        const reactionActive = !!botmem?.lab && !!labAId && !!labBId && !!botmem?.labAtype && !!botmem?.labBtype;
+        const forbiddenLabIds = new Set<string>();
+        if (reactionActive) {
+            forbiddenLabIds.add(labAId as string);
+            forbiddenLabIds.add(labBId as string);
+        }
 
         // 2. 获取当前活跃的 Boost 任务
         const activeTasks = this.getAllMissionFromPool('boost') as Task[];
@@ -28,6 +34,7 @@ export default class BoostMission extends TransportMission {
             for (const labId in boostLabs) {
                 const entry = boostLabs[labId];
                 if (!entry || entry.mode !== 'fixed') continue;
+                if (forbiddenLabIds.has(labId)) continue;
                 this.manageBoostLab(Game.getObjectById(labId), entry.mineral, 3000);
             }
             return;
@@ -47,6 +54,10 @@ export default class BoostMission extends TransportMission {
         for (const labId in boostLabs) {
             const entry = boostLabs[labId];
             if (!entry) continue;
+            if (forbiddenLabIds.has(labId)) {
+                if (entry.mode === 'task') delete boostLabs[labId];
+                continue;
+            }
             const mineral = entry.mineral;
             if (!mineral) {
                 delete boostLabs[labId];
@@ -70,11 +81,9 @@ export default class BoostMission extends TransportMission {
 
         // 5. 为剩余的新需求分配 Lab
         if (neededMinerals.length > 0) {
-            // 排除 A/B Lab
-            const availableLabs = this.lab.filter(lab => 
-                lab.id !== labAId && 
-                lab.id !== labBId
-            );
+            const availableLabs = reactionActive
+                ? this.lab.filter(lab => lab.id !== labAId && lab.id !== labBId)
+                : this.lab;
 
             for (const mineral of neededMinerals) {
                 // 寻找最佳 Lab (排除已分配的)
@@ -250,11 +259,14 @@ export default class BoostMission extends TransportMission {
      */
     private clearAllBoostData() {
         const botmem = Memory['StructControlData'][this.name];
+        const { labAId, labBId } = getLabAB(this.name, this);
+        const reactionActive = !!botmem?.lab && !!labAId && !!labBId && !!botmem?.labAtype && !!botmem?.labBtype;
         const boostLabs = botmem?.boostLabs;
         if (boostLabs) {
             for (const labId in boostLabs) {
                 const entry = boostLabs[labId];
                 if (!entry || entry.mode !== 'task') continue;
+                if (!reactionActive && ((labAId && labId === labAId) || (labBId && labId === labBId))) continue;
                 const lab = Game.getObjectById(labId) as StructureLab | null;
                 if (lab && lab.mineralType && this.storage) {
                     const exist = this.checkSameMissionInPool('transport', 'transport', {
