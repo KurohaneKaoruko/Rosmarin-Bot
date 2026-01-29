@@ -22,7 +22,7 @@ const double_heal = {
         }
         
         if(creep.ticksToLive < 100 && creep.room.my) {
-            creep.unboost();
+            creep.unBoost();
             return;
         }
     

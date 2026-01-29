@@ -217,7 +217,14 @@ export default class BoostMission extends TransportMission {
 
         for (const task of boostTasks) {
             const data = task.data as BoostTask;
-            if (!data.owners) continue;
+            if (data.totalAmount <= 0) {
+                this.deleteMissionFromPool('boost', task.id);
+                continue;
+            }
+
+            if (!data.owners || Object.keys(data.owners).length === 0) {
+                data.owners = { ['__public__']: { amount: data.totalAmount, time: Game.time } } as any
+            }
 
             let modified = false;
             for (const ownerId in data.owners) {
@@ -244,6 +251,7 @@ export default class BoostMission extends TransportMission {
                 }
             }
 
+            if (data.totalAmount < 0) data.totalAmount = 0;
             if (modified) {
                 if (data.totalAmount <= 0) {
                     this.deleteMissionFromPool('boost', task.id);

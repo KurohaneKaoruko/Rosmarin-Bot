@@ -141,7 +141,7 @@ const UpRepairFunction = {
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
         if(creep.ticksToLive < 30 && creep.body.some(part => part.boost)) {
-            if(creep.unboost()) creep.suicide();
+            if(creep.unBoost()) creep.suicide();
             return false;
         }
         if(creep.store.getFreeCapacity() === 0) {

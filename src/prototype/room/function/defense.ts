@@ -204,13 +204,13 @@ export default class RoomDefense extends Room {
             const desiredDouble = 1;
             if (doubleAttackDefenderNum + doubleAttackQueueNum < desiredDouble) {
                 const body = this.GetRoleBodys('defend-2attack');
-                this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
-                this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+                const ret = this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
+                if (ret === OK) this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
             if (doubleHealDefenderNum + doubleHealQueueNum < desiredDouble) {
                 const body = this.GetRoleBodys('defend-2heal');
-                this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
-                this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+                const ret = this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
+                if (ret === OK) this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
 
@@ -279,9 +279,9 @@ export default class RoomDefense extends Room {
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
                 this.level >= 7 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-            this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
+            const ret = this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
             if (mustBoost) {
-                this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+                if (ret === OK) this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
 
@@ -290,9 +290,9 @@ export default class RoomDefense extends Room {
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
                 this.level >= 7 && this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-            this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
+            const ret = this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
             if (mustBoost) {
-                this.AssignBoostTaskByBody(body, { [RANGED_ATTACK]: 'XKHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
+                if (ret === OK) this.AssignBoostTaskByBody(body, { [RANGED_ATTACK]: 'XKHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
     }

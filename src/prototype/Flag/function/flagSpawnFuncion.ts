@@ -74,15 +74,19 @@ export default class FlagSpawnFunction extends Flag {
             const config = RoleBodys['aid-build'][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
-            memory['boostmap'] = boostmap;
-            const result = room.AssignBoostTaskByBody(bodys, boostmap);
-            if (!result) {
+            if (room.CheckBoostRes(bodys, boostmap)) {
+                memory['boostmap'] = boostmap;
+                memory['boostOwnerId'] = `${flagName}:${Game.time}`;
+            } else {
                 bodys = [];
                 delete memory['boostmap'];
             }
         }
 
-        room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-build', memory);
+        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-build', memory);
+        if (ret === OK && memory['boostmap']) {
+            room.AssignBoostTaskByBody(bodys, memory['boostmap'] as any, memory['boostOwnerId'] as any);
+        }
         return true;
     }
 
@@ -108,15 +112,19 @@ export default class FlagSpawnFunction extends Flag {
             const config = RoleBodys['aid-upgrade'][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
-            memory['boostmap'] = boostmap;
-            const result = room.AssignBoostTaskByBody(bodys, boostmap);
-            if (!result) {
+            if (room.CheckBoostRes(bodys, boostmap)) {
+                memory['boostmap'] = boostmap;
+                memory['boostOwnerId'] = `${flagName}:${Game.time}`;
+            } else {
                 bodys = [];
                 delete memory['boostmap'];
             }
         }
 
-        room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-upgrade', memory);
+        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-upgrade', memory);
+        if (ret === OK && memory['boostmap']) {
+            room.AssignBoostTaskByBody(bodys, memory['boostmap'] as any, memory['boostOwnerId'] as any);
+        }
         return true;
     }
 
@@ -160,15 +168,20 @@ export default class FlagSpawnFunction extends Flag {
         const boost = this.getBoostTierFromName(flagName);
         if (boost && RoleBodys['aid-carry'][boost]) {
             bodys = RoleBodys['aid-carry'][boost].bodypart || [];
-            memory['boostmap'] = RoleBodys['aid-carry'][boost].boostmap || {};
-            const result = room.AssignBoostTaskByBody(bodys, memory['boostmap']);
-            if (!result) {
+            const boostmap = RoleBodys['aid-carry'][boost].boostmap || {};
+            if (room.CheckBoostRes(bodys, boostmap)) {
+                memory['boostmap'] = boostmap;
+                memory['boostOwnerId'] = `${flagName}:${Game.time}`;
+            } else {
                 bodys = [];
                 delete memory['boostmap'];
             }
         }
 
-        room.SpawnMissionAdd('', bodys, -1, 'aid-carry', memory);
+        const ret = room.SpawnMissionAdd('', bodys, -1, 'aid-carry', memory);
+        if (ret === OK && memory['boostmap']) {
+            room.AssignBoostTaskByBody(bodys, memory['boostmap'], memory['boostOwnerId'] as any);
+        }
         return true;
     }
 

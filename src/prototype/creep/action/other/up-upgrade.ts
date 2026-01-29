@@ -170,7 +170,7 @@ const UpUpgradeFunction = {
     target: function (creep: Creep) {   // 升级控制器
         if(!creep.memory.ready) return false;
         if(creep.ticksToLive < 10) {
-            if(creep.unboost()) creep.suicide();
+            if(creep.unBoost()) creep.suicide();
             return false;
         }
         if (creep.store.getUsedCapacity() === 0) {
@@ -194,7 +194,7 @@ const UpUpgradeFunction = {
             if(!result) return;
         }
         if(creep.ticksToLive < 10) {
-            if(creep.unboost()) creep.suicide();
+            if(creep.unBoost()) creep.suicide();
             return false;
         }
         if (creep.store.getFreeCapacity() === 0) {

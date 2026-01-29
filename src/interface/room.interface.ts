@@ -342,7 +342,7 @@ interface Room {
      * @returns true表示分配成功，false表示资源不足
      * @description 为指定体型的每个需要boost的部件分配lab任务
      */
-    AssignBoostTaskByBody(bodypart: (BodyPartConstant | number)[][], boostmap?: { [bodypart: string]: MineralBoostConstant }): boolean;
+    AssignBoostTaskByBody(bodypart: (BodyPartConstant | number)[][], boostmap?: { [bodypart: string]: MineralBoostConstant }, ownerId?: string): boolean;
     
     /** 
      * 给lab分配boost任务

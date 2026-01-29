@@ -111,20 +111,21 @@ export default class BoostFunction extends Creep {
             return 1;
         }
 
+        const mineral = targetLab.mineralType as ResourceConstant;
+        const needParts = this.body.filter(part => !part.boost && boostmap[part.type] === mineral).length;
+        const boostAmount = needParts * 30;
+
         const result = targetLab.boostCreep(this);
         if (result == OK) {
-            const mineral = targetLab.mineralType;
-            
             // 自动推断 ownerId 并提交任务
             // 如果是 Team Creep，ownerId 为 Team-ID
             // 如果是普通 Creep，ownerId 为 Creep Name
             const teamID = this.memory['teamID'];
-            const ownerId = teamID ? `Team-${teamID}` : this.name;
+            const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
 
-            const boostedParts = this.body.filter(part => !part.boost && boostmap[part.type] === mineral);
-            const boostAmount = Math.min(boostedParts.length * 30, targetLab.store[mineral] - targetLab.store[mineral] % 30);
-            
-            this.room.SubmitBoostTask(mineral, boostAmount, ownerId);
+            if (boostAmount > 0) {
+                this.room.SubmitBoostTask(mineral, boostAmount, ownerId);
+            }
 
             // 强化成功，清除目标缓存，以便下一 tick 重新评估（可能需要去另一个 Lab，或者已经全部完成）
             delete this.memory.boostTargetId;
@@ -173,7 +174,7 @@ export default class BoostFunction extends Creep {
         return result === 0;
     }
 
-    unboost() {
+    unBoost() {
         if(!this.body.some(part => part.boost)) return true;
 
         let lab = null;

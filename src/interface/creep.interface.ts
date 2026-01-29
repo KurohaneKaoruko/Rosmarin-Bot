@@ -153,7 +153,7 @@ interface Creep {
      * @returns true表示完成，false表示正在进行
      * @description 移动到lab旁的container并解除boost
      */
-    unboost(): boolean;
+    unBoost(): boolean;
     
     /** 
      * 是否处于白名单中

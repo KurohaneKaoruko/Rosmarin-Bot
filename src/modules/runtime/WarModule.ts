@@ -142,22 +142,21 @@ const WarModule = {
                 }
 
                 let boostResult = null;
-                if (bodys.length == 0) {
-                    boostResult = room.AssignBoostTaskByBody(RoleData['aio'].bodypart, boostmap);
-                } else {
-                    boostResult = room.AssignBoostTaskByBody(bodys, boostmap);
-                }
-
-                if (!boostResult) {
+                const boostBody = bodys.length == 0 ? RoleData['aio'].bodypart : bodys
+                if (boostmap && !room.CheckBoostRes(boostBody, boostmap)) {
                     console.log(flagName, '没有足够的boost资源');
                     Game.flags[flagName].remove();
                     continue;
                 }
 
-                room.SpawnMissionAdd('', bodys, -1, 'aio', {
+                const boostOwnerId = `${flagName}:${Game.time}`
+                const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'aio', {
                     targetRoom: targetRoom,
                     boostmap: boostmap,
+                    boostOwnerId,
                 } as any);
+                if (spawnRet !== OK) continue;
+                room.AssignBoostTaskByBody(boostBody, boostmap, boostOwnerId);
 
                 flagMemory['lastTime'] = Game.time;
                 flagMemory['spawnCount'] = (flagMemory['spawnCount']||0) + 1;
@@ -215,21 +214,25 @@ const WarModule = {
                     Game.flags[flagName].remove();
                     continue;
                 }
-
-                room.AssignBoostTaskByBody(A.bodypart, A.boostmap);
-                room.AssignBoostTaskByBody(B.bodypart, B.boostmap);
                 
                 // 添加孵化任务
-                room.SpawnMissionAdd('', A.bodypart, -1, A.role, {
+                const boostOwnerA = `${flagName}:${Game.time}:A`
+                const boostOwnerB = `${flagName}:${Game.time}:B`
+                const retA = room.SpawnMissionAdd('', A.bodypart, -1, A.role, {
                     targetRoom: targetRoom,
                     boostmap: A.boostmap,
-                    squad: squadType
+                    squad: squadType,
+                    boostOwnerId: boostOwnerA
                 } as any);
-                room.SpawnMissionAdd('', B.bodypart, -1, B.role, {
+                const retB = room.SpawnMissionAdd('', B.bodypart, -1, B.role, {
                     targetRoom: targetRoom,
                     boostmap: B.boostmap,
-                    squad: squadType
+                    squad: squadType,
+                    boostOwnerId: boostOwnerB
                 } as any)
+                if (retA !== OK || retB !== OK) continue;
+                room.AssignBoostTaskByBody(A.bodypart, A.boostmap, boostOwnerA);
+                room.AssignBoostTaskByBody(B.bodypart, B.boostmap, boostOwnerB);
 
 
                 flagMemory['lastTime'] = Game.time;

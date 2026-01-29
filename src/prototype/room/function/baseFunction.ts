@@ -368,19 +368,20 @@ export default class BaseFunction extends Room {
     }
 
     /** 根据体型和boost配置分配boot任务 */
-    AssignBoostTaskByBody(bodypart: any[], boostmap: any = {}) {
+    AssignBoostTaskByBody(bodypart: any[], boostmap: any = {}, ownerId?: string) {
         if (!this.CheckBoostRes(bodypart, boostmap)) return false;
         for (let bp of bodypart) {
             if (!boostmap[bp[0]]) continue;
-            this.AssignBoostTask(boostmap[bp[0]], bp[1] * 30)
+            this.AssignBoostTask(boostmap[bp[0]], bp[1] * 30, ownerId)
         }
         return true;
     }
 
     /** 给lab分配boost任务 */
     AssignBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string) {
+        const resolvedOwnerId = ownerId || '__public__';
         // 检查房间内资源是否足够
-        const stores = [this.storage, this.terminal, ...this.lab];
+        const stores = [this.storage, this.terminal, ...(this.lab || [])];
         const totalResource = stores.reduce((sum, s) => sum + (s?.store[mineral] || 0), 0);
         if (totalResource < amount) return false;
 
@@ -395,12 +396,12 @@ export default class BaseFunction extends Room {
             // 更新现有任务
             const data = task.data as BoostTask;
             data.totalAmount += amount;
-            if (ownerId) {
-                if (!data.owners[ownerId]) {
-                    data.owners[ownerId] = { amount: 0, time: Game.time };
+            if (resolvedOwnerId) {
+                if (!data.owners[resolvedOwnerId]) {
+                    data.owners[resolvedOwnerId] = { amount: 0, time: Game.time };
                 }
-                data.owners[ownerId].amount += amount;
-                data.owners[ownerId].time = Game.time;
+                data.owners[resolvedOwnerId].amount += amount;
+                data.owners[resolvedOwnerId].time = Game.time;
             }
             // 提交更新到内存 (虽然引用修改已经生效，但为了规范)
             this.updateMissionPool('boost', task.id, { data });
@@ -412,8 +413,8 @@ export default class BaseFunction extends Room {
                 owners: {},
                 active: true
             };
-            if (ownerId) {
-                data.owners[ownerId] = { amount, time: Game.time };
+            if (resolvedOwnerId) {
+                data.owners[resolvedOwnerId] = { amount, time: Game.time };
             }
             this.addMissionToPool('boost', 'boost', 0, data);
         }
@@ -423,6 +424,7 @@ export default class BaseFunction extends Room {
 
     /** 提交lab boost已完成量 */
     SubmitBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string) {
+        if (!amount || amount <= 0) return ERR_INVALID_ARGS;
         const boostPool = this.getAllMissionFromPool('boost') as Task[];
         if (!boostPool) return ERR_NOT_FOUND;
         
@@ -441,6 +443,14 @@ export default class BaseFunction extends Room {
                 }
                 // 只有当确认是有效的 owner 时，才扣减总任务量
                 data.totalAmount -= amount;
+            } else if (data.owners && data.owners['__public__']) {
+                data.owners['__public__'].amount -= amount;
+                if (data.owners['__public__'].amount <= 0) {
+                    delete data.owners['__public__'];
+                }
+                data.totalAmount -= amount;
+            } else if (!data.owners || Object.keys(data.owners).length === 0) {
+                data.totalAmount -= amount;
             } else {
                 // 如果 ownerId 不在 owners 列表中，则认为是“未注册”的消耗，不影响任务总数
                 // 这样 Team Creep 就不会因为被抢占而无法完成任务
@@ -453,6 +463,7 @@ export default class BaseFunction extends Room {
             return ERR_INVALID_ARGS;
         }
 
+        if (data.totalAmount < 0) data.totalAmount = 0;
         // 任务完成判断逻辑交给 UpdateBoostMission 或 submitMission 的 deleteFunc
         // 但这里我们手动调用 submitMission 来更新
         const deleteFunc = (d: BoostTask) => d.totalAmount <= 0;

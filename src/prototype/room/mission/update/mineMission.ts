@@ -36,20 +36,22 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
         let needUpdate = false;
         
         for (let i = Math.min(panum, phnum); i < P_num; i++) {
-            const memory = { homeRoom: room.name, targetRoom: targetRoom, boostLevel: mineData.boostLevel } as CreepMemory;
-            
-            if (mineData.boostLevel == 1) {
-                room.AssignBoostTask('GO', 150);
-                room.AssignBoostTask('UH', 600);
-                room.AssignBoostTask('LO', 750);
-            } else if (mineData.boostLevel == 2) {
-                room.AssignBoostTask('GHO2', 150);
-                room.AssignBoostTask('UH2O', 600);
-                room.AssignBoostTask('LO', 750);
-            }
+            const boostOwnerId = `Mine-${room.name}-${targetRoom}-${Game.time}-${mineData.count}`;
+            const memory = { homeRoom: room.name, targetRoom: targetRoom, boostLevel: mineData.boostLevel, boostOwnerId } as CreepMemory;
 
-            room.SpawnMissionAdd('PA', [], -1, 'power-attack', memory);
-            room.SpawnMissionAdd('PH', [], -1, 'power-heal', memory);
+            const paRet = room.SpawnMissionAdd('PA', [], -1, 'power-attack', memory);
+            const phRet = room.SpawnMissionAdd('PH', [], -1, 'power-heal', memory);
+            if (paRet !== OK || phRet !== OK) break;
+
+            if (mineData.boostLevel == 1) {
+                room.AssignBoostTask('GO', 150, boostOwnerId);
+                room.AssignBoostTask('UH', 600, boostOwnerId);
+                room.AssignBoostTask('LO', 750, boostOwnerId);
+            } else if (mineData.boostLevel == 2) {
+                room.AssignBoostTask('GHO2', 150, boostOwnerId);
+                room.AssignBoostTask('UH2O', 600, boostOwnerId);
+                room.AssignBoostTask('LO', 750, boostOwnerId);
+            }
 
             mineData.count = mineData.count + 1;
             needUpdate = true;
@@ -399,5 +401,4 @@ export default class MineMission extends Room {
         }
     }
 }
-
 
