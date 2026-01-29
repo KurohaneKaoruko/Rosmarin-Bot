@@ -4,6 +4,30 @@ import { TEAM_CONFIG } from "../config/TeamConfig";
 
 export default class TeamSpawner {
     /**
+     * Team 孵化队列的 Memory Key（按房间分桶）。
+     *
+     * @remarks
+     * 结构示意：\n
+     * `Memory[TeamSpawnQueue][roomName] = { queue: {flagName, enqueueTime}[], active?: {teamID, flagName, startTime, timedOut?}, ignoreTeams?: { [teamID]: expireTick } }`
+     */
+    private static readonly QUEUE_MEMORY_KEY = 'TeamSpawnQueue';
+    /**
+     * 写入到孵化旗 flag.memory 的“已入队”标记，用于去重。
+     *
+     * @remarks
+     * 该字段仅用于避免重复入队；真正的队列状态以 Memory.TeamSpawnQueue 为准。
+     */
+    private static readonly FLAG_QUEUED_MARK = 'teamSpawnQueuedAt';
+    /**
+     * 房间孵化锁最大持有 tick（超过则自动释放，避免卡死导致队列永久阻塞）。
+     */
+    private static readonly ACTIVE_TTL = 8000;
+    /**
+     * 锁超时后短期忽略该 teamID（避免同 tick 反复“推断 active → 超时释放 → 再推断”）。
+     */
+    private static readonly IGNORE_TTL_AFTER_TIMEOUT = 1000;
+
+    /**
      * 小队孵化入口。
      *
      * - 每 10 tick 扫描一次所有旗帜：\n
@@ -19,6 +43,7 @@ export default class TeamSpawner {
         // 孵化四人小队
         if (Game.time % 10) return;
         if (!Memory['TeamData']) Memory['TeamData'] = {};
+        if (!Memory[TeamSpawner.QUEUE_MEMORY_KEY]) Memory[TeamSpawner.QUEUE_MEMORY_KEY] = {};
 
         for (const flagName in Game.flags) {
             const flag = Game.flags[flagName];
@@ -30,8 +55,10 @@ export default class TeamSpawner {
             // TEAM_... 孵化指令旗
             // TEAM_配置_孵化房间_N最大孵化数量_T孵化间隔
             if (!flagName.startsWith('TEAM_')) continue;
-            this.handleSpawnFlag(flagName, flag);
+            this.tryEnqueueSpawnFlag(flagName, flag);
         }
+
+        this.dispatchQueues();
     }
 
     /**
@@ -62,14 +89,14 @@ export default class TeamSpawner {
      * - `canSpawnNow`：检查目标房间 safeMode 与孵化间隔。\n
      * - 解析孵化房间并校验归属（非己方房则移除孵化旗）。\n
      * - 解析配置并读取 `TEAM_CONFIG`（缺失则移除孵化旗）。\n
-     * - 生成 teamID，计算 boost 需求并检查资源充足。\n
-     * - 发送 boost 任务（AssignBoostTask），创建队伍数据并下发孵化任务（SpawnMissionAdd）。\n
-     * - 更新孵化计数与清理规则（`_N` 上限不存在则认为一次性指令，移除旗并清理 memory）。
+     * - 计算 boost 需求并检查资源充足。\n
+     * - 通过房间队列入队，避免同一房间并行下发多支队伍。\n
+     * - 真正的孵化派发（boost 任务 / TeamData / SpawnMission / 计数更新）在队列出队时执行。
      *
      * @param flagName 旗帜名（包含配置/房间/次数/间隔等参数）
      * @param flag 旗帜对象
      */
-    private static handleSpawnFlag(flagName: string, flag: Flag): void {
+    private static tryEnqueueSpawnFlag(flagName: string, flag: Flag): void {
         const flagMemory = flag.memory;
 
         if (!this.canSpawnNow(flagName, flag, flagMemory)) return;
@@ -94,13 +121,118 @@ export default class TeamSpawner {
             return;
         }
 
+        const RES_MAP = this.calcBoostNeeds(Team_Config);
+        if (!this.ensureBoostResources(room, RES_MAP, flagName, flag)) return;
+
+        const alreadyQueued = this.isFlagQueued(room.name, flagName) || this.isFlagActive(room.name, flagName);
+        if (flagMemory[TeamSpawner.FLAG_QUEUED_MARK] && !alreadyQueued) {
+            delete flagMemory[TeamSpawner.FLAG_QUEUED_MARK];
+        }
+        if (alreadyQueued) return;
+
+        this.enqueue(room.name, flagName);
+        flagMemory[TeamSpawner.FLAG_QUEUED_MARK] = Game.time;
+    }
+
+    /**
+     * 队列派发主逻辑：按房间串行派发一次孵化。
+     *
+     * @remarks
+     * - active 存在则检查是否完成/失败/超时，满足条件则释放锁。\n
+     * - active 不存在且 queue 非空：取队首重新校验并派发（生成 teamID、下发 boost/spawn、更新计数）。\n
+     * - 每房间每次 run 只会派发 1 支队伍，避免并行孵化打爆 lab/任务池。
+     */
+    private static dispatchQueues(): void {
+        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        if (!root) return;
+
+        for (const roomName in root) {
+            const entry = root[roomName] || {};
+            if (!entry.queue) entry.queue = [];
+            root[roomName] = entry;
+
+            if (!entry.active) {
+                const inferredTeamID = this.inferActiveTeamID(roomName, entry.ignoreTeams);
+                if (inferredTeamID) {
+                    entry.active = { teamID: inferredTeamID, flagName: '', startTime: Memory['TeamData']?.[inferredTeamID]?.time || Game.time };
+                }
+            }
+
+            if (entry.active) {
+                const done = this.isActiveDone(entry.active);
+                if (done) {
+                    if (entry.active.teamID && entry.active.timedOut) {
+                        this.ignoreTeam(entry, entry.active.teamID);
+                    }
+                    delete entry.active;
+                }
+            }
+
+            this.cleanupQueue(roomName, entry);
+
+            if (entry.active) continue;
+            if (!entry.queue.length) continue;
+
+            const request = entry.queue.shift();
+            if (!request) continue;
+
+            const flagName: string = request.flagName;
+            const flag = Game.flags[flagName];
+            if (!flag) continue;
+
+            if (flag.memory && flag.memory[TeamSpawner.FLAG_QUEUED_MARK]) delete flag.memory[TeamSpawner.FLAG_QUEUED_MARK];
+
+            const dispatched = this.dispatchOne(flagName, flag, roomName);
+            if (dispatched) {
+                entry.active = { teamID: dispatched.teamID, flagName, startTime: Game.time };
+            }
+        }
+
+        for (const roomName in root) {
+            const entry = root[roomName];
+            if (!entry) continue;
+            if (entry.active) continue;
+            if (entry.queue && entry.queue.length) continue;
+            delete root[roomName];
+        }
+    }
+
+    /**
+     * 实际派发一条孵化请求（出队执行）。
+     *
+     * @remarks
+     * 出队时会重新做一次校验（房间归属/配置存在/资源充足/间隔允许），防止等待期间环境变化导致派发错误。
+     */
+    private static dispatchOne(flagName: string, flag: Flag, roomName: string): { teamID: string } | undefined {
+        const flagMemory = flag.memory;
+        if (!this.canSpawnNow(flagName, flag, flagMemory)) return;
+
+        const spawnRoomName = flagName.match(/([EW][1-9]+[NS][1-9]+)/)?.[1]?.toUpperCase();
+        const room = spawnRoomName ? Game.rooms[spawnRoomName] : undefined;
+        if (!room || !room.my || room.name !== roomName) {
+            this.removeFlagAndMemory(flagName, flag, false);
+            return;
+        }
+
+        const config = flagName.match(/TEAM_([0-9A-Za-z/]+)/)?.[1];
+        if (!config) {
+            console.log(`未设置小队配置.`);
+            this.removeFlagAndMemory(flagName, flag, false);
+            return;
+        }
+        const Team_Config = TEAM_CONFIG[config];
+        if (!Team_Config) {
+            console.log(`小队配置 ${config} 不存在.`);
+            this.removeFlagAndMemory(flagName, flag, false);
+            return;
+        }
+
         const teamID = this.genTeamID();
 
         const RES_MAP = this.calcBoostNeeds(Team_Config);
         if (!this.ensureBoostResources(room, RES_MAP, flagName, flag)) return;
 
         if (RES_MAP && Object.keys(RES_MAP).length) {
-            // 给lab分配boost任务 (传入 Team-teamID)
             for (const m in RES_MAP) {
                 room.AssignBoostTask(m as ResourceConstant, RES_MAP[m], `Team-${teamID}`);
             }
@@ -108,8 +240,114 @@ export default class TeamSpawner {
 
         this.createTeam(teamID, Team_Config, room, flag);
         this.spawnTeamCreeps(teamID, Team_Config, room);
-
         this.updateSpawnCounter(flagName, flag, teamID, config);
+
+        return { teamID };
+    }
+
+    /**
+     * 将孵化旗入队（按房间分桶）。
+     *
+     * @remarks
+     * 入队只存 flagName，避免复制配置/颜色等信息；flag 本身是唯一真源。
+     */
+    private static enqueue(roomName: string, flagName: string): void {
+        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        if (!root[roomName]) root[roomName] = { queue: [], active: undefined };
+        if (!root[roomName].queue) root[roomName].queue = [];
+        root[roomName].queue.push({ flagName, enqueueTime: Game.time });
+    }
+
+    /**
+     * 清理队列中的失效请求（flag 不存在/房间不匹配等）。
+     */
+    private static cleanupQueue(roomName: string, entry: any): void {
+        if (!entry.queue || !entry.queue.length) return;
+        entry.queue = entry.queue.filter((r: any) => {
+            if (!r || !r.flagName) return false;
+            const flag = Game.flags[r.flagName];
+            if (!flag) return false;
+            const spawnRoomName = r.flagName.match(/([EW][1-9]+[NS][1-9]+)/)?.[1]?.toUpperCase();
+            if (!spawnRoomName || spawnRoomName !== roomName) return false;
+            return true;
+        });
+    }
+
+    /**
+     * 判断旗帜是否已在指定房间的队列中。
+     */
+    private static isFlagQueued(roomName: string, flagName: string): boolean {
+        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const entry = root?.[roomName];
+        if (!entry?.queue) return false;
+        return entry.queue.some((r: any) => r?.flagName === flagName);
+    }
+
+    /**
+     * 判断旗帜是否正在作为该房间的 active 孵化请求执行中。
+     */
+    private static isFlagActive(roomName: string, flagName: string): boolean {
+        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const entry = root?.[roomName];
+        if (!entry?.active) return false;
+        return entry.active.flagName === flagName;
+    }
+
+    /**
+     * 在队列重启/Memory 丢失 active 时，尝试从现存 TeamData 推断一个 active team。
+     *
+     * @remarks
+     * - 只选择 homeRoom 匹配且 status=ready 的队伍。\n
+     * - 选择 time 最新的一支，避免误锁住更早的残留队伍。
+     */
+    private static inferActiveTeamID(roomName: string, ignoreTeams?: Record<string, number>): string | undefined {
+        const teams = Memory['TeamData'] as any;
+        if (!teams) return;
+        let best: { id: string; time: number } | undefined;
+        for (const teamID in teams) {
+            if (ignoreTeams && ignoreTeams[teamID] && ignoreTeams[teamID] > Game.time) continue;
+            const t = teams[teamID];
+            if (!t) continue;
+            if (t.homeRoom !== roomName) continue;
+            if (t.status !== 'ready') continue;
+            if (!best || (t.time || 0) > best.time) best = { id: teamID, time: t.time || 0 };
+        }
+        return best?.id;
+    }
+
+    /**
+     * 判断 active 是否应当结束（释放房间孵化锁）。
+     *
+     * @remarks
+     * 结束条件：\n
+     * - TeamData 不存在（失败/被清理）\n
+     * - status 已不为 ready 或成员齐全\n
+     * - 超时（ACTIVE_TTL）：强制释放，并记录一次日志
+     */
+    private static isActiveDone(active: any): boolean {
+        const teamID: string | undefined = active?.teamID;
+        if (!teamID) return true;
+        const teamData = Memory['TeamData']?.[teamID] as any;
+        if (!teamData) return true;
+        if (teamData.status && teamData.status !== 'ready') return true;
+        if (teamData.creeps && teamData.num && teamData.creeps.length >= teamData.num) return true;
+
+        const startTime = typeof active.startTime === 'number' ? active.startTime : teamData.time;
+        if (startTime && Game.time - startTime > TeamSpawner.ACTIVE_TTL) {
+            active.timedOut = true;
+            active.timedOutAt = Game.time;
+            log('TeamModule', `${teamID} 孵化锁超时已释放`, `home:${teamData.homeRoom}`);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 超时后短期忽略某个 teamID，避免同 tick 反复推断 active。
+     */
+    private static ignoreTeam(entry: any, teamID: string): void {
+        if (!entry.ignoreTeams) entry.ignoreTeams = {};
+        entry.ignoreTeams[teamID] = Game.time + TeamSpawner.IGNORE_TTL_AFTER_TIMEOUT;
     }
 
     /**
