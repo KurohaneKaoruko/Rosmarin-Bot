@@ -129,24 +129,21 @@ interface Creep {
 
     /** 
      * 根据给定配置boost
-     * @param boostmap - 部件到boost资源的映射，如{ work: 'XUH2O', tough: 'XGHO2' }
+     * @param boostmap - 部件到boost资源的映射；支持单资源或候选列表（按顺序降级）
      * @param options - 可选的强化选项
      * @returns 0表示完成，1表示下一tick继续，-1表示资源不足，-2表示找不到lab
      * @description 移动到lab并进行boost强化
      * @example 
-     * const result = creep.Boost({ work: 'XUH2O', tough: 'XGHO2' });
+     * const result = creep.goBoost({ [WORK]: ['XUH2O', 'UH2O', 'UH'], [TOUGH]: 'XGHO2' });
      * if (result === 0) { // boost完成，执行后续逻辑 }
      */
-    Boost(boostmap: { [part: string]: string }, options?: { must?: boolean }): number;
+    goBoost(boostmap: { [part: string]: MineralBoostConstant | MineralBoostConstant[] }, options?: { must?: boolean }): number;
     
-    /** 
-     * boost creep
-     * @param boostTypes - 强化的资源类型数组，如['XUH2O', 'XGHO2']
-     * @param must - 可选，是否必须boost，默认false
-     * @returns true表示boost完成或不需要boost，false表示正在进行
-     * @description 按优先级顺序进行boost，失败5次后放弃
+    /**
+     * 旧版 goBoost（资源列表模式）已废弃
+     * @deprecated
      */
-    goBoost(boostTypes: string[], must?: boolean ): boolean;
+    // goBoost(boostTypes: string[], must?: boolean ): boolean;
     
     /** 
      * 解除boost
@@ -579,10 +576,28 @@ interface CreepMemory {
     
     /** 
      * boost配置映射
-     * @description 部件类型到boost资源的映射
-     * @example { work: 'XUH2O', tough: 'XGHO2' }
+     * @description 部件类型到boost资源的映射；支持单资源或候选列表（按顺序降级）
+     * @example { work: ['XGH2O', 'GH2O', 'GH'], tough: 'XGHO2' }
      */
-    boostmap?: { [part: string]: string };
+    boostmap?: { [part: string]: MineralBoostConstant | MineralBoostConstant[] };
+
+    /**
+     * Boost 目标 Lab 缓存
+     * @description Boost 过程中缓存目标 Lab 的 id，用于跨 tick 复用
+     */
+    boostTargetId?: Id<StructureLab>;
+
+    /**
+     * Boost 目标资源缓存
+     * @description 避免预定空 Lab（mineralType 为 null）导致无法推断目标资源
+     */
+    boostTargetMineral?: MineralBoostConstant;
+
+    /**
+     * Boost 目标部件缓存
+     * @description 记录本轮 Boost 针对的部件类型，便于正确计算用量与完成状态
+     */
+    boostTargetPart?: BodyPartConstant;
     
     /** 
      * 绑定的creep名称
@@ -656,4 +671,3 @@ interface CreepMemory {
      */
     [key: string]: any;
 }
-

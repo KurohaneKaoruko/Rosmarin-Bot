@@ -8,9 +8,12 @@ const one_ranged = {
         creep.heal(creep);
     
         if (!creep.memory.boosted) {
-            const boost = ['XGHO2', 'GHO2', 'GO','XLHO2', 'LHO2', 'LO',
-                            'XKHO2', 'KHO2', 'KO','XZHO2', 'ZHO2', 'ZO'];
-            creep.memory.boosted = creep.goBoost(boost);
+            creep.memory.boosted = creep.goBoost({
+                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                [HEAL]: ['XLHO2', 'LHO2', 'LO'],
+                [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
+                [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+            }) === OK;
             return
         }
     

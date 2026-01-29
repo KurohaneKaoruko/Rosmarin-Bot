@@ -25,9 +25,9 @@ const aid_build = {
 
     prepare: function (creep: Creep) {
         if (creep.memory['boostmap']) {
-            return creep.Boost(creep.memory['boostmap']);
+            return creep.goBoost(creep.memory['boostmap']) === OK;
         } else {
-            return creep.goBoost(['XLH2O', 'LH2O', 'LH']);
+            return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
         }
         
     },

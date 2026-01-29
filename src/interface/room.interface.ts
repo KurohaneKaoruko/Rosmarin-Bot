@@ -321,11 +321,11 @@ interface Room {
     /** 
      * 检查boost资源是否足够
      * @param bodypart - 压缩形式的体型数组
-     * @param boostmap - 部件到boost资源的映射，如{ work: 'XUH2O', tough: 'XGHO2' }
+     * @param boostmap - 部件到boost资源的映射；支持单资源或候选列表（按顺序降级）
      * @returns true表示资源足够，false表示不足
      * @description 检查房间内是否有足够的boost资源来强化指定体型
      */
-    CheckBoostRes(bodypart: (BodyPartConstant | number)[][], boostmap: { [bodypart: string]: MineralBoostConstant }): boolean;
+    CheckBoostRes(bodypart: (BodyPartConstant | number)[][], boostmap: { [bodypart: string]: MineralBoostConstant | MineralBoostConstant[] }): boolean;
 
     /**
      * 获取可用于 Boost 的 Lab
@@ -342,7 +342,7 @@ interface Room {
      * @returns true表示分配成功，false表示资源不足
      * @description 为指定体型的每个需要boost的部件分配lab任务
      */
-    AssignBoostTaskByBody(bodypart: (BodyPartConstant | number)[][], boostmap?: { [bodypart: string]: MineralBoostConstant }, ownerId?: string): boolean;
+    AssignBoostTaskByBody(bodypart: (BodyPartConstant | number)[][], boostmap?: { [bodypart: string]: MineralBoostConstant | MineralBoostConstant[] }, ownerId?: string): boolean;
     
     /** 
      * 给lab分配boost任务

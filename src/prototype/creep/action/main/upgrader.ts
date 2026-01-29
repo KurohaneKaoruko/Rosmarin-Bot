@@ -34,7 +34,7 @@ const upgrade = function (creep: Creep) {
 const Upgrader = {
     prepare: function (creep: Creep) {
         if(creep.room.level == 8) return true;
-        return creep.goBoost(['XGH2O', 'GH2O', 'GH']);
+        return creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] }) === OK;
     },
 
     target: function (creep: Creep) {   // 升级控制器
@@ -72,4 +72,3 @@ const Upgrader = {
 }
 
 export default Upgrader;
-

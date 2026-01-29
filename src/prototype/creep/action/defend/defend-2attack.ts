@@ -7,12 +7,11 @@ const double_defender = {
             creep.memory.notified = true;
         }
         if (!creep.memory.boosted) {
-            const boosts = [
-                'XGHO2', 'GHO2', 'GO',
-                'XUH2O', 'UH2O', 'UH',
-                'XZHO2', 'ZHO2', 'ZO'
-            ];
-            creep.memory.boosted = creep.goBoost(boosts, true);
+            creep.memory.boosted = creep.goBoost({
+                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
+                [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
+            }, { must: true }) === OK;
             return
         }
     

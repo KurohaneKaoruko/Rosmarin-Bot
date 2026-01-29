@@ -124,7 +124,7 @@ const WithdrawLink = function (creep: Creep) {
 
 const UpRepairFunction = {
     prepare: function (creep: Creep) {
-        return creep.goBoost(['XLH2O', 'LH2O', 'LH']);
+        return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
     },
     target: function (creep: Creep) {   // 维修
         if(!creep.memory.ready) return false;

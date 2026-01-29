@@ -171,15 +171,15 @@ const double_attack = {
         }
         if (!creep.memory.boosted) {
             if (creep.memory['boostmap']) {
-                let result = creep.Boost(creep.memory['boostmap']);
+                let result = creep.goBoost(creep.memory['boostmap']);
                 if (result === OK) {
                     creep.memory.boosted = true;
                 }
             } else {
-                creep.memory.boosted = creep.goBoost([
-                    'XGHO2', 'GHO2', 'GO',
-                    'XUH2O', 'UH2O', 'UH'
-                ]);
+                creep.memory.boosted = creep.goBoost({
+                    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                    [ATTACK]: ['XUH2O', 'UH2O', 'UH']
+                }) === OK;
             }
             return
         }

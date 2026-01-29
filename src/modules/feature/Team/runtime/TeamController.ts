@@ -28,7 +28,7 @@ export default class TeamController {
      *
      * @remarks
      * - Team creep 判定：role 以 `team` 开头。\n
-     * - boost：若 creep.memory.boostmap 存在，则调用 creep.Boost({ must: true })，直到完成。\n
+     * - boost：若 creep.memory.boostmap 存在，则调用 creep.goBoost({ must: true })，直到完成。\n
      * - 归队：首次完成 boost 后，把 creep.id 推入 Memory.TeamData[teamID].creeps。\n
      * - 若 TeamData 已被删除，则 creep 自杀，避免残留占用资源。
      */
@@ -48,7 +48,7 @@ export default class TeamController {
                 if (!creep.memory.boosted) {
                     if (creep.memory['boostmap']) {
                         // Team Creep 必须完成 Boost (must: true)，任务配额扣减由 Boost 内部自动处理
-                        const result = creep.Boost(creep.memory['boostmap'], { must: true });
+                        const result = creep.goBoost(creep.memory['boostmap'], { must: true });
                         if (result === OK) {
                             creep.memory.boosted = true;
                             delete creep.memory['boostmap'];

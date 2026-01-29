@@ -122,15 +122,15 @@ const double_dismantle = {
 
         if (!creep.memory.boosted) {
             if (creep.memory['boostmap']) {
-                let result = creep.Boost(creep.memory['boostmap']);
+                let result = creep.goBoost(creep.memory['boostmap']);
                 if (result === OK) {
                     creep.memory.boosted = true;
                 }
             } else {
-                creep.memory.boosted = creep.goBoost([
-                    'XGHO2', 'GHO2', 'GO',
-                    'XZH2O', 'ZH2O', 'ZH'
-                ]);
+                creep.memory.boosted = creep.goBoost({
+                    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                    [WORK]: ['XZH2O', 'ZH2O', 'ZH']
+                }) === OK;
             }
             return;
         }

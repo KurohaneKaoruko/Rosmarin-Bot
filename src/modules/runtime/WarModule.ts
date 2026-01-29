@@ -1,6 +1,6 @@
 import { RoleData } from "@/constant/CreepConstant";
 
-type BoostMap = { [bodypart: string]: MineralBoostConstant };
+type BoostMap = { [bodypart: string]: MineralBoostConstant | MineralBoostConstant[] };
 
 type AioConfig = {
     bodypart: [BodyPartConstant, number][];

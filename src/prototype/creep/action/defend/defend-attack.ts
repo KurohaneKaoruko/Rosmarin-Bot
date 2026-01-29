@@ -86,9 +86,15 @@ const autoDefend = function (creep: Creep) {
 const defend_attack = {
     run: function (creep: Creep) {
         if (!creep.memory.boosted) {
-            const boosts = creep.memory['mustBoost'] ? ['XUH2O', 'XZHO2'] : 
-                        ['XUH2O', 'UH2O', 'UH', 'XZHO2', 'ZHO2', 'ZO'];
-            creep.memory.boosted = creep.goBoost(boosts, creep.memory['mustBoost']);
+            const must = !!creep.memory['mustBoost'];
+            const boostmap = must ? {
+                [ATTACK]: ['XUH2O'],
+                [MOVE]: ['XZHO2'],
+            } : {
+                [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
+                [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+            };
+            creep.memory.boosted = creep.goBoost(boostmap as any, { must }) === OK;
             return
         }
         autoDefend(creep);

@@ -104,13 +104,17 @@ const aio = {
 
         if (!creep.memory.boosted) {
             if (creep.memory['boostmap']) {
-                let result = creep.Boost(creep.memory['boostmap'])
+                let result = creep.goBoost(creep.memory['boostmap'])
                 if (result == OK) {
                     creep.memory.boosted = true
                 }
             } else {
-                const boost = ['XGHO2', 'XLHO2', 'XKHO2', 'XZHO2'];
-                creep.memory.boosted = creep.goBoost(boost);
+                creep.memory.boosted = creep.goBoost({
+                    [TOUGH]: ['XGHO2'],
+                    [HEAL]: ['XLHO2'],
+                    [RANGED_ATTACK]: ['XKHO2'],
+                    [MOVE]: ['XZHO2']
+                }) === OK;
             }
             return;
         }

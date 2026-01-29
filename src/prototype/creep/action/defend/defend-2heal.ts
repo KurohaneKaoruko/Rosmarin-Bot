@@ -7,17 +7,16 @@ const double_heal = {
         }
         if(!creep.memory.boosted) {
             if (creep.memory['boostmap']) {
-                let result = creep.Boost(creep.memory['boostmap']);
+                let result = creep.goBoost(creep.memory['boostmap']);
                 if (result === OK) {
                     creep.memory.boosted = true;
                 }
             } else {
-                const boosts = [
-                    'XGHO2', 'GHO2', 'GO',
-                    'XLHO2', 'LHO2', 'LO',
-                    'XZHO2', 'ZHO2', 'ZO'
-                ];
-                creep.memory.boosted = creep.goBoost(boosts, true);
+                creep.memory.boosted = creep.goBoost({
+                    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                    [HEAL]: ['XLHO2', 'LHO2', 'LO'],
+                    [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
+                }, { must: true }) === OK;
             }
             return;
         }

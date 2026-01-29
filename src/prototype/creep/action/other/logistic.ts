@@ -150,10 +150,10 @@ function transfer(creep: Creep) {
 
 const logisticFunction = {
     prepare: function (creep: Creep) {
-        const boosts = ['XKH2O', 'KH2O', 'KH'];
-        creep.memory.boosted = creep.goBoost(boosts);
-        if(creep.memory.boosted) return true;
-        return false;
+        const boosts = ['XKH2O', 'KH2O', 'KH'] as MineralBoostConstant[];
+        const result = creep.goBoost({ [CARRY]: boosts });
+        creep.memory.boosted = result === OK;
+        return creep.memory.boosted;
     },
     source: function (creep: Creep) {
         withdraw(creep);

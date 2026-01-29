@@ -5,75 +5,125 @@ export default class BoostFunction extends Creep {
      * @param opts 选项 { must: 是否强制 }
      * @returns 0表示完成, 1表示下一tick还要继续, -1表示资源不足, -2表示找不到对应的LAB
      */
-    Boost(boostmap: { [part: string]: string }, opts: { must?: boolean } = {}) {
+    goBoost(boostmap: { [part: string]: MineralBoostConstant | MineralBoostConstant[] }, opts: { must?: boolean } = {}) {
         const { must = false } = opts;
 
         // Boost 期间允许被对穿，防止堵死 Lab 通道
         this.memory.dontPullMe = false;
 
         // 1. 检查是否已完成 Boost
-        let bodypart = {}   // 需要强化的部件及其数量
-        const done = this.body.every(part => {
-            if (!boostmap[part.type]) return true;
-            if (part.boost) return true;
-            
-            if (!bodypart[part.type]) {
-                bodypart[part.type] = 1;
-            } else {
-                bodypart[part.type] += 1;
-            }
-            return false;
-        })
-        if (done) {
-            delete this.memory.boostTargetId; // 清理缓存
+        const normalizeBoostList = (v: MineralBoostConstant | MineralBoostConstant[] | undefined): MineralBoostConstant[] => {
+            if (!v) return [];
+            if (Array.isArray(v)) return v.filter(Boolean);
+            return [v];
+        };
+
+        const bodypart: { [part: string]: number } = {}; // 需要强化的部件及其数量（仅统计未强化的）
+        for (const part of this.body) {
+            const boostList = normalizeBoostList(boostmap[part.type]);
+            if (boostList.length <= 0) continue;
+            if (part.boost) continue;
+            bodypart[part.type] = (bodypart[part.type] || 0) + 1;
+        }
+
+        if (Object.keys(bodypart).length <= 0) {
+            // 已完成，清理缓存
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
             return 0;
         }
 
-        // 2. 检查资源是否足够
+        // 2. 检查资源是否足够（允许同一部件按候选列表降级选择）
         for (const part in bodypart) {
-            if (this.room[boostmap[part]] < bodypart[part] * 30) {
-                if (!must) {
-                    delete this.memory.boostTargetId;
-                    return 0; // 如果不是强制，资源不足直接算完成（放弃）
-                }
-                return -1;
+            const boostList = normalizeBoostList(boostmap[part]);
+            const requiredAmount = bodypart[part] * 30;
+
+            const hasEnough = boostList.some(mineral => this.room[mineral] >= requiredAmount);
+            if (hasEnough) continue;
+
+            if (!must) {
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+                return 0; // 如果不是强制，资源不足直接算完成（放弃）
             }
+            return -1;
         }
 
         // 3. 查找有资源的 Lab
-        const requiredMinerals = Object.values(boostmap);
+        // 注意：boostmap 允许传入候选列表，这里用于校验缓存是否仍然可用
+        const requiredMinerals = Object.values(boostmap).flatMap(v => normalizeBoostList(v as any));
         // 使用 getBoostLab 获取最佳 Lab
         // 注意：目前 boost 逻辑是针对每个部件分别判断的，但 getBoostLab 只能返回一个 Lab。
         // 如果 Creep 需要多种资源，它应该依次去不同的 Lab。
         // 这里我们需要找到任何一个能满足当前未 boost 部件需求的 Lab。
         
         let targetLab: StructureLab | null = null;
+        let targetMineral: MineralBoostConstant | null = null;
+        let targetPart: BodyPartConstant | null = null;
         
         // 尝试从缓存获取
         if (this.memory.boostTargetId) {
             const cachedLab = Game.getObjectById(this.memory.boostTargetId) as StructureLab;
-            if (cachedLab && requiredMinerals.some(m => cachedLab.mineralType === m)) {
-                targetLab = cachedLab;
-            } else {
+            const cachedMineral = this.memory.boostTargetMineral as MineralBoostConstant | undefined;
+            const cachedPart = this.memory.boostTargetPart as BodyPartConstant | undefined;
+
+            if (!cachedLab || !cachedMineral || !cachedPart) {
                 delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+            } else if (!requiredMinerals.includes(cachedMineral)) {
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+            } else if (!bodypart[cachedPart]) {
+                // 该部件类型已经不需要强化了
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+            } else if (cachedLab.mineralType && cachedLab.mineralType !== cachedMineral) {
+                // Lab 已被填充为其他资源，缓存失效
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+            } else if (this.room[cachedMineral] < bodypart[cachedPart] * 30) {
+                // 资源量发生变化导致不再足够，缓存失效
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+            } else {
+                targetLab = cachedLab;
+                targetMineral = cachedMineral;
+                targetPart = cachedPart;
             }
         }
 
         // 如果没有缓存，寻找一个新的 Lab
         if (!targetLab) {
-            // 遍历所有需要的资源，看哪个 Lab 准备好了
-            for (const [partType, mineral] of Object.entries(boostmap)) {
+            // 遍历所有需要的部件，看哪个 Lab 准备好了（候选资源按顺序尝试）
+            for (const partType of Object.keys(bodypart) as BodyPartConstant[]) {
                 // 如果该部件类型还有未 boost 的，则寻找 Lab
                 // 之前的逻辑是 some(... && p.boost)，只要有一个 boost 了就跳过，这是错误的
                 if (!this.body.some(p => p.type === partType && !p.boost)) continue;
                 
-                // 寻找该资源的 Lab
-                const lab = this.room.getBoostLab(mineral as ResourceConstant);
-                if (lab) {
+                const boostList = normalizeBoostList(boostmap[partType]);
+                const requiredAmount = bodypart[partType] * 30;
+                
+                for (const mineral of boostList as MineralBoostConstant[]) {
+                    if (this.room[mineral] < requiredAmount) continue;
+                    const lab = this.room.getBoostLab(mineral as ResourceConstant);
+                    if (!lab) continue;
+
                     targetLab = lab;
+                    targetMineral = mineral;
+                    targetPart = partType;
                     this.memory.boostTargetId = lab.id;
+                    this.memory.boostTargetMineral = mineral;
+                    this.memory.boostTargetPart = partType;
                     break; // 找到一个就去
                 }
+                if (targetLab) break;
             }
         }
 
@@ -81,6 +131,8 @@ export default class BoostFunction extends Creep {
         if (!targetLab) {
             if (!must) {
                 delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
                 return 0; // 非强制则放弃
             }
             
@@ -111,8 +163,31 @@ export default class BoostFunction extends Creep {
             return 1;
         }
 
-        const mineral = targetLab.mineralType as ResourceConstant;
-        const needParts = this.body.filter(part => !part.boost && boostmap[part.type] === mineral).length;
+        const mineral = (targetMineral || (this.memory.boostTargetMineral as MineralBoostConstant | undefined)) as MineralBoostConstant | undefined;
+        const partType = (targetPart || (this.memory.boostTargetPart as BodyPartConstant | undefined)) as BodyPartConstant | undefined;
+        if (!mineral || !partType) {
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            return 1;
+        }
+
+        if (targetLab.mineralType && targetLab.mineralType !== mineral) {
+            // Lab 被占用或资源被替换，清理缓存后重新选择
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            return 1;
+        }
+
+        const needParts = this.body.filter(part => part.type === partType && !part.boost).length;
+        if (needParts <= 0) {
+            // 目标部件已经全部完成，清理缓存后下一 tick 继续评估
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            return 1;
+        }
         const boostAmount = needParts * 30;
 
         const result = targetLab.boostCreep(this);
@@ -129,6 +204,8 @@ export default class BoostFunction extends Creep {
 
             // 强化成功，清除目标缓存，以便下一 tick 重新评估（可能需要去另一个 Lab，或者已经全部完成）
             delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
             return 1; // 继续下一轮检查
         } else if (result === ERR_NOT_IN_RANGE) {
             // 理论上 isNearTo 已经检查了，但防止边界情况
@@ -137,41 +214,6 @@ export default class BoostFunction extends Creep {
         }
 
         return 1;
-    }
-
-    /**
-     * boost creep (兼容层，内部调用 Boost)
-     * @param boostTypes - 强化的资源类型数组
-     * @param must - 是否必须boost
-     * @param reserve - 是否为预定的boost
-     * @returns boolean - true 表示完成/放弃，false 表示正在进行
-     */
-    goBoost(boostTypes: Array<string>, must: boolean = false) {
-        // 将 boostTypes 转换为 boostmap
-        // 注意：这里需要反查 BOOSTS 表来确定哪些部件可以使用这些资源
-        // 这是一个简化的映射，假设每个资源只对应一种主要用途，或者我们只关心能不能用
-        const boostmap: { [part: string]: string } = {};
-        
-        // 遍历 creep 的 body，为每个部件寻找匹配的 boostType
-        this.body.forEach(part => {
-            if (part.boost) return;
-            const validBoosts = BOOSTS[part.type];
-            if (!validBoosts) return;
-            
-            // 查找该部件是否可以使用 boostTypes 中的任一资源
-            const targetBoost = boostTypes.find(type => type in validBoosts);
-            if (targetBoost) {
-                boostmap[part.type] = targetBoost;
-            }
-        });
-
-        // 如果没有匹配的 boostmap，直接返回完成
-        if (Object.keys(boostmap).length === 0) return true;
-
-        const result = this.Boost(boostmap, { must });
-        
-        // 转换返回码：0 表示完成/放弃，其他表示未完成
-        return result === 0;
     }
 
     unBoost() {
@@ -203,7 +245,7 @@ export default class BoostFunction extends Creep {
      */
     isBoostReady(): boolean {
         // 如果 creep 没有配置 boostmap，则不需要 boost
-        const boostmap = this.memory['boostmap'] as { [part: string]: string } | undefined;
+        const boostmap = this.memory['boostmap'] as { [part: string]: MineralBoostConstant | MineralBoostConstant[] } | undefined;
         if (!boostmap || Object.keys(boostmap).length === 0) {
             return true;
         }
@@ -211,7 +253,8 @@ export default class BoostFunction extends Creep {
         // 检查所有需要 boost 的部件是否都已被 boost
         const allBoosted = this.body.every(part => {
             // 如果该部件类型不在 boostmap 中，则不需要 boost
-            if (!boostmap[part.type]) return true;
+            const conf = boostmap[part.type];
+            if (!conf || (Array.isArray(conf) && conf.length <= 0)) return true;
             // 如果该部件已被 boost，则通过
             return !!part.boost;
         });

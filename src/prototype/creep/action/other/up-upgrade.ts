@@ -164,7 +164,7 @@ function withdrawEnergy(creep) {
 
 const UpUpgradeFunction = {
     prepare: function (creep: Creep) {
-        return creep.goBoost(['XGH2O', 'XZHO2']);
+        return creep.goBoost({ [WORK]: ['XGH2O'], [MOVE]: ['XZHO2'] }) === OK;
     },
 
     target: function (creep: Creep) {   // 升级控制器
@@ -189,9 +189,9 @@ const UpUpgradeFunction = {
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
         if(!creep.memory.boosted) {
-            let result = creep.goBoost(['XGH2O', 'GH2O', 'GH']);
-            creep.memory.boosted = result;
-            if(!result) return;
+            const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
+            creep.memory.boosted = result === OK;
+            if(result !== OK) return;
         }
         if(creep.ticksToLive < 10) {
             if(creep.unBoost()) creep.suicide();
@@ -206,4 +206,3 @@ const UpUpgradeFunction = {
 }
 
 export default UpUpgradeFunction;
-

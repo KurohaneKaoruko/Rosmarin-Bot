@@ -125,7 +125,7 @@ const WorkerAction = function (creep: Creep) {
 
 const WorkerFunction = {
     prepare: function (creep: Creep) {
-        return creep.goBoost(['XLH2O', 'LH2O', 'LH']);
+        return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
     },
     target: function (creep: Creep) {   // 建造
         if(!creep.memory.ready) return false;

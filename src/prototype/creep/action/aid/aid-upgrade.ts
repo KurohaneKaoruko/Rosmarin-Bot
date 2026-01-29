@@ -33,11 +33,9 @@ const upgrade = function (creep: Creep) {
 const aid_upgrade = {
     prepare: function (creep: Creep) {
         if (creep.memory['boostmap']) {
-            let result = creep.Boost(creep.memory['boostmap']);
-            if (result === OK) return true;
-            else return false;
+            return creep.goBoost(creep.memory['boostmap']) === OK;
         }
-        return creep.goBoost(['XGH2O', 'GH2O', 'GH']);
+        return creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] }) === OK;
     },
 
     target: function (creep: Creep) {   // 升级控制器

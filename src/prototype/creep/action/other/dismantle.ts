@@ -76,12 +76,14 @@ const dismantle = {
         // 处理boost
         if (!creep.memory.boosted) {
             if (creep.memory['boostmap']) {
-                if (creep.Boost(creep.memory['boostmap']) === OK) {
+                if (creep.goBoost(creep.memory['boostmap']) === OK) {
                     creep.memory.boosted = true;
                 }
             } else {
-                const boostTypes = ['XZH2O', 'ZH2O', 'ZH', 'XZHO2', 'ZHO2', 'ZO'];
-                creep.memory.boosted = creep.goBoost(boostTypes);
+                creep.memory.boosted = creep.goBoost({
+                    [WORK]: ['XZH2O', 'ZH2O', 'ZH'],
+                    [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
+                }) === OK;
             }
             return;
         }

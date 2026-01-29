@@ -353,27 +353,73 @@ export default class BaseFunction extends Room {
     /** 检查资源是否足够BOOST某个体型 */
     CheckBoostRes(bodypart: any[], boostmap: any) {
         if (Object.keys(boostmap).length == 0) return true;
-        let boostAmountMap = {};
+        const normalizeBoostList = (v: string | string[] | undefined): string[] => {
+            if (!v) return [];
+            if (Array.isArray(v)) return v.filter(Boolean);
+            return [v];
+        };
+
+        // 支持 boostmap 的 value 为 string 或 string[]：按候选列表顺序，贪心选择可用资源
+        const remaining: { [mineral: string]: number } = {};
+
         for (let bp of bodypart) {
             if (!boostmap[bp[0]]) continue;
-            if (!boostAmountMap[boostmap[bp[0]]]) boostAmountMap[boostmap[bp[0]]] = 0;
-            boostAmountMap[boostmap[bp[0]]] += bp[1] * 30;
-        }
-        for (let mineral in boostAmountMap) {
-            if (this[mineral] < boostAmountMap[mineral]) {
-                return false;
+
+            const boostList = normalizeBoostList(boostmap[bp[0]]);
+            if (boostList.length <= 0) continue;
+
+            const amount = bp[1] * 30;
+            let selected: string | null = null;
+
+            for (const mineral of boostList) {
+                const available = remaining[mineral] ?? this[mineral] ?? 0;
+                if (available >= amount) {
+                    selected = mineral;
+                    remaining[mineral] = available - amount;
+                    break;
+                }
             }
+
+            if (!selected) return false;
         }
+
         return true;
     }
 
     /** 根据体型和boost配置分配boot任务 */
     AssignBoostTaskByBody(bodypart: any[], boostmap: any = {}, ownerId?: string) {
         if (!this.CheckBoostRes(bodypart, boostmap)) return false;
+        const normalizeBoostList = (v: string | string[] | undefined): string[] => {
+            if (!v) return [];
+            if (Array.isArray(v)) return v.filter(Boolean);
+            return [v];
+        };
+
+        // 与 CheckBoostRes 使用同一套选择逻辑，避免检查通过但分配失败
+        const remaining: { [mineral: string]: number } = {};
+
         for (let bp of bodypart) {
             if (!boostmap[bp[0]]) continue;
-            this.AssignBoostTask(boostmap[bp[0]], bp[1] * 30, ownerId)
+
+            const boostList = normalizeBoostList(boostmap[bp[0]]);
+            if (boostList.length <= 0) continue;
+
+            const amount = bp[1] * 30;
+            let selected: ResourceConstant | null = null;
+
+            for (const mineral of boostList as ResourceConstant[]) {
+                const available = remaining[mineral] ?? this[mineral] ?? 0;
+                if (available >= amount) {
+                    selected = mineral;
+                    remaining[mineral] = available - amount;
+                    break;
+                }
+            }
+
+            if (!selected) return false;
+            if (!this.AssignBoostTask(selected, amount, ownerId)) return false;
         }
+
         return true;
     }
 
