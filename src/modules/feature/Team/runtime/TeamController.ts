@@ -1,12 +1,37 @@
 import Team from "../core/TeamClass";
 import TeamCalc from "../infra/TeamCalc";
 
+/**
+ * Team 执行调度器（运行时）。
+ *
+ * @remarks
+ * - 本模块是 Team 系统的执行端：驱动 Team creep 的 boost/归队，并驱动 Team 的状态机。\n
+ * - 生成端（创建 TeamData、下发孵化）在 TeamSpawner。\n
+ * - 数据源：Memory.TeamData[teamID]（队伍状态与成员列表）。
+ */
 export default class TeamController {
+    /**
+     * Team 主入口（每 tick 调用）。
+     *
+     * @remarks
+     * 执行顺序：\n
+     * 1) 处理 Team creep：boost、归队、异常清理\n
+     * 2) 处理 Team：集结/移动/战斗/解散
+     */
     static run(): void {
         this.runCreeps();
         this.runTeams();
     }
 
+    /**
+     * 驱动 Team creep 行为（boost 与归队）。
+     *
+     * @remarks
+     * - Team creep 判定：role 以 `team` 开头。\n
+     * - boost：若 creep.memory.boostmap 存在，则调用 creep.Boost({ must: true })，直到完成。\n
+     * - 归队：首次完成 boost 后，把 creep.id 推入 Memory.TeamData[teamID].creeps。\n
+     * - 若 TeamData 已被删除，则 creep 自杀，避免残留占用资源。
+     */
     private static runCreeps(): void {
         // 小队成员的行为
         for (const creep of Object.values(Game.creeps)) {
@@ -46,6 +71,15 @@ export default class TeamController {
         }
     }
 
+    /**
+     * 驱动队伍状态机（TeamClass.exec）。
+     *
+     * @remarks
+     * - status=ready：等待成员集齐；超时会解散并移除 Team-xxxx 标记旗。\n
+     * - 成员齐全：按伤害排序，切换到 attack。\n
+     * - 成员全部死亡：解散。\n
+     * - 仅剩治疗者：把 healer 重新分配到未满员的队伍，尽量提高存活率。
+     */
     private static runTeams(): void {
         // 独立的治疗者
         let soloHealers = [];

@@ -1,3 +1,14 @@
+/**
+ * Team 配置表（体型/角色/boost 映射）。
+ *
+ * @remarks
+ * - TeamSpawner 会从孵化旗解析 config key，并在此表中查找对应的队伍配置数组。\n
+ * - 单个成员配置结构：\n
+ *   - role：creep 角色名（team-attack/team-heal/...）\n
+ *   - bodypart：压缩前体型配置 `[[part, count], ...]`\n
+ *   - boostmap：bodypart → 化合物映射（用于 AssignBoostTask/Boost）\n
+ * - TEAM_CONFIG 的 value 是“队伍成员配置数组”，数组顺序会作为队内 A1/A2/B1/B2 等索引基础。
+ */
 const A = ATTACK
 const W = WORK
 const R = RANGED_ATTACK

@@ -3,6 +3,14 @@
  */
 type forEachFunc<T> = (x: number, y: number, value: T) => void
 
+/**
+ * 房间二维数组（50x50）工具类。
+ *
+ * @remarks
+ * - 用一维数组存储 (x,y) → x*50 + y。\n
+ * - 常用于缓存塔伤分布、flood fill、临时 costmap 等。\n
+ * - forEachNear 不做边界校验，调用方需确保坐标合法。
+ */
 export default class RoomArray<T extends number = number> {
     // 存放房间中 50 * 50 信息的数组
     protected arr: T[]

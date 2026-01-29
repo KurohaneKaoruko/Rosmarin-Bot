@@ -29,9 +29,21 @@ export default class TeamAction {
 
 
     // 调整朝向
-    public static AdjustToward(team: Team): void {
-        if (!TeamUtils.isQuad(team)) return;
-        if (!TeamUtils.inSameRoom(team)) return;
+    /**
+     * 根据 team.toward 对四角位做“微调归位”。
+     *
+     * @param team 队伍实例
+     * @returns 是否尝试执行了调整（满足前置才会返回 true）
+     *
+     * @remarks
+     * - 该方法依赖 TeamUtils.isQuad 与 TeamUtils.inSameRoom，要求队伍已经是可行动矩阵。\n
+     * - 仅做角位的微调（move 1 步），不负责集结成矩阵；队形打散时应由 Gather 负责重组。\n
+     * - 返回值用于 TeamClass.moved 标记：避免在不满足条件时“空转占用本 tick 的移动机会”。
+     */
+    public static AdjustToward(team: Team): boolean {
+        if (team.creeps.length < 3) return false;
+        if (!TeamUtils.isQuad(team)) return false;
+        if (!TeamUtils.inSameRoom(team)) return false;
 
         const { minX, maxX, minY, maxY } = TeamUtils.getPosRange(team);
         let [ A1, A2, B1, B2 ] = team.creeps;
@@ -67,9 +79,22 @@ export default class TeamAction {
                 if (B2 && !B2.pos.isEqual(LB)) B2.move(B2.pos.getDirection(LB));
                 break;
         }
+        // 这里不需要精确判断每个 creep 是否真的动了：只要满足前置，说明本 tick 尝试纠偏
+        return true;
     }
 
     // 成员集结
+    /**
+     * 队伍集结/归位（line/quad 通用）。
+     *
+     * @param team 队伍实例
+     * @returns 是否发出了移动指令（true 表示本 tick 做了集结行为）
+     *
+     * @remarks
+     * - line：队首先走，其余成员跟随前一个成员，必要时可朝目标点集合。\n
+     * - quad：计算左上角集结点，检查 2x2 周围地形/建筑/creep，满足条件则各自 moveTo 对应角位。\n
+     * - 靠边/空间不足时会返回 false，避免硬集结导致堵边或撞墙。
+     */
     public static Gather(team: Team): boolean {
         if (team.creeps.length <= 1) return;
 
@@ -267,6 +292,18 @@ export default class TeamAction {
     }
 
     // 线性队形移动到目标
+    /**
+     * 线性队形推进（队首 moveTo，队尾跟随）。
+     *
+     * @param team 队伍实例
+     * @param pos 目标位置（默认队伍指挥旗）
+     * @param reverse 是否反向（用于特殊场景：以队尾为“头”推进）
+     *
+     * @remarks
+     * - 当队形已线性相连时，后续成员用 move(directionTo(prev)) 追随，降低 moveTo 的 CPU。\n
+     * - 队首处于边界时允许直接 moveTo 目标，用于跨房/出入口通过。\n
+     * - 内部会在同房且已到达/疲劳时早退，避免无意义移动。
+     */
     public static LinearMove(team: Team, pos: RoomPosition = team.flag.pos, reverse = false): void {
         if (team.creeps.length == 0) return;
         if (!pos) pos = team.flag.pos;
@@ -333,6 +370,14 @@ export default class TeamAction {
 
 
     // 方阵移动
+    /**
+     * 矩阵队形推进（按方向整体移动）。
+     *
+     * @remarks
+     * - 多人队伍（>=3）若下一步会跨房，则会自动降级为线性推进通过边界，避免卡在房间边缘。\n
+     * - 2 人队伍在无方向时会尝试把边界上的成员挪到内侧空位，减少“贴边抖动”。\n
+     * - 有 fatigue 时直接停止，避免队形撕裂。
+     */
     public static move(team: Team, direction: DirectionConstant): void {
         // 存在疲劳的creep则停止
         if (TeamUtils.hasCreepFatigue(team)) return;
@@ -348,7 +393,7 @@ export default class TeamAction {
             return
         }
 
-        // 四人小队下一步跨房间不走
+        // 四人小队位于房间边界且下一步跨越房间不走（因为走不了）, 等传送到另一个房间再走
         if (creeps.length >= 3) {
             if (
                 creeps.some(
@@ -381,6 +426,12 @@ export default class TeamAction {
     }
 
     // 方阵移动到目标
+    /**
+     * quad 队形朝目标点移动（内部先算方向再调用 move）。
+     *
+     * @param team 队伍实例
+     * @param targetPos 目标位置
+     */
     public static QuadMoveTo(team: Team, targetPos: RoomPosition): void {
         // 获取移动方向
         let d = this.getTeamMoveDirection(team, [{pos:targetPos}]);

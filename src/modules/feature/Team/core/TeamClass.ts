@@ -3,7 +3,14 @@ import TeamAction from '../ai/TeamAction';
 import TeamBattle from '../ai/TeamBattle';
 import TeamVisual from '../debug/TeamVisual';
 
-// 小队类
+/**
+ * 小队实体（Team 状态机）。
+ *
+ * @remarks
+ * - 该类每 tick 会被 TeamController 实例化一次（非持久对象），真实状态落在 Memory.TeamData。\n
+ * - exec() 的顺序非常重要：Update（更新数据/绘制）→ Attack（选目标/火力/避让）→ Move（移动/集结/变阵）→ Adjust（朝向微调）→ Save。\n
+ * - moved 用于保证每 tick 最多触发一次“移动类行为”，避免同 tick 多次 move 互相覆盖。
+ */
 class Team {
     name: string;
     status: 'ready' | 'attack' | 'flee' | 'avoid' | 'sleep'; // 状态
@@ -18,6 +25,13 @@ class Team {
     moved: boolean;       // 本tick是否移动过
 
     // 构造函数
+    /**
+     * 从 Memory 中的 TeamData 构建运行时 Team 实例。
+     *
+     * @remarks
+     * - creeps 列表会过滤掉已死亡成员（Game.getObjectById 为 null）。\n
+     * - cache 是可写的临时存储，会在 save() 时写回 Memory.TeamData[teamID].cache。
+     */
     constructor(teamData: TeamMemory) {
         const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache } = teamData;
         this.name = name;
@@ -38,6 +52,13 @@ class Team {
     }
 
     // 保存数据
+    /**
+     * 把运行时状态写回 Memory.TeamData。
+     *
+     * @remarks
+     * - creeps 会写回为 id 数组。\n
+     * - teamData.room 用于记录队伍当前所在房间（取第一个成员）。
+     */
     save(): void {
         const teamData = Memory['TeamData'][this.name];
         if (!teamData) return;
@@ -57,6 +78,15 @@ class Team {
     }
 
     // 更新数据
+    /**
+     * 更新队伍状态（回血评估/目标房间同步/绘制）。
+     *
+     * @remarks
+     * - 若 Team-xxxx 指挥旗不存在，则尝试在第一个成员位置创建。\n
+     * - flag.pos.roomName 与 targetRoom 不一致时，targetRoom 以旗帜为准。\n
+     * - 根据战斗评估切换 status（attack/avoid/flee/sleep）。\n
+     * - 防止对穿：当队形稳定时设置 creep.memory.dontPullMe=true，减少 moveOptimization 的对穿打散。
+     */
     execUpdate(): void {
         // 没有旗帜则创建, 目标房间不一致则更新
         if (!this.flag && this.creeps && this.creeps.length > 0) {
@@ -86,7 +116,7 @@ class Team {
             })
         }
 
-        if (this.flag?.secondaryColor === COLOR_RED) {
+        if (this.flag?.secondaryColor === COLOR_PURPLE) {
             // rush模式, 不算伤
             this.status = 'attack'
         } else {
@@ -117,6 +147,13 @@ class Team {
     }
 
     // 索敌攻击与规避
+    /**
+     * 战斗决策与火力执行。
+     *
+     * @remarks
+     * - 目标选择、自动攻击与避让对象均由 TeamBattle 负责。\n
+     * - 最终会更新推进目标点（targetPos），供移动模块参考。
+     */
     execAttack(): void {
         if (!this.flag) return;
         // 选择目标
@@ -134,6 +171,14 @@ class Team {
     }
     
     // 移动行为
+    /**
+     * 队伍移动入口（队形保持/集结/跨房/追击/撤退）。
+     *
+     * @remarks
+     * - line：线性跟随推进，必要时可尝试重组成 quad。\n
+     * - quad：优先保持矩阵推进；当队形被打散时会 Gather 重组。\n
+     * - 边缘跨房：由 TeamAction.move 内部做降级处理（通过边界时不强行保持矩阵）。
+     */
     execMove(): void {
         if (this.moved) return;
         
@@ -211,15 +256,27 @@ class Team {
     }
 
     // 调整朝向
+    /**
+     * 矩阵队形的朝向微调（四人成形矩阵）。
+     *
+     * @remarks
+     * - 仅用于四人成形矩阵的“角位纠正”，三人缺角矩阵不做朝向纠偏。\n
+     * - AdjustToward 会返回是否实际执行调整，用于决定 moved 标记。
+     */
     execAdjust(): void {
         if (this.moved) return;
         if (this.creeps.length < 3) return;
         if (TeamUtils.checkToward(this)) return;
-        TeamAction.AdjustToward(this);
-        this.moved = true;
+        this.moved = TeamAction.AdjustToward(this);
     }
 
     // 主运行逻辑
+    /**
+     * 队伍单 tick 主逻辑。
+     *
+     * @remarks
+     * 顺序：Update → Attack → Move → Adjust → Save
+     */
     exec(): void {
         // 更新数据
         this.execUpdate();

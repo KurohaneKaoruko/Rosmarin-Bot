@@ -3,6 +3,12 @@
  */
 export default class TeamUtils {
     // 获取队伍坐标范围
+    /**
+     * 获取队伍在当前房间坐标系下的包围盒范围。
+     *
+     * @param team 队伍实例
+     * @returns {minX,maxX,minY,maxY}；队伍为空时返回 undefined
+     */
     public static getPosRange(team: Team): { minX: number; maxX: number; minY: number; maxY: number } | undefined {
         if (team.creeps.length == 0) return undefined;
         let creepPos = team.creeps.map((c: Creep) => c.pos);
@@ -14,6 +20,12 @@ export default class TeamUtils {
     }
 
     // 获取队伍全局坐标范围
+    /**
+     * 获取队伍在全局坐标系（跨房）下的包围盒范围。
+     *
+     * @remarks
+     * 主要用于跨房场景下的相对位置判断，避免房间边界导致的坐标不连续。
+     */
     public static getGlobalPosRange(team: Team): { minX: number; maxX: number; minY: number; maxY: number } | undefined {
         if (team.creeps.length == 0) return undefined;
         let creepPos = team.creeps.map((c: Creep) => c.pos.toGlobal());
@@ -25,6 +37,14 @@ export default class TeamUtils {
     }
 
     // 获取队伍左上角坐标
+    /**
+     * 获取队伍的“左上角”参考点（teamPos）。
+     *
+     * @remarks
+     * - 3 人及以上：使用全局坐标 gp.x + gp.y 最小的 creep 作为左上角参考。\n
+     * - flee/avoid 且仅 2 人：取队尾作为参考（倒着走）。\n
+     * - 结果会按 tick 缓存到 team['pos']/team['posTick']。
+     */
     public static getTeamPos(team: Team): RoomPosition {
         if (team['posTick'] === Game.time && team['pos']) return team['pos'];
         let teamPos = null;
@@ -47,6 +67,14 @@ export default class TeamUtils {
     }
 
     // 检查小队成员位置是否构成方形
+    /**
+     * 判断队伍是否处于“矩阵（quad）可行动”状态。
+     *
+     * @remarks
+     * - 这里的判定是“强邻近”：要求队伍内任意两名成员都互相相邻（含跨房邻近）。\n
+     * - 结果会按 tick 缓存到 team['isQuad']/team['isQuadTick']，减少重复计算。\n
+     * - 该结果用于队形保持/集结逻辑的分支选择（例如是否需要 Gather 归位）。
+     */
     public static isQuad(team: Team): boolean {
         if (team['isQuadTick'] === Game.time) return !!team['isQuad'];
 
@@ -72,6 +100,12 @@ export default class TeamUtils {
     }
 
     // 检查小队成员位置是否线性相连
+    /**
+     * 判断队伍是否线性相连（用于 line 队形推进与归位判断）。
+     *
+     * @remarks
+     * 该判定会按特定顺序重排 3/4 人队伍的成员，以更贴近“队首→队尾”的链式相邻关系。
+     */
     public static isLinear(team: Team): boolean {
         if (team.creeps.length < 2) return true;
         let creeps: Creep[] = []
@@ -95,6 +129,9 @@ export default class TeamUtils {
     }
 
     // 检查队伍是否均在同一房间
+    /**
+     * 判断队伍是否全部位于同一房间。
+     */
     public static inSameRoom(team: Team): boolean {
         if (team.creeps.length == 0) return false;
         let roomName = team.creeps[0].room.name;
@@ -102,6 +139,9 @@ export default class TeamUtils {
     }
 
     // 检查队伍是否在目标房间
+    /**
+     * 判断队伍是否全部位于目标房间（team.targetRoom）。
+     */
     public static inTargetRoom(team: Team): boolean {
         let targetRoom = team.targetRoom;
         if (!targetRoom) return true;
@@ -111,6 +151,14 @@ export default class TeamUtils {
 
 
     // 检查队伍是否符合设定的朝向
+    /**
+     * 检查矩阵队形是否符合设定的朝向（toward）。
+     *
+     * @remarks
+     * - 该逻辑会以全局包围盒四角为基准校验 A1/A2/B1/B2 的角位归属。\n
+     * - 当成员不足 4 时，角位会缺失（B2 可能为 undefined），因此此处只做“存在则校验”。\n
+     * - 校验失败会触发 TeamAction.AdjustToward 做微调。
+     */
     public static checkToward(team: Team): boolean {
         if (team.creeps.length == 0) return true;
         if (team.formation !== 'quad') return true;
@@ -156,12 +204,22 @@ export default class TeamUtils {
     }
 
     // 检查队伍是否到达指定位置
+    /**
+     * 判断队伍任意成员是否位于指定位置。
+     */
     public static isEqual(team: Team, pos: RoomPosition): boolean {
         if (team.creeps.length == 0) return false;
         return team.creeps.some((c: Creep) => c.pos.isEqual(pos));
     }
 
     // 检查队伍是否与目标相邻
+    /**
+     * 判断队伍是否已“贴近”目标点。
+     *
+     * @remarks
+     * - 单人：isNear\n
+     * - 多人：至少 2 名成员 isNear
+     */
     public static isNear(team: Team, pos: RoomPosition): boolean {
         if (team.creeps.length == 0) return false;
         if (team.creeps.length == 1) return team.creeps[0].pos.isNear(pos);
@@ -183,6 +241,12 @@ export default class TeamUtils {
         return team.creeps.some((creep) => creep.pos.isRoomEdge())
     }
 
+    /**
+     * 选择“最优攻击目标”（从缓存目标集合中取最近）。
+     *
+     * @remarks
+     * 优先使用 team['_attackTargets']，否则从 team['_targets'] 里筛选可被攻击的对象。
+     */
     public static focusTarget(team: Team, originPos: RoomPosition) {
         let targets: (Creep | Structure)[] = []
         if (team['_attackTargets']?.length) {

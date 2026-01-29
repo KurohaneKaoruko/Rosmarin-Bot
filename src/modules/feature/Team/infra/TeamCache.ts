@@ -104,6 +104,20 @@ export default class TeamCache {
         return `_${objsInRoom.length}_${this.hashString(signature)}`
     }
 
+    /**
+     * 获取或构建房间 CostMatrix（支持避让集合维度缓存）。
+     *
+     * @param roomName 房间名
+     * @param avoidObjs 避让对象（会参与缓存 key，避免不同避让集合误命中）
+     * @param isVisible 是否可见房间（可见房间缓存更短，避免陈旧）
+     * @param build 构建 CostMatrix 的回调（仅在缓存未命中时调用）
+     * @returns CostMatrix
+     *
+     * @remarks
+     * - 可见房间：最多复用 1 tick\n
+     * - 不可见房间：最多复用 5 tick\n
+     * - 内部会定期清理过期与超量条目，避免缓存无限增长
+     */
     public static getOrBuildGlobalCostMatrix(
         roomName: string,
         avoidObjs: { pos: RoomPosition; range?: number }[] | undefined,
