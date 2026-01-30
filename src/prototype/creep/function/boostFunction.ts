@@ -135,17 +135,65 @@ export default class BoostFunction extends Creep {
                 delete this.memory.boostTargetPart;
                 return 0; // 非强制则放弃
             }
-            
-            // 重试逻辑
+
+            const teamID = this.memory['teamID'];
+            const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
+
+            const ensureInterval = 20;
+            const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
+            const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
+
+            const boostPool = this.room.getAllMissionFromPool?.('boost') as any[] | undefined;
+            const ownersMap: Record<string, number> = {};
+            if (boostPool) {
+                for (const t of boostPool) {
+                    const data = t?.data;
+                    const mineral = data?.mineral as string | undefined;
+                    if (!mineral) continue;
+                    const amount = data?.owners?.[ownerId]?.amount;
+                    if (typeof amount === 'number' && amount > 0) {
+                        ownersMap[mineral] = (ownersMap[mineral] || 0) + amount;
+                    }
+                }
+            }
+
+            const partList = Object.keys(bodypart) as BodyPartConstant[];
+            const remaining: Record<string, number> = {};
+            const missing: Array<{ mineral: ResourceConstant; amount: number }> = [];
+
+            for (const partType of partList) {
+                const boostList = normalizeBoostList(boostmap[partType]);
+                if (boostList.length <= 0) continue;
+
+                const amount = bodypart[partType] * 30;
+                let selected: ResourceConstant | null = null;
+                for (const mineral of boostList as unknown as ResourceConstant[]) {
+                    const available = remaining[mineral] ?? (this.room as any)[mineral] ?? 0;
+                    if (available >= amount) {
+                        selected = mineral;
+                        remaining[mineral] = available - amount;
+                        break;
+                    }
+                }
+                if (!selected) continue;
+
+                if ((ownersMap[selected] || 0) >= amount) {
+                    ownersMap[selected] -= amount;
+                    continue;
+                }
+                missing.push({ mineral: selected, amount });
+            }
+
+            if (allowEnsure && missing.length > 0) {
+                for (const m of missing) {
+                    this.room.AssignBoostTask(m.mineral, m.amount, ownerId);
+                }
+                (this.memory as any).boostEnsureTime = Game.time;
+            }
+
             if (!this.memory.boostAttempts) this.memory.boostAttempts = 0;
             this.memory.boostAttempts++;
-            // 强制模式下 (must=true) 无限等待，直到找到 Lab
-            // if (this.memory.boostAttempts >= 5) {
-            //    delete this.memory.boostAttempts;
-            //    delete this.memory.boostTargetId;
-            //    return 0; // 重试超时，放弃
-            // }
-            return -2;
+            return 1;
         }
 
         // 6. 智能选择 Lab (已通过 getBoostLab 完成)
