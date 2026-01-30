@@ -126,4 +126,35 @@ export default class BaseFunction extends PowerCreep {
         
         return false;
     }
+
+    moveToRoom(roomName: string, opts: MoveToOpts = {}): boolean {
+        if (!this.room || this.room.name === roomName) return false;
+
+        const route = Game.map.findRoute(this.room.name, roomName, {
+            routeCallback: (r: string) => {
+                const status = Game.map.getRoomStatus(r);
+                if (status.status !== 'normal') return Infinity;
+                return 1;
+            }
+        });
+
+        if (route === ERR_NO_PATH || route.length <= 0) {
+            this.moveTo(new RoomPosition(25, 25, roomName), opts);
+            return true;
+        }
+
+        const nextRoom = route[0].room;
+        const exitDir = this.room.findExitTo(nextRoom);
+        if (exitDir === ERR_NO_PATH || exitDir === ERR_INVALID_ARGS) {
+            this.moveTo(new RoomPosition(25, 25, nextRoom), opts);
+            return true;
+        }
+
+        const exitTiles = this.room.find(exitDir as FindConstant);
+        const exitPos = this.pos.findClosestByRange(exitTiles);
+        if (!exitPos) return false;
+
+        this.moveTo(exitPos, opts);
+        return true;
+    }
 }

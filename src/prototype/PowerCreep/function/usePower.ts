@@ -198,4 +198,55 @@ export default class PowerCreepUsePower extends PowerCreep {
         }
         return false;
     }
+
+    Disrupt_Tower() {
+        const power = this.powers[PWR_DISRUPT_TOWER];
+        if (!power || power.cooldown > 0) return false;
+        if (this.store[RESOURCE_OPS] < 10) return false;
+
+        const targets = this.room.find(FIND_STRUCTURES, {
+            filter: (s: AnyStructure) => {
+                if (s.structureType !== STRUCTURE_TOWER) return false;
+                if ((s as any).my) return false;
+                const effects = (s as any).effects as PowerEffect[] | undefined;
+                if (!effects) return true;
+                return !effects.some(e => e.effect === PWR_DISRUPT_TOWER && e.ticksRemaining > 0);
+            }
+        }) as StructureTower[];
+
+        if (targets.length <= 0) return false;
+        const target = this.pos.findClosestByRange(targets);
+        if (!target) return false;
+
+        const result = this.usePower(PWR_DISRUPT_TOWER, target);
+        if (result === ERR_NOT_IN_RANGE) {
+            this.moveTo(target, { plainCost: 1, swampCost: 1 });
+        }
+        return result === OK || result === ERR_NOT_IN_RANGE;
+    }
+
+    Disrupt_Spawn() {
+        const power = this.powers[PWR_DISRUPT_SPAWN];
+        if (!power || power.cooldown > 0) return false;
+        if (this.store[RESOURCE_OPS] < 10) return false;
+
+        const targets = this.room.find(FIND_HOSTILE_STRUCTURES, {
+            filter: (s: AnyStructure) => {
+                if (s.structureType !== STRUCTURE_SPAWN) return false;
+                const effects = (s as any).effects as PowerEffect[] | undefined;
+                if (!effects) return true;
+                return !effects.some(e => e.effect === PWR_DISRUPT_SPAWN && e.ticksRemaining > 0);
+            }
+        }) as StructureSpawn[];
+
+        if (targets.length <= 0) return false;
+        const target = this.pos.findClosestByRange(targets);
+        if (!target) return false;
+
+        const result = this.usePower(PWR_DISRUPT_SPAWN, target);
+        if (result === ERR_NOT_IN_RANGE) {
+            this.moveTo(target, { plainCost: 1, swampCost: 1 });
+        }
+        return result === OK || result === ERR_NOT_IN_RANGE;
+    }
 }

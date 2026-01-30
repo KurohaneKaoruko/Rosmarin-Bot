@@ -216,6 +216,10 @@ export const RoleData: RoleConfig = {
         bodypart: [[MOVE, 25], [HEAL, 25]],
         level: 10, code: 'PH', action: 'power-heal'
     },
+    'pc-heal': {
+        bodypart: [[MOVE, 25], [HEAL, 25]],
+        level: 10, code: 'PCH', action: 'pc-heal'
+    },
     'power-carry': {
         bodypart: [[MOVE, 25], [CARRY, 25]],
         level: 9, code: 'PC', work: 'power-carry'

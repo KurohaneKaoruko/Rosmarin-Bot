@@ -146,6 +146,27 @@ interface PowerCreep {
      */
     transferPower(): boolean;
 
+    /**
+     * 前往指定房间
+     * @description 移动 PowerCreep 到目标房间。
+     * @param roomName 目标房间名称
+     * @param opts 移动选项，参考 {@link MoveToOpts}
+     * @returns {boolean} 如果正在执行移动操作返回 true，否则返回 false
+     * @example
+     * ```typescript
+     * // 前往目标房间
+     * if (powerCreep.moveToRoom('W1N1')) {
+     *     return; // 正在前往目标房间
+     * }
+     * ```
+     */
+    moveToRoom(roomName: string, opts?: MoveToOpts): boolean;
+
+    pcDoubleMove(Direction: DirectionConstant, healer?: Creep): number;
+    pcDoubleMoveTo(target: RoomPosition, healer?: Creep, color?: string, ops?: MoveToOpts): number | boolean;
+    pcDoubleMoveToRoom(roomName: string, healer?: Creep, color?: string, ops?: MoveToOpts): boolean;
+    pcDoubleFleeEdge(healer?: Creep, ops?: MoveToOpts): boolean | void;
+
     // ============================================================
     // Power 能力 - Power Abilities
     // ============================================================
@@ -351,4 +372,8 @@ interface PowerCreep {
      * ```
      */
     Shield(pos: RoomPosition): boolean;
+
+    Disrupt_Tower(): boolean;
+
+    Disrupt_Spawn(): boolean;
 }

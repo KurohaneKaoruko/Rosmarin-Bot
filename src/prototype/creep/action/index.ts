@@ -38,17 +38,17 @@ import out2Attack from './outmine/out-2attack';
 import out2Heal from './outmine/out-2heal';
 
 // Power role imports
-import powerAttack from './power/power-attack';
-import powerHeal from './power/power-heal';
-import powerCarry from './power/power-carry';
-import powerRanged from './power/power-ranged';
+import powerAttack from './collect/power-attack';
+import powerHeal from './collect/power-heal';
+import powerCarry from './collect/power-carry';
+import powerRanged from './collect/power-ranged';
 
 // Deposit role imports
-import depositHarvest from './deposit/deposit-harvest';
-import depositTransfer from './deposit/deposit-transfer';
-import depositRanged from './deposit/deposit-ranged';
-import depositAttack from './deposit/deposit-attack';
-import depositHeal from './deposit/deposit-heal';
+import depositHarvest from './collect/deposit-harvest';
+import depositTransfer from './collect/deposit-transfer';
+import depositRanged from './collect/deposit-ranged';
+import depositAttack from './collect/deposit-attack';
+import depositHeal from './collect/deposit-heal';
 
 // War role imports
 import oneRanged from './war/one-ranged';
@@ -56,6 +56,7 @@ import aio from './war/aio';
 import doubleAttack from './war/double-attack';
 import doubleDismantle from './war/double-dismantle';
 import doubleHeal from './war/double-heal';
+import pcHeal from './war/pc-heal';
 
 // Defend role imports
 import defendAttack from './defend/defend-attack';
@@ -118,4 +119,5 @@ export const actionRegistry: Record<string, any> = {
     'power-attack': powerAttack,
     'power-heal': powerHeal,
     'power-ranged': powerRanged,
+    'pc-heal': pcHeal,
 };
