@@ -53,7 +53,10 @@ export default class BoostFunction extends Creep {
 
         // 3. 查找有资源的 Lab
         // 注意：boostmap 允许传入候选列表，这里用于校验缓存是否仍然可用
-        const requiredMinerals = Object.values(boostmap).flatMap(v => normalizeBoostList(v as any));
+        const requiredMinerals: MineralBoostConstant[] = [];
+        for (const v of Object.values(boostmap)) {
+            requiredMinerals.push(...normalizeBoostList(v as any));
+        }
         // 使用 getBoostLab 获取最佳 Lab
         // 注意：目前 boost 逻辑是针对每个部件分别判断的，但 getBoostLab 只能返回一个 Lab。
         // 如果 Creep 需要多种资源，它应该依次去不同的 Lab。

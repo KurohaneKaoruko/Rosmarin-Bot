@@ -104,7 +104,7 @@ export default defineConfig(() => {
 			pluginTimings: false
 		},
 		transform: {
-			target: 'es2017'
+			target: 'node8.9.3'
 		},
 		output: {
 			file: outputFile,
