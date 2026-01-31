@@ -5,8 +5,6 @@ import {decompress} from "@/modules/utils/compress"
 export default class AutoBuild extends Room {
     // 自动建筑
     autoBuild() {
-        if (this.memory.defend) return;
-        if (Memory['warmode']) return;
         if (Game.cpu.bucket < 100) return;
         
         if (Game.time % 100 !== (this.memory['index']||0)) return;

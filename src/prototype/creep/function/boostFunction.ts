@@ -11,6 +11,17 @@ export default class BoostFunction extends Creep {
         // Boost 期间允许被对穿，防止堵死 Lab 通道
         this.memory.dontPullMe = false;
 
+        const isLabReadyForBoost = (
+            lab: StructureLab,
+            mineral: ResourceConstant,
+            mineralAmount: number,
+            energyAmount: number
+        ): boolean => {
+            const m = lab.store.getUsedCapacity(mineral);
+            const e = lab.store.getUsedCapacity(RESOURCE_ENERGY);
+            return m >= mineralAmount && e >= energyAmount;
+        };
+
         // 统一的 boost 资源统计：mass_stores（storage/terminal/factory/container）+ labs
         // 注意：room[RESOURCE] 的实现不包含 labs，且 boost 场景下资源很可能已经被搬进 lab
         const getBoostAvailableAmount = (mineral: ResourceConstant): number => {
@@ -108,15 +119,20 @@ export default class BoostFunction extends Creep {
                 delete this.memory.boostTargetId;
                 delete this.memory.boostTargetMineral;
                 delete this.memory.boostTargetPart;
-            } else if (getBoostAvailableAmount(cachedMineral as ResourceConstant) < bodypart[cachedPart] * 30) {
-                // 资源量发生变化导致不再足够，缓存失效
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
             } else {
-                targetLab = cachedLab;
-                targetMineral = cachedMineral;
-                targetPart = cachedPart;
+                const reqMineral = bodypart[cachedPart] * 30;
+                const reqEnergy = bodypart[cachedPart] * 20;
+                if (!isLabReadyForBoost(cachedLab, cachedMineral as ResourceConstant, reqMineral, reqEnergy)) {
+                    delete this.memory.boostTargetId;
+                    delete this.memory.boostTargetMineral;
+                    delete this.memory.boostTargetPart;
+                    delete (this.memory as any).boostTargetAccessible;
+                    delete (this.memory as any).boostTargetFailCount;
+                } else {
+                    targetLab = cachedLab;
+                    targetMineral = cachedMineral;
+                    targetPart = cachedPart;
+                }
             }
         }
 
@@ -135,6 +151,8 @@ export default class BoostFunction extends Creep {
                     if (getBoostAvailableAmount(mineral as ResourceConstant) < requiredAmount) continue;
                     const lab = this.room.getBoostLab(mineral as ResourceConstant);
                     if (!lab) continue;
+                    const requiredEnergy = bodypart[partType] * 20;
+                    if (!isLabReadyForBoost(lab, mineral as ResourceConstant, requiredAmount, requiredEnergy)) continue;
 
                     targetLab = lab;
                     targetMineral = mineral;
@@ -289,12 +307,12 @@ export default class BoostFunction extends Creep {
                 const mineral = (targetMineral || (this.memory.boostTargetMineral as MineralBoostConstant | undefined)) as string | undefined;
                 const c = mineralToUlkzgColor(mineral);
                 this.room.visual.circle(targetLab.pos, { radius: 0.55, fill: 'transparent', stroke: c, strokeWidth: 0.07, opacity: 0.85 });
-                drawPerpendicularDashes(this.room.visual, this.pos, targetLab.pos, c, 1.2, 0.28, 0.08, 0.35);
+                this.room.visual.line(this.pos, targetLab.pos, { color: c, width: 0.15, opacity: 0.9, lineStyle: 'dotted' });
             }
             // moveTo 会在封装层根据“原地停留 tick 数”自动把 dontPullMe 置为 true，导致对穿/换位失效
             // boost 过程中允许对穿，避免出现“只差一格但永远进不去”的卡位现象
-            ;(this.memory as any)._lpv = -1;
-            ;(this.memory as any)._lpt = 0;
+            (this.memory as any)._lpv = -1;
+            (this.memory as any)._lpt = 0;
             this.memory.dontPullMe = false;
             // 使用 ignoreCreeps: true 启用 moveOptimization 的对穿逻辑
             // maxRooms: 1 限制在同房间
@@ -389,6 +407,11 @@ export default class BoostFunction extends Creep {
                 }
                 (this.memory as any).boostEnsureTime = Game.time;
             }
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
             return 1;
         }
 
@@ -479,34 +502,4 @@ function mineralToUlkzgColor(mineral?: string): string {
     if (best === 'K') return '#ac92ec';
     if (best === 'Z') return '#ffce54';
     return '#aab2bd';
-}
-
-function drawPerpendicularDashes(
-    visual: RoomVisual,
-    from: RoomPosition,
-    to: RoomPosition,
-    color: string,
-    step: number,
-    halfLen: number,
-    width: number,
-    opacity: number
-): void {
-    const dx = to.x - from.x;
-    const dy = to.y - from.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
-    if (!dist || dist <= 0.001) return;
-    const ux = dx / dist;
-    const uy = dy / dist;
-    const px = -uy;
-    const py = ux;
-
-    for (let t = 0.4; t < dist; t += step) {
-        const cx = from.x + ux * t;
-        const cy = from.y + uy * t;
-        const x1 = cx + px * halfLen;
-        const y1 = cy + py * halfLen;
-        const x2 = cx - px * halfLen;
-        const y2 = cy - py * halfLen;
-        visual.line(x1, y1, x2, y2, { color, width, opacity });
-    }
 }
