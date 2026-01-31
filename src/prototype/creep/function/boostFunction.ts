@@ -11,6 +11,14 @@ export default class BoostFunction extends Creep {
         // Boost 期间允许被对穿，防止堵死 Lab 通道
         this.memory.dontPullMe = false;
 
+        // 统一的 boost 资源统计：mass_stores（storage/terminal/factory/container）+ labs
+        // 注意：room[RESOURCE] 的实现不包含 labs，且 boost 场景下资源很可能已经被搬进 lab
+        const getBoostAvailableAmount = (mineral: ResourceConstant): number => {
+            const inMassStores = Number((this.room as any)?.[mineral] ?? 0);
+            const inLabs = (this.room.lab || []).reduce((sum, lab) => sum + (lab?.store?.[mineral] || 0), 0);
+            return inMassStores + inLabs;
+        };
+
         // 1. 检查是否已完成 Boost
         const normalizeBoostList = (v: MineralBoostConstant | MineralBoostConstant[] | undefined): MineralBoostConstant[] => {
             if (!v) return [];
@@ -31,6 +39,11 @@ export default class BoostFunction extends Creep {
             delete this.memory.boostTargetId;
             delete this.memory.boostTargetMineral;
             delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
+            delete (this.memory as any).boostOptionalStartTime;
+            delete (this.memory as any).boostEnsureTime;
+            delete this.memory.boostAttempts;
             return 0;
         }
 
@@ -39,13 +52,18 @@ export default class BoostFunction extends Creep {
             const boostList = normalizeBoostList(boostmap[part]);
             const requiredAmount = bodypart[part] * 30;
 
-            const hasEnough = boostList.some(mineral => this.room[mineral] >= requiredAmount);
+            const hasEnough = boostList.some(mineral => getBoostAvailableAmount(mineral as ResourceConstant) >= requiredAmount);
             if (hasEnough) continue;
 
             if (!must) {
                 delete this.memory.boostTargetId;
                 delete this.memory.boostTargetMineral;
                 delete this.memory.boostTargetPart;
+                delete (this.memory as any).boostTargetAccessible;
+                delete (this.memory as any).boostTargetFailCount;
+                delete (this.memory as any).boostOptionalStartTime;
+                delete (this.memory as any).boostEnsureTime;
+                delete this.memory.boostAttempts;
                 return 0; // 如果不是强制，资源不足直接算完成（放弃）
             }
             return -1;
@@ -90,7 +108,7 @@ export default class BoostFunction extends Creep {
                 delete this.memory.boostTargetId;
                 delete this.memory.boostTargetMineral;
                 delete this.memory.boostTargetPart;
-            } else if (this.room[cachedMineral] < bodypart[cachedPart] * 30) {
+            } else if (getBoostAvailableAmount(cachedMineral as ResourceConstant) < bodypart[cachedPart] * 30) {
                 // 资源量发生变化导致不再足够，缓存失效
                 delete this.memory.boostTargetId;
                 delete this.memory.boostTargetMineral;
@@ -114,7 +132,7 @@ export default class BoostFunction extends Creep {
                 const requiredAmount = bodypart[partType] * 30;
                 
                 for (const mineral of boostList as MineralBoostConstant[]) {
-                    if (this.room[mineral] < requiredAmount) continue;
+                    if (getBoostAvailableAmount(mineral as ResourceConstant) < requiredAmount) continue;
                     const lab = this.room.getBoostLab(mineral as ResourceConstant);
                     if (!lab) continue;
 
@@ -124,6 +142,8 @@ export default class BoostFunction extends Creep {
                     this.memory.boostTargetId = lab.id;
                     this.memory.boostTargetMineral = mineral;
                     this.memory.boostTargetPart = partType;
+                    delete (this.memory as any).boostTargetAccessible;
+                    delete (this.memory as any).boostTargetFailCount;
                     break; // 找到一个就去
                 }
                 if (targetLab) break;
@@ -132,13 +152,6 @@ export default class BoostFunction extends Creep {
 
         // 5. 如果找不到 Lab
         if (!targetLab) {
-            if (!must) {
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
-                return 0; // 非强制则放弃
-            }
-
             const teamID = this.memory['teamID'];
             const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
 
@@ -171,7 +184,7 @@ export default class BoostFunction extends Creep {
                 const amount = bodypart[partType] * 30;
                 let selected: ResourceConstant | null = null;
                 for (const mineral of boostList as unknown as ResourceConstant[]) {
-                    const available = remaining[mineral] ?? (this.room as any)[mineral] ?? 0;
+                    const available = remaining[mineral] ?? getBoostAvailableAmount(mineral) ?? 0;
                     if (available >= amount) {
                         selected = mineral;
                         remaining[mineral] = available - amount;
@@ -196,17 +209,96 @@ export default class BoostFunction extends Creep {
 
             if (!this.memory.boostAttempts) this.memory.boostAttempts = 0;
             this.memory.boostAttempts++;
+
+            // must=false：不直接当作完成。短暂等待 BoostMission 分配/补料后再放弃，避免“明明能 boost 却直接跳过”。 
+            if (!must) {
+                const optStart = (this.memory as any).boostOptionalStartTime as number | undefined;
+                if (!optStart) (this.memory as any).boostOptionalStartTime = Game.time;
+                const startTime = optStart || Game.time;
+                const giveUpAfter = 80; // 可选 boost 最多等待的 tick 数
+
+                if (Game.time - startTime >= giveUpAfter) {
+                    delete this.memory.boostTargetId;
+                    delete this.memory.boostTargetMineral;
+                    delete this.memory.boostTargetPart;
+                    delete (this.memory as any).boostTargetAccessible;
+                    delete (this.memory as any).boostTargetFailCount;
+                    delete (this.memory as any).boostOptionalStartTime;
+                    delete (this.memory as any).boostEnsureTime;
+                    delete this.memory.boostAttempts;
+                    return 0;
+                }
+            }
             return 1;
         }
 
-        // 6. 智能选择 Lab (已通过 getBoostLab 完成)
+        // 已经找到目标 Lab，说明 boost 流程在推进，重置可选 boost 的等待计时
+        delete (this.memory as any).boostOptionalStartTime;
 
-        // 7. 强化与移动
+        // 防御性处理：缓存的 lab 可能来自其他房间，且 moveTo(maxRooms:1) 会导致永远走不到
+        if (targetLab.pos.roomName !== this.room.name) {
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetFailCount;
+            delete (this.memory as any).boostTargetAccessible;
+            return 1;
+        }
+
+        // 防御性处理：如果 lab 周围没有可站立的相邻格，则永远无法进行 boost
+        // 只在首次选中该 lab 时计算一次，降低 CPU 开销
+        if ((this.memory as any).boostTargetAccessible !== true) {
+            const terrain = this.room.getTerrain();
+            let ok = false;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const x = targetLab.pos.x + dx;
+                    const y = targetLab.pos.y + dy;
+                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                    if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                    const pos = new RoomPosition(x, y, this.room.name);
+                    const structures = pos.lookFor(LOOK_STRUCTURES) as Structure[];
+                    const blocked = structures.some(s => {
+                        if (!s) return false;
+                        if (s.structureType === STRUCTURE_ROAD) return false;
+                        if (s.structureType === STRUCTURE_CONTAINER) return false;
+                        if (s.structureType === STRUCTURE_RAMPART && (s as any).my) return false;
+                        return true;
+                    });
+                    if (blocked) continue;
+                    ok = true;
+                    break;
+                }
+                if (ok) break;
+            }
+            if (!ok) {
+                delete this.memory.boostTargetId;
+                delete this.memory.boostTargetMineral;
+                delete this.memory.boostTargetPart;
+                delete (this.memory as any).boostTargetFailCount;
+                delete (this.memory as any).boostTargetAccessible;
+                return 1;
+            }
+            (this.memory as any).boostTargetAccessible = true;
+        }
+
+        // 6. 强化与移动
         if (!this.pos.isNearTo(targetLab)) {
+            if (this.room?.visual) {
+                const mineral = (targetMineral || (this.memory.boostTargetMineral as MineralBoostConstant | undefined)) as string | undefined;
+                const c = mineralToUlkzgColor(mineral);
+                this.room.visual.circle(targetLab.pos, { radius: 0.55, fill: 'transparent', stroke: c, strokeWidth: 0.07, opacity: 0.85 });
+                drawPerpendicularDashes(this.room.visual, this.pos, targetLab.pos, c, 1.2, 0.28, 0.08, 0.35);
+            }
+            // moveTo 会在封装层根据“原地停留 tick 数”自动把 dontPullMe 置为 true，导致对穿/换位失效
+            // boost 过程中允许对穿，避免出现“只差一格但永远进不去”的卡位现象
+            ;(this.memory as any)._lpv = -1;
+            ;(this.memory as any)._lpt = 0;
+            this.memory.dontPullMe = false;
             // 使用 ignoreCreeps: true 启用 moveOptimization 的对穿逻辑
             // maxRooms: 1 限制在同房间
             this.moveTo(targetLab, { 
-                visualizePathStyle: { stroke: '#ffffff' },
                 ignoreCreeps: true,
                 maxRooms: 1,
                 range: 1
@@ -220,6 +312,8 @@ export default class BoostFunction extends Creep {
             delete this.memory.boostTargetId;
             delete this.memory.boostTargetMineral;
             delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
             return 1;
         }
 
@@ -228,6 +322,8 @@ export default class BoostFunction extends Creep {
             delete this.memory.boostTargetId;
             delete this.memory.boostTargetMineral;
             delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
             return 1;
         }
 
@@ -237,18 +333,17 @@ export default class BoostFunction extends Creep {
             delete this.memory.boostTargetId;
             delete this.memory.boostTargetMineral;
             delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
             return 1;
         }
         const boostAmount = needParts * 30;
 
+        const teamID = this.memory['teamID'];
+        const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
+
         const result = targetLab.boostCreep(this);
         if (result == OK) {
-            // 自动推断 ownerId 并提交任务
-            // 如果是 Team Creep，ownerId 为 Team-ID
-            // 如果是普通 Creep，ownerId 为 Creep Name
-            const teamID = this.memory['teamID'];
-            const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
-
             if (boostAmount > 0) {
                 this.room.SubmitBoostTask(mineral, boostAmount, ownerId);
             }
@@ -257,6 +352,9 @@ export default class BoostFunction extends Creep {
             delete this.memory.boostTargetId;
             delete this.memory.boostTargetMineral;
             delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostOptionalStartTime;
+            delete (this.memory as any).boostTargetFailCount;
+            delete (this.memory as any).boostTargetAccessible;
             return 1; // 继续下一轮检查
         } else if (result === ERR_NOT_IN_RANGE) {
             // 理论上 isNearTo 已经检查了，但防止边界情况
@@ -264,6 +362,54 @@ export default class BoostFunction extends Creep {
             return 1;
         }
 
+        // 失败处理：尽量避免“站在 lab 旁但长期不 boost”或“lab 未准备好就一直空转”
+        const failCount = ((this.memory as any).boostTargetFailCount as number | undefined) || 0;
+        (this.memory as any).boostTargetFailCount = failCount + 1;
+
+        if (result === ERR_NOT_ENOUGH_RESOURCES) {
+            // 缺矿/缺能量：确保有对应的 boost 任务，驱动 BoostMission 去补矿/补能量
+            const ensureInterval = 10;
+            const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
+            const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
+
+            if (allowEnsure) {
+                const boostPool = this.room.getAllMissionFromPool?.('boost') as any[] | undefined;
+                let reserved = 0;
+                if (boostPool) {
+                    for (const t of boostPool) {
+                        const data = t?.data;
+                        if (!data || data.mineral !== mineral) continue;
+                        const amount = data?.owners?.[ownerId]?.amount;
+                        if (typeof amount === 'number' && amount > 0) reserved += amount;
+                    }
+                }
+                const needEnsure = Math.max(0, boostAmount - reserved);
+                if (needEnsure > 0) {
+                    this.room.AssignBoostTask(mineral, needEnsure, ownerId);
+                }
+                (this.memory as any).boostEnsureTime = Game.time;
+            }
+            return 1;
+        }
+
+        // 某些错误码不会自行恢复：清理缓存，下一 tick 重选目标
+        if (result === ERR_INVALID_TARGET || result === ERR_NOT_FOUND) {
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetAccessible;
+            delete (this.memory as any).boostTargetFailCount;
+            return 1;
+        }
+
+        // 长时间失败：尝试换一个 lab，避免卡死在同一个目标上
+        if ((this.memory as any).boostTargetFailCount >= 30) {
+            delete this.memory.boostTargetId;
+            delete this.memory.boostTargetMineral;
+            delete this.memory.boostTargetPart;
+            delete (this.memory as any).boostTargetFailCount;
+            delete (this.memory as any).boostTargetAccessible;
+        }
         return 1;
     }
 
@@ -311,5 +457,56 @@ export default class BoostFunction extends Creep {
         });
 
         return allBoosted;
+    }
+}
+
+function mineralToUlkzgColor(mineral?: string): string {
+    if (!mineral) return '#ffffff';
+    const s = mineral.toUpperCase();
+    const counts: Record<string, number> = { U: 0, L: 0, K: 0, Z: 0, G: 0 };
+    for (let i = 0; i < s.length; i++) {
+        const ch = s.charAt(i);
+        if (ch in counts) counts[ch]++;
+    }
+    let best: keyof typeof counts = 'U';
+    const order: Array<keyof typeof counts> = ['U', 'L', 'K', 'Z', 'G'];
+    for (const k of order) {
+        if (counts[k] > counts[best]) best = k;
+    }
+    if (counts[best] <= 0) return '#ffffff';
+    if (best === 'U') return '#5d9cec';
+    if (best === 'L') return '#48cfad';
+    if (best === 'K') return '#ac92ec';
+    if (best === 'Z') return '#ffce54';
+    return '#aab2bd';
+}
+
+function drawPerpendicularDashes(
+    visual: RoomVisual,
+    from: RoomPosition,
+    to: RoomPosition,
+    color: string,
+    step: number,
+    halfLen: number,
+    width: number,
+    opacity: number
+): void {
+    const dx = to.x - from.x;
+    const dy = to.y - from.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (!dist || dist <= 0.001) return;
+    const ux = dx / dist;
+    const uy = dy / dist;
+    const px = -uy;
+    const py = ux;
+
+    for (let t = 0.4; t < dist; t += step) {
+        const cx = from.x + ux * t;
+        const cy = from.y + uy * t;
+        const x1 = cx + px * halfLen;
+        const y1 = cy + py * halfLen;
+        const x2 = cx - px * halfLen;
+        const y2 = cy - py * halfLen;
+        visual.line(x1, y1, x2, y2, { color, width, opacity });
     }
 }
