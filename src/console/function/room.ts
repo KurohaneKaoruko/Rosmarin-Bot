@@ -1,4 +1,5 @@
 import { signConstant } from "@/constant/SignConstant";
+import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
 
 // 房间控制
 export default {
@@ -40,17 +41,7 @@ export default {
                 return Error(`房间 ${roomName} 等级大于等于6, 为避免误删除, 请放置一个名为 "remove-${roomName}" 的flag来确认删除。`);
             }
             if (Game.flags[`remove-${roomName}`]) Game.flags[`remove-${roomName}`].remove();
-
-            delete Memory['rooms'][roomName];
-            delete Memory['RoomControlData'][roomName];
-            delete Memory['StructControlData'][roomName];
-            delete Memory['LayoutData'][roomName];
-            delete Memory['OutMineData'][roomName];
-            delete Memory['AutoData']['AutoMarketData'][roomName];
-            delete Memory['AutoData']['AutoLabData'][roomName];
-            delete Memory['AutoData']['AutoFactoryData'][roomName];
-            delete Memory['ResourceManage'][roomName];
-            delete Memory['MissionPools'][roomName];
+            clearRoomRelatedMemory(roomName);
             global.log(`已从控制列表删除房间${roomName}并清空相关Memory。`);
             return OK;
         },
@@ -152,4 +143,3 @@ export default {
         }
     },
 }
-

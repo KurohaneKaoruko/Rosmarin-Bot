@@ -1,6 +1,8 @@
 /**
  * 清理模块
  */
+import { clearRoomRelatedMemory } from '@/modules/utils/roomMemory';
+
 export const ClearModule = {
     end: () => {
         if(Game.time % 100 == 0) {
@@ -33,6 +35,14 @@ function  memoryClear() {
     for (let roomName in Memory.MissionPools) {
         if(Memory.RoomControlData[roomName]) continue;
         delete Memory.MissionPools[roomName];
+    }
+    // 清理已失去控制权但仍在控制列表里的房间
+    for (const roomName of Object.keys(Memory.RoomControlData)) {
+        const room = Game.rooms[roomName];
+        if (!room) continue;
+        if (room.controller?.my) continue;
+        clearRoomRelatedMemory(roomName);
+        console.log(`[控制列表清理] 房间 ${roomName} 已不属于自己，已清理相关 Memory`);
     }
     // 清理长时间没视野的房间memory
     for (let roomName in Memory.rooms) {
