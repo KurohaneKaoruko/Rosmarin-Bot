@@ -49,12 +49,14 @@ export default class SpawnControl extends Room {
             return null;
         }
 
+        let usedBudget = false;
         let body: ((BodyPartConstant | number)[])[] = data.body;
         if (typeof body == 'string' && body) {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
             const budget = state === 'LOW' || state === 'CRITICAL' ? this.energyAvailable : undefined;
+            usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
         }
 
@@ -70,9 +72,25 @@ export default class SpawnControl extends Room {
             return null;
         }
 
+        if (!data.memory.cache) data.memory.cache = {};
+
+        if (role === 'transport' || role === 'carrier' || role === 'manager') {
+            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            if (usedBudget && (state === 'LOW' || state === 'CRITICAL')) {
+                const fullConfig = this.GetRoleBodys(role, data.upbody, undefined);
+                const fullBody = this.GenerateBodys(fullConfig, role);
+                const fullCost = fullBody?.length ? this.CalculateEnergy(fullBody) : cost;
+                if (cost < fullCost) data.memory.downgraded = true;
+            } else if (state === 'NORMAL' || state === 'SURPLUS') {
+                const fullConfig = this.GetRoleBodys(role, data.upbody, undefined);
+                const fullBody = this.GenerateBodys(fullConfig, role);
+                const fullCost = fullBody?.length ? this.CalculateEnergy(fullBody) : cost;
+                if (cost >= fullCost) delete (data.memory as any).downgraded;
+            }
+        }
+
         let name = GenCreepName(data.name||RoleData[role].code);
 
-        if (!data.memory.cache) data.memory.cache = {};
         return {
             bodypart,
             name,
