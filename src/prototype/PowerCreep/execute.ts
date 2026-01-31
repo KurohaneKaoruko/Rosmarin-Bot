@@ -14,7 +14,7 @@ export default class PowerCreepExecute extends PowerCreep {
         const mem = this.memory as any;
         const hasAssistContext = !!mem.assistTargetRoom || !!mem.assistIdleRoom || !!mem.assistState;
         if (hasAssistContext) {
-            const idleFlag = Game.flags[`${this.name}-idle`];
+            const idleFlag = Game.flags[`${this.name}-idle`] || Game.flags[`${this.name}-IDLE`];
             const homeFlag = Game.flags[`${this.name}-home`];
             const idleRoom = idleFlag?.pos.roomName || homeFlag?.pos.roomName || mem.assistIdleRoom || mem.spawnRoom || this.room.name;
             const idlePos =

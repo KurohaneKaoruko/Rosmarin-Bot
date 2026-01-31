@@ -11,7 +11,7 @@ export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
     const targetRoom = assistFlag.pos.roomName;
     mem.assistTargetRoom = targetRoom;
 
-    const idleFlag = Game.flags[`${name}-idle`];
+    const idleFlag = Game.flags[`${name}-idle`] || Game.flags[`${name}-IDLE`];
     const homeFlag = Game.flags[`${name}-home`];
     const idleRoom = idleFlag?.pos.roomName || homeFlag?.pos.roomName || mem.spawnRoom || pc.room.name;
 

@@ -38,7 +38,7 @@ export function runOperate(pc: PowerCreep): boolean {
         if (handler(pc)) return true;
     }
 
-    const idleFlag = Game.flags[`${name}-idle`] || flagHome;
+    const idleFlag = Game.flags[`${name}-idle`] || Game.flags[`${name}-IDLE`] || flagHome;
     if (idleFlag && pc.room.name == idleFlag.pos.roomName && !pc.pos.isEqualTo(idleFlag.pos)) {
         if (!canStandOn(pc.room, idleFlag.pos)) return true;
         pc.moveTo(idleFlag, { plainCost: 1, swampCost: 1 });

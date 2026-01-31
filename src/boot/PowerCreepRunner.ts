@@ -8,7 +8,7 @@ export const powerCreepRunner = function (pc: PowerCreep) {
     if (!pc.ticksToLive) {
         if (Game.time % 10) return;
         if (pc.spawnCooldownTime > Date.now()) return;
-        const flag = Game.flags[`${pc.name}-idle`];
+        const flag = Game.flags[`${pc.name}-idle`] || Game.flags[`${pc.name}-IDLE`];
         const room = flag?.room;
         const powerSpawn = room?.powerSpawn;
         if (powerSpawn) {
