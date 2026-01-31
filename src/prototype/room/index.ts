@@ -1,6 +1,6 @@
 import { assignPrototype } from "@/utils"
 import BaseFunction from "./function/baseFunction"
-import RoomDefense from "./function/defense"
+import RoomDefense from "./function/roomDefense"
 import OutMine from "./function/outMine"
 
 import SpawnControl from "./structure/spawnControl"
