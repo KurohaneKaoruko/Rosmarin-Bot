@@ -34,8 +34,9 @@ const aid_build = {
 
     harvest: function (creep: Creep) {
         const sourceRoom = creep.memory.sourceRoom || creep.memory.targetRoom;
-        if (sourceRoom && creep.room.name != creep.memory.sourceRoom) {
-            creep.moveToRoom(creep.memory.sourceRoom);
+        // 兼容仅配置 targetRoom（未配置 sourceRoom）的情况：默认在 targetRoom 获取能量
+        if (sourceRoom && creep.room.name != sourceRoom) {
+            creep.moveToRoom(sourceRoom);
             return;
         }
 

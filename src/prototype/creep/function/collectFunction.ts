@@ -116,7 +116,10 @@ export default class CollectFunction extends Creep {
 
         const validContainers = containers.filter((container: StructureContainer) => {
             if (!container || !container.store) return false;
-            if (container.store.getUsedCapacity(resourceType) < minAmount) return false;
+            const used = container.store.getUsedCapacity(resourceType);
+            // 允许 minAmount=0 表示“不设门槛”，但仍然必须有资源（避免锁定空容器导致原地空转）
+            if (used <= 0) return false;
+            if (used < minAmount) return false;
             if (excludeControllerContainer && controllerPos && container.pos.inRangeTo(controllerPos, 3)) {
                 return false;
             }

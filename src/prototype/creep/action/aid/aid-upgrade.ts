@@ -61,7 +61,11 @@ const aid_upgrade = {
         else if(container && container.store[RESOURCE_ENERGY] > 0) {
             creep.goWithdraw(container, RESOURCE_ENERGY);
         }
-        else if(!link || creep.room.level < 6) { creep.TakeEnergy() }
+        else {
+            // AID 可能处于外派/支援房间，controller 附近 link/container 为空或没能量是常态
+            // 不能因为“link 存在但没能量”就跳过后续采集，否则会出现原地空转不去拿能量的问题
+            creep.TakeEnergy()
+        }
 
         if (creep.store.getFreeCapacity() === 0) {
             creep.say('⚡');
