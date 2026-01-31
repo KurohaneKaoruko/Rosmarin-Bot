@@ -63,11 +63,15 @@ export default class RoomDefense extends Room {
 
         if (threats.length === 0) {
             global.Hostiles[this.name] = [];
+            // 无威胁时撤销未孵化的防御兵孵化任务，避免防御冷却期仍继续出兵
+            this.deleteSpawnMissionsByRole(['defend-attack', 'defend-ranged', 'defend-2attack', 'defend-2heal']);
             if (this.memory['defendUntil'] && this.memory['defendUntil'] > Game.time) {
                 this.memory.defend = true;
             } else {
                 this.memory.defend = false;
                 delete this.memory['defendUntil'];
+                delete this.memory['defenseRamparts'];
+                delete this.memory['breached'];
             }
             return;
         }

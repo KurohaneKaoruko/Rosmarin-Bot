@@ -326,6 +326,15 @@ interface Room {
      */
     submitSpawnMission(id: Task['id']): OK | void;
 
+    /**
+     * 删除指定 role 的孵化任务
+     * @param roles - 单个角色名或角色名数组
+     * @returns 本次删除的任务数量
+     * @description 常用于防御结束后撤销未孵化的防御兵孵化队列，避免继续出兵浪费能量。
+     * @example room.deleteSpawnMissionsByRole(['defend-attack', 'defend-ranged']);
+     */
+    deleteSpawnMissionsByRole(roles: string[] | string): number;
+
     // ==================== 任务更新 ====================
     /**
      * 任务更新主循环

@@ -33,6 +33,43 @@ export default class MissionSubmit extends Room {
         return OK;
     }
 
+    /**
+     * 删除指定 role 的孵化任务
+     * @description 用于防御结束后撤销未孵化的防御兵孵化队列，避免继续出兵浪费能量。
+     */
+    deleteSpawnMissionsByRole(roles: string[] | string): number {
+        const roleSet = new Set(Array.isArray(roles) ? roles : [roles]);
+        const pools = Memory.MissionPools?.[this.name];
+        const tasks = pools?.spawn;
+        if (!Array.isArray(tasks) || tasks.length === 0) return 0;
+
+        let removed = 0;
+        const removedByRole: Record<string, number> = {};
+        const remaining: Task[] = [];
+
+        for (const task of tasks) {
+            const data = task?.data as SpawnTask | undefined;
+            const role = data?.memory?.role;
+            if (role && roleSet.has(role)) {
+                removed++;
+                removedByRole[role] = (removedByRole[role] || 0) + 1;
+                continue;
+            }
+            remaining.push(task);
+        }
+
+        pools.spawn = remaining as any;
+
+        delete (this as any)['SpawnMissionNumChecked'];
+        if (global.SpawnMissionNum?.[this.name]) {
+            for (const [role, num] of Object.entries(removedByRole)) {
+                const old = global.SpawnMissionNum[this.name][role] || 0;
+                global.SpawnMissionNum[this.name][role] = Math.max(0, old - num);
+            }
+        }
+        return removed;
+    }
+
     // 提交mine任务
     submitMineMission(id: Task['id'], data: Partial<MineTask>) {
         const task = this.getMissionFromPoolById('mine', id);
