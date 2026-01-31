@@ -29,7 +29,7 @@ const double_defender = {
     
         // 如果heal不在身边，让它过来
         if (!creep.pos.isNear(bindcreep.pos)) {
-            bindcreep.moveTo(creep.pos);
+            bindcreep.moveTo(creep.pos, { costCallback: bindcreep.room.getDefenseCreepCostCallback(bindcreep.name) });
             return;
         }
     
@@ -42,7 +42,7 @@ const double_defender = {
             if(creep.pos.inRangeTo(hostile, 1)) {
                 creep.attack(hostile);
             } else {
-                creep.doubleMoveTo(hostile.pos, '#ff0000');
+                creep.doubleMoveTo(hostile.pos, '#ff0000', { costCallback: creep.room.getDefenseCreepCostCallback(creep.name) } as any);
             }
         }
     }

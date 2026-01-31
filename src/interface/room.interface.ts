@@ -392,6 +392,18 @@ interface Room {
      * @description 生成考虑防御建筑的cost矩阵
      */
     getDefenseCostMatrix(show?: boolean): CostMatrix;
+
+    /**
+     * 获取防御用危险区 CostMatrix（叠加敌方攻击范围）
+     * @returns PathFinder.CostMatrix 对象
+     */
+    getDefenseDangerCostMatrix(): CostMatrix;
+
+    /**
+     * 获取防御 creep 寻路用 costCallback（包含防御矩阵 + 危险区 + 站位占用）
+     * @param excludeCreepName - 可选，排除自身占位
+     */
+    getDefenseCreepCostCallback(excludeCreepName?: string): (roomName: string, costMatrix: CostMatrix) => CostMatrix;
     
     /** 
      * 可视化主防cost矩阵

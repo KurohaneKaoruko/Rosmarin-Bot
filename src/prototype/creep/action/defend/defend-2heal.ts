@@ -59,8 +59,8 @@ const double_heal = {
             creep.heal(bindcreep);
         } else if (creep.pos.inRangeTo(bindcreep, 3)) {
             creep.rangedHeal(bindcreep);
-            creep.moveTo(bindcreep);
-        } else creep.moveTo(bindcreep);
+            creep.moveTo(bindcreep, { costCallback: creep.room.getDefenseCreepCostCallback(creep.name) });
+        } else creep.moveTo(bindcreep, { costCallback: creep.room.getDefenseCreepCostCallback(creep.name) });
     }
 }
 

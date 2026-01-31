@@ -592,6 +592,90 @@ export default class RoomDefense extends Room {
         return costs;
     }
 
+    getDefenseDangerCostMatrix(): CostMatrix {
+        if (!global.DefenseDangerCostMatrix) global.DefenseDangerCostMatrix = {};
+        const cache = global.DefenseDangerCostMatrix[this.name];
+        if (cache && cache.tick === Game.time && cache.costMatrix) return cache.costMatrix;
+
+        if (!global.DefenseDangerOffsets) {
+            const r1: Array<[number, number, number]> = [];
+            const r2: Array<[number, number, number]> = [];
+            const r3: Array<[number, number, number]> = [];
+            const r4: Array<[number, number, number]> = [];
+            for (let dx = -4; dx <= 4; dx++) {
+                for (let dy = -4; dy <= 4; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const d = Math.max(Math.abs(dx), Math.abs(dy));
+                    if (d <= 1) r1.push([dx, dy, d]);
+                    if (d <= 2) r2.push([dx, dy, d]);
+                    if (d <= 3) r3.push([dx, dy, d]);
+                    if (d <= 4) r4.push([dx, dy, d]);
+                }
+            }
+            global.DefenseDangerOffsets = { r1, r2, r3, r4 };
+        }
+
+        const base = this.getDefenseCostMatrix(false);
+        const matrix = base.clone();
+
+        const hostiles = this.findEnemyCreeps({
+            filter: (c: Creep) =>
+                !!c?.body?.some((b: BodyPartDefinition) =>
+                    b.type === ATTACK || b.type === RANGED_ATTACK
+                )
+        }) as any as Creep[];
+
+        const apply = (x: number, y: number, add: number) => {
+            if (x < 0 || x > 49 || y < 0 || y > 49) return;
+            // 高血量自家 rampart 是安全点位：不应被危险区抬高 cost
+            if (base.get(x, y) === 1) return;
+            const old = matrix.get(x, y);
+            if (old >= 254) return;
+            const next = Math.min(253, old + add);
+            if (next !== old) matrix.set(x, y, next);
+        };
+
+        const offsets = global.DefenseDangerOffsets;
+        for (const hostile of hostiles) {
+            if (!hostile?.pos || hostile.pos.roomName !== this.name) continue;
+            const hasRanged = hostile.getActiveBodyparts(RANGED_ATTACK) > 0;
+            const hasMelee = hostile.getActiveBodyparts(ATTACK) > 0;
+            if (!hasRanged && !hasMelee) continue;
+
+            const ox = hostile.pos.x;
+            const oy = hostile.pos.y;
+
+            if (hasRanged) {
+                for (const [dx, dy, d] of offsets.r4 as Array<[number, number, number]>) {
+                    apply(ox + dx, oy + dy, d <= 1 ? 80 : d <= 3 ? 45 : 25);
+                }
+            } else {
+                for (const [dx, dy, d] of offsets.r2 as Array<[number, number, number]>) {
+                    apply(ox + dx, oy + dy, d <= 1 ? 80 : 45);
+                }
+            }
+        }
+
+        global.DefenseDangerCostMatrix[this.name] = { tick: Game.time, costMatrix: matrix };
+        return matrix;
+    }
+
+    getDefenseCreepCostCallback(excludeCreepName?: string): (roomName: string, costMatrix: CostMatrix) => CostMatrix {
+        const roomName = this.name;
+        return (rn: string, cm: CostMatrix) => {
+            if (rn !== roomName) return cm;
+            const base = this.getDefenseDangerCostMatrix();
+            const matrix = base.clone();
+            const creeps = this.find(FIND_CREEPS) as Creep[];
+            for (const other of creeps) {
+                if (!other?.pos) continue;
+                if (excludeCreepName && other.name === excludeCreepName) continue;
+                matrix.set(other.pos.x, other.pos.y, 255);
+            }
+            return matrix;
+        };
+    }
+
     showDefenseCostMatrix() {
         if (!Game.flags[`${this.name}/SDCM`]) return;
         const costs = this.getDefenseCostMatrix(true);

@@ -9,6 +9,8 @@ const autoDefend = function (creep: Creep) {
         for (const id of mem.ranged) {
             const r = Game.getObjectById(id as Id<StructureRampart>);
             if (!r || !r.my || r.hits < minHits) continue;
+            const lookCreeps = creep.room.lookForAt(LOOK_CREEPS, r.pos);
+            if (lookCreeps.length) continue;
             const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, r.pos);
             if (lookStructure.length && lookStructure.some(structure =>
                 structure.structureType !== STRUCTURE_RAMPART &&
@@ -23,6 +25,8 @@ const autoDefend = function (creep: Creep) {
 
     if (!targetRampart) {
         const ramparts = creep.room.rampart.filter((rampart) => {
+            const lookCreeps = creep.room.lookForAt(LOOK_CREEPS, rampart.pos);
+            if (lookCreeps.length) return false;
             const lookStructure = creep.room.lookForAt(LOOK_STRUCTURES, rampart.pos);
             if (lookStructure.length && lookStructure.some(structure =>
                 structure.structureType !== STRUCTURE_RAMPART &&
@@ -53,16 +57,8 @@ const autoDefend = function (creep: Creep) {
     if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
         creep.moveTo(targetRampart.pos, {
             visualizePathStyle: { stroke: '#ff0000' },
-            costCallback: (roomName: string, costMatrix: CostMatrix) => {
-                if (roomName !== creep.room.name) return costMatrix;
-                const base = creep.room.getDefenseCostMatrix();
-                const matrix = base.clone();
-                for (const other of creep.room.find(FIND_CREEPS)) {
-                    if (other.name === creep.name) continue;
-                    matrix.set(other.pos.x, other.pos.y, 255);
-                }
-                return matrix;
-            }
+            range: 0,
+            costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
         });
         return;
     }
