@@ -589,7 +589,8 @@ export default class TeamAction {
         if (creeps.length <= 2) return false
 
         const originPos = TeamUtils.getTeamPos(team)!
-        const targetPos = this.focusTarget(team, originPos)?.pos || team.flag.pos
+        const cachedTargetPos = TeamUtils.getCachePos(team, 'targetPos')
+        const targetPos = cachedTargetPos || this.focusTarget(team, originPos)?.pos || team.flag.pos
 
         if (!targetPos) return false
 
@@ -605,10 +606,13 @@ export default class TeamAction {
         // 过远不管
         if (adx >= 5 || ady >= 5) return false
 
-        // 在对角线上就不管
-        if (adx === ady) {
+        // 在对角线附近会因为抖动反复切朝向：加一层阈值，只有主轴明显占优才允许切换
+        if (Math.abs(adx - ady) <= 1) {
             return false
         }
+
+        const lastSwitchTick = team.cache?.lastTowardSwitchTick || 0
+        if (Game.time - lastSwitchTick < 2) return false
 
         // 是否交换了位置
         let switched = false
@@ -635,6 +639,10 @@ export default class TeamAction {
             team.toward = '↓';
         }
 
+        if (switched) {
+            if (!team.cache) team.cache = {}
+            team.cache.lastTowardSwitchTick = Game.time
+        }
         return switched
     }
 
@@ -813,7 +821,6 @@ export default class TeamAction {
                 }
 
                 if (creep.my) return;
-``
                 // 敌人单位要计算周围伤害
                 const atkDamage = TeamCalc.calcAttackDamage(creep)
                 const rangeDamage = TeamCalc.calcRangeDamage(creep)
@@ -994,6 +1001,35 @@ export default class TeamAction {
                         
                         // 妥协方案：如果周围没有危险源，或者危险源很远，就切换回普通移动模式去安全点。
                         // 现有的逻辑是：只要 status 是 flee，就强制 flee。
+                        const exitDirection = originPos.getDirectionTo(exit) as DirectionConstant | 0
+                        if (exitDirection) {
+                            const calcClearance = (pos: RoomPosition) => {
+                                let min = Infinity
+                                safeGoals.forEach((g: any) => {
+                                    if (!g?.pos) return
+                                    if (g.pos.roomName !== pos.roomName) return
+                                    let dangerRange = 0
+                                    if (g instanceof StructureTower) dangerRange = 20
+                                    else if (g instanceof Creep) dangerRange = g['_range'] || 0
+                                    else return
+                                    min = Math.min(min, pos.getRangeTo(g.pos) - dangerRange)
+                                })
+                                ;(team['_avoidObjs'] || []).forEach((o: any) => {
+                                    if (!o?.pos) return
+                                    if (o.pos.roomName !== pos.roomName) return
+                                    const dangerRange = o.range || 0
+                                    min = Math.min(min, pos.getRangeTo(o.pos) - dangerRange)
+                                })
+                                return min
+                            }
+
+                            const curClearance = calcClearance(originPos)
+                            const nextPos = originPos.getDirectPos(exitDirection)
+                            const nextClearance = calcClearance(nextPos)
+                            if ((curClearance >= 4 && nextClearance >= 0) || nextClearance >= curClearance) {
+                                return exitDirection
+                            }
+                        }
                     }
                 }
             }
@@ -1046,36 +1082,55 @@ export default class TeamAction {
             roomCallback: (roomName) => {
                 if (Memory['bypassRooms'] && Memory['bypassRooms'].includes(roomName)) return false
 
-                // 生成缓存键：房间名 + 避让对象的简要Hash
-                // 只有当避让对象在这个房间时才影响Hash，否则不同队伍在同一房间的CostMatrix应该是通用的
-                let avoidHash = '';
-                if (team['_avoidObjs'] && team['_avoidObjs'].length > 0) {
-                    const objsInRoom = team['_avoidObjs'].filter(o => o.pos.roomName === roomName);
-                    if (objsInRoom.length > 0) {
-                        avoidHash = '_' + objsInRoom.length + objsInRoom[0].pos.x; // 简单的Hash，可优化
+                // 生成稳定的避让对象哈希：只让“位于该房间的避让对象”影响 key，
+                // 避免跨房间时避让对象变化导致缓存抖动，同时防止简单 key 撞车。
+                let avoidHash = ''
+                const avoidObjs = team['_avoidObjs'] as { pos: RoomPosition; range?: number }[] | undefined
+                if (avoidObjs?.length) {
+                    const objsInRoom = avoidObjs.filter((o) => o.pos.roomName === roomName)
+                    if (objsInRoom.length) {
+                        const signature = objsInRoom
+                            .map((o) => `${o.pos.x},${o.pos.y},${o.range || 0}`)
+                            .sort()
+                            .slice(0, 12)
+                            .join('|')
+                        let hash = 0
+                        for (let i = 0; i < signature.length; i++) hash = (hash * 31 + signature.charCodeAt(i)) | 0
+                        avoidHash = `_${objsInRoom.length}_${(hash >>> 0).toString(36)}`
                     }
                 }
-                const cacheKey = `${roomName}${avoidHash}`;
-                const cached = TeamCache.globalCostMatrixCache[cacheKey];
-                
-                // 缓存有效期 5 tick，或者如果是目标房间且可见则每 tick 更新
-                const isTargetRoom = team.flag.pos.roomName === roomName;
-                const isVisible = !!Game.rooms[roomName];
-                
-                if (cached && (Game.time - cached.tick < (isVisible ? 1 : 5))) {
-                    return cached.matrix;
-                }
+
+                // 可见房间：CostMatrix 会把“非本队伍 creep”当成障碍（255），因此必须按队伍隔离缓存，
+                // 否则多队伍同 tick 会互相复用矩阵，导致寻路失败/原地不动。
+                const isVisible = !!Game.rooms[roomName]
+                const structHitLimit = team.cache.structHitLimit || this.structHitLimit
+                const isSpawnDanger = !!team.cache.isSpawnDanger
+                const damageLimit = team['_max_damage'] || 0
+                const swampCost = needAvoid ? 50 : 5
+                const isFourTeam = creeps.length >= 3
+
+                // 缓存 key 需要包含所有会改变矩阵的关键参数，避免“不同参数共用同一矩阵”带来矛盾：
+                // - isFourTeam：4 人/3 人会用 2x2 逻辑抬高 cost
+                // - rangePlus / swampCost：避伤/绕路策略差异
+                // - structHitLimit / isSpawnDanger：通行建筑阈值与 spawn 周边禁行
+                // - damageLimit：基于伤害阈值的禁行区域
+                const paramKey = `p${isFourTeam ? 1 : 0}_${rangePlus}_${swampCost}_${structHitLimit}_${isSpawnDanger ? 1 : 0}_${damageLimit}`
+
+                // 缓存有效期：可见房间 1 tick（及时反映 creep 占位变化），不可见房间 5 tick（降低 CPU）。
+                const cacheKey = `${roomName}${avoidHash}_${paramKey}${isVisible ? `_t${team.name}` : ''}`
+                const cached = TeamCache.globalCostMatrixCache[cacheKey]
+                if (cached && Game.time - cached.tick < (isVisible ? 1 : 5)) return cached.matrix
 
                 const costs = this.getMoveAbleCostMatrix(
                     roomName,
                     creeps,
                     team['_avoidObjs'],
-                    team['_max_damage'],
+                    damageLimit,
                     rangePlus,
-                    creeps.length >= 3,
-                    needAvoid ? 50 : 5,
-                    team.cache.structHitLimit || this.structHitLimit,
-                    team.cache.isSpawnDanger,
+                    isFourTeam,
+                    swampCost,
+                    structHitLimit,
+                    isSpawnDanger,
                 )
 
                 // 更新缓存
@@ -1157,14 +1212,43 @@ export default class TeamAction {
         const currentTargetPos = TeamUtils.getCachePos(team, 'targetPos')
         const hasAttackTargets = !!team['_attackTargets']?.length
 
+        const lockTicks = 3
+        const lockedUntil = team.cache?.focusTargetLockUntil || 0
+        const lockedId = team.cache?.focusTargetId as Id<any> | undefined
+        let lockedPos: RoomPosition | undefined
+        if (hasAttackTargets && lockedId && Game.time < lockedUntil) {
+            const lockedObj = Game.getObjectById(lockedId) as any
+            if (lockedObj?.pos) lockedPos = lockedObj.pos
+            else {
+                delete team.cache.focusTargetId
+                delete team.cache.focusTargetLockUntil
+            }
+        }
+        const desiredPos = lockedPos || focusPos
+        const desiredId = lockedPos ? lockedId : ((focusTarget as any)?.id as Id<any> | undefined)
+
         // candidates：当前 tick 可推进/可攻击的有效目标（排除 flag），用于判断当前 targetPos 是否仍有效
         const candidates = ((team['_targets'] || []) as any[]).filter((t) => t && 'hits' in t && t.pos) as {
             pos: RoomPosition
         }[]
         const candidatePosSet = new Set<number>(candidates.map((t) => t.pos?.hashCode()).filter((v) => v !== undefined) as number[])
 
-        if (!currentTargetPos || (hasAttackTargets && !currentTargetPos.isEqualTo(focusPos))) {
-            TeamUtils.setCachePos(team, 'targetPos', focusPos)
+        if (!currentTargetPos) {
+            TeamUtils.setCachePos(team, 'targetPos', desiredPos)
+            if (hasAttackTargets && desiredId) {
+                team.cache.focusTargetId = desiredId
+                team.cache.focusTargetLockUntil = Game.time + lockTicks
+            }
+            delete team.cache.targetPosIndex
+            return
+        }
+
+        if (hasAttackTargets && !currentTargetPos.isEqualTo(desiredPos)) {
+            TeamUtils.setCachePos(team, 'targetPos', desiredPos)
+            if (desiredId) {
+                team.cache.focusTargetId = desiredId
+                team.cache.focusTargetLockUntil = Game.time + lockTicks
+            }
             delete team.cache.targetPosIndex
             return
         }
