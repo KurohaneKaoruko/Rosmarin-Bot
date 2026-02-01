@@ -434,4 +434,36 @@ export default class TeamUtils {
         if (x === pos.x && y === pos.y) return pos
         return new RoomPosition(x, y, pos.roomName)
     }
+
+    /**
+     * 生成 values 的 k-排列（有序、不重复抽取 k 个元素）。
+     *
+     * @remarks
+     * 例如 values=[0,1,2,3], k=3 会生成 P(4,3)=24 种序列。\n
+     * 该函数用于预计算 quad 集结时的“角位分配方案”，运行时只需遍历结果，避免每 tick 递归生成。\n
+     */
+    private static kPermutations(values: number[], k: number): number[][] {
+        const res: number[][] = []
+        const used = new Array(values.length).fill(false)
+        const cur: number[] = []
+        const dfs = () => {
+            if (cur.length === k) {
+                res.push([...cur])
+                return
+            }
+            for (let i = 0; i < values.length; i++) {
+                if (used[i]) continue
+                used[i] = true
+                cur.push(values[i])
+                dfs()
+                cur.pop()
+                used[i] = false
+            }
+        }
+        dfs()
+        return res
+    }
+
+    public static QUAD_ASSIGN_PATTERNS_4 = this.kPermutations([0, 1, 2, 3], 4)
+    public static QUAD_ASSIGN_PATTERNS_3 = this.kPermutations([0, 1, 2, 3], 3)
 }

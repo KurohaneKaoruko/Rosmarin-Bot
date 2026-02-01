@@ -112,132 +112,291 @@ export default class TeamAction {
      * - 靠边/空间不足时会返回 false，避免硬集结导致堵边或撞墙。
      */
     public static Gather(team: Team): boolean {
-        if (team.creeps.length <= 1) return;
+        // 0/1 人队伍不需要集结
+        if (team.creeps.length <= 1) return false
+        // 线性队形（或人数不足以构成 quad）走 line 集结逻辑
+        if (team.formation == 'line') return this.GatherLine(team);
+        // 矩阵队形走 quad 集结逻辑
+        if (team.formation == 'quad') return this.GatherQuad(team);
+        
+        // 其他队形不处理
+        return false;
+    }
 
-        if (team.formation == 'line' || team.creeps.length < 3) {
-            let creeps: Creep[] = []
-            if (team.creeps.length === 4) {
-                creeps = [team.creeps[0], team.creeps[2], team.creeps[1], team.creeps[3]]
-            } else if (team.creeps.length === 3) {
-                creeps = [team.creeps[0], team.creeps[2], team.creeps[1]]
-            } else {
-                creeps = team.creeps
-            }
+    /**
+     * line 队形集结/归位（包含 2/3/4 人“跟随队首”的统一处理）。
+     *
+     * @remarks
+     * - 优先响应 TeamGater 旗帜（用于调试/集结点）。\n
+     * - 在 homeRoom 内会尝试向旗帜/目标房/出口方向收敛，以便从安全区出发。\n
+     * - 其余情况：队首不动/由外层驱动，后续成员跟随前一名成员归位。\n
+     */
+    public static GatherLine(team: Team): boolean {
+        // 3/4 人队伍内部顺序重排：保证“队首→队尾”的跟随链更稳定
+        let creeps: Creep[] = []
+        if (team.creeps.length === 4) {
+            creeps = [team.creeps[0], team.creeps[2], team.creeps[1], team.creeps[3]]
+        } else if (team.creeps.length === 3) {
+            creeps = [team.creeps[0], team.creeps[2], team.creeps[1]]
+        } else {
+            creeps = team.creeps
+        }
 
-            let GaterFlag = Game.flags['TeamGater']?.pos.roomName === team.homeRoom ? Game.flags['TeamGater'] : null;
-            if (GaterFlag) {
-                const pos = GaterFlag.pos;
-                if (!creeps[0].pos.isEqual(pos))
-                    creeps[0].moveTo(pos);
-                for (let i = 1; i < creeps.length; i++) {
-                    if (creeps[i].pos.isNearTo(creeps[i - 1].pos)) continue;
-                    creeps[i].moveTo(creeps[i - 1]);
-                }
-                return true;
-            }
-
-            let head = creeps[0];
-            if (team.flag && head.room.name == team.targetRoom) {
-                head.moveTo(team.flag);
-            } else if (head.room.name == team.homeRoom &&
-                head.pos.x > 4 && head.pos.y > 4 && head.pos.x < 45 && head.pos.y < 45
-            ) {
-                let tarPos = team.flag ? team.flag.pos :
-                            team.targetRoom ?
-                            new RoomPosition(25, 25, team.targetRoom) :
-                            head.room.find(FIND_EXIT)[0];
-                head.moveTo(tarPos);
-                for (let i = 1; i < creeps.length; i++) {
-                    if (creeps[i].pos.inRangeTo(tarPos, 2)) continue;
-                    creeps[i].moveTo(tarPos);
-                }
-                return true;
-            } 
-
+        // 优先按 TeamGater 旗帜集结（仅在 homeRoom 生效）
+        let GaterFlag = Game.flags['TeamGater']?.pos.roomName === team.homeRoom ? Game.flags['TeamGater'] : null;
+        if (GaterFlag) {
+            const pos = GaterFlag.pos;
+            if (!creeps[0].pos.isEqual(pos))
+                creeps[0].moveTo(pos);
             for (let i = 1; i < creeps.length; i++) {
                 if (creeps[i].pos.isNearTo(creeps[i - 1].pos)) continue;
                 creeps[i].moveTo(creeps[i - 1]);
             }
             return true;
         }
-        if (team.formation == 'quad') {
-            let [ A1, A2, B1, B2 ] = team.creeps;
-            // 确定每个爬应该站的位置
-            let LT = A1, RT = A2,
-                LB = B1, RB = B2;
-            switch (team.toward) {
-            case '←':
-                LT = A2, RT = B2,
-                LB = A1, RB = B1;
-                break;
-            case '→':
-                LT = B1, RT = A1,
-                LB = B2, RB = A2;
-                break;
-            case '↓':
-                LT = B2, RT = B1,
-                LB = A2, RB = A1;
-                break;
+
+        // 队首的“自驱动”：到目标房后靠旗帜收敛；在 homeRoom 时往目标房中心/出口靠拢
+        let head = creeps[0];
+        if (team.flag && head.room.name == team.targetRoom) {
+            head.moveTo(team.flag);
+        } else if (head.room.name == team.homeRoom &&
+            head.pos.x > 4 && head.pos.y > 4 && head.pos.x < 45 && head.pos.y < 45
+        ) {
+            let tarPos = team.flag ? team.flag.pos :
+                        team.targetRoom ?
+                        new RoomPosition(25, 25, team.targetRoom) :
+                        head.room.find(FIND_EXIT)[0];
+            head.moveTo(tarPos);
+            for (let i = 1; i < creeps.length; i++) {
+                if (creeps[i].pos.inRangeTo(tarPos, 2)) continue;
+                creeps[i].moveTo(tarPos);
             }
-            // 找到集结点
-            const pos = LT ? LT.pos : new RoomPosition(RT.pos.x - 1, RT.pos.y, RT.pos.roomName);
-            const room = Game.rooms[pos.roomName];
-            const terrain = room.getTerrain();
-            // 如果集结点周围空间不足就不集结
-            let structCheck = (s: LookAtResultWithPos) => 
-                s.structure.structureType !== STRUCTURE_ROAD &&
-                s.structure.structureType !== STRUCTURE_CONTAINER &&
-                s.structure.structureType !== STRUCTURE_RAMPART;
-            let creepCheck = (c: LookAtResultWithPos) => 
-                team.creeps.every(creep => creep.id !== c.creep.id);
-            const isValidQuadArea = (p: RoomPosition) => {
-                if (p.x < 2 || p.y < 2 || p.x > 47 || p.y > 47) return false;
-                if (terrain.get(p.x, p.y) == TERRAIN_MASK_WALL) return false;
-                if (terrain.get(p.x, p.y + 1) == TERRAIN_MASK_WALL) return false;
-                if (terrain.get(p.x + 1, p.y) == TERRAIN_MASK_WALL) return false;
-                if (terrain.get(p.x + 1, p.y + 1) == TERRAIN_MASK_WALL) return false;
-                const area = [p.y, p.x, p.y + 1, p.x + 1]
-                if (room.lookForAtArea(LOOK_STRUCTURES, area[0], area[1], area[2], area[3], true).filter(structCheck).length) return false;
-                if (room.lookForAtArea(LOOK_CREEPS, area[0], area[1], area[2], area[3], true).filter(creepCheck).length) return false;
-                if (room.lookForAtArea(LOOK_POWER_CREEPS, area[0], area[1], area[2], area[3], true).length) return false;
-                return true;
-            }
-            // 集结点贴边时，向内收敛并尝试在附近寻找可用的 2x2 区域，避免边缘打散后直接卡死
-            const clamp = (v: number) => Math.min(47, Math.max(2, v));
-            const basePos = (pos.x < 2 || pos.y < 2 || pos.x > 47 || pos.y > 47)
-                ? new RoomPosition(clamp(pos.x), clamp(pos.y), pos.roomName)
-                : pos;
-            let gatherPos: RoomPosition | null = null;
-            if (isValidQuadArea(basePos)) {
-                gatherPos = basePos;
-            } else {
-                const searchRadius = 4;
-                for (let r = 1; !gatherPos && r <= searchRadius; r++) {
-                    for (let dx = -r; dx <= r && !gatherPos; dx++) {
-                        for (let dy = -r; dy <= r; dy++) {
-                            const nx = clamp(basePos.x + dx);
-                            const ny = clamp(basePos.y + dy);
-                            const p = new RoomPosition(nx, ny, basePos.roomName);
-                            if (isValidQuadArea(p)) {
-                                gatherPos = p;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-            if (!gatherPos) return false;
-            // 各个爬移动到对应位置
-            const LT_TARGET = gatherPos;
-            const RT_TARGET = new RoomPosition(gatherPos.x + 1, gatherPos.y, gatherPos.roomName);
-            const LB_TARGET = new RoomPosition(gatherPos.x, gatherPos.y + 1, gatherPos.roomName);
-            const RB_TARGET = new RoomPosition(gatherPos.x + 1, gatherPos.y + 1, gatherPos.roomName);
-            if (LT && !LT.pos.isEqualTo(LT_TARGET)) LT.moveTo(LT_TARGET);
-            if (RT && !RT.pos.isEqualTo(RT_TARGET)) RT.moveTo(RT_TARGET);
-            if (LB && !LB.pos.isEqualTo(LB_TARGET)) LB.moveTo(LB_TARGET);
-            if (RB && !RB.pos.isEqualTo(RB_TARGET)) RB.moveTo(RB_TARGET);
+            return true;
+        } 
+
+        // 通用跟随：后续成员尽量贴近前一名成员
+        for (let i = 1; i < creeps.length; i++) {
+            if (creeps[i].pos.isNearTo(creeps[i - 1].pos)) continue;
+            creeps[i].moveTo(creeps[i - 1]);
+        }
+        return true;
+    }
+
+    /**
+     * quad 队形集结/归位：优先保证“能 1 tick 恢复就 1 tick 恢复”，避免高 CPU 的全量搜索。
+     *
+     * @remarks
+     * - 先在少量高价值候选点中检查：是否存在 1 tick 以内即可恢复 quad 的方案。\n
+     * - 若存在：优先精确占位（与 toward 一致），否则选择任意占位先恢复 quad（占位由 AdjustToward 纠偏）。\n
+     * - 若不存在：退化为在最近可用 2x2 点上做一次“精确 vs 任意”的步数比较（仅对单个点），避免全局最优搜索。\n
+     */
+    public static GatherQuad(team: Team): boolean {
+        let [ A1, A2, B1, B2 ] = team.creeps;
+        // 根据 team.toward 推导“精确占位”时每个角位应该由哪个 creep 承担（不改变 creeps 数组顺序）
+        let LT = A1, RT = A2,
+            LB = B1, RB = B2;
+        switch (team.toward) {
+        case '←':
+            LT = A2, RT = B2,
+            LB = A1, RB = B1;
+            break;
+        case '→':
+            LT = B1, RT = A1,
+            LB = B2, RB = A2;
+            break;
+        case '↓':
+            LT = B2, RT = B1,
+            LB = A2, RB = A1;
+            break;
+        }
+        // 选一个锚点：优先用推导出的 LT 成员位置；缺失时用 RT 往左一格作为近似锚点
+        const pos = LT ? LT.pos : new RoomPosition(RT.pos.x - 1, RT.pos.y, RT.pos.roomName);
+        const room = Game.rooms[pos.roomName];
+        const terrain = room.getTerrain();
+
+        // 2x2 合法性判定：墙/阻挡建筑/其他 creep/PC 视为不可用
+        let structCheck = (s: LookAtResultWithPos) => 
+            s.structure.structureType !== STRUCTURE_ROAD &&
+            s.structure.structureType !== STRUCTURE_CONTAINER &&
+            s.structure.structureType !== STRUCTURE_RAMPART;
+        let creepCheck = (c: LookAtResultWithPos) => 
+            team.creeps.every(creep => creep.id !== c.creep.id);
+        const isValidQuadArea = (p: RoomPosition) => {
+            if (p.x < 2 || p.y < 2 || p.x > 47 || p.y > 47) return false;
+            if (terrain.get(p.x, p.y) == TERRAIN_MASK_WALL) return false;
+            if (terrain.get(p.x, p.y + 1) == TERRAIN_MASK_WALL) return false;
+            if (terrain.get(p.x + 1, p.y) == TERRAIN_MASK_WALL) return false;
+            if (terrain.get(p.x + 1, p.y + 1) == TERRAIN_MASK_WALL) return false;
+            const area = [p.y, p.x, p.y + 1, p.x + 1]
+            if (room.lookForAtArea(LOOK_STRUCTURES, area[0], area[1], area[2], area[3], true).filter(structCheck).length) return false;
+            if (room.lookForAtArea(LOOK_CREEPS, area[0], area[1], area[2], area[3], true).filter(creepCheck).length) return false;
+            if (room.lookForAtArea(LOOK_POWER_CREEPS, area[0], area[1], area[2], area[3], true).length) return false;
             return true;
         }
+
+        // 锚点贴边时向内收敛到 [2..47]，保证候选 top-left 不会越界
+        const clamp = (v: number) => Math.min(47, Math.max(2, v));
+        const basePos = (pos.x < 2 || pos.y < 2 || pos.x > 47 || pos.y > 47)
+            ? new RoomPosition(clamp(pos.x), clamp(pos.y), pos.roomName)
+            : pos;
+
+        // Chebyshev 距离：用于估算 “恢复到目标阵形所需 tick（最大者）”
+        const getRange = (a: RoomPosition, b: RoomPosition) => Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y))
+
+        // 有效成员集合（3/4 人）
+        const allCreeps = team.creeps.filter(Boolean) as Creep[]
+
+        // 给定 top-left，生成对应 2x2 的四个角位坐标（TL/TR/BL/BR）
+        const quadTargets = (p: RoomPosition) => [
+            p,
+            new RoomPosition(p.x + 1, p.y, p.roomName),
+            new RoomPosition(p.x, p.y + 1, p.roomName),
+            new RoomPosition(p.x + 1, p.y + 1, p.roomName),
+        ]
+
+        const moveToTarget = (creep: Creep, target: RoomPosition) => {
+            if (creep.pos.isEqualTo(target)) return
+            if (typeof (creep as any).move === 'function' && typeof creep.pos.getDirectionTo === 'function') {
+                const dir = creep.pos.getDirectionTo(target) as DirectionConstant | 0
+                if (dir) {
+                    ;(creep as any).move(dir)
+                    return
+                }
+            }
+            creep.moveTo(target)
+        }
+
+        const moveExact = (p: RoomPosition) => {
+            const [tl, tr, bl, br] = quadTargets(p)
+            if (LT) moveToTarget(LT, tl)
+            if (RT) moveToTarget(RT, tr)
+            if (LB) moveToTarget(LB, bl)
+            if (RB) moveToTarget(RB, br)
+        }
+
+        const computeStepsExact = (p: RoomPosition) => {
+            const [tl, tr, bl, br] = quadTargets(p)
+            let steps = 0
+            if (LT) steps = Math.max(steps, getRange(LT.pos, tl))
+            if (RT) steps = Math.max(steps, getRange(RT.pos, tr))
+            if (LB) steps = Math.max(steps, getRange(LB.pos, bl))
+            if (RB) steps = Math.max(steps, getRange(RB.pos, br))
+            return steps
+        }
+
+        const computeStepsQuadAndAssign = (p: RoomPosition) => {
+            const targets = quadTargets(p)
+            const n = allCreeps.length
+            let bestSteps = Infinity
+            let bestAssign: Array<[Creep, RoomPosition]> = []
+
+            const patterns = n === 4 ? TeamUtils.QUAD_ASSIGN_PATTERNS_4 : TeamUtils.QUAD_ASSIGN_PATTERNS_3
+            for (let pi = 0; pi < patterns.length; pi++) {
+                const pattern = patterns[pi]
+                let steps = 0
+                for (let i = 0; i < n; i++) {
+                    steps = Math.max(steps, getRange(allCreeps[i].pos, targets[pattern[i]]))
+                    if (steps >= bestSteps) break
+                }
+                if (steps >= bestSteps) continue
+                bestSteps = steps
+                bestAssign = allCreeps.map((c, i) => [c, targets[pattern[i]]])
+                if (bestSteps <= 1) break
+            }
+
+            return { steps: bestSteps, assign: bestAssign }
+        }
+
+        // 在锚点附近收集所有可用 2x2 区域作为候选集结点（top-left）
+        const searchRadius = 4
+        const candidates: RoomPosition[] = []
+        const candidateSet = new Set<number>()
+        const pushCandidateIfValid = (x: number, y: number) => {
+            const nx = clamp(x)
+            const ny = clamp(y)
+            const p = new RoomPosition(nx, ny, basePos.roomName)
+            const h = nx * 50 + ny
+            if (candidateSet.has(h)) return
+            candidateSet.add(h)
+            if (!isValidQuadArea(p)) return
+            candidates.push(p)
+        }
+
+        pushCandidateIfValid(basePos.x, basePos.y)
+        allCreeps.forEach((c) => {
+            const cx = c.pos.x
+            const cy = c.pos.y
+            pushCandidateIfValid(cx, cy)
+            pushCandidateIfValid(cx - 1, cy)
+            pushCandidateIfValid(cx, cy - 1)
+            pushCandidateIfValid(cx - 1, cy - 1)
+        })
+
+        if (!candidates.length) {
+            for (let r = 1; r <= searchRadius; r++) {
+                for (let dx = -r; dx <= r; dx++) {
+                    for (let dy = -r; dy <= r; dy++) {
+                        pushCandidateIfValid(basePos.x + dx, basePos.y + dy)
+                    }
+                }
+                if (candidates.length) break
+            }
+        }
+        if (!candidates.length) return false
+
+        // 优先：能 1 tick 精确占位就直接精确占位
+        for (let i = 0; i < candidates.length; i++) {
+            const p = candidates[i]
+            if (computeStepsExact(p) <= 1) {
+                moveExact(p)
+                return true
+            }
+        }
+
+        // 次优：能 1 tick 恢复 quad（任意占位）就直接恢复 quad
+        for (let i = 0; i < candidates.length; i++) {
+            const p = candidates[i]
+            const quad = computeStepsQuadAndAssign(p)
+            if (quad.steps <= 1) {
+                quad.assign.forEach(([creep, target]) => moveToTarget(creep, target))
+                return true
+            }
+        }
+
+        // 兜底：在有限候选点内做一次“近似最优”选择，避免全量最优搜索
+        // - 只评估少量 topK（按离 basePos 的 Chebyshev 距离排序）
+        // - 仍保留“步数相同优先精确占位”的偏好
+        const topK = Math.min(6, candidates.length)
+        candidates.sort((a, b) => getRange(a, basePos) - getRange(b, basePos))
+
+        let bestPos: RoomPosition | null = null
+        let bestUseExact = true
+        let bestSteps = Infinity
+        let bestAssign: Array<[Creep, RoomPosition]> = []
+
+        for (let i = 0; i < topK; i++) {
+            const p = candidates[i]
+            const exactSteps = computeStepsExact(p)
+            const quad = computeStepsQuadAndAssign(p)
+            const useExact = exactSteps <= quad.steps
+            const chosenSteps = useExact ? exactSteps : quad.steps
+
+            if (chosenSteps > bestSteps) continue
+            if (chosenSteps === bestSteps && bestUseExact && !useExact) continue
+
+            bestPos = p
+            bestSteps = chosenSteps
+            bestUseExact = useExact
+            bestAssign = quad.assign
+        }
+
+        if (!bestPos) bestPos = candidates[0]
+        if (bestUseExact) {
+            moveExact(bestPos)
+            return true
+        }
+        bestAssign.forEach(([creep, target]) => moveToTarget(creep, target))
+        return true;
     }
 
     /**

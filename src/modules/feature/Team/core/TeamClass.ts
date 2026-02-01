@@ -98,6 +98,10 @@ class Team {
 
         if (!this.creeps) return;
 
+        if (this.creeps.length < 3) {
+            this.formation = 'line';
+        }
+
         // 防止队形被对穿打散
         if (this.formation === 'quad' && TeamUtils.isQuad(this)) {
             this.creeps.forEach((c: Creep) => {
