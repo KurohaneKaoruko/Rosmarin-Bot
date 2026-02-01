@@ -138,6 +138,143 @@ export default class TeamUtils {
         return team.creeps.every((c: Creep) => c.room.name == roomName);
     }
 
+    /**
+     * 预测某个 creep 在“下一 tick（tick 边界之后）”会处于的位置。
+     *
+     * @param pos 当前坐标（x/y/roomName）
+     * @param direction 本 tick 的移动方向（无方向/undefined 表示不移动）
+     *
+     * @returns 下一 tick 的位置（考虑房间边界传送后的 roomName 与坐标）
+     *
+     * @remarks
+     * - Screeps 边界（0/49）：当 creep 在 tick 结束时位于边界格，会在 tick 边界自动被“传送”到相邻房间对应边界格。\n
+     * - 往边界外移动：不会得到 room 内坐标（这里把越界 move 视为“坐标不变”，但随后仍会触发边界传送）。\n
+     * - 该方法只用于队形/决策模拟，不做地形、障碍、对穿、疲劳等校验。
+     */
+    public static simulateCreepNextPos(
+        pos: { x: number; y: number; roomName: string },
+        direction: DirectionConstant | undefined
+    ): { x: number; y: number; roomName: string } {
+        const base = { x: pos.x, y: pos.y, roomName: pos.roomName }
+
+        // 方向 → 坐标增量（1..8）
+        const dirDelta: Record<number, { dx: number; dy: number }> = {
+            1: { dx: 0, dy: -1 },
+            2: { dx: 1, dy: -1 },
+            3: { dx: 1, dy: 0 },
+            4: { dx: 1, dy: 1 },
+            5: { dx: 0, dy: 1 },
+            6: { dx: -1, dy: 1 },
+            7: { dx: -1, dy: 0 },
+            8: { dx: -1, dy: -1 },
+        }
+
+        // 先模拟“本 tick 执行 move 后”的房间内坐标变化（direction 存在即视为尝试移动；不允许得到越界坐标）
+        if (direction) {
+            const d = dirDelta[direction]
+            if (d) {
+                const nx = base.x + d.dx
+                const ny = base.y + d.dy
+                if (nx >= 0 && nx <= 49 && ny >= 0 && ny <= 49) {
+                    base.x = nx
+                    base.y = ny
+                }
+            }
+        }
+
+        // 再模拟“tick 边界的房间传送”：只要此刻站在 0/49，就会在下一 tick 出现在相邻房间的对应边界
+        const { rx, ry } = this.parseRoomCoord(base.roomName)
+        let nrx = rx
+        let nry = ry
+        let x = base.x
+        let y = base.y
+
+        if (x === 0) {
+            nrx -= 1
+            x = 49
+        } else if (x === 49) {
+            nrx += 1
+            x = 0
+        }
+
+        if (y === 0) {
+            nry -= 1
+            y = 49
+        } else if (y === 49) {
+            nry += 1
+            y = 0
+        }
+
+        return { x, y, roomName: this.formatRoomCoord(nrx, nry) }
+    }
+
+    /**
+     * 判断队伍在“下一 tick”是否仍保持 quad（强邻近）状态。
+     *
+     * @param team 队伍
+     * @param direction 本 tick 的移动方向
+     *
+     * @returns true 表示下一 tick 任意两两成员仍互相相邻（含跨房邻近）
+     *
+     * @remarks
+     * - 这里用全局坐标（roomCoord*50 + x/y）来实现跨房邻近判定。\n
+     * - 判定标准使用 Chebyshev 距离（max(|dx|,|dy|) <= 1），与 Screeps 的相邻定义一致。\n
+     * - 该方法用于“跨房穿边时是否需要停 1 tick 等待传送”的决策：如果不动能保持 quad，而动会打散，就不动。
+     */
+    public static willTeamBeQuadNextTick(team: Team, direction: DirectionConstant | undefined): boolean {
+        if (!team.creeps?.length) return true
+        if (team.creeps.length === 1) return true
+
+        const sim = team.creeps.map((c) =>
+            this.simulateCreepNextPos({ x: c.pos.x, y: c.pos.y, roomName: c.pos.roomName }, direction),
+        )
+
+        const globals = sim.map((p) => {
+            const { rx, ry } = this.parseRoomCoord(p.roomName)
+            return { gx: rx * 50 + p.x, gy: ry * 50 + p.y }
+        })
+
+        for (let i = 0; i < globals.length; i++) {
+            for (let j = i + 1; j < globals.length; j++) {
+                const dx = Math.abs(globals[i].gx - globals[j].gx)
+                const dy = Math.abs(globals[i].gy - globals[j].gy)
+                if (Math.max(dx, dy) > 1) return false
+            }
+        }
+        return true
+    }
+
+    /**
+     * 将房间名解析为“连续坐标系”的房间坐标（rx/ry）。
+     *
+     * @remarks
+     * - 采用与 Screeps API 一致的约定：E0 与 W0 相邻；N0 与 S0 相邻。\n
+     * - 这里使用映射：E{x} → +x，W{x} → -(x+1)；S{y} → +y，N{y} → -(y+1)。\n
+     * - 该映射让房间坐标在数轴上连续，便于做跨房距离计算与“全局坐标”拼接。
+     */
+    private static parseRoomCoord(roomName: string): { rx: number; ry: number } {
+        const m = roomName.match(/^([WE])(\d+)([NS])(\d+)$/)
+        if (!m) return { rx: 0, ry: 0 }
+        const ew = m[1]
+        const ex = Number(m[2])
+        const ns = m[3]
+        const ny = Number(m[4])
+        const rx = ew === 'E' ? ex : -ex - 1
+        const ry = ns === 'S' ? ny : -ny - 1
+        return { rx, ry }
+    }
+
+    /**
+     * 将连续坐标系的房间坐标（rx/ry）反向格式化为 Screeps 房间名。
+     */
+    private static formatRoomCoord(rx: number, ry: number): string {
+        const ew = rx >= 0 ? 'E' : 'W'
+        const ns = ry >= 0 ? 'S' : 'N'
+        const ex = rx >= 0 ? rx : -rx - 1
+        const ny = ry >= 0 ? ry : -ry - 1
+        return `${ew}${ex}${ns}${ny}`
+    }
+
     // 检查队伍是否在目标房间
     /**
      * 判断队伍是否全部位于目标房间（team.targetRoom）。

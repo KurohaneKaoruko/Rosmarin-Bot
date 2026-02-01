@@ -232,8 +232,20 @@ class Team {
         }
         // 方阵队形移动
         else if (this.formation === 'quad' && !isQuad &&
-            this.creeps.length >= 2 && this.creeps[0].pos.isRoomEdge()
+            this.creeps.length >= 2 && hasOnEdge
         ) {
+            if (!this['_targets']) this['_targets'] = [this.flag];
+            const moveGoals: any[] = this['_targets']
+            let direction = TeamAction.getTeamMoveDirection(this, moveGoals)
+            if (!direction && this.status === 'avoid') {
+                direction = TeamAction.getTeamMoveDirection(this, this['_targets'], 'flee')
+            }
+            if (direction) {
+                TeamAction.move(this, direction);
+                this.moved = true;
+                return;
+            }
+
             TeamAction.LinearMove(this, this.creeps[this.creeps.length - 1].pos, true);
             this.moved = true;
         } else if (this.formation === 'quad') {

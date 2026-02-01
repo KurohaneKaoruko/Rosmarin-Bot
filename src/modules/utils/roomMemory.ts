@@ -18,6 +18,4 @@ export const clearRoomRelatedMemory = (roomName: string) => {
     if (auto?.AutoLabData) delete auto.AutoLabData[roomName];
     if (auto?.AutoFactoryData) delete auto.AutoFactoryData[roomName];
     if (auto?.AutoPowerData) delete auto.AutoPowerData[roomName];
-
-    return OK;
 };

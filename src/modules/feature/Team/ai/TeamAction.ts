@@ -174,20 +174,48 @@ export default class TeamAction {
                 s.structure.structureType !== STRUCTURE_RAMPART;
             let creepCheck = (c: LookAtResultWithPos) => 
                 team.creeps.every(creep => creep.id !== c.creep.id);
-            if (pos.x < 2 || pos.y < 2 || pos.x > 47 || pos.y > 47) return false;
-            if (terrain.get(pos.x, pos.y) == TERRAIN_MASK_WALL) return false;
-            if (terrain.get(pos.x, pos.y + 1) == TERRAIN_MASK_WALL) return false;
-            if (terrain.get(pos.x + 1, pos.y) == TERRAIN_MASK_WALL) return false;
-            if (terrain.get(pos.x + 1, pos.y + 1) == TERRAIN_MASK_WALL) return false;
-            let area = [pos.y, pos.x, pos.y + 1, pos.x + 1]
-            if (room.lookForAtArea(LOOK_STRUCTURES, area[0], area[1], area[2], area[3], true).filter(structCheck).length) return false;
-            if (room.lookForAtArea(LOOK_CREEPS, area[0], area[1], area[2], area[3], true).filter(creepCheck).length) return false;
-            if (room.lookForAtArea(LOOK_POWER_CREEPS, area[0], area[1], area[2], area[3], true).length) return false;
+            const isValidQuadArea = (p: RoomPosition) => {
+                if (p.x < 2 || p.y < 2 || p.x > 47 || p.y > 47) return false;
+                if (terrain.get(p.x, p.y) == TERRAIN_MASK_WALL) return false;
+                if (terrain.get(p.x, p.y + 1) == TERRAIN_MASK_WALL) return false;
+                if (terrain.get(p.x + 1, p.y) == TERRAIN_MASK_WALL) return false;
+                if (terrain.get(p.x + 1, p.y + 1) == TERRAIN_MASK_WALL) return false;
+                const area = [p.y, p.x, p.y + 1, p.x + 1]
+                if (room.lookForAtArea(LOOK_STRUCTURES, area[0], area[1], area[2], area[3], true).filter(structCheck).length) return false;
+                if (room.lookForAtArea(LOOK_CREEPS, area[0], area[1], area[2], area[3], true).filter(creepCheck).length) return false;
+                if (room.lookForAtArea(LOOK_POWER_CREEPS, area[0], area[1], area[2], area[3], true).length) return false;
+                return true;
+            }
+            // 集结点贴边时，向内收敛并尝试在附近寻找可用的 2x2 区域，避免边缘打散后直接卡死
+            const clamp = (v: number) => Math.min(47, Math.max(2, v));
+            const basePos = (pos.x < 2 || pos.y < 2 || pos.x > 47 || pos.y > 47)
+                ? new RoomPosition(clamp(pos.x), clamp(pos.y), pos.roomName)
+                : pos;
+            let gatherPos: RoomPosition | null = null;
+            if (isValidQuadArea(basePos)) {
+                gatherPos = basePos;
+            } else {
+                const searchRadius = 4;
+                for (let r = 1; !gatherPos && r <= searchRadius; r++) {
+                    for (let dx = -r; dx <= r && !gatherPos; dx++) {
+                        for (let dy = -r; dy <= r; dy++) {
+                            const nx = clamp(basePos.x + dx);
+                            const ny = clamp(basePos.y + dy);
+                            const p = new RoomPosition(nx, ny, basePos.roomName);
+                            if (isValidQuadArea(p)) {
+                                gatherPos = p;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (!gatherPos) return false;
             // 各个爬移动到对应位置
-            const LT_TARGET = pos;
-            const RT_TARGET = new RoomPosition(pos.x + 1, pos.y, pos.roomName);
-            const LB_TARGET = new RoomPosition(pos.x, pos.y + 1, pos.roomName);
-            const RB_TARGET = new RoomPosition(pos.x + 1, pos.y + 1, pos.roomName);
+            const LT_TARGET = gatherPos;
+            const RT_TARGET = new RoomPosition(gatherPos.x + 1, gatherPos.y, gatherPos.roomName);
+            const LB_TARGET = new RoomPosition(gatherPos.x, gatherPos.y + 1, gatherPos.roomName);
+            const RB_TARGET = new RoomPosition(gatherPos.x + 1, gatherPos.y + 1, gatherPos.roomName);
             if (LT && !LT.pos.isEqualTo(LT_TARGET)) LT.moveTo(LT_TARGET);
             if (RT && !RT.pos.isEqualTo(RT_TARGET)) RT.moveTo(RT_TARGET);
             if (LB && !LB.pos.isEqualTo(LB_TARGET)) LB.moveTo(LB_TARGET);
@@ -374,7 +402,8 @@ export default class TeamAction {
      * 矩阵队形推进（按方向整体移动）。
      *
      * @remarks
-     * - 多人队伍（>=3）若下一步会跨房，则会自动降级为线性推进通过边界，避免卡在房间边缘。\n
+     * - 多人队伍（>=3）跨房穿边时优先保持同向同步移动，以保证治疗覆盖与承伤分摊。\n
+     * - 但当“移动会导致下一 tick 阵型打散，而停 1 tick 可以保持 quad”时，会选择停 1 tick 等待边界传送完成。\n
      * - 2 人队伍在无方向时会尝试把边界上的成员挪到内侧空位，减少“贴边抖动”。\n
      * - 有 fatigue 时直接停止，避免队形撕裂。
      */
@@ -393,13 +422,19 @@ export default class TeamAction {
             return
         }
 
-        // 四人小队位于房间边界且下一步跨越房间不走（因为走不了）, 等传送到另一个房间再走
+        // 多人小队穿边：保持同步同向移动，尽量维持 quad 紧密度，减少边缘承伤导致治疗覆盖不足
         if (creeps.length >= 3) {
             if (
                 creeps.some(
                     (creep) => creep.pos.isRoomEdge() && creep.pos.getDirectPos(direction).roomName != creep.pos.roomName,
                 )
             ) {
+                // 穿边时可能出现“队伍被拆成两房”的过渡态：如果继续移动会打散 quad，而站桩 1 tick 能保持 quad，
+                // 则本 tick 不下发 move，等待边界传送把队伍合回同一侧后再继续推进。
+                const holdQuad = TeamUtils.willTeamBeQuadNextTick(team, undefined)
+                const moveQuad = TeamUtils.willTeamBeQuadNextTick(team, direction)
+                if (holdQuad && !moveQuad) return
+                creeps.forEach((creep) => creep.move(direction))
                 return
             }
         }
