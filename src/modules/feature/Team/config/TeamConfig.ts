@@ -63,17 +63,17 @@ const H28T12 = {
 
 const A29T11 = {
     role: 'team-attack',
-    bodypart: [[T, 11], [A, 29], [M, 10]],
+    bodypart: [[A, 9], [T, 11], [A, 20], [M, 10]],
     boostmap: T3,
 }
 const W29T11 = {
     role: 'team-dismantle',
-    bodypart: [[T, 11], [W, 29], [M, 10]],
+    bodypart: [[W, 9], [T, 11], [W, 20], [M, 10]],
     boostmap: T3,
 }
 const R29T11 = {
     role: 'team-ranged',
-    bodypart: [[T, 11], [R, 29], [M, 10]],
+    bodypart: [[R, 9], [T, 11], [R, 20], [M, 10]],
     boostmap: T3,
 }
 const H29R1T10 = {
