@@ -972,7 +972,9 @@ export default class TeamAction {
                 !(teamFlag.secondaryColor == COLOR_RED)) {
                 goal['_range'] = 2
             }
-            allGoals.push({ pos: goal.pos, range: goal['_range'] })
+            const allowEdgeChase = !needAvoid && goal && 'hits' in goal
+            const pos = allowEdgeChase && goal.pos?.isRoomEdge?.() ? TeamUtils.pushInsideRoomPos(goal.pos, 1) : goal.pos
+            allGoals.push({ pos, range: goal['_range'] })
         })
 
         if (isFlee) {
@@ -1056,9 +1058,7 @@ export default class TeamAction {
             // 四人小队模式
             allGoals.forEach((goal) => {
                 // 不考虑在房间边缘的目标
-                if (goal.pos.isRoomEdge()) {
-                    return
-                }
+                if (goal.pos.isRoomEdge()) return
 
                 for (const item of [
                     [0, 0],
@@ -1066,7 +1066,8 @@ export default class TeamAction {
                     [0, -1],
                     [-1, -1],
                 ]) {
-                    const pos = new RoomPosition(goal.pos.x + item[0], goal.pos.y + item[1], goal.pos.roomName)
+                    const raw = new RoomPosition(goal.pos.x + item[0], goal.pos.y + item[1], goal.pos.roomName)
+                    const pos = TeamUtils.pushInsideRoomPos(raw, 1)
                     if (visited.has(pos.hashCode())) return
 
                     visited.add(pos.hashCode())
@@ -1224,7 +1225,8 @@ export default class TeamAction {
                 delete team.cache.focusTargetLockUntil
             }
         }
-        const desiredPos = lockedPos || focusPos
+        let desiredPos = lockedPos || focusPos
+        if (hasAttackTargets && desiredPos.isRoomEdge()) desiredPos = TeamUtils.pushInsideRoomPos(desiredPos, 1)
         const desiredId = lockedPos ? lockedId : ((focusTarget as any)?.id as Id<any> | undefined)
 
         // candidates：当前 tick 可推进/可攻击的有效目标（排除 flag），用于判断当前 targetPos 是否仍有效

@@ -416,4 +416,22 @@ export default class TeamUtils {
         }
         team.cache[key] = { x: pos.x, y: pos.y, roomName: pos.roomName }
     }
+
+    /**
+     * 将房间坐标“夹到房间内侧”，避免返回边缘坐标（x=0/49 或 y=0/49）。
+     *
+     * @remarks
+     * 用途：
+     * - 追击贴边目标时，把目标点推到内侧，避免被“忽略边缘目标”的逻辑过滤掉。\n
+     * - 生成 quad 的候选推进点时，避免贴边导致的跨房抖动/阵型撕裂。\n
+     *
+     * @param pos 原始位置（同房间）
+     * @param margin 内侧边距，默认 1 表示限制到 [1..48]
+     */
+    public static pushInsideRoomPos(pos: RoomPosition, margin = 1): RoomPosition {
+        const x = Math.max(margin, Math.min(49 - margin, pos.x))
+        const y = Math.max(margin, Math.min(49 - margin, pos.y))
+        if (x === pos.x && y === pos.y) return pos
+        return new RoomPosition(x, y, pos.roomName)
+    }
 }
