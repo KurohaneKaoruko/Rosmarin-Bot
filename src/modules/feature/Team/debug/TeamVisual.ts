@@ -1,5 +1,8 @@
 import TeamCache from '../infra/TeamCache'
 import RoomArray from '../infra/RoomArray'
+import TeamUtils from '../core/TeamUtils'
+
+const ENABLE_TEAM_MOVE_VISUAL = true
 
 /**
  * 战斗绘制
@@ -101,5 +104,67 @@ export default class TeamVisual {
         const visual = new RoomVisual(pos.roomName)
         visual.circle(pos.x, pos.y, { stroke: '#00ffff', radius: 0.7, fill: 'transparent' })
         visual.text(team.name, pos.x, pos.y - 0.6, { font: 0.4, color: '#00ffff' })
+    }
+
+    /**
+     * 绘制队伍本 tick 的移动方向（含跨房穿边的 Hold 状态）。
+     *
+     * @remarks
+     * - 方向来自 team.cache.lastMoveDirection/lastMoveHold，由 TeamAction.move 在本 tick 写入。\n
+     * - 仅当存在 flag `teamMoveShow` 或 `teamMoveShow-${team.name}` 时绘制，避免常驻刷屏。\n
+     * - 若 lastMoveHold 为 true：表示本 tick 选择停 1 tick 等待边界传送，以保持 quad 阵型。\n
+     * - 为了在跨房边界也能看清方向，箭头绘制为“短箭头”（不跨房连线）。
+     */
+    public static drawMoveDirection(team: Team) {
+        if (!ENABLE_TEAM_MOVE_VISUAL) return
+
+        const lastTick = team.cache?.lastMoveTick
+        if (lastTick !== Game.time) return
+
+        const direction = team.cache?.lastMoveDirection as DirectionConstant | undefined
+        const hold = !!team.cache?.lastMoveHold
+        const creepDirections = team.cache?.lastCreepMoveDirections as Record<string, DirectionConstant> | undefined
+        if (!direction && !creepDirections) return
+
+        const dirDelta: Record<number, { dx: number; dy: number; arrow: string }> = {
+            1: { dx: 0, dy: -1, arrow: '↑' },
+            2: { dx: 1, dy: -1, arrow: '↗' },
+            3: { dx: 1, dy: 0, arrow: '→' },
+            4: { dx: 1, dy: 1, arrow: '↘' },
+            5: { dx: 0, dy: 1, arrow: '↓' },
+            6: { dx: -1, dy: 1, arrow: '↙' },
+            7: { dx: -1, dy: 0, arrow: '←' },
+            8: { dx: -1, dy: -1, arrow: '↖' },
+        }
+
+        const statusColors: { [status in Exclude<typeof team.status, undefined>]: string } = {
+            attack: '#9af893',
+            flee: '#e62e1b',
+            avoid: '#f9e50a',
+            sleep: '#abd4ed',
+            ready: '#8a8a8a',
+        }
+
+        const color = hold ? '#00ffff' : (team.status ? statusColors[team.status] : '#00ffff')
+        const arrowOffsetY = 0
+
+        team.creeps.forEach((creep) => {
+            const creepDir = creepDirections?.[creep.id] || direction
+            if (!creepDir) return
+            const dd = dirDelta[creepDir]
+            if (!dd) return
+            const x = creep.pos.x
+            const y = creep.pos.y - arrowOffsetY
+            const label = hold ? `H${dd.arrow}` : dd.arrow
+            creep.room.visual.text(label, x, y, { font: 0.55, color, stroke: '#1b1b1b', strokeWidth: 0.06 })
+        })
+
+        if (hold && direction) {
+            const dd = dirDelta[direction]
+            if (!dd) return
+            const pos = TeamUtils.getTeamPos(team)
+            const visual = new RoomVisual(pos.roomName)
+            visual.text(`HOLD ${dd.arrow}`, pos.x, pos.y - 1.2, { font: 0.5, color, stroke: '#1b1b1b', strokeWidth: 0.05 })
+        }
     }
 }

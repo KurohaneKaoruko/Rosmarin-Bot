@@ -45,6 +45,12 @@ export default class TeamAction {
         if (!TeamUtils.isQuad(team)) return false;
         if (!TeamUtils.inSameRoom(team)) return false;
 
+        if (!team.cache) team.cache = {}
+        team.cache.lastMoveTick = Game.time
+        team.cache.lastMoveDirection = undefined
+        team.cache.lastMoveHold = false
+        team.cache.lastCreepMoveDirections = {}
+
         const { minX, maxX, minY, maxY } = TeamUtils.getPosRange(team);
         let [ A1, A2, B1, B2 ] = team.creeps;
 
@@ -53,30 +59,40 @@ export default class TeamAction {
         let LB = new RoomPosition(minX, maxY, A1.room.name);
         let RB = new RoomPosition(maxX, maxY, A1.room.name);
 
+        const setMove = (creep: Creep | undefined, target: RoomPosition) => {
+            if (!creep) return
+            if (creep.pos.isEqual(target)) return
+            const dir = creep.pos.getDirection(target) as DirectionConstant
+            if (dir) {
+                team.cache.lastCreepMoveDirections[creep.id] = dir
+                creep.move(dir)
+            }
+        }
+
         switch (team.toward) {
             case '↑':
-                if (A1 && !A1.pos.isEqual(LT)) A1.move(A1.pos.getDirection(LT));
-                if (A2 && !A2.pos.isEqual(RT)) A2.move(A2.pos.getDirection(RT));
-                if (B1 && !B1.pos.isEqual(LB)) B1.move(B1.pos.getDirection(LB));
-                if (B2 && !B2.pos.isEqual(RB)) B2.move(B2.pos.getDirection(RB));
+                setMove(A1, LT)
+                setMove(A2, RT)
+                setMove(B1, LB)
+                setMove(B2, RB)
                 break;
             case '↓':
-                if (A1 && !A1.pos.isEqual(RB)) A1.move(A1.pos.getDirection(RB));
-                if (A2 && !A2.pos.isEqual(LB)) A2.move(A2.pos.getDirection(LB));
-                if (B1 && !B1.pos.isEqual(RT)) B1.move(B1.pos.getDirection(RT));
-                if (B2 && !B2.pos.isEqual(LT)) B2.move(B2.pos.getDirection(LT));
+                setMove(A1, RB)
+                setMove(A2, LB)
+                setMove(B1, RT)
+                setMove(B2, LT)
                 break;
             case '←':
-                if (A1 && !A1.pos.isEqual(LB)) A1.move(A1.pos.getDirection(LB));
-                if (A2 && !A2.pos.isEqual(LT)) A2.move(A2.pos.getDirection(LT));
-                if (B1 && !B1.pos.isEqual(RB)) B1.move(B1.pos.getDirection(RB));
-                if (B2 && !B2.pos.isEqual(RT)) B2.move(B2.pos.getDirection(RT));
+                setMove(A1, LB)
+                setMove(A2, LT)
+                setMove(B1, RB)
+                setMove(B2, RT)
                 break;
             case '→':
-                if (A1 && !A1.pos.isEqual(RT)) A1.move(A1.pos.getDirection(RT));
-                if (A2 && !A2.pos.isEqual(RB)) A2.move(A2.pos.getDirection(RB));
-                if (B1 && !B1.pos.isEqual(LT)) B1.move(B1.pos.getDirection(LT));
-                if (B2 && !B2.pos.isEqual(LB)) B2.move(B2.pos.getDirection(LB));
+                setMove(A1, RT)
+                setMove(A2, RB)
+                setMove(B1, LT)
+                setMove(B2, LB)
                 break;
         }
         // 这里不需要精确判断每个 creep 是否真的动了：只要满足前置，说明本 tick 尝试纠偏
@@ -356,6 +372,13 @@ export default class TeamAction {
 
         if (reverse) creeps.reverse();
 
+        if (!team.cache) team.cache = {}
+        team.cache.lastMoveTick = Game.time
+        const headDirection = creeps[0]?.pos?.getDirectionTo(pos) as DirectionConstant | 0
+        team.cache.lastMoveDirection = headDirection ? headDirection : undefined
+        team.cache.lastMoveHold = false
+        delete team.cache.lastCreepMoveDirections
+
         // 队伍是否保持直形
         const isLine = TeamUtils.isLinear(team);
         // 到达目标或有creep疲劳则停止
@@ -411,6 +434,18 @@ export default class TeamAction {
         // 存在疲劳的creep则停止
         if (TeamUtils.hasCreepFatigue(team)) return;
 
+        /**
+         * 运行期调试字段：记录队伍在本 tick 的“移动决策”，供可视化模块读取。
+         * - lastMoveTick：写入的 tick（仅当等于 Game.time 时可视化才会绘制）
+         * - lastMoveDirection：本 tick 计算出的方向（可能为 undefined，表示无方向）
+         * - lastMoveHold：是否决定“停 1 tick 等待边界传送”，用于跨房穿边过渡态保持阵型
+         */
+        if (!team.cache) team.cache = {}
+        team.cache.lastMoveTick = Game.time
+        team.cache.lastMoveDirection = direction
+        team.cache.lastMoveHold = false
+        delete team.cache.lastCreepMoveDirections
+
         const creeps = team.creeps;
         // 没有方向
         if (!direction) {
@@ -433,7 +468,10 @@ export default class TeamAction {
                 // 则本 tick 不下发 move，等待边界传送把队伍合回同一侧后再继续推进。
                 const holdQuad = TeamUtils.willTeamBeQuadNextTick(team, undefined)
                 const moveQuad = TeamUtils.willTeamBeQuadNextTick(team, direction)
-                if (holdQuad && !moveQuad) return
+                if (holdQuad && !moveQuad) {
+                    team.cache.lastMoveHold = true
+                    return
+                }
                 creeps.forEach((creep) => creep.move(direction))
                 return
             }

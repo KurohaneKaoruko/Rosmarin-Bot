@@ -225,10 +225,12 @@ class Team {
         if (this.formation === 'line' && this['_targets']?.[0]?.pos) {
             TeamAction.LinearMove(this, this['_targets'][0].pos);
             this.moved = true;
+            TeamVisual.drawMoveDirection(this)
         }
         else if (this.formation === 'line') {
             TeamAction.LinearMove(this);
             this.moved = true;
+            TeamVisual.drawMoveDirection(this)
         }
         // 方阵队形移动
         else if (this.formation === 'quad' && !isQuad &&
@@ -243,6 +245,7 @@ class Team {
             if (direction) {
                 TeamAction.move(this, direction);
                 this.moved = true;
+                TeamVisual.drawMoveDirection(this)
                 return;
             }
 
@@ -260,6 +263,7 @@ class Team {
                     if (direction) {
                         TeamAction.move(this, direction);
                         this.moved = true;
+                        TeamVisual.drawMoveDirection(this)
                     }
                 }
             }
@@ -280,6 +284,7 @@ class Team {
         if (this.creeps.length < 3) return;
         if (TeamUtils.checkToward(this)) return;
         this.moved = TeamAction.AdjustToward(this);
+        if (this.moved) TeamVisual.drawMoveDirection(this)
     }
 
     // 主运行逻辑
