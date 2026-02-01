@@ -1,7 +1,7 @@
 /**
  * 一些基础的功能
  */
-import { getWhitelistSet } from '@/utils';
+import { inWhitelist } from '@/modules/utils/whitelist';
 
 type TakeTargetType = 'dropped' | 'structure' | 'ruin';
 type TakeTarget = { id: Id<any>; type: TakeTargetType };
@@ -175,7 +175,7 @@ export default class BaseFunction extends Creep {
 
     // 是否处于白名单中
     isWhiteList() {
-        return getWhitelistSet().has(this.owner.username);
+        return inWhitelist(this.owner.username);
     }
 
     /**

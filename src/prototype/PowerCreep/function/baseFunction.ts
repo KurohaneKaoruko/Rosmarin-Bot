@@ -1,8 +1,8 @@
-import { getWhitelistSet } from '@/utils';
+import { inWhitelist } from '@/modules/utils/whitelist';
 
 export default class BaseFunction extends PowerCreep {
     isWhiteList() {
-        return getWhitelistSet().has(this.owner.username);
+        return inWhitelist(this.owner.username);
     }
     PowerEnabled(): boolean {
         const controller = this.room?.controller;

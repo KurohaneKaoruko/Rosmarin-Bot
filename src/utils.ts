@@ -9,16 +9,6 @@ export const assignPrototype = function(obj1: any, obj2: any) {
     });
 };
 
-let cachedWhitelistTick = -1;
-let cachedWhitelistSet: Set<string> = new Set();
-
-export function getWhitelistSet(): Set<string> {
-    if (cachedWhitelistTick === Game.time) return cachedWhitelistSet;
-    cachedWhitelistTick = Game.time;
-    cachedWhitelistSet = new Set<string>((Memory as any)['whitelist'] || []);
-    return cachedWhitelistSet;
-}
-
 /** 日志输出
  * 输出日志到控制台
  * @param type 日志类型

@@ -2,7 +2,7 @@
  * 战斗功能类
  * 提供战斗相关方法的原型扩展
  */
-import { getWhitelistSet } from '@/utils';
+import { inWhitelist } from '@/modules/utils/whitelist';
 
 export default class CombatFunction extends Creep {
     /**
@@ -28,11 +28,9 @@ export default class CombatFunction extends Creep {
             ...options
         };
 
-        const whiteList = getWhitelistSet();
-
         const filter = (creep: Creep): boolean => {
             // 排除白名单玩家
-            if (opts.excludeWhitelist && whiteList.has(creep.owner.username)) {
+            if (opts.excludeWhitelist && inWhitelist(creep.owner.username)) {
                 return false;
             }
             // 过滤有攻击部件的

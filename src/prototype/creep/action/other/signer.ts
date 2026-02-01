@@ -1,4 +1,4 @@
-import { getWhitelistSet } from '@/utils';
+import { inWhitelist } from '@/modules/utils/whitelist';
 
 const signAction = (creep: Creep) => {
     let controller = creep.room.controller;
@@ -6,7 +6,7 @@ const signAction = (creep: Creep) => {
     if (!controller.sign) return;
     if (controller.sign.username === creep.owner.username) return;
     if (controller.sign.username === 'Screeps') return;
-    if (getWhitelistSet().has(controller.sign.username)) return;
+    if (inWhitelist(controller.sign.username)) return;
     controller = creep.pos.findClosestByPath([controller]);
     if (!controller) return;
 

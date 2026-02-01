@@ -1,5 +1,5 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
-import { getWhitelistSet } from '@/utils';
+import { inWhitelist } from '@/modules/utils/whitelist';
 
 const getCreepNumByHomeRoom = (() => {
     let cachedTick = -1;
@@ -45,7 +45,7 @@ const getMyCreepsByRoleByRoom = (() => {
 export default class BaseFunction extends Room {
     // 判断是否在白名单中
     isWhiteList() {
-        return getWhitelistSet().has(this.controller?.owner?.username);
+        return inWhitelist(this.controller?.owner?.username);
     }
 
     // 获取房间指定资源储备
@@ -574,29 +574,34 @@ export default class BaseFunction extends Room {
 
     /** 寻找敌方creep */
     findEnemyCreeps(opts?: any) {
-        if (this['EnemyCreeps']) return this['EnemyCreeps']; 
-        const whiteList = getWhitelistSet();
-        let EnemyCreeps = this.find(FIND_HOSTILE_CREEPS, opts).filter((c: any) => !whiteList.has(c.owner.username));
-        return this['EnemyCreeps'] = [...EnemyCreeps];
+        const base = (this['EnemyCreeps'] ||
+            (this['EnemyCreeps'] = this
+                .find(FIND_HOSTILE_CREEPS, { filter: (c: Creep) => !inWhitelist(c.owner.username) }))) as Creep[]
+        const filter = opts?.filter
+        if (!filter) return base
+        return base.filter(filter)
     }
 
     /** 寻找敌方PowerCreep */
     findEnemyPowerCreeps(opts?: any) {
-        if (this['EnemyPowerCreeps']) return this['EnemyPowerCreeps']; 
-        const whiteList = getWhitelistSet();
-        let EnemyPowerCreeps = this.find(FIND_HOSTILE_POWER_CREEPS, opts).filter((c: any) => !whiteList.has(c.owner.username));
-        return this['EnemyPowerCreeps'] = [...EnemyPowerCreeps];
+        const base = (this['EnemyPowerCreeps'] ||
+            (this['EnemyPowerCreeps'] = this
+                .find(FIND_HOSTILE_POWER_CREEPS, { filter: (c: PowerCreep) => !inWhitelist(c.owner.username) }))) as PowerCreep[]
+        const filter = opts?.filter
+        if (!filter) return base
+        return base.filter(filter)
     }
 
     /**
      * 寻找敌方建筑
      */
     findEnemyStructures(opts?: any) {
-        if (this['EnemyStructures']) return this['EnemyStructures']; 
-        const whiteList = getWhitelistSet();
-        let EnemyStructures = this.find(FIND_HOSTILE_STRUCTURES, opts).filter((c: any) => !whiteList.has(c.owner.username));
-        this['EnemyStructures'] = [...EnemyStructures];
-        return [...EnemyStructures];
+        const base = (this['EnemyStructures'] ||
+            (this['EnemyStructures'] = this
+                .find(FIND_HOSTILE_STRUCTURES, { filter: (c: AnyOwnedStructure) => !inWhitelist(c.owner.username) }))) as AnyOwnedStructure[]
+        const filter = opts?.filter
+        if (!filter) return base
+        return base.filter(filter)
     }
 
     /**
