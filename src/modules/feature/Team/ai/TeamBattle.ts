@@ -39,10 +39,22 @@ export default class TeamBattle {
                 room._team_hostiles_tick = Game.time
                 room._team_hostiles = creep.room.find(FIND_HOSTILE_CREEPS)
                 // 同 tick 内复用“按攻击类型分桶”的敌人数组，避免每个队员重复 hasBodyPart/filter
-                room._team_hostiles_ranged = room._team_hostiles.filter((e: Creep) => TeamCalc.hasBodyPart(e, RANGED_ATTACK))
-                room._team_hostiles_rangedOrAttack = room._team_hostiles.filter(
-                    (e: Creep) => TeamCalc.hasBodyPart(e, RANGED_ATTACK) || TeamCalc.hasBodyPart(e, ATTACK),
-                )
+                // 这里用“单次遍历 body”完成分桶，等价于 hasBodyPart(checkHits=false)，但更省 CPU
+                const hostilesRanged: Creep[] = []
+                const hostilesRangedOrAttack: Creep[] = []
+                ;(room._team_hostiles as Creep[]).forEach((e) => {
+                    let hasRanged = false
+                    let hasAttack = false
+                    for (const part of e.body) {
+                        if (part.type === RANGED_ATTACK) hasRanged = true
+                        else if (part.type === ATTACK) hasAttack = true
+                        if (hasRanged && hasAttack) break
+                    }
+                    if (hasRanged) hostilesRanged.push(e)
+                    if (hasRanged || hasAttack) hostilesRangedOrAttack.push(e)
+                })
+                room._team_hostiles_ranged = hostilesRanged
+                room._team_hostiles_rangedOrAttack = hostilesRangedOrAttack
             }
             const hostilesRanged = room._team_hostiles_ranged as Creep[]
             const hostilesRangedOrAttack = room._team_hostiles_rangedOrAttack as Creep[]
