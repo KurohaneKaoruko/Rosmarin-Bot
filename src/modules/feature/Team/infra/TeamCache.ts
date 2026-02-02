@@ -76,6 +76,17 @@ export default class TeamCache {
             .forEach(({ key }) => delete cache[key])
     }
 
+    /**
+     * 清理 globalCostMatrixCache（公开入口）。
+     *
+     * @remarks
+     * - 该缓存被多个模块直接读写；提供统一清理入口避免长期运行时无限增长。\n
+     * - 同 tick 内只会执行一次清理（内部有 tick 去重）。
+     */
+    public static cleanupGlobalCostMatrixCache(currentTick = Game.time, maxAge = 5, maxEntries = 300) {
+        this.globalCostMatrixCacheCleanup(currentTick, maxAge, maxEntries)
+    }
+
     private static hashString(value: string): string {
         let hash = 0
         for (let i = 0; i < value.length; i++) {

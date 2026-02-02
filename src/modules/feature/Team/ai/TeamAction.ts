@@ -1242,6 +1242,9 @@ export default class TeamAction {
             roomCallback: (roomName) => {
                 if (Memory['bypassRooms'] && Memory['bypassRooms'].includes(roomName)) return false
 
+                // 防止 costMatrix 缓存长期堆积：同 tick 内只会清理一次（内部有 tick 去重）
+                TeamCache.cleanupGlobalCostMatrixCache(Game.time)
+
                 // 生成稳定的避让对象哈希：只让“位于该房间的避让对象”影响 key，
                 // 避免跨房间时避让对象变化导致缓存抖动，同时防止简单 key 撞车。
                 let avoidHash = ''
