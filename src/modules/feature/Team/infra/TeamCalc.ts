@@ -98,6 +98,8 @@ export default class TeamCalc {
      *
      * @remarks
      * - 该方法内部包含 PathFinder.search，可能较重；因此会对同 tick 的相同参数组合做结果缓存。\n
+     * - 可达性对 tick 是单调的：若 N tick 内不可达，则 (N-1) tick 内也不可达；若 N tick 内可达，则 (N+1) tick 内也可达。\n
+     *   因此会对相邻 tick 做推导缓存，减少重复 PathFinder。\n
      * - 该判定用于战斗评估的近似模型，不考虑动态绕路/队形。
      *
      * @param creep 发起判定的爬
@@ -122,7 +124,8 @@ export default class TeamCalc {
             this.touchableCacheSize = 0
         }
 
-        const cacheKey = `${creep.id}_${creep.pos.roomName}_${creep.pos.x}_${creep.pos.y}_${targetPos.roomName}_${targetPos.x}_${targetPos.y}_${tick}_${range}_${plainCost}`
+        const baseKey = `${creep.id}_${creep.pos.roomName}_${creep.pos.x}_${creep.pos.y}_${targetPos.roomName}_${targetPos.x}_${targetPos.y}_${range}_${plainCost}`
+        const cacheKey = `${baseKey}_${tick}`
         if (cacheKey in this.touchableCache) return this.touchableCache[cacheKey]
 
         const username = creep.owner.username
@@ -163,9 +166,17 @@ export default class TeamCalc {
         })
 
         const ok = !result.incomplete
-        if (this.touchableCacheSize < this.touchableCacheLimit) {
-            this.touchableCache[cacheKey] = ok
+        const writeCache = (key: string, value: boolean) => {
+            if (key in this.touchableCache) return
+            if (this.touchableCacheSize >= this.touchableCacheLimit) return
+            this.touchableCache[key] = value
             this.touchableCacheSize++
+        }
+        writeCache(cacheKey, ok)
+        if (ok) {
+            writeCache(`${baseKey}_${tick + 1}`, true)
+        } else if (tick > 1) {
+            writeCache(`${baseKey}_${tick - 1}`, false)
         }
         return ok
     }
