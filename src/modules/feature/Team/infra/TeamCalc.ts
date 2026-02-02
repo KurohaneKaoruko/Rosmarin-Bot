@@ -7,6 +7,11 @@ export default class TeamCalc {
      */
     private static emptyCostMatrix = new PathFinder.CostMatrix()
 
+    private static touchableCacheTick = -1
+    private static touchableCache = Object.create(null) as Record<string, boolean>
+    private static touchableCacheSize = 0
+    private static touchableCacheLimit = 2000
+
     /**
      * 基础攻击力
      */
@@ -54,6 +59,15 @@ export default class TeamCalc {
         if (tick > 100) throw new Error(`tick 数量过大，可能会导致性能问题`)
         if (tick === 0) return creep.pos.inRangeTo(targetPos, range)
 
+        if (this.touchableCacheTick !== Game.time) {
+            this.touchableCacheTick = Game.time
+            this.touchableCache = Object.create(null)
+            this.touchableCacheSize = 0
+        }
+
+        const cacheKey = `${creep.id}_${creep.pos.roomName}_${creep.pos.x}_${creep.pos.y}_${targetPos.roomName}_${targetPos.x}_${targetPos.y}_${tick}_${range}_${plainCost}`
+        if (cacheKey in this.touchableCache) return this.touchableCache[cacheKey]
+
         const username = creep.owner.username
         const goal = { pos: targetPos, range }
         const result = PathFinder.search(creep.pos, [goal], {
@@ -87,7 +101,12 @@ export default class TeamCalc {
             },
         })
 
-        return !result.incomplete
+        const ok = !result.incomplete
+        if (this.touchableCacheSize < this.touchableCacheLimit) {
+            this.touchableCache[cacheKey] = ok
+            this.touchableCacheSize++
+        }
+        return ok
     }
 
     /**
