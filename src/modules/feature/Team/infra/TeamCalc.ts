@@ -7,10 +7,57 @@ export default class TeamCalc {
      */
     private static emptyCostMatrix = new PathFinder.CostMatrix()
 
+    /**
+     * `touchableNTickInRange` 的同 tick 结果缓存（避免重复 PathFinder.search）。
+     *
+     * @remarks
+     * - 仅缓存单 tick 结果；tick 变更会自动清空。\n
+     * - 为避免极端情况下无限增长，设置了容量上限（touchableCacheLimit）。
+     */
     private static touchableCacheTick = -1
     private static touchableCache = Object.create(null) as Record<string, boolean>
     private static touchableCacheSize = 0
     private static touchableCacheLimit = 2000
+
+    /**
+     * PathFinder.roomCallback 的结构 CostMatrix 缓存（按 roomName + username）。
+     *
+     * @remarks
+     * - 该矩阵构建成本较高，且在同一 tick/短时间内会被反复使用。\n
+     * - 使用 tick 访问时间做淘汰：超龄或超量时清理，避免长期运行堆积。
+     */
+    private static usernameCostsLastCleanupTick = -1
+    private static usernameCosts = Object.create(null) as Record<string, { matrix: CostMatrix; tick: number }>
+    private static usernameCostsMaxAge = 1500
+    private static usernameCostsMaxEntries = 500
+
+    /**
+     * 清理 `usernameCosts` 缓存：移除过期与超量条目。
+     *
+     * @param currentTick 当前 tick
+     */
+    private static cleanupUsernameCosts(currentTick: number) {
+        if (this.usernameCostsLastCleanupTick === currentTick) return
+        this.usernameCostsLastCleanupTick = currentTick
+
+        const cache = this.usernameCosts
+        const keys = Object.keys(cache)
+        if (!keys.length) return
+
+        keys.forEach((key) => {
+            const entry = cache[key]
+            if (!entry || currentTick - entry.tick > this.usernameCostsMaxAge) delete cache[key]
+        })
+
+        const remainingKeys = Object.keys(cache)
+        if (remainingKeys.length <= this.usernameCostsMaxEntries) return
+
+        remainingKeys
+            .map((key) => ({ key, tick: cache[key]?.tick ?? -1 }))
+            .sort((a, b) => a.tick - b.tick)
+            .slice(0, remainingKeys.length - this.usernameCostsMaxEntries)
+            .forEach(({ key }) => delete cache[key])
+    }
 
     /**
      * 基础攻击力
@@ -48,6 +95,16 @@ export default class TeamCalc {
      *
      * 说明：
      * - 仅在 roomCallback 可见时构建 CostMatrix；不可见房间直接返回 emptyCostMatrix
+     *
+     * @remarks
+     * - 该方法内部包含 PathFinder.search，可能较重；因此会对同 tick 的相同参数组合做结果缓存。\n
+     * - 该判定用于战斗评估的近似模型，不考虑动态绕路/队形。
+     *
+     * @param creep 发起判定的爬
+     * @param targetPos 目标位置
+     * @param tick 最大步数（maxCost）
+     * @param range 目标范围
+     * @param plainCost 平原代价（swampCost 会按比例放大）
      */
     public static touchableNTickInRange(
         creep: Creep,
@@ -79,10 +136,11 @@ export default class TeamCalc {
                 const room = Game.rooms[roomName]
                 if (!room) return this.emptyCostMatrix
 
-                if (!Game['_username_costs']) Game['_username_costs'] = {}
                 const id = roomName + username
+                this.cleanupUsernameCosts(Game.time)
 
-                if (!Game['_username_costs'][id]) {
+                let entry = this.usernameCosts[id]
+                if (!entry) {
                     const costs = new PathFinder.CostMatrix()
                     const structures = room.find(FIND_STRUCTURES)
                     structures.forEach((s) => {
@@ -94,10 +152,13 @@ export default class TeamCalc {
                         if (s.structureType === STRUCTURE_RAMPART && (s as StructureRampart).my) return
                         costs.set(s.pos.x, s.pos.y, 255)
                     })
-                    Game['_username_costs'][id] = costs
+                    entry = { matrix: costs, tick: Game.time }
+                    this.usernameCosts[id] = entry
+                } else {
+                    entry.tick = Game.time
                 }
 
-                return Game['_username_costs'][id]
+                return entry.matrix
             },
         })
 
