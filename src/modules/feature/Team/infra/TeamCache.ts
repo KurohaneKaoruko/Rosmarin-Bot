@@ -349,9 +349,10 @@ export default class TeamCache {
             for (const s of defensiveStructures) {
                 floodArray.set(s.pos.x, s.pos.y, 0)
                 if (isFour) {
-                    floodArray.set(s.pos.x-1, s.pos.y-1, 0)
-                    floodArray.set(s.pos.x-1, s.pos.y, 0)
-                    floodArray.set(s.pos.x, s.pos.y-1, 0)
+                    // 四人小队占 2x2，边界处需要做坐标保护，避免 RoomArray 负索引写入导致异常缓存
+                    if (s.pos.x - 1 >= 0 && s.pos.y - 1 >= 0) floodArray.set(s.pos.x - 1, s.pos.y - 1, 0)
+                    if (s.pos.x - 1 >= 0) floodArray.set(s.pos.x - 1, s.pos.y, 0)
+                    if (s.pos.y - 1 >= 0) floodArray.set(s.pos.x, s.pos.y - 1, 0)
                 }
             }
 
