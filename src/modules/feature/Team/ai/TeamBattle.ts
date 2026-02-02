@@ -58,31 +58,52 @@ export default class TeamBattle {
             }
             const hostilesRanged = room._team_hostiles_ranged as Creep[]
             const hostilesRangedOrAttack = room._team_hostiles_rangedOrAttack as Creep[]
+            const creepPos = creep.pos
 
             // 优化：先通过简单的范围判断过滤，减少 touchableNTickInRange 的调用
             // 三格的蓝球敌人
-            creep._ra_enemys = hostilesRanged.filter((e) => {
-                if (!e.pos.inRangeTo(creep.pos, 3 + tick)) return false;
-                if (tick === 0) return true;
+            const raEnemys: Creep[] = []
+            for (const e of hostilesRanged) {
+                if (!e.pos.inRangeTo(creepPos, 3 + tick)) continue
+                if (tick === 0) {
+                    raEnemys.push(e)
+                    continue
+                }
                 // 已在射程内则必然可攻击到（等价于 touchableNTickInRange 成本为 0），避免无意义的 PathFinder
-                if (e.pos.inRangeTo(creep.pos, 3)) return true;
+                if (e.pos.inRangeTo(creepPos, 3)) {
+                    raEnemys.push(e)
+                    continue
+                }
                 // 如果敌人疲劳，可能无法移动，简化判断
-                if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 3)) return true;
-                
-                return TeamCalc.touchableNTickInRange(e, creep.pos, tick, 3)
-            })
+                if (e.fatigue > 0 && e.pos.inRangeTo(creepPos, 3)) {
+                    raEnemys.push(e)
+                    continue
+                }
+                if (TeamCalc.touchableNTickInRange(e, creepPos, tick, 3)) raEnemys.push(e)
+            }
+            creep._ra_enemys = raEnemys
 
             // 一格的蓝球或者红球敌人
-            creep._ra_atk_enemys = hostilesRangedOrAttack.filter((e) => {
-                if (!e.pos.inRangeTo(creep.pos, 1 + tick)) return false;
-                if (tick === 0) return true;
+            const raAtkEnemys: Creep[] = []
+            for (const e of hostilesRangedOrAttack) {
+                if (!e.pos.inRangeTo(creepPos, 1 + tick)) continue
+                if (tick === 0) {
+                    raAtkEnemys.push(e)
+                    continue
+                }
                 // 已在射程内则必然可攻击到（等价于 touchableNTickInRange 成本为 0），避免无意义的 PathFinder
-                if (e.pos.inRangeTo(creep.pos, 1)) return true;
+                if (e.pos.inRangeTo(creepPos, 1)) {
+                    raAtkEnemys.push(e)
+                    continue
+                }
                 // 如果敌人疲劳，可能无法移动，简化判断
-                if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 1)) return true;
-
-                return TeamCalc.touchableNTickInRange(e, creep.pos, tick, 1)
-            })
+                if (e.fatigue > 0 && e.pos.inRangeTo(creepPos, 1)) {
+                    raAtkEnemys.push(e)
+                    continue
+                }
+                if (TeamCalc.touchableNTickInRange(e, creepPos, tick, 1)) raAtkEnemys.push(e)
+            }
+            creep._ra_atk_enemys = raAtkEnemys
 
             // 被集火的伤害，即假设周围的爬都打到自己的伤害
             let maxCreepDamage = 0
