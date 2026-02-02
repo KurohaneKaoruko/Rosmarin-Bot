@@ -38,14 +38,19 @@ export default class TeamBattle {
             if (room._team_hostiles_tick !== Game.time) {
                 room._team_hostiles_tick = Game.time
                 room._team_hostiles = creep.room.find(FIND_HOSTILE_CREEPS)
+                // 同 tick 内复用“按攻击类型分桶”的敌人数组，避免每个队员重复 hasBodyPart/filter
+                room._team_hostiles_ranged = room._team_hostiles.filter((e: Creep) => TeamCalc.hasBodyPart(e, RANGED_ATTACK))
+                room._team_hostiles_rangedOrAttack = room._team_hostiles.filter(
+                    (e: Creep) => TeamCalc.hasBodyPart(e, RANGED_ATTACK) || TeamCalc.hasBodyPart(e, ATTACK),
+                )
             }
-            const hostiles = room._team_hostiles as Creep[]
+            const hostilesRanged = room._team_hostiles_ranged as Creep[]
+            const hostilesRangedOrAttack = room._team_hostiles_rangedOrAttack as Creep[]
 
             // 优化：先通过简单的范围判断过滤，减少 touchableNTickInRange 的调用
             // 三格的蓝球敌人
-            creep._ra_enemys = hostiles.filter((e) => {
+            creep._ra_enemys = hostilesRanged.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 3 + tick)) return false;
-                if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK)) return false;
                 if (tick === 0) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 3)) return true;
@@ -54,9 +59,8 @@ export default class TeamBattle {
             })
 
             // 一格的蓝球或者红球敌人
-            creep._ra_atk_enemys = hostiles.filter((e) => {
+            creep._ra_atk_enemys = hostilesRangedOrAttack.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 1 + tick)) return false;
-                if (!TeamCalc.hasBodyPart(e, RANGED_ATTACK) && !TeamCalc.hasBodyPart(e, ATTACK)) return false;
                 if (tick === 0) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 1)) return true;
@@ -66,6 +70,7 @@ export default class TeamBattle {
 
             // 被集火的伤害，即假设周围的爬都打到自己的伤害
             let maxCreepDamage = 0
+            const selfHasAttack = TeamCalc.hasBodyPart(creep, ATTACK)
             creep._ra_enemys.forEach((e) => {
                 if (e._ra_damage === undefined) {
                     // rangedAttack 虽然是 3 格远，但是伤害和 1 格一样，同时不考虑敌人受伤（可能随时可能奶回来）
@@ -78,7 +83,7 @@ export default class TeamBattle {
                     e._atk_damage = TeamCalc.calcAttackDamage(e, 1, false)
                 }
                 // 自己也有红球的话，打别人会造成反伤
-                maxCreepDamage += e._atk_damage * (TeamCalc.hasBodyPart(creep, ATTACK) ? 2 : 1)
+                maxCreepDamage += e._atk_damage * (selfHasAttack ? 2 : 1)
                 // TODO: 一格以内的蓝球，对面肯定 mass，需要根据小队人数算出更大的伤害
                 maxCreepDamage += (e._ra_damage || 0) * this.rangeNearDamageRate[creeps.length]
             })
