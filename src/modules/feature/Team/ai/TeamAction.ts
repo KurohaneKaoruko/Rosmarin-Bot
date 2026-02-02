@@ -765,14 +765,6 @@ export default class TeamAction {
         // 过远不管
         if (adx >= 5 || ady >= 5) return false
 
-        // 在对角线附近会因为抖动反复切朝向：加一层阈值，只有主轴明显占优才允许切换
-        if (Math.abs(adx - ady) <= 1) {
-            return false
-        }
-
-        const lastSwitchTick = team.cache?.lastTowardSwitchTick || 0
-        if (Game.time - lastSwitchTick < 2) return false
-
         // 是否交换了位置
         let switched = false
 
