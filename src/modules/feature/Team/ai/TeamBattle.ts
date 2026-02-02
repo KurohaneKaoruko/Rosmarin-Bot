@@ -52,6 +52,8 @@ export default class TeamBattle {
             creep._ra_enemys = hostilesRanged.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 3 + tick)) return false;
                 if (tick === 0) return true;
+                // 已在射程内则必然可攻击到（等价于 touchableNTickInRange 成本为 0），避免无意义的 PathFinder
+                if (e.pos.inRangeTo(creep.pos, 3)) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 3)) return true;
                 
@@ -62,6 +64,8 @@ export default class TeamBattle {
             creep._ra_atk_enemys = hostilesRangedOrAttack.filter((e) => {
                 if (!e.pos.inRangeTo(creep.pos, 1 + tick)) return false;
                 if (tick === 0) return true;
+                // 已在射程内则必然可攻击到（等价于 touchableNTickInRange 成本为 0），避免无意义的 PathFinder
+                if (e.pos.inRangeTo(creep.pos, 1)) return true;
                 // 如果敌人疲劳，可能无法移动，简化判断
                 if (e.fatigue > 0 && e.pos.inRangeTo(creep.pos, 1)) return true;
 
