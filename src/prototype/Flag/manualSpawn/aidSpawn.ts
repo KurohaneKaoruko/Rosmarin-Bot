@@ -1,41 +1,13 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
 import { log } from "@/utils";
+import { RoleBodys } from "../spawnConfig";
+import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
-type BoostConfig = {
-    bodypart: [BodyPartConstant, number][];
-    boostmap: { [bodypart: string]: MineralBoostConstant };
-};
-
-const RoleBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
-    'aid-build': {
-        'T3': {
-            bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
-            boostmap: { [WORK]: 'XLH2O', [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' }
-        }
-    },
-    'aid-upgrade': {
-        'T3': {
-            bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
-            boostmap: { [WORK]: 'XGH2O', [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' }
-        }
-    },
-    'aid-carry': {
-        'T3': {
-            bodypart: [[CARRY, 25], [MOVE, 25]],
-            boostmap: { [CARRY]: 'XKH2O' }
-        },
-        'BIG': {
-            bodypart: [[CARRY, 40], [MOVE, 10]],
-            boostmap: { [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' }
-        }
-    }
-};
-
-export default class FlagSpawnFunction extends Flag {
+export default class AidSpawnFunction extends Flag {
     // 旗帜触发的孵化控制
-    handleSpawnFlag(): boolean {
+    handleAidSpawnFlag(): boolean {
         const flagName = this.name;
-        if (!this.isSpawnFlag(flagName)) return false;
+        if (!this.isAidSpawnFlag(flagName)) return false;
 
         // 节流：每 10 tick 扫描一次，减少 CPU 开销
         if (Game.time % 10) return true;
@@ -301,7 +273,7 @@ export default class FlagSpawnFunction extends Flag {
         return true;
     }
 
-    private isSpawnFlag(flagName: string) {
+    private isAidSpawnFlag(flagName: string) {
         return (
             flagName.startsWith('CLAIM/') ||
             flagName.startsWith('RESERVE/') ||
@@ -319,26 +291,14 @@ export default class FlagSpawnFunction extends Flag {
     }
 
     private getSpawnIntervalFromName(Default = 500) {
-        let spawnInterval = this.name.match(/\/T-(\d+)/)?.[1] as any;
-        if (!spawnInterval) spawnInterval = Default;
-        else spawnInterval = parseInt(spawnInterval);
-        return spawnInterval;
+        return parseFlagNumber(this.name, 'T', Default)
     }
 
     private getSpawnRoomFromName() {
-        const spawnRoom = this.name.match(/\/([EW][1-9]+[NS][1-9]+)/)?.[1];
-        const room = Game.rooms[spawnRoom];
-        if (!spawnRoom || !room || !room.my) {
-            this.remove();
-            return undefined;
-        }
-        return room;
+        return getSpawnRoomOrRemove(this)
     }
 
     private timeCheck(spawnInterval: number) {
-        const flagMemory = this.memory as any;
-        if ((Game.time - (flagMemory['lastTime'] || 0) < spawnInterval)) return false;
-        flagMemory['lastTime'] = Game.time;
-        return true;
+        return tickThrottle(this, spawnInterval)
     }
 }

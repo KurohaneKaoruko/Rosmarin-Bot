@@ -1,10 +1,12 @@
 import { assignPrototype } from "@/utils"
 import BaseFunction from "./function/baseFunction"
-import FlagSpawnFunction from "./function/flagSpawnFuncion"
+import AidSpawnFunction from "./manualSpawn/aidSpawn"
+import WarSpawnFunction from "./manualSpawn/warSpawn"
 
 const plugins = [
     BaseFunction,
-    FlagSpawnFunction,
+    AidSpawnFunction,
+    WarSpawnFunction,
 ]
 
 export default () => plugins.forEach(plugin => assignPrototype(Flag, plugin))
