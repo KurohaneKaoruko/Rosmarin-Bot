@@ -1,7 +1,9 @@
 import { compress } from '@/modules/utils/compress';
 
 const RepairWork = function (creep: Creep) {
-    let target = Game.getObjectById(creep.memory.cache.targetId) as StructureRampart | StructureWall | null;
+    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+    const cache = creep.memory.cacheTarget as any
+    let target = Game.getObjectById(cache.targetId) as StructureRampart | StructureWall | null;
 
     if (!target || target.hits == target.hitsMax) {
         const memory = Memory['LayoutData'][creep.room.name];
@@ -46,7 +48,7 @@ const RepairWork = function (creep: Creep) {
             }
         }
         
-        if (target) creep.memory.cache.targetId = target.id;
+        if (target) cache.targetId = target.id;
     }
 
     if (target) creep.goRepair(target);

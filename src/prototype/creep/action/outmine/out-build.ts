@@ -1,27 +1,29 @@
 const outBuild = {
     harvest: function(creep) {
+        creep.memory.cacheSource = creep.memory.cacheSource || {}
+        const cache = creep.memory.cacheSource
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom);
             return;
         }
 
-        if (creep.memory.cache.harvestTarget) {
-            let target = Game.getObjectById(creep.memory.cache.harvestTarget) as any;
+        if (cache.harvestTarget) {
+            let target = Game.getObjectById(cache.harvestTarget) as any;
             if (target) {
                 if (creep.pos.inRangeTo(target, 1)) {
                     creep.withdraw(target, RESOURCE_ENERGY);
                     if(!target || target.store.getUsedCapacity(RESOURCE_ENERGY) == 0) {
-                        creep.memory.cache.harvestTarget = null;
+                        cache.harvestTarget = null;
                         return;
                     }
-                    creep.memory.cache.harvestTarget = null;
+                    cache.harvestTarget = null;
                 } else {
                     creep.moveTo(target, { visualizePathStyle: { stroke: '#ffaa00' } });
                 }
                 return;
             }
             else {
-                creep.memory.cache.harvestTarget = null;
+                cache.harvestTarget = null;
             }
         }
     
@@ -40,7 +42,7 @@ const outBuild = {
         }
         if (container.length > 0) {
             container = creep.pos.findClosestByRange(container);
-            creep.memory.cache.harvestTarget = container.id;
+            cache.harvestTarget = container.id;
             if (creep.pos.inRangeTo(container, 1)) {
                 creep.withdraw(container, RESOURCE_ENERGY);
             }
@@ -61,13 +63,15 @@ const outBuild = {
         }
     },
     build: function(creep) {
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+        const cache = creep.memory.cacheTarget
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom);
             return;
         }
 
-        if (creep.memory.cache.targetId) {
-            const target = Game.getObjectById(creep.memory.cache.targetId);
+        if (cache.targetId) {
+            const target = Game.getObjectById(cache.targetId);
             if (target) {
                 if (creep.pos.inRangeTo(target, 3)) {
                     creep.build(target);
@@ -77,7 +81,7 @@ const outBuild = {
                 }
             }
             else {
-                creep.memory.cache.targetId = null;
+                cache.targetId = null;
             }
             return;
         }
@@ -88,7 +92,7 @@ const outBuild = {
         });
         if (constructionSite.length > 0) {
             const target = creep.pos.findClosestByRange(constructionSite);
-            creep.memory.cache.targetId = target.id;
+            cache.targetId = target.id;
             if (creep.pos.inRangeTo(target, 3)) {
                 creep.build(target);
             }

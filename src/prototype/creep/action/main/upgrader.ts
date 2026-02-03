@@ -31,6 +31,23 @@ const upgrade = function (creep: Creep) {
     }
 }
 
+const takeEnergy = function (creep: Creep) {
+    const links = creep.room.link.filter(l => l.pos.inRangeTo(creep.room.controller, 2)) || [];
+    const link = links.find(l => l.store[RESOURCE_ENERGY] > 0);
+    const containers = creep.room.container.filter(c => c.pos.inRangeTo(creep.room.controller, 1)) || [];
+    const container = containers.find(c => c.store[RESOURCE_ENERGY] > 0);
+
+    if (link) {
+        creep.goWithdraw(link, RESOURCE_ENERGY);
+    }
+    else if (container) {
+        creep.goWithdraw(container, RESOURCE_ENERGY);
+    }
+    else if (links.length == 0 || creep.room.level < 6) {
+        creep.TakeEnergy()
+    }
+}
+
 const Upgrader = {
     prepare: function (creep: Creep) {
         if(creep.room.level == 8) return true;
@@ -40,34 +57,25 @@ const Upgrader = {
     target: function (creep: Creep) {   // 升级控制器
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
-        upgrade(creep);
         if (creep.store.getUsedCapacity() === 0) {
             creep.say('🔄');
+            takeEnergy(creep);
             return true;
-        } else { return false; }
+        }
+        upgrade(creep);
+        return false;
     },
     
     source: function (creep: Creep) {   // 获取能量
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
-
-        const links = creep.room.link.filter(l => l.pos.inRangeTo(creep.room.controller, 2)) || [];
-        const link = links.find(l => l.store[RESOURCE_ENERGY] > 0);
-        const containers = creep.room.container.filter(c => c.pos.inRangeTo(creep.room.controller, 1)) || [];
-        const container = containers.find(c => c.store[RESOURCE_ENERGY] > 0);
-
-        if (link) {
-            creep.goWithdraw(link, RESOURCE_ENERGY);
-        }
-        else if(container) {
-            creep.goWithdraw(container, RESOURCE_ENERGY);
-        }
-        else if(links.length == 0 || creep.room.level < 6) { creep.TakeEnergy() }
-
         if (creep.store.getFreeCapacity() === 0) {
             creep.say('⚡');
+            upgrade(creep);
             return true;
-        } else { return false; }
+        }
+        takeEnergy(creep);
+        return false;
     },
 }
 

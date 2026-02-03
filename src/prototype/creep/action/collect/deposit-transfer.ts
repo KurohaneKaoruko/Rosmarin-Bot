@@ -1,5 +1,7 @@
 const deposit_transfer = {
     source: function(creep) {
+        creep.memory.cacheSource = creep.memory.cacheSource || {}
+        const cache = creep.memory.cacheSource
         if (!creep.memory.notified) {
             creep.notifyWhenAttacked(false);
             creep.memory.notified = true;
@@ -18,8 +20,8 @@ const deposit_transfer = {
             }
         }
 
-        const target = Game.getObjectById(creep.memory.cache.targetId) as any;
-        const targetType = creep.memory.cache.targetType;
+        const target = Game.getObjectById(cache.targetId) as any;
+        const targetType = cache.targetType;
         if (target) {
             if (targetType === 'dropped' && target.amount > 0) {
                 creep.goPickup(target);
@@ -37,8 +39,8 @@ const deposit_transfer = {
         const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES).filter(s => s.resourceType !== RESOURCE_ENERGY);
         if (droppedResources.length > 0) {
             const closestResource = creep.pos.findClosestByRange(droppedResources);
-            creep.memory.targetId = closestResource.id;
-            creep.memory.cache.targetType = 'dropped';
+            cache.targetId = closestResource.id;
+            cache.targetType = 'dropped';
             creep.goPickup(closestResource);
             return creep.store.getFreeCapacity() == 0;
         }
@@ -47,8 +49,8 @@ const deposit_transfer = {
         });
         if (tombstones.length > 0) {
             const closestTombstone = creep.pos.findClosestByRange(tombstones);
-            creep.memory.targetId = closestTombstone.id;
-            creep.memory.cache.targetType = 'tombstone';
+            cache.targetId = closestTombstone.id;
+            cache.targetType = 'tombstone';
             const resourceType = Object.keys(closestTombstone.store).find(type => type !== RESOURCE_ENERGY);
             creep.goWithdraw(closestTombstone, resourceType);
             return creep.store.getFreeCapacity() == 0;
@@ -74,8 +76,8 @@ const deposit_transfer = {
             });
             if (!closestHarvester) closestHarvester = creep.pos.findClosestByRange(harvesters);
             if (!creep.pos.isNearTo(closestHarvester)) {
-                creep.memory.cache.targetId = closestHarvester.id;
-                creep.memory.cache.targetType = 'harvester';
+                cache.targetId = closestHarvester.id;
+                cache.targetType = 'harvester';
                 creep.moveTo(closestHarvester, { visualizePathStyle: { stroke: '#00ff00' }, ignoreCreeps: false });
                 return creep.store.getFreeCapacity() == 0;
             }

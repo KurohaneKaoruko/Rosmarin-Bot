@@ -1,4 +1,4 @@
-function withdraw(creep: Creep) {
+function withdraw(creep: Creep): boolean {
     if (!creep.memory.sourceRoom) return;
     
     if (creep.room.name != creep.memory.sourceRoom) {
@@ -7,9 +7,10 @@ function withdraw(creep: Creep) {
     }
 
     const room = creep.room;
-    let target = Game.getObjectById(creep.memory.cache.targetId) as any;
-    let resType = creep.memory.cache.resType;
-    let actionType = creep.memory.cache.actionType;
+    const cache = (creep.memory.cacheSource ||= {}) as any;
+    let target = Game.getObjectById(cache.targetId) as any;
+    let resType = cache.resType;
+    let actionType = cache.actionType;
 
     if (!target || ((actionType == 'pickup' && target.amount == 0) ||
         (actionType == 'withdraw' && target.store[resType] == 0)
@@ -22,9 +23,9 @@ function withdraw(creep: Creep) {
             target = creep.pos.findClosestByRange(resources);
             resType = target.resourceType;
             actionType = 'pickup';
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.resType = resType;
-            creep.memory.cache.actionType = actionType;
+            cache.targetId = target.id;
+            cache.resType = resType;
+            cache.actionType = actionType;
         }
     }
 
@@ -39,9 +40,9 @@ function withdraw(creep: Creep) {
             target = creep.pos.findClosestByRange(RUINs);
             resType = Object.keys(target.store)[0] as ResourceConstant;
             actionType = 'withdraw';
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.resType = resType;
-            creep.memory.cache.actionType = actionType;
+            cache.targetId = target.id;
+            cache.resType = resType;
+            cache.actionType = actionType;
         }
     }
     
@@ -53,9 +54,9 @@ function withdraw(creep: Creep) {
             resType = Object.keys(room.storage.store)
                         .reduce((a, b) => room.storage.store[a] < room.storage.store[b] ? a : b);
             actionType = 'withdraw';
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.resType = resType;
-            creep.memory.cache.actionType = actionType;
+            cache.targetId = target.id;
+            cache.resType = resType;
+            cache.actionType = actionType;
         }
     }
 
@@ -67,9 +68,9 @@ function withdraw(creep: Creep) {
             resType = Object.keys(room.terminal.store)
                         .reduce((a, b) => room.terminal.store[a] < room.terminal.store[b] ? a : b);
             actionType = 'withdraw';
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.resType = resType;
-            creep.memory.cache.actionType = actionType;
+            cache.targetId = target.id;
+            cache.resType = resType;
+            cache.actionType = actionType;
         }
     }
 
@@ -84,17 +85,16 @@ function withdraw(creep: Creep) {
             resType = Object.keys(container.store)
                         .reduce((a, b) => container.store[a] < container.store[b] ? a : b);
             actionType = 'withdraw';
-            creep.memory.cache.targetId = target.id;
-            creep.memory.cache.resType = resType;
-            creep.memory.cache.actionType = actionType;
+            cache.targetId = target.id;
+            cache.resType = resType;
+            cache.actionType = actionType;
         }
     }
 
     if (!target || ((actionType == 'pickup' && target.amount == 0) ||
         (actionType == 'withdraw' && target.store[resType] == 0)
     )) {
-        creep.memory.working = true;
-        return
+        return true
     }
 
 
@@ -123,6 +123,8 @@ function withdraw(creep: Creep) {
         }
         return;
     }
+
+    return false
 }
 
 function transfer(creep: Creep) {
@@ -156,8 +158,8 @@ const logisticFunction = {
         return creep.memory.boosted;
     },
     source: function (creep: Creep) {
-        withdraw(creep);
-        return creep.store.getFreeCapacity() === 0;
+        const stateChange = withdraw(creep);
+        return stateChange || creep.store.getFreeCapacity() === 0;
     },
     target: function (creep: Creep) {
         transfer(creep);

@@ -71,12 +71,14 @@ const getEnergy = function (creep: Creep) {
 }
 
 const doWork = function (creep: Creep) {
+    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+    const cache = creep.memory.cacheTarget
     // 1. 尝试从缓存获取填充目标
-    let target = Game.getObjectById(creep.memory.cache.targetId) as StructureSpawn | StructureExtension | StructureTower | null;
+    let target = Game.getObjectById(cache.targetId) as StructureSpawn | StructureExtension | StructureTower | null;
 
     // 验证目标有效性 (存在且未满)
     if (!target || target.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
-        creep.memory.cache.targetId = null;
+        cache.targetId = null;
         target = null;
 
         // 2. 查找新的填充目标
@@ -98,7 +100,7 @@ const doWork = function (creep: Creep) {
         if (validTargets.length > 0) {
             target = creep.pos.findClosestByRange(validTargets);
             if (target) {
-                creep.memory.cache.targetId = target.id;
+                cache.targetId = target.id;
             }
         }
     }

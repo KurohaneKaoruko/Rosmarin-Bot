@@ -10,10 +10,15 @@ type CarrierCache = {
     resourceType?: ResourceConstant;
 };
 
-const getCarrierCache = (creep: Creep): CarrierCache => {
-    if (!creep.memory.cache) creep.memory.cache = {};
-    return creep.memory.cache as CarrierCache;
-};
+const getCarrierSourceCache = (creep: Creep): CarrierCache => {
+    creep.memory.cacheSource = creep.memory.cacheSource || {}
+    return creep.memory.cacheSource as CarrierCache
+}
+
+const getCarrierTargetCache = (creep: Creep): CarrierCache => {
+    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+    return creep.memory.cacheTarget as CarrierCache
+}
 
 const getRoomCarrierLocks = (roomName: string): Record<string, CarrierLockEntry> => {
     const roomMem = ((Memory.rooms as any)[roomName] ||= {});
@@ -48,7 +53,7 @@ const getClaimedTargetIdsByCarrier = (() => {
             if (!creep) continue;
             if (creep.memory?.role !== 'carrier') continue;
             if (creep.room.name !== roomName) continue;
-            const sourceId = creep.memory.cache?.sourceId;
+            const sourceId = creep.memory.cacheSource?.sourceId || creep.memory.cacheTarget?.sourceId;
             if (sourceId) ids.add(sourceId);
         }
         cache[roomName] = { time: Game.time, ids };
@@ -324,23 +329,21 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
 
 // 收集资源阶段
 const withdraw = (creep: Creep) => {
+    const cache = getCarrierSourceCache(creep)
     const { pos, store, room } = creep;
-    const cache = getCarrierCache(creep);
 
-    const targetId = cache.sourceId || cache.targetId;
+    const targetId = cache.sourceId;
     if (targetId && !Game.getObjectById(targetId)) {
         cache.sourceId = undefined;
         cache.sourceKind = undefined;
-        cache.targetId = undefined;
         cache.resourceType = undefined;
     }
 
-    if (!cache.sourceId && !cache.targetId) {
+    if (!cache.sourceId) {
         const plan = selectWithdrawPlan(creep);
         if (!plan) return false;
 
         cache.sourceId = plan.id;
-        cache.targetId = plan.id;
         cache.sourceKind = plan.kind;
         cache.resourceType = plan.resourceType;
 
@@ -349,11 +352,10 @@ const withdraw = (creep: Creep) => {
         }
     }
 
-    const target = Game.getObjectById(cache.sourceId || cache.targetId);
+    const target = Game.getObjectById(cache.sourceId);
     if (!target) {
         cache.sourceId = undefined;
         cache.sourceKind = undefined;
-        cache.targetId = undefined;
         cache.resourceType = undefined;
         return false;
     }
@@ -363,7 +365,6 @@ const withdraw = (creep: Creep) => {
         if (res.amount <= 0) {
             cache.sourceId = undefined;
             cache.sourceKind = undefined;
-            cache.targetId = undefined;
             cache.resourceType = undefined;
             return false;
         }
@@ -382,7 +383,6 @@ const withdraw = (creep: Creep) => {
         if (storeTarget.structureType !== STRUCTURE_LINK || pos.inRangeTo(storeTarget, 1)) {
             cache.sourceId = undefined;
             cache.sourceKind = undefined;
-            cache.targetId = undefined;
             cache.resourceType = undefined;
             return false;
         }
@@ -400,20 +400,21 @@ const withdraw = (creep: Creep) => {
 const carry = (creep: Creep) => {
     const { store, room, pos } = creep;
     const roomAny = room as any;
-    const cache = getCarrierCache(creep);
+    const cache = getCarrierTargetCache(creep)
 
     const carryTypes = getCreepCarryTypesSorted(creep);
     if (carryTypes.length === 0) return true;
 
     const currentType = cache.resourceType && store[cache.resourceType] > 0 ? cache.resourceType : undefined;
-    const currentTarget = cache.targetId ? (Game.getObjectById(cache.targetId) as AnyStoreStructure | null) : null;
+    const currentTarget = cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
 
     const needNewTarget =
         !currentType ||
         !currentTarget ||
+        !currentTarget.store?.getFreeCapacity ||
         currentTarget.store.getFreeCapacity(currentType) <= 0;
 
-    let target: AnyStoreStructure | null = currentTarget;
+    let target: AnyStoreStructure | null = (currentTarget?.store?.getFreeCapacity ? currentTarget : null);
     let resourceType: ResourceConstant = currentType || carryTypes[0];
 
     if (needNewTarget) {
@@ -526,13 +527,19 @@ const goGenerateSafeMode = (creep: Creep): boolean => {
 const CarrierFunction = {
     source: (creep: Creep) => {
         if (!creep.moveHomeRoom()) return;
-        if (creep.store.getFreeCapacity() === 0) return true;
+        if (creep.store.getFreeCapacity() === 0) {
+            carry(creep)
+            return true
+        }
         if (goGenerateSafeMode(creep)) return;
         return withdraw(creep);
     },
     target: (creep: Creep) => {
         if (!creep.moveHomeRoom()) return;
-        if (creep.store.getUsedCapacity() === 0) return true;
+        if (creep.store.getUsedCapacity() === 0) {
+            withdraw(creep)
+            return true
+        }
         if (checkAndFillNearbyExtensions(creep)) return;
         return carry(creep);;
     },

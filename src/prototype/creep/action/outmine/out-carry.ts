@@ -1,16 +1,18 @@
 const outCarry = {
     withdraw: function(creep: Creep) {
+        creep.memory.cacheSource = creep.memory.cacheSource || {}
+        const cache = creep.memory.cacheSource as any
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
         
         // 处理缓存的目标
-        if (creep.memory.cache?.targetId) {
-            let target = Game.getObjectById(creep.memory.cache.targetId) as any;
+        if (cache.targetId) {
+            let target = Game.getObjectById(cache.targetId) as any;
             if (!target) {
-                delete creep.memory.cache.targetId;
-                delete creep.memory.cache.targetType;
+                delete cache.targetId;
+                delete cache.targetType;
                 return;
             }
 
@@ -19,7 +21,7 @@ const outCarry = {
                 return;
             }
 
-            const targetType = creep.memory.cache.targetType;
+            const targetType = cache.targetType;
             if (targetType === 'dropped') {
                 creep.pickup(target);
             } else if (targetType === 'container' || targetType === 'ruin' || targetType === 'tombstone') {
@@ -29,13 +31,13 @@ const outCarry = {
 
             if ((targetType === 'dropped' && target.amount === 0) || 
                 ((targetType === 'container' || targetType === 'ruin' || targetType === 'tombstone') && target.store.getUsedCapacity() === 0)) {
-                delete creep.memory.cache.targetId;
-                delete creep.memory.cache.targetType;
+                delete cache.targetId;
+                delete cache.targetType;
                 return;
             }
 
-            delete creep.memory.cache.targetId;
-            delete creep.memory.cache.targetType;
+            delete cache.targetId;
+            delete cache.targetType;
         }
 
         // 先找mineral旁边的container (特殊逻辑，保留原有行为)
@@ -44,13 +46,13 @@ const outCarry = {
                 container && container.store.getUsedCapacity() >= 300 &&
                 container.pos.inRangeTo(creep.room.mineral, 2) &&
                 Object.values(Memory.creeps).every((m) => 
-                    (m.role != 'out-carry' && m.role != 'out-car') || m.cache?.targetId !== container.id)
+                    (m.role != 'out-carry' && m.role != 'out-car') || (m.cacheSource?.targetId || m.cacheTarget?.targetId || m.cache?.targetId) !== container.id)
             );
             if (containers && containers.length > 0) {
                 const container = creep.pos.findClosestByRange(containers);
                 if (container) {
-                    creep.memory.cache.targetId = container.id;
-                    creep.memory.cache.targetType = 'container';
+                    cache.targetId = container.id;
+                    cache.targetType = 'container';
                     creep.moveTo(container, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
                     return;
                 }
@@ -124,6 +126,8 @@ const outCarry = {
     },
     
     carry: function(creep: any) {
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+        const cache = creep.memory.cacheTarget as any
         if (creep.room.name != creep.memory.homeRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.homeRoom, { plainCost: 2, swampCost: 10 });
             return;
@@ -131,21 +135,21 @@ const outCarry = {
 
         let target: StructureContainer | StructureStorage;
     
-        if (creep.memory.cache.targetId) {
-            target = Game.getObjectById(creep.memory.cache.targetId) as StructureContainer | StructureStorage;
+        if (cache.targetId) {
+            target = Game.getObjectById(cache.targetId) as StructureContainer | StructureStorage;
             if (target) {
                 if (creep.pos.inRangeTo(target, 1)) {
                     if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 200) {
                         creep.transfer(target, Object.keys(creep.store)[0]);
                     } else {
-                        delete creep.memory.cache.targetId;
+                        delete cache.targetId;
                     }
                 } else {
                     creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
                 }
                 return;
             }
-            delete creep.memory.cache.targetId;
+            delete cache.targetId;
         }
 
         if(!target) {
@@ -169,12 +173,12 @@ const outCarry = {
         }
     
         if (target) {
-            creep.memory.cache.targetId = target.id;
+            cache.targetId = target.id;
             if (creep.pos.inRangeTo(target, 1)) {
                 if (target.store.getFreeCapacity() > 0) {
                     creep.transfer(target, Object.keys(creep.store)[0]);
                 } else {
-                    delete creep.memory.cache.targetId;
+                    delete cache.targetId;
                 }
             } else {
                 creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });

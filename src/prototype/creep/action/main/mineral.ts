@@ -33,8 +33,10 @@ const MineralAction = {
         return creep.store.getFreeCapacity() === 0 && creep.store.getUsedCapacity() > 0;
     },
     target: function (creep: Creep) {
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+        const cache = creep.memory.cacheTarget
         // 如果没有缓存存储目标，则寻找存储目标
-        if (!creep.memory.cache.targetId) {
+        if (!cache.targetId) {
             const mineralContainer = creep.room.container.find(c => c.pos.inRangeTo(creep.room.mineral, 1)) || null;
             if(!mineralContainer &&
                 creep.pos.inRange(creep.room.mineral.pos, 1) &&
@@ -47,15 +49,15 @@ const MineralAction = {
                             mineralContainer : null;
 
             if (target) {
-                creep.memory.cache.targetId = target.id;
+                cache.targetId = target.id;
             } else {
                 return false;
             }
         }
 
-        const target = Game.getObjectById(creep.memory.cache.targetId) as StructureContainer | StructureStorage | StructureTerminal;
+        const target = Game.getObjectById(cache.targetId) as StructureContainer | StructureStorage | StructureTerminal;
         if (!target || target.store.getFreeCapacity() === 0) {
-            delete creep.memory.cache.targetId;
+            delete cache.targetId;
             return false;
         }
 

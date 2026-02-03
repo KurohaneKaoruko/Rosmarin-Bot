@@ -1,10 +1,16 @@
 import { decompress } from '@/modules/utils/compress';
 
+const getCache = (creep: Creep) => {
+    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
+    return creep.memory.cacheTarget as any
+}
+
 const RepairRampart = function (creep: Creep) {
-    if (creep.memory.cache.buildRampartId) {
-        const rampart = Game.getObjectById(creep.memory.cache.buildRampartId) as StructureRampart;
+    const cache = getCache(creep)
+    if (cache.buildRampartId) {
+        const rampart = Game.getObjectById(cache.buildRampartId) as StructureRampart;
         if (!rampart || rampart.hits >= 5000) {
-            delete creep.memory.cache.buildRampartId;
+            delete cache.buildRampartId;
             return false;
         } else {
             creep.goRepair(rampart);
@@ -12,13 +18,13 @@ const RepairRampart = function (creep: Creep) {
         }
     }
 
-    if (creep.memory.cache.buildRampart && !creep.memory.cache.task) {
-        const [x, y] = decompress(creep.memory.cache.posInfo);
+    if (cache.buildRampart && !cache.task) {
+        const [x, y] = decompress(cache.posInfo);
         const Pos = new RoomPosition(x, y, creep.room.name);
         const rampart = Pos.lookFor(LOOK_STRUCTURES).find((s) => s.structureType == STRUCTURE_RAMPART);
-        if (rampart) creep.memory.cache.buildRampartId = rampart.id;
-        delete creep.memory.cache.posInfo;
-        delete creep.memory.cache.buildRampart;
+        if (rampart) cache.buildRampartId = rampart.id;
+        delete cache.posInfo;
+        delete cache.buildRampart;
         return true;
     }
     
@@ -26,13 +32,14 @@ const RepairRampart = function (creep: Creep) {
 }
 
 const BuildRepairWork = function (creep: Creep) {
+    const cache = getCache(creep)
     let target = null;
     let taskType = null;
     let taskid = null;
 
     if (RepairRampart(creep)) return true;
 
-    if (!creep.memory.cache.task) {
+    if (!cache.task) {
         let task = creep.room.getBuildMission(creep);
         if (!task && (!creep.room.tower || creep.room.tower.length == 0)) {
             task = creep.room.getRepairMission(creep);
@@ -41,31 +48,31 @@ const BuildRepairWork = function (creep: Creep) {
         const taskdata = task.data as BuildTask | RepairTask;
         const target = Game.getObjectById(taskdata.target) as any;
         if (task.type == 'build' && target?.structureType == 'rampart') {
-            creep.memory.cache.buildRampart = true;
-            creep.memory.cache.posInfo = taskdata.pos;
+            cache.buildRampart = true;
+            cache.posInfo = taskdata.pos;
         }
         if (!target || (task.type !== 'build' && target.hits >= (taskdata as RepairTask).hits)){
             creep.room.deleteMissionFromPool(task.type, task.id);
-            delete creep.memory.cache.task;
-            delete creep.memory.cache.taskid;
-            delete creep.memory.cache.tasktype;
+            delete cache.task;
+            delete cache.taskid;
+            delete cache.tasktype;
             return true;
         }
-        creep.memory.cache.task = taskdata;
-        creep.memory.cache.taskid = task.id;
-        creep.memory.cache.tasktype = task.type;
+        cache.task = taskdata;
+        cache.taskid = task.id;
+        cache.tasktype = task.type;
     }
     
-    if (creep.memory.cache.task){
-        const taskdata = creep.memory.cache.task;
+    if (cache.task){
+        const taskdata = cache.task;
         target = Game.getObjectById(taskdata.target);
-        taskType = creep.memory.cache.tasktype;
-        taskid = creep.memory.cache.taskid;
+        taskType = cache.tasktype;
+        taskid = cache.taskid;
         if(!target || (taskType !== 'build' && target.hits >= taskdata.hits)){
             creep.room.deleteMissionFromPool(taskType, taskid);
-            delete creep.memory.cache.task;
-            delete creep.memory.cache.taskid;
-            delete creep.memory.cache.tasktype;
+            delete cache.task;
+            delete cache.taskid;
+            delete cache.tasktype;
             return true;
         }
     }
@@ -85,21 +92,22 @@ const BuildRepairWork = function (creep: Creep) {
 }
 
 const RepairWallWork = function (creep: Creep) {
-    if (!creep.memory.cache.wallTask) {
+    const cache = getCache(creep)
+    if (!cache.wallTask) {
         const task = creep.room.getWallMission(creep);
         if (!task) return false;
-        creep.memory.cache.wallTask = task.target;
+        cache.wallTask = task.target;
     }
 
-    const target = Game.getObjectById(creep.memory.cache.wallTask) as StructureRampart;
+    const target = Game.getObjectById(cache.wallTask) as StructureRampart;
     if (!target) {
         const task = creep.room.getWallMission(creep);
         if (!task) {
-            delete creep.memory.cache.wallTask;
-            delete creep.memory.cache.targetHits;
+            delete cache.wallTask;
+            delete cache.targetHits;
             return false;
         }
-        creep.memory.cache.wallTask = task.target;
+        cache.wallTask = task.target;
         return true;
     } else {
         creep.goRepair(target);
