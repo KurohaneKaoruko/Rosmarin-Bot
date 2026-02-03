@@ -65,9 +65,23 @@ export function resolveLabFromMem(room: Room, value: unknown): { lab: StructureL
 }
 
 /**
+ * 计算两点之间的直线距离（欧式距离）
+ * @param p1 点 1
+ * @param p2 点 2
+ * @returns 距离
+ */
+function linearDistance(p1: RoomPosition, p2: RoomPosition): number {
+    return Math.hypot(p1.x - p2.x, p1.y - p2.y)
+}
+
+/**
  * 在 10 Lab 布局中推导底物 A/B
  * @description
- * 选择满足“其余 8 个 lab 到 A 与 B 的距离都 <= 2”的一对 (A,B)。
+ * 选择满足“其余 8 个 lab 到 A 与 B 的距离都 <= 2（range）”的一对 (A,B)。
+ *
+ * @remarks
+ * - 约束使用 `getRangeTo`（Screeps 的 range，保证反应范围有效）。\n
+ * - 排序评分使用直线距离（欧式距离），用于在多个可行解中择优。
  * 排序优先级：
  * 1. (如果有 centerPos) A/B 到中心的距离之和最小
  * 2. 内部距离和（其他 Lab 到 A/B 距离之和）最小
@@ -101,13 +115,13 @@ function pickLabAB(labs: StructureLab[], centerPos?: RoomPosition): { a: Structu
                     ok = false;
                     break;
                 }
-                internalScore += ra + rb;
+                internalScore += linearDistance(c.pos, a.pos) + linearDistance(c.pos, b.pos);
             }
 
             if (ok) {
                 let centerScore = 0;
                 if (centerPos) {
-                    centerScore = a.pos.getRangeTo(centerPos) + b.pos.getRangeTo(centerPos);
+                    centerScore = linearDistance(a.pos, centerPos) + linearDistance(b.pos, centerPos);
                 }
                 candidates.push({
                     a, b,
