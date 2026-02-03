@@ -22,6 +22,8 @@ class Team {
     creeps: Creep[];     // 成员数组
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
+    actionMode: 'normal' | 'rush' | 'stomp';
+    targetMode: 'default' | 'structure' | 'creep' | 'flag';
     moved: boolean;       // 本tick是否移动过
 
     // 构造函数
@@ -43,12 +45,43 @@ class Team {
         this.moveMode = moveMode;
         this.cache = cache || {};
         this.flag = Game.flags[`Team-${this.name}`];
+        this.actionMode = 'normal'
+        this.targetMode = 'default'
+        this.updateModesFromFlag()
         this.moved = false;
-        
-        // 即使是缓存的对象，也需要从 memory 中获取最新的 creep 列表（因为可能有成员死亡被移除）
+
         const creepIds = teamData.creeps || [];
         const liveCreeps = creepIds.map(id => Game.getObjectById(id)).filter(Boolean) as Creep[];
         this.creeps = liveCreeps;
+    }
+
+    /**
+     * 从指挥旗的主色/副色解析并刷新队伍模式字段。
+     * @remarks 若指挥旗不存在，回退到 default/normal。
+     */
+    private updateModesFromFlag(): void {
+        const flag = this.flag
+        if (!flag) {
+            this.actionMode = 'normal'
+            this.targetMode = 'default'
+            return
+        }
+
+        // - normal：默认
+        // - rush：强攻（跳过伤害评估，直接 attack）
+        // - stomp：碾压（更激进的贴近/踩位策略）
+        if (flag.secondaryColor === COLOR_PURPLE) this.actionMode = 'rush'
+        else if (flag.secondaryColor === COLOR_BLUE) this.actionMode = 'stomp'
+        else this.actionMode = 'normal'
+        
+        // - default：默认
+        // - structure：优先打建筑
+        // - creep：优先打 creep
+        // - flag：优先打旗
+        if (flag.color === COLOR_YELLOW) this.targetMode = 'structure'
+        else if (flag.color === COLOR_GREEN) this.targetMode = 'creep'
+        else if (flag.color === COLOR_RED) this.targetMode = 'flag'
+        else this.targetMode = 'default'
     }
 
     // 保存数据
@@ -96,6 +129,8 @@ class Team {
             this.targetRoom = this.flag.pos.roomName;
         }
 
+        this.updateModesFromFlag()
+
         if (!this.creeps) return;
 
         if (this.creeps.length < 3) {
@@ -120,10 +155,10 @@ class Team {
             })
         }
 
-        if (this.flag?.secondaryColor === COLOR_PURPLE) {
-            // rush模式, 不算伤
+        if (this.actionMode === 'rush') {
             this.status = 'attack'
-        } else {
+        }
+        else {
             // 2 tick 内能奶住
             if (TeamBattle.canHealInNTick(this, 2)) {
                 if (this.status === 'sleep' && Game.time % 7) return

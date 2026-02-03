@@ -139,6 +139,17 @@ export default class TeamUtils {
     }
 
     /**
+     * 判断队伍是否均未装备攻击部件（ATTACK/RANGED_ATTACK）。
+     * @param team 
+     * @returns 是否均未装备攻击部件
+     */
+    public static isDisarmed(team: Team): boolean {
+        return team.creeps.every((c) =>
+                !c.getActiveBodyparts(ATTACK) &&
+                !c.getActiveBodyparts(RANGED_ATTACK))
+    }
+
+    /**
      * 预测某个 creep 在“下一 tick（tick 边界之后）”会处于的位置。
      *
      * @param pos 当前坐标（x/y/roomName）

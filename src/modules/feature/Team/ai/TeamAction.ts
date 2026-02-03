@@ -1120,7 +1120,8 @@ export default class TeamAction {
             if (goal instanceof StructureSpawn &&
                 teamFlag &&
                 !(goal.pos.isEqualTo(teamFlag.pos)) &&
-                !(teamFlag.secondaryColor == COLOR_RED)) {
+                team.actionMode !== 'rush' &&
+                team.actionMode !== 'stomp') {
                 goal['_range'] = 2
             }
             const allowEdgeChase = !needAvoid && goal && 'hits' in goal

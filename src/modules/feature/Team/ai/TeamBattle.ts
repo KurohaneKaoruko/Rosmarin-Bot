@@ -253,13 +253,12 @@ export default class TeamBattle {
     public static chooseTargets(team: Team) {
         if (!team.flag) return;
         const room = team.flag.room;
-        // 旗帜是黄色表示专注建筑
-        const isFocusStructure = team.flag.color === COLOR_YELLOW || 
-            team.creeps.every((c) => !c.getActiveBodyparts(ATTACK) && !c.getActiveBodyparts(RANGED_ATTACK));
-        // 是否先打爬
-        const preferCreep = team.flag.color === COLOR_BLUE
-        // 是否优先打旗帜下面的东西
-        const preferFlag = team.flag.color === COLOR_RED
+        // 强制优先打建筑
+        const isFocusStructure = team.targetMode === 'structure' || TeamUtils.isDisarmed(team);
+        // 强制优先打爬
+        const preferCreep = team.targetMode === 'creep'
+        // 强制优先打旗
+        const preferFlag = team.targetMode === 'flag'
 
         const result: (Creep | Structure | Flag)[] = []
         const creep = team.creeps.find((c) => c.room.name === team.flag.pos.roomName)
