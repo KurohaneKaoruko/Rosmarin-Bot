@@ -1,4 +1,4 @@
-import { mountDD, checkDDMessages, ddTools } from '../infra/dd'
+import { mountDD, checkDDMessages, ddTools } from '../infra/ddcomm'
 
 export const DDModule = {
     init: () => {
