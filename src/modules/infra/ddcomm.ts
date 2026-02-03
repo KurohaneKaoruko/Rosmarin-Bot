@@ -49,6 +49,8 @@ interface DDMemory {
     seq?: number               // 消息序号
     commList?: string[]        // 通讯名单
     attackNotify?: boolean     // 是否开启攻击通知
+    lastSeen?: Record<string, string> // 每个对端最后处理的 msg.id（用于重载去重）
+    seen?: Record<string, number> // 消息指纹 -> 处理 tick（用于无 id 对端的重载去重）
 }
 
 interface PendingRequest {
@@ -382,6 +384,29 @@ function processForeignSegment(): void {
     if (!key) return
 
     const mem = getDDMemory()
+    if (!mem.lastSeen) mem.lastSeen = {}
+    if (!mem.seen) mem.seen = {}
+
+    const parseMsgId = (id: string): { time: number; seq: number } | null => {
+        const m = id.match(/^(\d+)_(\d+)$/)
+        if (!m) return null
+        return { time: parseInt(m[1]), seq: parseInt(m[2]) }
+    }
+
+    const isNewerThan = (a: string, b: string): boolean => {
+        if (a === b) return false
+        const pa = parseMsgId(a)
+        const pb = parseMsgId(b)
+        if (!pa || !pb) return a > b
+        if (pa.time !== pb.time) return pa.time > pb.time
+        return pa.seq > pb.seq
+    }
+
+    if (Object.keys(mem.seen).length > 5000) {
+        for (const k in mem.seen) {
+            if (Game.time - (mem.seen[k] || 0) > HISTORY_RETENTION) delete mem.seen[k]
+        }
+    }
 
     for (const part of seg.data.split('||')) {
         if (!part) continue
@@ -397,16 +422,27 @@ function processForeignSegment(): void {
                 if (processedMessages.has(msgId)) continue
                 processedMessages.add(msgId)
                 msg.from = username
+                const fingerprint = `${username}|${msg.id || ''}|${msg.to || 'all'}|${msg.type || ''}|${msg.time}|${msg.msg}`
+                const seenTick = mem.seen[fingerprint]
+                if (seenTick && Game.time - seenTick <= HISTORY_RETENTION) continue
+
+                const lastSeen = mem.lastSeen[username]
+                const canUseLastSeen = !!parseMsgId(msg.id)
+                if (canUseLastSeen && lastSeen && !isNewerThan(msg.id, lastSeen)) continue
 
                 // 处理战争请求（需要确认）
                 if (msg.type === 'request' && msg.data) {
                     handleWarRequest(msg)
+                    mem.seen[fingerprint] = Game.time
+                    if (canUseLastSeen) mem.lastSeen[username] = lastSeen ? (isNewerThan(msg.id, lastSeen) ? msg.id : lastSeen) : msg.id
                     continue
                 }
 
                 // 处理响应
                 if (msg.type === 'response' && msg.data) {
                     handleResponse(msg)
+                    mem.seen[fingerprint] = Game.time
+                    if (canUseLastSeen) mem.lastSeen[username] = lastSeen ? (isNewerThan(msg.id, lastSeen) ? msg.id : lastSeen) : msg.id
                     continue
                 }
 
@@ -415,10 +451,18 @@ function processForeignSegment(): void {
                     handleResourceRequest(msg)
                 }
 
-                loadHistory().push(msg)
-                saveHistory(loadHistory())
+                const history = loadHistory()
+                const historyKey = `${msg.from}_${msg.id}`
+                const tail = history.slice(-50)
+                if (!tail.some(m => `${m.from}_${m.id}` === historyKey)) {
+                    history.push(msg)
+                    saveHistory(history)
+                }
 
                 console.log(`\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n📨 [DD] 来自 ${username}${msg.to && msg.to !== 'all' ? ' (私信)' : ''}\n⏰ ${msg.time}\n💬 ${msg.msg}\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n`)
+
+                mem.seen[fingerprint] = Game.time
+                if (canUseLastSeen) mem.lastSeen[username] = lastSeen ? (isNewerThan(msg.id, lastSeen) ? msg.id : lastSeen) : msg.id
             }
         } catch { /* 静默忽略 */ }
     }
