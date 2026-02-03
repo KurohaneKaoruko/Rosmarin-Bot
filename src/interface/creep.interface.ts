@@ -631,6 +631,9 @@ interface CreepMemory {
         /** 其他缓存数据 */
         [key: string]: any;
     };
+
+    cacheSource?: CreepMemory['cache'];
+    cacheTarget?: CreepMemory['cache'];
     
     /** 
      * 禁止被对穿
