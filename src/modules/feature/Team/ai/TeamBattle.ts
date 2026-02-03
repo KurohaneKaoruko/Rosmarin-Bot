@@ -24,12 +24,21 @@ export default class TeamBattle {
 
     /**
      * n tick 内能否奶住
+     * @param team 队伍
+     * @param tick 预测 tick
+     * @param opts 选项
+     * @param opts.threatTick 威胁 tick，默认与预测 tick 相同
+     * @param opts.minHitsRate 最小生命值比例，默认 0.4
      * @returns true 表示能奶住，false 表示不能奶住
-     *
      * TODO: 优化算伤策略，同时考虑会陷入沼泽的情况
      */
-    public static canHealInNTick(team: Team, tick: number) {
+    public static canHealInNTick(
+        team: Team,
+        tick: number,
+        opts?: { threatTick?: number; minHitsRate?: number },
+    ) {
         const creeps = team.creeps as any;
+        const threatTick = opts?.threatTick ?? tick
 
         // 搜索 n tick 后会攻击到自己的敌人
         creeps.forEach((creep) => {
@@ -64,8 +73,8 @@ export default class TeamBattle {
             // 三格的蓝球敌人
             const raEnemys: Creep[] = []
             for (const e of hostilesRanged) {
-                if (!e.pos.inRangeTo(creepPos, 3 + tick)) continue
-                if (tick === 0) {
+                if (!e.pos.inRangeTo(creepPos, 3 + threatTick)) continue
+                if (threatTick === 0) {
                     raEnemys.push(e)
                     continue
                 }
@@ -79,15 +88,15 @@ export default class TeamBattle {
                     raEnemys.push(e)
                     continue
                 }
-                if (TeamCalc.touchableNTickInRange(e, creepPos, tick, 3)) raEnemys.push(e)
+                if (TeamCalc.touchableNTickInRange(e, creepPos, threatTick, 3)) raEnemys.push(e)
             }
             creep._ra_enemys = raEnemys
 
             // 一格的蓝球或者红球敌人
             const raAtkEnemys: Creep[] = []
             for (const e of hostilesRangedOrAttack) {
-                if (!e.pos.inRangeTo(creepPos, 1 + tick)) continue
-                if (tick === 0) {
+                if (!e.pos.inRangeTo(creepPos, 1 + threatTick)) continue
+                if (threatTick === 0) {
                     raAtkEnemys.push(e)
                     continue
                 }
@@ -101,7 +110,7 @@ export default class TeamBattle {
                     raAtkEnemys.push(e)
                     continue
                 }
-                if (TeamCalc.touchableNTickInRange(e, creepPos, tick, 1)) raAtkEnemys.push(e)
+                if (TeamCalc.touchableNTickInRange(e, creepPos, threatTick, 1)) raAtkEnemys.push(e)
             }
             creep._ra_atk_enemys = raAtkEnemys
 
@@ -198,7 +207,8 @@ export default class TeamBattle {
             return true
         }
 
-        if (creeps.some((creep) => creep._virtual_hits! < 0 || creep.hits < creep.hitsMax * 0.6)) {
+        const minHitsRate = opts?.minHitsRate ?? 0.6
+        if (creeps.some((creep) => creep._virtual_hits! < 0 || creep.hits < creep.hitsMax * minHitsRate)) {
             // 第一 tick 就寄啦
             return false
         }

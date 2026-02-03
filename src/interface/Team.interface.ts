@@ -49,7 +49,7 @@ interface Team {
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
     /** 行动模式（来源：指挥旗 secondaryColor，经 Team 解析为属性） */
-    actionMode: 'normal' | 'rush' | 'stomp';
+    actionMode: 'normal' | 'rush' | 'press';
     /** 索敌模式（来源：指挥旗 color，经 Team 解析为属性） */
     targetMode: 'default' | 'structure' | 'creep' | 'flag';
 }

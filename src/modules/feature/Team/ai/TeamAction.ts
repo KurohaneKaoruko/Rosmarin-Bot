@@ -1121,7 +1121,7 @@ export default class TeamAction {
                 teamFlag &&
                 !(goal.pos.isEqualTo(teamFlag.pos)) &&
                 team.actionMode !== 'rush' &&
-                team.actionMode !== 'stomp') {
+                team.actionMode !== 'press') {
                 goal['_range'] = 2
             }
             const allowEdgeChase = !needAvoid && goal && 'hits' in goal

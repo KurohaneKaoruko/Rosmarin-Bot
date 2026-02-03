@@ -22,7 +22,7 @@ class Team {
     creeps: Creep[];     // 成员数组
     cache: { [key: string]: any };    // 缓存
     flag: Flag;          // 小队指挥旗
-    actionMode: 'normal' | 'rush' | 'stomp';
+    actionMode: 'normal' | 'rush' | 'press';
     targetMode: 'default' | 'structure' | 'creep' | 'flag';
     moved: boolean;       // 本tick是否移动过
 
@@ -69,9 +69,9 @@ class Team {
 
         // - normal：默认
         // - rush：强攻（跳过伤害评估，直接 attack）
-        // - stomp：碾压（更激进的贴近/踩位策略）
+        // - press：压制推进（更激进的推进/贴近策略，算伤更不保守）
         if (flag.secondaryColor === COLOR_PURPLE) this.actionMode = 'rush'
-        else if (flag.secondaryColor === COLOR_BLUE) this.actionMode = 'stomp'
+        else if (flag.secondaryColor === COLOR_BLUE) this.actionMode = 'press'
         else this.actionMode = 'normal'
         
         // - default：默认
@@ -157,6 +157,21 @@ class Team {
 
         if (this.actionMode === 'rush') {
             this.status = 'attack'
+        }
+        else if (this.actionMode === 'press') {
+            // 2 tick 内能奶住
+            if (TeamBattle.canHealInNTick(this, 2, { threatTick: 0, minHitsRate: 0.4 })) {
+                if (this.status === 'sleep' && Game.time % 7) return
+                this.status = 'attack'
+            }
+            // 1 tick 内能奶住
+            else if (TeamBattle.canHealInNTick(this, 1, { threatTick: 0, minHitsRate: 0.4 })) {
+                this.status = 'avoid'
+            }
+            // 不能奶住
+            else {
+                this.status = 'flee'
+            }
         }
         else {
             // 2 tick 内能奶住
