@@ -1,43 +1,44 @@
 // 颜色常量
 const COLORS = {
-    good: '#06D6A0',
-    warning: '#FFD166',
-    danger: '#EF476F',
-    neutral: '#8892a0',
-    info: '#118AB2',
-    text: '#e8eaed',
-    textMuted: '#a0aab8',
-    levelLow: '#8892a0',
-    levelMid: '#6B9FD4',
-    levelHigh: '#D4AF37',
-    border: '#3d4a5c',
-    bgDark: '#1a2332',
-    bgLight: '#242f3f',
+    theme: '#D0CAE0',     // Endfield Lavender
+    good: '#4CC9F0',      // Technical Teal
+    warning: '#FFC300',   // Safety Amber
+    danger: '#FF003C',    // Signal Red
+    neutral: '#888888',   // Muted Grey
+    info: '#4CC9F0',
+    text: '#F0F0F0',
+    textMuted: '#666666',
+    levelLow: '#666666',
+    levelMid: '#4CC9F0',
+    levelHigh: '#D0CAE0', // Use Theme Color
+    border: '#2A2D33',
+    bgDark: '#1E2024',
+    bgLight: '#25282D',
 } as const;
 
 // 状态图标
 const ICONS = {
-    good: '✅',
-    warning: '⚠️',
-    danger: '❌',
-    neutral: '⚪',
+    good: '■',
+    warning: '▲',
+    danger: '✕',
+    neutral: '―',
 } as const;
 
 // 表格样式
 const STYLES = {
-    table: 'text-align: center; border-collapse: separate; border-spacing: 0; width: 100%; box-shadow: 0 4px 12px rgba(0,0,0,0.4); border-radius: 3px; overflow: hidden; margin-top: 12px; border: 1px solid #3d4a5c;',
-    header: 'background-color: #2a3a4f; color: #e8eaed; font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px;',
-    th: 'padding: 14px 10px; text-align: center; border-bottom: 2px solid #4a5a6f;',
-    tr: 'border-bottom: 1px solid #2d3850; transition: background-color 0.2s;',
-    td: 'padding: 12px 10px; color: #e8eaed; vertical-align: middle;',
-    title: 'font-size: 16px; margin-bottom: 12px; display: flex; align-items: center; color: #e8eaed; font-weight: 600; text-shadow: 0 1px 2px rgba(0,0,0,0.3);',
-    odd: 'background-color: rgba(42, 58, 79, 0.5);',
-    even: 'background-color: rgba(36, 47, 63, 0.7);',
-    footer: 'background-color: #1a2332; font-size: 11px; color: #8892a0; padding: 10px 12px; text-align: right; border-top: 1px solid #3d4a5c;'
+    table: 'text-align: left; border-collapse: collapse; width: 100%; margin-top: 12px; border-top: 2px solid #D0CAE0; font-family: Consolas, monospace;',
+    header: 'background-color: #15171A; color: #F0F0F0; font-weight: 700; text-transform: uppercase; font-size: 11px; letter-spacing: 1px; border-bottom: 1px solid #333;',
+    th: 'padding: 10px 12px; text-align: center; border-right: 1px solid #2A2D33;',
+    tr: 'border-bottom: 1px solid #2A2D33;',
+    td: 'padding: 8px 12px; color: #CCCCCC; vertical-align: middle; border-right: 1px solid #2A2D33; font-size: 12px;',
+    title: 'font-size: 14px; margin-bottom: 8px; display: flex; align-items: center; color: #D0CAE0; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; border-left: 3px solid #D0CAE0; padding-left: 10px;',
+    odd: 'background-color: rgba(37, 40, 45, 0.9);',
+    even: 'background-color: rgba(30, 32, 36, 0.9);',
+    footer: 'background-color: #15171A; font-size: 10px; color: #888; padding: 8px 12px; text-align: right; border-top: 1px solid #333; font-family: Consolas, monospace;'
 } as const;
 
 // 等级符号
-const LEVEL_SYMBOLS = ['⓪', '①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧'] as const;
+const LEVEL_SYMBOLS = ['[0]', '[1]', '[2]', '[3]', '[4]', '[5]', '[6]', '[7]', '[8]'] as const;
 
 // 阈值常量
 const THRESHOLDS = {
@@ -52,22 +53,19 @@ const THRESHOLDS = {
 
 // 辅助函数
 const colorText = (text: string, color: string) => 
-    `<span style="color: ${color}; font-weight: 500; text-shadow: 0 1px 1px rgba(0,0,0,0.2);">${text}</span>`;
+    `<span style="color: ${color}; font-weight: 500; padding: 0;">${text}</span>`;
 
 const td = (text: string) => `<td style="${STYLES.td}">${text}</td>`;
 
 const th = (text: string) => `<th style="${STYLES.th}">${text}</th>`;
 
-const headSpan = (text: string) => 
-    `<span style="display:flex;align-items:center;justify-content:center;gap:4px;">${text}</span>`;
+const notBuilt = () => td(`<span style="color: ${COLORS.neutral}; opacity: 0.5;padding: 0;">- NULL -</span>`);
 
-const notBuilt = () => td(`<span style="color: ${COLORS.neutral}; font-style: italic; opacity: 0.7;">${ICONS.neutral} 未建造</span>`);
+const disabled = () => td(colorText(`${ICONS.danger} OFFLINE`, COLORS.danger));
 
-const disabled = () => td(colorText(`${ICONS.danger} 已关闭`, COLORS.danger));
+const idle = () => td(colorText(`${ICONS.warning} IDLE`, COLORS.warning));
 
-const idle = () => td(colorText(`${ICONS.warning} 闲置中`, COLORS.warning));
-
-const lowResource = () => td(colorText(`${ICONS.warning} 资源不足`, COLORS.warning));
+const lowResource = () => td(colorText(`${ICONS.warning} LOW_RES`, COLORS.warning));
 
 // 根据使用率获取状态
 const getStoreStatus = (ratio: number): { icon: string; color: string } => {
@@ -78,13 +76,13 @@ const getStoreStatus = (ratio: number): { icon: string; color: string } => {
 
 // 生成进度条
 const progressBar = (ratio: number, color: string) => 
-    `<div style="background-color: rgba(255,255,255,0.08); height: 4px; width: 100%; margin-top: 5px; border-radius: 3px; overflow: hidden;"><div style="background: linear-gradient(90deg, ${color} 0%, ${color}dd 100%); height: 100%; width: ${Math.min(ratio, 1) * 100}%; border-radius: 3px; transition: width 0.3s;"></div></div>`;
+    `<div style="background-color: #333; height: 2px; width: 100%; margin-top: 6px;"><div style="background-color: ${color}; height: 100%; width: ${Math.min(ratio, 1) * 100}%;"></div></div>`;
 
 // 获取房间等级图标
 const getRoomLevelIcon = (level?: number): string => {
     if (!level) return '';
     const color = level <= 3 ? COLORS.levelLow : level <= 6 ? COLORS.levelMid : COLORS.levelHigh;
-    return `<span style="color: ${color}; font-weight: bold; margin-right: 6px; font-size: 12px; text-shadow: 0 1px 2px rgba(0,0,0,0.3);">${LEVEL_SYMBOLS[level]}</span>`;
+    return `<span style="color: ${color}; font-weight: 700; margin-right: 6px; padding:0; font-size: 12px; font-family: Consolas, monospace;">${LEVEL_SYMBOLS[level]}</span>`;
 };
 
 // 各结构状态渲染函数
@@ -94,7 +92,7 @@ const renderSpawn = (room: Room): string => {
     const { icon, color } = missionCount > 0 
         ? { icon: ICONS.warning, color: COLORS.warning }
         : { icon: ICONS.good, color: COLORS.good };
-    return td(colorText(`${icon} ${missionCount} / ${room.spawn.length}`, color));
+    return td(colorText(`${icon} ${missionCount}/${room.spawn.length}`, color));
 };
 
 const renderStorage = (room: Room): string => {
@@ -119,7 +117,7 @@ const renderLab = (room: Room, structMem: any): string => {
     const { labAtype, labBtype } = structMem;
     if (!labAtype || !labBtype) return idle();
     const product = REACTIONS[labAtype][labBtype];
-    return td(colorText(`${ICONS.good} ${labAtype} + ${labBtype} → ${product}`, COLORS.good));
+    return td(colorText(`${ICONS.good} ${labAtype} + ${labBtype} -> ${product}`, COLORS.good));
 };
 
 const renderFactory = (room: Room, structMem: any): string => {
@@ -138,19 +136,19 @@ const renderPowerSpawn = (room: Room, structMem: any): string => {
     }
     const effect = ps.effects?.find(e => e.effect === PWR_OPERATE_POWER) as PowerEffect | undefined;
     const speed = 1 + (effect?.level || 0);
-    return td(colorText(`${ICONS.good} ${speed}速工作中`, COLORS.good));
+    return td(colorText(`${ICONS.good} SPD:${speed}`, COLORS.good));
 };
 
 const renderNuker = (room: Room): string => {
     if (!room.nuker) return notBuilt();
     if (room.nuker.cooldown) {
-        return td(colorText(`${ICONS.warning} 冷却中(${room.nuker.cooldown})`, COLORS.warning));
+        return td(colorText(`${ICONS.warning} CD(${room.nuker.cooldown})`, COLORS.warning));
     }
     if (room.nuker.store[RESOURCE_ENERGY] < THRESHOLDS.nukerEnergy || 
         room.nuker.store[RESOURCE_GHODIUM] < THRESHOLDS.nukerGhodium) {
         return lowResource();
     }
-    return td(colorText(`${ICONS.good} 已就绪`, COLORS.good));
+    return td(colorText(`${ICONS.good} READY`, COLORS.good));
 };
 
 const renderEnergy = (room: Room): string => {
@@ -158,7 +156,7 @@ const renderEnergy = (room: Room): string => {
     if (!energy) return td(colorText(`${ICONS.neutral} 0`, COLORS.neutral));
     const color = energy > THRESHOLDS.energyHigh ? COLORS.info 
         : energy > THRESHOLDS.energyLow ? COLORS.warning : COLORS.danger;
-    return td(colorText(`⚡ ${energy.toFixed(0).toLocaleString()}`, color));
+    return td(colorText(`${energy.toFixed(0).toLocaleString()}`, color));
 };
 
 // 生成单行数据
@@ -185,13 +183,12 @@ const rowInfo = (roomName: string, rowIndex: number): string => {
 };
 
 export const showRoomInfo = (rooms: string[]): string => {
-    const headers = ['房间', 'Spawn', 'Storage', 'Terminal', 'Lab', 'Factory', 'PowerSpawn', 'Nuker', 'Energy']
-        .map((h, i) => i === 0 ? h : headSpan(h));
+    const headers = ['ROOM', 'SPAWN', 'STORAGE', 'TERMINAL', 'LAB', 'FACTORY', 'POWER', 'NUKER', 'ENERGY'];
 
     const roomRows = rooms
         .map((name, index) => rowInfo(name, index))
         .filter(Boolean)
         .join('');
 
-    return `<div style="font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif; padding: 16px;"><div style="${STYLES.title}"><span style="font-size: 16px;">🏠</span><span>房间信息</span></div><table style="${STYLES.table}"><thead><tr style="${STYLES.header}">${headers.map(th).join('')}</tr></thead><tbody>${roomRows}</tbody><tfoot><tr><td colspan="${headers.length}" style="${STYLES.footer}">📅 ${new Date().toLocaleString()} &nbsp;|&nbsp; ⏱ Tick ${Game.time.toLocaleString()}</td></tr></tfoot></table></div>`;
+    return `<div style="font-family: Consolas, monospace; padding: 10px; background-color: ${COLORS.bgDark};"><div style="${STYLES.title}"><span>// ROOM_STATUS_MONITOR</span></div><table style="${STYLES.table}"><thead><tr style="${STYLES.header}">${headers.map(th).join('')}</tr></thead><tbody>${roomRows}</tbody><tfoot><tr><td colspan="${headers.length}" style="${STYLES.footer}">SYSTEM_TIME: ${new Date().toISOString()} | TICK: ${Game.time}</td></tr></tfoot></table></div>`;
 }
