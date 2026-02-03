@@ -1179,7 +1179,11 @@ export default class TeamAction {
                             const curClearance = calcClearance(originPos)
                             const nextPos = originPos.getDirectPos(exitDirection)
                             const nextClearance = calcClearance(nextPos)
-                            if ((curClearance >= 4 && nextClearance >= 0) || nextClearance >= curClearance) {
+                            // 方向直返前先做一次“首步可走”校验：避免返回不可通行方向导致队伍持续撞墙
+                            // 若被挡住，则不直返，继续走下面的 PathFinder（flee）逻辑去尝试躲避绕行
+                            if (this.hasObstacleInPath(creeps, nextPos)) {
+                                // fallthrough
+                            } else if ((curClearance >= 4 && nextClearance >= 0) || nextClearance >= curClearance) {
                                 return exitDirection
                             }
                         }
