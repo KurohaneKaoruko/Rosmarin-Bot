@@ -7,6 +7,7 @@ import { isTickAligned } from '@/modules/utils/tick';
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
     declare UpdateTransportMission: (offset?: number) => void;
+    declare UpdateBoostMission: (offset?: number) => void;
     declare UpdateManageMission: (offset?: number) => void;
     declare UpdateBuildRepairMission: (offset?: number) => void;
     declare UpdateWallRepairMission: (offset?: number) => void;
@@ -14,7 +15,6 @@ export default class Mission extends Room {
     declare BuildRepairMissionCheck: () => void;
     declare UpdateMineMission: () => void;
     declare UpdateHighwayScan: () => void;
-    declare UpdateBoostMission: (offset?: number) => void;
 
     /**
      * 任务更新主循环
@@ -28,10 +28,10 @@ export default class Mission extends Room {
             { interval: 30, offset: 3, run: (offset) => this.UpdateManageMission(offset) },
             { interval: 50, offset: 4, run: (offset) => this.UpdateBuildRepairMission(offset) },
             { interval: 50, offset: 5, run: (offset) => this.UpdateWallRepairMission(offset) },
-            { interval: 100, offset: 6, run: (_offset) => this.TransportMissionCheck() },
-            { interval: 200, offset: 7, run: (_offset) => this.BuildRepairMissionCheck() },
-            { interval: 1, offset: 0, run: (_offset) => this.UpdateMineMission() },
-            { interval: 1, offset: 0, run: (_offset) => this.UpdateHighwayScan() },
+            { interval: 100, offset: 6, run: (_) => this.TransportMissionCheck() },
+            { interval: 200, offset: 7, run: (_) => this.BuildRepairMissionCheck() },
+            { interval: 1, offset: 0, run: (_) => this.UpdateMineMission() },
+            { interval: 1, offset: 0, run: (_) => this.UpdateHighwayScan() },
         ];
 
         for (const item of schedule) {

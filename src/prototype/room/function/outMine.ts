@@ -1,5 +1,6 @@
 import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoadBuilder, RoadVisual } from '@/modules/feature/externalRoad';
+import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
 import { getQoS, shouldRun } from '@/modules/infra/qos';
 
 /** 外矿采集模块 */
@@ -13,6 +14,7 @@ export default class OutMine extends Room {
 
         if (qosLevel === 'normal' || shouldRun({ every: 5, allowLevels: ['constrained'] })) {
             RoadVisual.run();
+            HighwayMineVisual.run();
         }
         this.EnergyMine();
         this.CenterMine();

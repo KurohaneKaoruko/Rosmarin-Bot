@@ -1,4 +1,5 @@
 import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/feature/externalRoad';
+import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
 
 // 外矿设置
 export default {
@@ -111,6 +112,32 @@ export default {
                 BotMem['outmineDeposit'] = !BotMem['outmineDeposit'];
                 console.log(`房间 ${roomName} 的自动采集Deposit已设置为 ${BotMem['outmineDeposit']}。`);
             }
+            return OK;
+        },
+        mapShow(homeRoom?: string) {
+            if (homeRoom) {
+                HighwayMineVisual.enable(homeRoom);
+                HighwayMineVisual.visualizeOnMap(homeRoom);
+                console.log(`✓ 已启用 ${homeRoom} 的 power/deposit 大地图可视化`);
+                console.log(`  提示: 也可以创建 Flag "${homeRoom}/mineMapVisual" 来触发可视化`);
+                return OK;
+            }
+
+            HighwayMineVisual.enableAll();
+            HighwayMineVisual.run();
+            console.log('✓ 已启用所有房间的 power/deposit 大地图可视化');
+            console.log('  提示: 也可以创建 Flag "ALL/mineMapVisual" 来触发可视化');
+            return OK;
+        },
+        mapHide(homeRoom?: string) {
+            if (homeRoom) {
+                HighwayMineVisual.disable(homeRoom);
+                console.log(`✓ 已禁用 ${homeRoom} 的 power/deposit 大地图可视化`);
+                return OK;
+            }
+
+            HighwayMineVisual.disableAll();
+            console.log('✓ 已禁用所有房间的 power/deposit 大地图可视化');
             return OK;
         },
         // 立即开始到指定房间开采power
