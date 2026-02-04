@@ -67,6 +67,16 @@ const idle = () => td(colorText(`${ICONS.warning} IDLE`, COLORS.warning));
 
 const lowResource = () => td(colorText(`${ICONS.warning} LOW_RES`, COLORS.warning));
 
+// ENERGY 显示格式：默认千分位；达到百万级后转为 K 单位（保持逗号分隔）
+export const formatEnergy = (energy: number): string => {
+    const value = Math.trunc(energy);
+    if (value >= 1_000_000) {
+        const k = Math.round(value / 1000);
+        return `${k.toLocaleString('en-US')}K`;
+    }
+    return value.toLocaleString('en-US');
+};
+
 // 根据使用率获取状态
 const getStoreStatus = (ratio: number): { icon: string; color: string } => {
     if (ratio >= THRESHOLDS.storeDanger) return { icon: ICONS.danger, color: COLORS.danger };
@@ -156,7 +166,7 @@ const renderEnergy = (room: Room): string => {
     if (!energy) return td(colorText(`${ICONS.neutral} 0`, COLORS.neutral));
     const color = energy > THRESHOLDS.energyHigh ? COLORS.info 
         : energy > THRESHOLDS.energyLow ? COLORS.warning : COLORS.danger;
-    return td(colorText(`${energy.toFixed(0).toLocaleString()}`, color));
+    return td(colorText(formatEnergy(energy), color));
 };
 
 // 生成单行数据
