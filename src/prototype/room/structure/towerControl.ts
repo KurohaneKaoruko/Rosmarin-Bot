@@ -1,4 +1,5 @@
 import { compress } from '@/modules/utils/compress';
+import { pickTowerFocusTarget } from '@/modules/utils/defenseUtils';
 
 export default class TowerControl extends Room {
     // 处理 Tower 防御和修复逻辑
@@ -151,17 +152,20 @@ export default class TowerControl extends Room {
             totalHeal += h;
         });
         creep['_towerDamage'] = realDamage - totalHeal;
-        this.visual.text(
-            `${creep['_towerDamage']}`,
-            creep.pos,
-            {
-                color: creep['_towerDamage'] > 0 ? 'red' : 'green',
-                align: 'center',
-                stroke: '#2a2a2a',
-                strokeWidth: 0.05,
-                font: '0.3 inter',
-            }
-        );
+        // 可视化仅用于调试：默认不画，避免每 tick 多目标评估时产生额外 CPU/视图开销。
+        if (Game.flags[`${this.name}/TD`]) {
+            this.visual.text(
+                `${creep['_towerDamage']}`,
+                creep.pos,
+                {
+                    color: creep['_towerDamage'] > 0 ? 'red' : 'green',
+                    align: 'center',
+                    stroke: '#2a2a2a',
+                    strokeWidth: 0.05,
+                    font: '0.3 inter',
+                }
+            );
+        }
         return creep['_towerDamage'];
     }
 
@@ -247,36 +251,23 @@ export default class TowerControl extends Room {
                         .filter((c: Creep | PowerCreep) => c) as Creep[] | PowerCreep[];
         if (Hostiles.length == 0) return false;
 
-        // 算伤, 找到能造成伤害最高的
-        let hostiles = [];
-        let maxDamege = -Infinity;
-        
-        Hostiles.forEach((c: Creep | PowerCreep) => {
-            let d = this.TowerDamageToCreep(c as any);
-            if (d > maxDamege) {
-                maxDamege = d;
-                hostiles = [c];
-            } else if (d == maxDamege) {
-                hostiles.push(c);
-            } else return;
-        })
+        const pick = pickTowerFocusTarget(this, Hostiles as any);
+        if (!pick) return false;
+        const hostile = Game.getObjectById(pick.id) as any;
+        if (!hostile) return false;
 
-        let random = (hs: (Creep | PowerCreep)[]) => Math.floor(Math.random() * hs.length);
-        let randomHostile = (hs: (Creep | PowerCreep)[]) => hs.length > 1 ? hs[random(hs)] : hs[0];
-
-        // 集火攻击
-        if (maxDamege > 0) {
-            let hostile = randomHostile(hostiles);
+        // 集火攻击：优先选择“可击杀且 TTk 更短”的目标，并保持短期粘性，避免频繁换目标打不死。
+        if (pick.netDamage > 0) {
             this.CallTowerAttack(hostile);
-        } else {
-            if (Game.time % 20 >= 5) return false;
-            let hostile = randomHostile(hostiles);
-            this.tower.forEach(tower => {
-                // 如果本tick已经攻击过, 那么不处理
-                if (tower['attacked']) return;
-                tower.attack(hostile);
-            })
+            return true;
         }
+
+        // 打不动的目标不要每 tick 浪费 tower 能量：低频点射用于逼退/打断（为什么：有些极限 boost 需要等防御兵到位）。
+        if (Game.time % 20 >= 5) return false;
+        this.tower.forEach(tower => {
+            if (tower['attacked']) return;
+            tower.attack(hostile);
+        });
         
         return true;
     

@@ -197,13 +197,12 @@ export default class RoomDefense extends Room {
 
         const canDoubleAttackBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000;
         const canDoubleHealBoost = this.level >= 7 && this['XGHO2'] >= 3000 && this['XLHO2'] >= 3000 && this['XZHO2'] >= 3000;
-        // const useDouble =
-        //     this.level >= 7 &&
-        //     canDoubleAttackBoost &&
-        //     canDoubleHealBoost &&
-        //     (breached || threatLevel >= 25 || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || hasBoostedThreat);
-
-        const useDouble = false;
+        // 双人组队防御的成本很高（占用孵化与资源），只在“确实打不动/会被冲破”时启用。
+        const useDouble =
+            this.level >= 7 &&
+            canDoubleAttackBoost &&
+            canDoubleHealBoost &&
+            (breached || hasBoostedThreat || (hasHealThreat && (hasMeleeThreat || hasRangedThreat)) || threatLevel >= 28);
         if (useDouble) {
             const desiredDouble = 1;
             if (doubleAttackDefenderNum + doubleAttackQueueNum < desiredDouble) {
@@ -239,6 +238,13 @@ export default class RoomDefense extends Room {
             enemyStats.heal * 1.8 +
             (enemyStats.boosted ? 8 : 0) +
             enemyStats.other * 3;
+
+        // 把态势写入内存，便于防御 creep 做“追击/撤退”决策（为什么：主防判定应统一，避免各自为政）。
+        this.memory['defenseState'] = breached
+            ? 'breached'
+            : enemyPressure >= 18 || enemyStats.boosted || enemyStats.heal > 0
+              ? 'hold'
+              : 'observe';
 
         let desiredAttack = 0;
         let desiredRanged = 0;
@@ -302,9 +308,39 @@ export default class RoomDefense extends Room {
     }
 
     activateSafeMode() {
-        if (this.controller.safeModeAvailable) return;
+        if (!this.controller.safeModeAvailable) return;
         if (this.controller.safeModeCooldown) return;
         if (this.controller.upgradeBlocked) return;
+        // 强威胁优先：高强度 boost 治疗团一旦压进来，若我方已有关键建筑被打爆（出现 Ruin），应立刻保全核心。
+        const hostiles = this.find(FIND_HOSTILE_CREEPS, {
+            filter: (c: Creep) =>
+                c.owner.username !== 'Invader' &&
+                !c.isWhiteList() &&
+                c.body?.some(b => b.hits > 0 && b.type === HEAL && !!b.boost)
+        }) as any as Creep[];
+        if (hostiles.length) {
+            const boostedHealParts = hostiles.reduce((sum, c) => {
+                return sum + (c.body?.filter(b => b.hits > 0 && b.type === HEAL && !!b.boost).length || 0);
+            }, 0);
+            const threshold = this.level >= 8 ? 12 : this.level >= 7 ? 6 : 999;
+            if (boostedHealParts >= threshold) {
+                const hasMyRuin = this.find(FIND_RUINS, {
+                    filter: (e: any) =>
+                        e.structure?.owner &&
+                        e.structure.owner.username === this.controller.owner.username &&
+                        e.structure.structureType !== STRUCTURE_ROAD &&
+                        e.structure.structureType !== STRUCTURE_CONTAINER &&
+                        e.structure.structureType !== STRUCTURE_WALL &&
+                        e.structure.structureType !== STRUCTURE_RAMPART &&
+                        e.structure.structureType !== STRUCTURE_EXTRACTOR &&
+                        e.structure.structureType !== STRUCTURE_LINK
+                }).length;
+                if (hasMyRuin) {
+                    this.controller.activateSafeMode();
+                    return true;
+                }
+            }
+        }
         let RuinCount = this.find(FIND_RUINS, {filter: (e: any) => e.structure.owner &&
             e.structure.owner.username==this.controller.owner.username
             &&e.structure.structureType!=STRUCTURE_ROAD

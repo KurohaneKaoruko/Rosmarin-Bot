@@ -1,3 +1,5 @@
+import { buildCombatProfile, estimateDismantlePower } from '@/modules/utils/combatCalc';
+
 export type DefenseRampartMode = 'melee' | 'ranged';
 
 /**
@@ -79,3 +81,132 @@ export const shouldSwitchDefenseRampart = (currentScore: number, nextScore: numb
     return nextScore - currentScore >= threshold;
 };
 
+export const pickDefenseAnchorRampart = (
+    room: Room,
+    mode: DefenseRampartMode,
+    seed: string,
+    minHits: number
+): StructureRampart | null => {
+    const mem = room.memory['defenseRamparts'];
+    if (!mem || !mem.tick) return null;
+    // 只使用短期缓存的候选点：避免每 tick 扫全房 rampart 造成 CPU 抖动。
+    if (mem.tick + 15 < Game.time) return null;
+    const list = mode === 'melee' ? mem.melee : mem.ranged;
+    if (!Array.isArray(list) || list.length === 0) return null;
+
+    const startIndex = getStableStartIndex(seed, list.length);
+    for (let i = 0; i < list.length; i++) {
+        const id = list[(startIndex + i) % list.length];
+        const r = Game.getObjectById(id as Id<StructureRampart>);
+        if (!r || !isDefenseRampartValid(room, r, minHits)) continue;
+        if (!isPosOccupiedByOtherCreep(room, r.pos, seed)) return r;
+        if (room.lookForAt(LOOK_CREEPS, r.pos).some(c => c.name === seed)) return r;
+    }
+    return null;
+};
+
+export type DefenseTargetPickReason = 'killable-fast' | 'killable-value' | 'unbreakable-delay' | 'fallback-closest';
+
+export type DefenseTargetPick = {
+    id: Id<Creep | PowerCreep>;
+    reason: DefenseTargetPickReason;
+    score: number;
+    netDamage: number;
+};
+
+type TowerFocusMemory = {
+    id?: Id<Creep | PowerCreep>;
+    until?: number;
+    lastSeen?: number;
+};
+
+const getRoomTowerFocusMem = (room: Room): TowerFocusMemory => {
+    if (!room.memory) (room as any).memory = {};
+    if (!room.memory['_towerFocus']) room.memory['_towerFocus'] = {};
+    return room.memory['_towerFocus'] as TowerFocusMemory;
+};
+
+const isClaimer = (c: Creep): boolean => {
+    return (c.body || []).some(p => p.hits > 0 && p.type === CLAIM);
+};
+
+const getValueBonus = (c: Creep): number => {
+    let v = 0;
+    const body = c.body || [];
+    for (const p of body) {
+        if (p.hits <= 0) continue;
+        if (p.type === HEAL) v += 6;
+        else if (p.type === CLAIM) v += 10;
+        else if (p.type === RANGED_ATTACK) v += 4;
+        else if (p.type === ATTACK) v += 3;
+        else if (p.type === WORK) v += 2;
+    }
+    const dismantle = estimateDismantlePower(c as any);
+    if (dismantle > 0) v += 6;
+    return v;
+};
+
+const getNetTowerDamage = (room: Room, target: Creep | PowerCreep): number => {
+    const fn = (room as any).TowerDamageToCreep;
+    if (typeof fn !== 'function') return 0;
+    return Number(fn.call(room, target)) || 0;
+};
+
+export const pickTowerFocusTarget = (room: Room, hostiles: (Creep | PowerCreep)[]): DefenseTargetPick | null => {
+    if (!hostiles || hostiles.length === 0) return null;
+
+    const mem = getRoomTowerFocusMem(room);
+    const focusActive = typeof mem.until === 'number' && mem.until > Game.time && mem.id;
+    if (focusActive) {
+        const keep = Game.getObjectById(mem.id!);
+        if (keep && (keep as any).pos && (keep as any).pos.roomName === room.name) {
+            const netDamage = getNetTowerDamage(room, keep as any);
+            if (netDamage > 0) {
+                mem.lastSeen = Game.time;
+                return { id: mem.id!, reason: 'killable-value', score: 1e9, netDamage };
+            }
+        }
+    }
+
+    let best: DefenseTargetPick | null = null;
+    for (const h of hostiles) {
+        if (!h) continue;
+        if ((h as any).pos?.roomName !== room.name) continue;
+
+        const netDamage = getNetTowerDamage(room, h as any);
+        const killable = netDamage > 0;
+        const hits = Number((h as any).hits) || 0;
+        const ttk = killable ? hits / Math.max(1, netDamage) : Infinity;
+        let score = 0;
+
+        if (killable) {
+            score += 100000;
+            score += Math.max(0, 5000 - ttk * 10);
+        } else {
+            score -= 20000;
+        }
+
+        if ((h as any).body) {
+            const v = getValueBonus(h as any);
+            score += v * 50;
+
+            const profile = buildCombatProfile(h as any);
+            if (profile.boosted) score += 200;
+            if (isClaimer(h as any)) score += 800;
+        }
+
+        const distToCore = room.storage ? room.storage.pos.getRangeTo((h as any).pos) : 25;
+        score += Math.max(0, 30 - distToCore) * 8;
+
+        if (!best || score > best.score) {
+            best = { id: (h as any).id, reason: killable ? 'killable-fast' : 'unbreakable-delay', score, netDamage };
+        }
+    }
+
+    if (best) {
+        mem.id = best.id;
+        mem.until = Game.time + 8;
+        mem.lastSeen = Game.time;
+    }
+    return best;
+};

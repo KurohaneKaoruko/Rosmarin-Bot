@@ -130,22 +130,30 @@ const autoDefend = function (creep: Creep) {
         return;
     }
 
-    const target = creep.pos.findClosestByRange(hostileCreeps);
+    const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
+    const focus = focusId ? (Game.getObjectById(focusId) as any) : null;
+    const target = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
         if (creep.pos.isNearTo(target)) {
             const result = creep.attack(target);
             if(result == OK) creep.room.CallTowerAttack(target);
         } else {
-            // 目标不在近战攻击范围内时不要站桩：释放站位锁并主动贴近敌人
-            // 否则 defenseRampartId/LockUntil 会让 creep 长时间固定在一个 rampart 上，无法参与输出
-            delete creep.memory['defenseRampartId'];
-            delete creep.memory['defenseRampartLockUntil'];
-            creep.memory['defenseRampartBlockedTicks'] = 0;
-            creep.moveTo(target, {
-                visualizePathStyle: { stroke: '#ff0000' },
-                range: 1,
-                costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
-            });
+            const state = creep.room.memory['defenseState'];
+            const hasRamparts = Array.isArray(creep.room[STRUCTURE_RAMPART]) && creep.room[STRUCTURE_RAMPART].length > 0;
+            if (state === 'breached' || !hasRamparts) {
+                // 破口/无工事时必须主动贴脸，否则敌人会持续推进（为什么：近战是“止损位”，不出手就会丢核心）。
+                delete creep.memory['defenseRampartId'];
+                delete creep.memory['defenseRampartLockUntil'];
+                creep.memory['defenseRampartBlockedTicks'] = 0;
+                creep.moveTo(target, {
+                    visualizePathStyle: { stroke: '#ff0000' },
+                    range: 1,
+                    costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
+                });
+                creep.room.CallTowerAttack(target);
+                return;
+            }
+            // 有工事且未破口时不追击：继续守点压制入口（为什么：追击会导致防线被拉开、被对方逐个击破）。
             creep.room.CallTowerAttack(target);
         }
     }
