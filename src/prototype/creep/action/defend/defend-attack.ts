@@ -136,6 +136,16 @@ const autoDefend = function (creep: Creep) {
             const result = creep.attack(target);
             if(result == OK) creep.room.CallTowerAttack(target);
         } else {
+            // 目标不在近战攻击范围内时不要站桩：释放站位锁并主动贴近敌人
+            // 否则 defenseRampartId/LockUntil 会让 creep 长时间固定在一个 rampart 上，无法参与输出
+            delete creep.memory['defenseRampartId'];
+            delete creep.memory['defenseRampartLockUntil'];
+            creep.memory['defenseRampartBlockedTicks'] = 0;
+            creep.moveTo(target, {
+                visualizePathStyle: { stroke: '#ff0000' },
+                range: 1,
+                costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
+            });
             creep.room.CallTowerAttack(target);
         }
     }

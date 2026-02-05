@@ -129,6 +129,19 @@ const autoDefend = function (creep: Creep) {
     const target = creep.pos.findClosestByRange(hostileCreeps);
     if(target) {
         const range = creep.pos.getRangeTo(target);
+        if (range > 3) {
+            // 目标不在射程内时不要站桩：释放站位锁并推进到 3 格射程，进入有效输出距离
+            delete creep.memory['defenseRampartId'];
+            delete creep.memory['defenseRampartLockUntil'];
+            creep.memory['defenseRampartBlockedTicks'] = 0;
+            creep.moveTo(target, {
+                visualizePathStyle: { stroke: '#0000ff' },
+                range: 3,
+                costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
+            });
+            creep.room.CallTowerAttack(target);
+            return;
+        }
         if (range <= 1) {
             const nearHostiles = hostileCreeps.filter(h => creep.pos.isNearTo(h)).length;
             if (nearHostiles >= 2) {
