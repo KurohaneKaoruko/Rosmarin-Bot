@@ -19,13 +19,18 @@ const upgrade = function (creep: Creep) {
     if (creep.pos.inRangeTo(creep.room.controller, 3)) {
         creep.upgradeController(creep.room.controller)
         const botMem = getRoomData(creep.room.name);
-        const sign = botMem?.sign ?? BASE_CONFIG.DEFAULT_SIGN;
-        const oldSign = creep.room.controller.sign?.text ?? '';
-        if(creep.room.controller && sign && oldSign != sign) {
-            if (creep.pos.inRangeTo(creep.room.controller, 1)) {
-                creep.signController(creep.room.controller, sign);
-            } else {
-                creep.moveTo(creep.room.controller.pos);
+        const customSign = botMem?.sign;
+        const controller = creep.room.controller;
+        if (controller) {
+            const oldSign = controller.sign?.text;
+            const shouldOverwrite = !!customSign;
+            const desired = shouldOverwrite ? customSign : (!controller.sign ? BASE_CONFIG.DEFAULT_SIGN : undefined);
+            if (desired && (shouldOverwrite ? oldSign !== desired : !controller.sign)) {
+                if (creep.pos.inRangeTo(controller, 1)) {
+                    creep.signController(controller, desired);
+                } else {
+                    creep.moveTo(controller.pos);
+                }
             }
         }
     }

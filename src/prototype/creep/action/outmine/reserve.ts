@@ -1,5 +1,7 @@
 import {outSignConstant} from "@/constant/SignConstant";
 
+const OUTMINE_SIGN_OVERWRITE = true;
+
 const Reserve = {
     target: function(creep: Creep) {
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -20,9 +22,19 @@ const Reserve = {
                 creep.reserveController(controller);
             }
 
-            if (!controller.sign || controller.sign.username != creep.owner.username) {
+            let desired = creep.memory['outmineSign'];
+            if (!desired) {
                 const index = Math.floor(Math.random() * outSignConstant.length);
-                creep.signController(controller, outSignConstant[index]);
+                desired = outSignConstant[index];
+                creep.memory['outmineSign'] = desired;
+            }
+
+            if (OUTMINE_SIGN_OVERWRITE) {
+                if (!controller.sign || controller.sign.username !== creep.owner.username) {
+                    if (controller.sign?.text !== desired) creep.signController(controller, desired);
+                }
+            } else if (!controller.sign) {
+                creep.signController(controller, desired);
             }
         }
         else {
