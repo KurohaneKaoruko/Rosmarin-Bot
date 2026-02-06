@@ -1,6 +1,8 @@
 import {getPrice} from "@/utils"
+import { getAutoMarketData } from "@/modules/utils/memory";
+import { BASE_CONFIG } from "@/constant/config";
 
-const normalizeResType = (resType: string): ResourceConstant => (global.BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType) as ResourceConstant;
+const normalizeResType = (resType: string): ResourceConstant => (BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType) as ResourceConstant;
 const formatPriceLimit = (p: number | undefined, orderType: string) => {
     if (p === undefined || p === null) return '无';
     return orderType === 'buy' || orderType === 'dealbuy' ? `<=${p}` : `>=${p}`;
@@ -278,8 +280,8 @@ export default {
         auto: {
             list(roomName: string) {
                 if(roomName) {
-                    const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
-                    if(!autoMarket || autoMarket.length == 0) {
+                    const autoMarket = getAutoMarketData(roomName);
+                    if(autoMarket.length == 0) {
                         console.log(`房间 ${roomName} 没有开启自动交易`);
                     }
                     else {
@@ -291,7 +293,7 @@ export default {
                     return OK;
                 }
     
-                const autoMarket = Memory['AutoData']['AutoMarketData']
+                const autoMarket = getAutoMarketData()
                 if(!autoMarket || Object.keys(autoMarket).length == 0) {
                     console.log(`没有房间开启自动交易`);
                 }
@@ -312,8 +314,8 @@ export default {
                     console.log(`房间 ${roomName} 不存在或未拥有`);
                     return;
                 }
-                const tasks = Memory['AutoData']['AutoMarketData'][roomName];
-                if (!tasks || tasks.length === 0) {
+                const tasks = getAutoMarketData(roomName);
+                if (tasks.length === 0) {
                     console.log(`房间 ${roomName} 没有开启自动交易`);
                     return;
                 }
@@ -342,11 +344,11 @@ export default {
                 return OK;
             },
             remove(roomName: string, resourceType: string, orderType: string) {
-                if(!Memory['AutoData']['AutoMarketData'][roomName]) {
+                const autoMarket = getAutoMarketData(roomName);
+                if (autoMarket.length === 0) {
                     console.log(`房间 ${roomName} 没有开启自动交易`);
                     return OK;
                 }
-                const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
                 const rt = normalizeResType(resourceType);
                 const index = autoMarket.findIndex((item: any) => normalizeResType(item.resourceType) === rt && item.orderType === orderType);
                 if(index === -1) {
@@ -371,10 +373,7 @@ export default {
                 resourceType = normalizeResType(resourceType);
                 amount = parseAmount(amount);
                 price = (price === undefined ? undefined : parseAmount(price)) as any;
-                if(!Memory['AutoData']['AutoMarketData'][roomName]) {
-                    Memory['AutoData']['AutoMarketData'][roomName] = [];
-                }
-                const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
+                const autoMarket = getAutoMarketData(roomName);
                 if (type === 'create') {
                     const autoOrder = autoMarket.find((item: any) => normalizeResType(item.resourceType) === resourceType && item.orderType === 'buy');
                     if(!autoOrder) {
@@ -414,10 +413,7 @@ export default {
                 resourceType = normalizeResType(resourceType);
                 amount = parseAmount(amount);
                 price = (price === undefined ? undefined : parseAmount(price)) as any;
-                if(!Memory['AutoData']['AutoMarketData'][roomName]) {
-                    Memory['AutoData']['AutoMarketData'][roomName] = [];
-                }
-                const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
+                const autoMarket = getAutoMarketData(roomName);
                 if (type === 'create') {
                     const autoOrder = autoMarket.find((item: any) => normalizeResType(item.resourceType) === resourceType && item.orderType === 'sell')
                     if(!autoOrder) {
@@ -429,7 +425,6 @@ export default {
                         console.log(`房间 ${roomName} 已存在自动出售${resourceType}, 已修改为: 购买阈值${amount}`);
                     }
                 } else if (type === 'deal') {
-                    const autoMarket = Memory['AutoData']['AutoMarketData'][roomName];
                     if(!autoMarket.find((item: any) => normalizeResType(item.resourceType) === resourceType && item.orderType === 'dealsell')) {
                         autoMarket.push({resourceType, amount, orderType: 'dealsell' as const, price});
                         console.log(`已在房间 ${roomName} 开启自动Deal卖${resourceType}，出售阈值:${amount}, 价格限制:${price ?? '无限制'}`);

@@ -82,10 +82,10 @@ const RoleSpawnCheck = {
     'manager': (room: Room, current: number) => {
         const num = RoleLevelData['manager'][room.level]['num'];
         if (num == 0) return false;
-        const center = Memory['RoomControlData'][room.name]?.center;
+        const center = room.getCenter();
         const storage = room.storage;
         const terminal = room.terminal;
-        const link = room.link.find(l => l.pos.inRangeTo(center.x, center.y, 1));
+        const link = room.link.find(l => l.pos.inRangeTo(center, 1));
         return current < num && storage && (terminal || link);
     },
     'carrier': (room: Room, current: number) => {

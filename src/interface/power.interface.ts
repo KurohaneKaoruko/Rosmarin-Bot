@@ -131,7 +131,7 @@ interface PowerCreep {
     /**
      * 为 PowerSpawn 运输 Power 资源
      * @description 当 PowerSpawn 的 Power 不足时，从 Storage 取出并运送。
-     * 需要在 Memory['StructControlData'][roomName].powerSpawn 中开启。
+     * 需要在 Memory.RosmarinBot.StructData[roomName].powerSpawn 中开启。
      * 条件检查：
      * - Storage 中 Power >= 100
      * - Storage 中 Energy >= 10000

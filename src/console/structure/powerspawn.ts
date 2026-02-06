@@ -1,9 +1,11 @@
+import { getAutoPowerData, getStructData } from '@/modules/utils/memory';
+
 export default {
     power: {
         // 开启powerSpawn
         open(roomName: string) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
@@ -16,7 +18,7 @@ export default {
         // 关闭powerSpawn
         stop(roomName: string) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
@@ -28,14 +30,14 @@ export default {
         },
         show(roomName: string) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
             const structMem = BotMemStructures[roomName];
             const mode = structMem['powerSpawnMode'] ?? 'auto';
             const enabled = !!structMem['powerSpawn'];
-            const autoMem = Memory['AutoData']?.['AutoPowerData']?.[roomName] || {};
+            const autoMem = getAutoPowerData()?.[roomName] || {};
             const energy = autoMem['energy'] ?? 100e3;
             const power = autoMem['power'] ?? 10e3;
             console.log(
@@ -48,7 +50,7 @@ export default {
         auto: {
             on(roomName: string) {
                 const room = Game.rooms[roomName];
-                const BotMemStructures =  Memory['StructControlData'];
+                const BotMemStructures =  getStructData();
                 if(!room || !room.my || !BotMemStructures[roomName]) {
                     return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 }
@@ -61,14 +63,12 @@ export default {
                 if (!room || !room.my) {
                     return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 }
-                const BotMem =  Memory['AutoData']['AutoPowerData'];
-                if(!BotMem[roomName]) BotMem[roomName] = {};
+                const BotMem = getAutoPowerData(roomName);
 
-                BotMem[roomName]['energy'] = energy;
-                BotMem[roomName]['power'] = power;
-                if (Memory['StructControlData']?.[roomName]) {
-                    Memory['StructControlData'][roomName]['powerSpawnMode'] = 'auto';
-                }
+                BotMem['energy'] = energy;
+                BotMem['power'] = power;
+                const struct = getStructData();
+                if (struct?.[roomName]) struct[roomName]['powerSpawnMode'] = 'auto';
                 global.log(`已设置${roomName}的自动烧power的阈值为 ${energy} Energy 和 ${power} Power。`);
                 return OK;
             },
@@ -77,13 +77,12 @@ export default {
                 if (!room || !room.my) {
                     return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 }
-                const BotMem = Memory['AutoData']['AutoPowerData'];
+                const BotMem = getAutoPowerData();
                 if(!BotMem[roomName]) return;
 
                 delete BotMem[roomName];
-                if (Memory['StructControlData']?.[roomName]) {
-                    Memory['StructControlData'][roomName]['powerSpawnMode'] = 'auto';
-                }
+                const struct = getStructData();
+                if (struct?.[roomName]) struct[roomName]['powerSpawnMode'] = 'auto';
                 global.log(`已移除${roomName}的自动烧power的阈值。`);
                 return OK;
             }

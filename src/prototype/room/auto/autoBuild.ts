@@ -1,4 +1,5 @@
 import LayoutPlanner from "@/modules/feature/planner/layoutPlanner"
+import { getLayoutData, getRoomData } from "@/modules/utils/memory";
 
 
 
@@ -10,8 +11,8 @@ export default class AutoBuild extends Room {
         if (Game.time % 100 !== (this.memory['index']||0)) return;
 
         // 开启了自动建造, 且有布局Memory, 则自动建筑
-        const memory = Memory['RoomControlData'][this.name];
-        const layoutMemory = Memory['LayoutData'][this.name];
+        const memory = getRoomData()[this.name];
+        const layoutMemory = getLayoutData(this.name);
         if (memory && memory.autobuild && layoutMemory &&
             Object.keys(layoutMemory).length) {
             LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });

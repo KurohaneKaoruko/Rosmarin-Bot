@@ -1,4 +1,5 @@
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
+import { getStructData } from '@/modules/utils/memory';
 
 export default class PowerCreepUsePower extends PowerCreep {
     Generate_OPS() {
@@ -109,7 +110,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         const factory = this.room.factory;
         if(!factory) return false;
         // 没有任务时不处理
-        const memory = Memory['StructControlData'][this.room.name];
+        const memory = getStructData(this.room.name);
         if(!memory || !memory.factoryProduct) return false;
         // ops不足时不处理
         if(this.store[RESOURCE_OPS] < 100) return false;
@@ -140,7 +141,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         if(!this.room.lab) return false;
         if(this.store[RESOURCE_OPS] < 10) return false;
 
-        const botmem =  Memory['StructControlData'][this.room.name];
+        const botmem = getStructData(this.room.name);
         if (!botmem || !botmem.lab) return;
         const { labA, labB, labAId, labBId } = getLabAB(this.room.name, this.room);
         if (!labA || !labB || !labAId || !labBId) return;
@@ -172,7 +173,7 @@ export default class PowerCreepUsePower extends PowerCreep {
     Operate_Power() {
         const powerSpawn = this.room.powerSpawn;
         if(!powerSpawn) return false;
-        const mem = Memory['StructControlData'][this.room.name];
+        const mem = getStructData(this.room.name);
         if(!mem || !mem.powerSpawn) return false;
         if(this.store[RESOURCE_OPS] < 200) return false;
         if(this.room.storage.store[RESOURCE_POWER] < 5000) return false;

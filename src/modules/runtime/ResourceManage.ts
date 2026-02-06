@@ -1,13 +1,14 @@
 import {Goods, RESOURCE_BALANCE} from '@/constant/ResourceConstant'
 import { log } from '@/utils';
+import { getMissionPools, getResourceManage, getRoomData } from '@/modules/utils/memory';
 
 /** 资源管理模块 */
 export const ResourceManage = {
     tick: function () {
         // 降低全局资源平衡的 CPU 占用：固定间隔执行
         if (Game.time % 50) return;
-        const ResManageMem = Memory['ResourceManage'] || {};
-        // 全局默认参与平衡的资源类型（可被 Memory.ResourceManage 的房间自定义条目扩展）
+        const ResManageMem = getResourceManage() || {};
+        // 全局默认参与平衡的资源类型（可被 Memory.RosmarinBot.ResourceManage 的房间自定义条目扩展）
         const balanceResKeys = Object.keys(RESOURCE_BALANCE);
 
         // ResManageMap: 按资源维度收集“可供应房间/需求房间”
@@ -26,7 +27,7 @@ export const ResourceManage = {
         }
 
         // 遍历所有房间的设置
-        for (const roomName in Memory['RoomControlData']) {
+        for (const roomName in getRoomData()) {
             const room = Game.rooms[roomName];
             // 仅对满足条件的“己方房间”启用跨房间资源平衡
             if (!room || !room.my || !room.terminal || !room.storage || room.level < 6 || 
@@ -50,7 +51,7 @@ export const ResourceManage = {
                 if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
                 let sourceThreshold: number, targetThreshold: number;
                 if (ResManageMem[roomName] && ResManageMem[roomName][res]) {
-                    // Memory.ResourceManage 配置优先级高于全局 RESOURCE_BALANCE
+                    // Memory.RosmarinBot.ResourceManage 配置优先级高于全局 RESOURCE_BALANCE
                     sourceThreshold = ResManageMem[roomName][res][1] ?? Infinity;
                     targetThreshold = ResManageMem[roomName][res][0] ?? 0;
                 } else {
@@ -111,7 +112,7 @@ export const ResourceManage = {
             }
         }
 
-        const missionPools = Memory.MissionPools || {};
+        const missionPools = getMissionPools() || {};
         for (const sourceRoomName in missionPools) {
             const roomPools = missionPools[sourceRoomName];
             const terminalTasks = roomPools?.terminal;

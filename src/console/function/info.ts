@@ -1,4 +1,5 @@
 import { showRoomInfo } from "@/modules/utils/showRoomInfo";
+import { getRoomData } from "@/modules/utils/memory";
 
 export default {
     info: {
@@ -10,7 +11,7 @@ export default {
                 if (!room || !room.my) return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
             // 获取需要显示的房间名列表
-            const roomNames = roomName ? [roomName] : Object.keys(Memory['RoomControlData']);
+            const roomNames = roomName ? [roomName] : Object.keys(getRoomData());
             return showRoomInfo(roomNames);
         },
         // 查看所有资源储量

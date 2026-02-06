@@ -1,5 +1,6 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
 import { ensureLabAB, getLabAB } from '@/modules/utils/labReservations';
+import { getStructData } from '@/modules/utils/memory';
 
 export default class LabControl extends Room {
     LabWork() {
@@ -58,7 +59,7 @@ export default class LabControl extends Room {
         if (!this.lab || this.lab.length < 3) return;
         if (this.memory.defend) return;
         // lab关停时不合成
-        const memory =  Memory['StructControlData'][this.name];
+        const memory = getStructData(this.name);
         if (!memory || !memory.lab) return;
         // 读取 A/B（只读）；若未配置且未通过 LabWork 的 ensure 修正，这里将直接返回空
         const { labA, labB, labAId, labBId } = getLabAB(this.name, this);

@@ -1,6 +1,8 @@
 import {LabMap} from '@/constant/ResourceConstant'
 import { compress } from '@/modules/utils/compress';
 import { ensureBoostLabs } from '@/modules/utils/labReservations';
+import { BASE_CONFIG } from '@/constant/config';
+import { getAutoLabData, getStructData } from '@/modules/utils/memory';
 
 export default {
     lab: {
@@ -11,9 +13,8 @@ export default {
                 global.log(`房间 ${roomName} 不存在或未添加。`);
                 return;
             }
-            const BotMemStructures =  Memory['StructControlData'];
-            if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
-            BotMemStructures[roomName]['lab'] = true;
+            const BotMemStructures = getStructData(roomName) as any;
+            BotMemStructures['lab'] = true;
             global.log(`[${roomName}] 已开启lab合成。`);
             return OK;
         },
@@ -24,9 +25,8 @@ export default {
                 global.log(`房间 ${roomName} 不存在或未添加。`);
                 return;
             }
-            const BotMemStructures =  Memory['StructControlData'];
-            if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
-            BotMemStructures[roomName]['lab'] = false;
+            const BotMemStructures = getStructData(roomName) as any;
+            BotMemStructures['lab'] = false;
             global.log(`[${roomName}] 已关闭lab合成。`);
             return OK;
         },
@@ -37,8 +37,7 @@ export default {
                 global.log(`房间 ${roomName} 不存在或未拥有。`);
                 return;
             }
-            const BotMemStructures =  Memory['StructControlData'];
-            if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
+            const BotMemStructures = getStructData(roomName) as any;
             if (product) {
                 if (!LabMap[product]) {
                     global.log(`不存在Lab合成产物 ${product} 。`);
@@ -46,9 +45,9 @@ export default {
                 }
                 let A = LabMap[product].raw1;
                 let B = LabMap[product].raw2;
-                BotMemStructures[roomName]['labAtype'] = A;
-                BotMemStructures[roomName]['labBtype'] = B;
-                BotMemStructures[roomName]['labAmount'] = Math.max(0, amount);
+                BotMemStructures['labAtype'] = A;
+                BotMemStructures['labBtype'] = B;
+                BotMemStructures['labAmount'] = Math.max(0, amount);
                 global.log(`[${roomName}] 已设置lab合成底物为 ${A} 和 ${B}。`);
             }
             const labAflag = Game.flags[`labA`] || Game.flags[`lab-A`];
@@ -59,14 +58,14 @@ export default {
                 if (!labA || !labB) {
                     global.log(`[${roomName}] 未找到 labA/labB 旗帜所在位置的 Lab。`);
                 } else {
-                    BotMemStructures[roomName]['labA'] = compress(labA.pos.x, labA.pos.y);
-                    BotMemStructures[roomName]['labB'] = compress(labB.pos.x, labB.pos.y);
+                    BotMemStructures['labA'] = compress(labA.pos.x, labA.pos.y);
+                    BotMemStructures['labB'] = compress(labB.pos.x, labB.pos.y);
                     global.log(`[${roomName}] 已设置底物lab为 (${labA.pos.x},${labA.pos.y}) 和 (${labB.pos.x},${labB.pos.y})。`);
                 }
                 labAflag.remove();
                 labBflag.remove();
             }
-            BotMemStructures[roomName]['lab'] = true;
+            BotMemStructures['lab'] = true;
             global.log(`[${roomName}] 已开启lab合成。`);
             return OK;
         },
@@ -76,8 +75,6 @@ export default {
                 global.log(`房间 ${roomName} 不存在或未拥有。`);
                 return;
             }
-            const BotMemStructures = Memory['StructControlData'];
-            if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
             // 手动长期征用：通过旗帜设置某个 lab 固定填充指定 boost 资源（mode: 'fixed'）
             const boostLabs = ensureBoostLabs(roomName);
             for(const id of Object.keys(boostLabs)) {
@@ -89,8 +86,8 @@ export default {
                 if(!labsetMatch) continue;
                 const lab = flag.pos.lookFor(LOOK_STRUCTURES).find(structure => structure.structureType === STRUCTURE_LAB);
                 if (!lab) continue;
-                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-                let resourceType = RES[labsetMatch[1]] || labsetMatch[1];
+                const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+                let resourceType = RES[labsetMatch[1]] || labsetMatch[1] as ResourceConstant;
                 if (!resourceType || !LabMap[resourceType]) {
                     delete boostLabs[lab.id];
                     flag.remove();
@@ -132,11 +129,10 @@ export default {
                     global.log(`资源 ${product} 不存在。`);
                     return;
                 }
-                const BotMem =  Memory['AutoData']['AutoLabData'];
-                if(!BotMem[roomName]) BotMem[roomName] = {};
+                const BotMem = getAutoLabData(roomName);
     
                 amount = amount || 0;
-                BotMem[roomName][product] = amount;
+                BotMem[product] = amount;
                 global.log(`已设置 ${roomName} 的自动lab合成: ${product} - ${amount}`);
                 if (amount > 0) global.log(`合成任务限额: ${amount}`);
                 return OK;
@@ -151,15 +147,14 @@ export default {
                     global.log(`资源 ${product} 不存在。`);
                     return;
                 }
-                const BotMem = Memory['AutoData']['AutoLabData'];
-                if(!BotMem[roomName]) BotMem[roomName] = {};
+                const BotMem = getAutoLabData(roomName);
     
-                delete BotMem[roomName][product];
+                delete BotMem[product];
                 global.log(`已删去 ${roomName} 的自动lab合成: ${product}`);
                 return OK;
             },
             list(roomName: string) {
-                const BotMemAutoFactory = Memory['AutoData']['AutoLabData'];
+                const BotMemAutoFactory = getAutoLabData();
                 if(roomName) {
                     const autoLab = BotMemAutoFactory[roomName];
                     if(!autoLab || autoLab.length == 0) {

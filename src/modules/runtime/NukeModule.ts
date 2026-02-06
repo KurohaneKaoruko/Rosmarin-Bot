@@ -1,16 +1,18 @@
 import { shouldRun } from "@/modules/infra/qos";
+import { getNukerData } from "@/modules/utils/memory";
 
 export const NukeModule = {
     tick: function () {
         if (!shouldRun({ every: 10, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return;
 
-        if (!Memory.nuke?.requests || Memory.nuke.requests.length === 0) return;
+        const nukerData = getNukerData();
+        if (nukerData.requests.length === 0) return;
 
         const now = Game.time;
-        Memory.nuke.requests = Memory.nuke.requests.filter(req => now - req.createdTick <= req.ttl);
-        if (Memory.nuke.requests.length === 0) return;
+        nukerData.requests = nukerData.requests.filter(req => now - req.createdTick <= req.ttl);
+        if (nukerData.requests.length === 0) return;
 
-        for (const req of Memory.nuke.requests) {
+        for (const req of nukerData.requests) {
             const flagName = req.flagName || `nuke-${Math.max(1, req.amount || 1)}-${req.id}`;
             req.flagName = flagName;
 
@@ -39,10 +41,9 @@ export const NukeModule = {
             }
         }
 
-        Memory.nuke.requests = Memory.nuke.requests.filter(req => {
+        nukerData.requests = nukerData.requests.filter(req => {
             if (!req.flagName) return true;
             return !!Game.flags[req.flagName];
         });
     }
 }
-

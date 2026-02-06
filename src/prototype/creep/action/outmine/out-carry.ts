@@ -200,8 +200,7 @@ const outCarry = {
                 }
             } 
             else {
-                const center = Memory['RoomControlData'][creep.room.name]?.center;
-                const centerPos = new RoomPosition(center.x, center.y, creep.room.name);
+                const centerPos = creep.room.getCenter();
                 if (centerPos && creep.pos.inRangeTo(centerPos, 1)) {
                     creep.drop(Object.keys(creep.store)[0]);
                 } else {

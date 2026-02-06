@@ -287,8 +287,8 @@ export default class TowerControl extends Room {
         if (Game.time % 20 == 0) {
             targetCache[this.name] = null;
             if (this.checkMissionInPool('repair')) {
-                const center = Memory['RoomControlData'][this.name]?.center
-                const posInfo = compress(center?.x||25, center?.y||25);
+                const centerPos = this.getCenter();
+                const posInfo = compress(centerPos.x, centerPos.y);
                 const hits = this[RESOURCE_ENERGY] > 200000 ? 1e6 : this[RESOURCE_ENERGY] > 100000 ? 3e5 : 3e4;
                 const task = this.getMissionFromPool('repair', posInfo,
                     (t) => (Game.getObjectById(t.data.target) as any)?.hits <= hits

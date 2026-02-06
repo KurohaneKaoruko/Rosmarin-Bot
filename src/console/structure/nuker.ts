@@ -1,3 +1,5 @@
+import { getNukerData } from "@/modules/utils/memory";
+
 export default {
     nuker: {
         launch(...rooms: string[]) {
@@ -36,11 +38,10 @@ export default {
         },
         request(roomName: string, x: number, y: number, amount: number = 1, ttl: number = 2000, ...rooms: string[]) {
             const cpu0 = Game.cpu.getUsed();
-            if (!Memory.nuke) Memory.nuke = { landTime: {} };
-            if (!Memory.nuke.requests) Memory.nuke.requests = [];
+            const nukerData = getNukerData();
 
             const id = `${Game.time}-${Math.floor(Math.random() * 1000000)}`;
-            Memory.nuke.requests.push({
+            nukerData.requests.push({
                 id,
                 roomName,
                 x,
@@ -55,12 +56,13 @@ export default {
         },
         list() {
             const cpu0 = Game.cpu.getUsed();
-            const reqs = Memory.nuke?.requests || [];
+            const reqs = getNukerData().requests;
             return `${JSON.stringify(reqs)}  CPU used:${Game.cpu.getUsed() - cpu0}`;
         },
         cancel(id: string) {
             const cpu0 = Game.cpu.getUsed();
-            const list = Memory.nuke?.requests;
+            const nukerData = getNukerData();
+            const list = nukerData.requests;
             if (!list || list.length === 0) return `无 nuke 请求  CPU used:${Game.cpu.getUsed() - cpu0}`;
 
             const next = [];
@@ -73,7 +75,7 @@ export default {
                 removed++;
                 if (req.flagName && Game.flags[req.flagName]) Game.flags[req.flagName].remove();
             }
-            Memory.nuke!.requests = next;
+            nukerData.requests = next;
             return `已取消 ${removed} 条 nuke 请求  CPU used:${Game.cpu.getUsed() - cpu0}`;
         },
         cluster(targetRoomName: string, count: number = 4, ...rooms: string[]) {

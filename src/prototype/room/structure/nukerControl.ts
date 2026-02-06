@@ -1,3 +1,5 @@
+import { getNukerData } from "@/modules/utils/memory";
+
 export default class NukerControl extends Room {
     /**
      * 判断本房间 nuker 是否已满足发射资源条件
@@ -57,8 +59,8 @@ export default class NukerControl extends Room {
         if (!this.NukerInLaunchRange(targetPos)) return ERR_NOT_IN_RANGE;
         const code = nuker.launchNuke(targetPos);
         if (code === OK) {
-            if (!Memory.nuke) Memory.nuke = { landTime: {} };
-            Memory.nuke.landTime[targetPos.roomName] = Game.time + NUKE_LAND_TIME;
+            const nukerData = getNukerData();
+            nukerData.landTime[targetPos.roomName] = Game.time + NUKE_LAND_TIME;
         }
         return code;
     }

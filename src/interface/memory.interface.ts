@@ -25,6 +25,8 @@ interface NukeMemory {
     requests?: NukeRequest[];
 }
 
+type NukerDataMemory = NukeMemory;
+
 interface NukeRequest {
     id: string;
     roomName: string;
@@ -37,6 +39,19 @@ interface NukeRequest {
     flagName?: string;
     lastError?: number;
     lastErrorTick?: number;
+}
+
+interface BotMemory {
+    MissionPools: { [roomName: string]: MissionPoolMemory };
+    RoomData: { [roomName: string]: RoomControlMemory };
+    StructData: { [roomName: string]: StructControlMemory };
+    LayoutData: { [roomName: string]: LayoutMemory };
+    OutMineData: { [roomName: string]: OutMineMemory };
+    AutoData: AutoDataMemory;
+    ResourceManage: { [roomName: string]: ResourceManageMemory };
+    TeamData: Record<string, any>;
+    TeamSpawnQueue: Record<string, any>;
+    NukerData: NukerDataMemory;
 }
 
 interface Memory {
@@ -81,84 +96,10 @@ interface Memory {
     warmode: boolean;
 
     /**
-     * 核弹打击数据
-     * @description 记录核弹落点时间等数据，用于避免重复 nuke
+     * Bot数据
+     * @description 存储改bot运行时的数据，包括任务队列、资源管理等
      */
-    nuke?: NukeMemory;
-
-    // ========================================================
-    // 房间控制数据 - Room Control Data
-    // ========================================================
-
-    /**
-     * 房间控制数据
-     * @description 存储每个房间的基本控制配置
-     */
-    RoomControlData: {
-        [roomName: string]: RoomControlMemory;
-    };
-
-    /**
-     * 建筑控制数据
-     * @description 存储每个房间的建筑运行配置，如 Lab、Factory、PowerSpawn 等
-     */
-    StructControlData: {
-        [roomName: string]: StructControlMemory;
-    };
-
-    /**
-     * 布局数据
-     * @description 存储每个房间的建筑布局信息，用于自动建造
-     */
-    LayoutData: {
-        [roomName: string]: LayoutMemory;
-    };
-
-    // ========================================================
-    // 外矿数据 - Out Mine Data
-    // ========================================================
-
-    /**
-     * 外矿数据
-     * @description 存储每个房间的外矿配置，包括能量矿、中央九房、过道采集等
-     */
-    OutMineData: {
-        [roomName: string]: OutMineMemory;
-    };
-
-    // ========================================================
-    // 自动化数据 - Auto Data
-    // ========================================================
-
-    /**
-     * 自动化任务数据
-     * @description 存储各种自动化任务的配置
-     */
-    AutoData: AutoDataMemory;
-
-    // ========================================================
-    // 资源管理 - Resource Management
-    // ========================================================
-
-    /**
-     * 资源管理配置
-     * @description 存储每个房间的资源供需阈值，用于跨房间资源调度
-     */
-    ResourceManage: {
-        [roomName: string]: ResourceManageMemory;
-    };
-
-    // ========================================================
-    // 任务池 - Mission Pools
-    // ========================================================
-
-    /**
-     * 任务池
-     * @description 存储每个房间的任务队列
-     */
-    MissionPools: {
-        [roomName: string]: MissionPoolMemory;
-    };
+    RosmarinBot: BotMemory;
 }
 
 /**

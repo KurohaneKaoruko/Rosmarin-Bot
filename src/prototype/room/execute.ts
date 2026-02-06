@@ -1,4 +1,5 @@
 import { shouldRun } from '@/modules/infra/qos';
+import { getRoomData, getStructData } from '@/modules/utils/memory';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -34,10 +35,11 @@ export default class RoomExecute extends Room {
 
     // 房间初始化
     init() {
-        if (!this.my || !Memory['RoomControlData'][this.name]) return;
+        if (!this.my || !getRoomData()[this.name]) return;
 
-        if (!Memory['StructControlData'][this.name]) {
-            Memory['StructControlData'][this.name] = {
+        const structData = getStructData();
+        if (!structData[this.name]) {
+            structData[this.name] = {
                 lab: true,
                 factory: true,
                 powerSpawn: true,

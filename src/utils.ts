@@ -1,3 +1,5 @@
+import { BASE_CONFIG } from '@/constant/config';
+
 /** 签入原型
  * 为obj1添加obj2的原型方法
  * @param obj1 目标对象
@@ -16,7 +18,7 @@ export const assignPrototype = function(obj1: any, obj2: any) {
  * @param args 日志参数
  */
 export function log(type: string, text: string, ...args: any[]) {
-    if (!type) type = `${global.BOT_NAME}`;
+    if (!type) type = `${BASE_CONFIG.BOT_NAME}`;
     const str = `<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`
     if (console['logUnsafe'] && typeof console['logUnsafe'] === 'function') {
         console['logUnsafe'](str, ...args);

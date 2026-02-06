@@ -1,4 +1,5 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
+import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
 const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnMissionNum: {[role: string]: number}) => {
     const targetRoom = mineData.targetRoom;
@@ -316,11 +317,11 @@ export default class MineMission extends Room {
         if (Game.time % LOOK_INTERVAL > 1) return;
 
         if (this[RESOURCE_ENERGY] < 50000) return;
-        const outminePower = Memory['RoomControlData'][this.name]['outminePower'];
-        const outmineDeposit = Memory['RoomControlData'][this.name]['outmineDeposit'];
+        const outminePower = getRoomData()[this.name]['outminePower'];
+        const outmineDeposit = getRoomData()[this.name]['outmineDeposit'];
         if (!outminePower && !outmineDeposit) return;
         
-        let lookList = Memory['OutMineData'][this.name]?.['highway'] || [];
+        let lookList = getOutMineData(this.name)?.['highway'] || [];
         if (lookList.length == 0) return;
         
         if (Game.time % LOOK_INTERVAL == 0) {
@@ -401,4 +402,3 @@ export default class MineMission extends Room {
         }
     }
 }
-

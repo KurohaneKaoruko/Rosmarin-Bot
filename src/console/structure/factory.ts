@@ -1,9 +1,12 @@
+import { BASE_CONFIG } from '@/constant/config';
+import { getAutoFactoryData, getStructData } from '@/modules/utils/memory';
+
 export default {
     factory: {
         // 开启factory
         open(roomName: string) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
@@ -15,7 +18,7 @@ export default {
         // 关闭factory
         stop(roomName: string) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
@@ -26,9 +29,9 @@ export default {
         },
         // 设置factory生产
         set(roomName: string, product: string, amount: number = 0) {
-            const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+            const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -36,7 +39,7 @@ export default {
             if(!COMMODITIES[product]) {
                 return Error(`生产目标 ${product} 不存在。`);
             }
-            const flv = room.factory?.level || Memory['StructControlData'][roomName]?.['factoryLevel'] || 0;
+            const flv = room.factory?.level || getStructData(roomName)?.['factoryLevel'] || 0;
             if(COMMODITIES[product].level && COMMODITIES[product].level != flv) {
                 return Error(`生产目标 ${product} 需要factory等级为 ${COMMODITIES[product].level}, 而factory等级不匹配或未设置等级。`);
             }
@@ -52,7 +55,7 @@ export default {
         // 设置factory等级
         setlevel(roomName: string, level: number) {
             const room = Game.rooms[roomName];
-            const BotMemStructures =  Memory['StructControlData'];
+            const BotMemStructures =  getStructData();
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`[${roomName}] 房间不存在、未拥有或未添加。`);
                 return;
@@ -67,7 +70,7 @@ export default {
         },
         auto: {
             set(roomName: string, product: string, amount?: number) {
-                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+                const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 product = RES[product] || product;
                 const room = Game.rooms[roomName];
                 if(!room || !room.my) {
@@ -78,20 +81,19 @@ export default {
                     global.log(`资源 ${product} 不存在。`);
                     return;
                 }
-                const flv = room.factory?.level || Memory['StructControlData'][roomName]?.['factoryLevel'];
+                const flv = room.factory?.level || getStructData(roomName)?.['factoryLevel'];
                 if(COMMODITIES[product].level && COMMODITIES[product].level != flv) {
                     global.log(`资源 ${product} 的等级 ${COMMODITIES[product].level} 不匹配 factory 等级 ${flv}。`);
                     return;
                 }
-                const BotMemStructures =  Memory['AutoData']['AutoFactoryData'];
-                if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
+                const BotMemStructures = getAutoFactoryData(roomName);
                 amount = amount || 0
-                BotMemStructures[roomName][product] = amount;
+                BotMemStructures[product] = amount;
                 global.log(`已设置 ${roomName} 的factory自动生产: ${product} - ${amount}。`);
                 return OK;
             },
             remove(roomName: string, product: string) {
-                const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+                const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 product = RES[product] || product;
                 const room = Game.rooms[roomName];
                 if(!room || !room.my) {
@@ -102,14 +104,13 @@ export default {
                     global.log(`资源 ${product} 不存在。`);
                     return;
                 }
-                const BotMemStructures =  Memory['AutoData']['AutoFactoryData'];
-                if(!BotMemStructures[roomName]) BotMemStructures[roomName] = {};
-                delete BotMemStructures[roomName][product];
+                const BotMemStructures = getAutoFactoryData(roomName);
+                delete BotMemStructures[product];
                 global.log(`已删除 ${roomName} 的factory自动生产: ${product}。`);
                 return OK;
             },
             list(roomName: string) {
-                const BotMemAutoFactory = Memory['AutoData']['AutoFactoryData'];
+                const BotMemAutoFactory = getAutoFactoryData();
                 if(roomName) {
                     const autoFactory = BotMemAutoFactory[roomName];
                     if(!autoFactory || autoFactory.length == 0) {

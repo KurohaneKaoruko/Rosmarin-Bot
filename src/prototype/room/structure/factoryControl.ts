@@ -1,3 +1,5 @@
+import { getStructData } from '@/modules/utils/memory';
+
 export default class FactoryControl extends Room {
     FactoryWork() {
         const factory = this.factory;
@@ -7,7 +9,7 @@ export default class FactoryControl extends Room {
         if (factory.cooldown != 0) return;
         if (Memory['warmode']) return;
 
-        const memory =  Memory['StructControlData'][this.name];
+        const memory = getStructData(this.name);
         // 关停时不处理
         if (!memory || !memory.factory) return;
         // 没有任务时不处理

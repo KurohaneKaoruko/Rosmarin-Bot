@@ -1,5 +1,7 @@
 import { signConstant } from "@/constant/SignConstant";
+import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
+import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memory";
 
 // 房间控制
 export default {
@@ -9,23 +11,22 @@ export default {
             if (!roomName) return Error('请输入房间名。');
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
-            const BotMemRooms =  Memory['RoomControlData'];
-            if(!BotMemRooms[roomName]) BotMemRooms[roomName] = {} as any;
-            if(!BotMemRooms[roomName]['mode']) {
-                BotMemRooms[roomName]['mode'] = 'main';
+            const roomMem = ensureRoomData(roomName) as any;
+            if(!roomMem['mode']) {
+                roomMem['mode'] = 'main';
             }
             global.log(`已添加房间${roomName}。`);
             if(layout) {
-                BotMemRooms[roomName]['layout'] = layout;
+                roomMem['layout'] = layout;
                 global.log(`已设置 ${roomName} 的布局为 ${layout}。`);
             }
             if(x && y) {
-                BotMemRooms[roomName]['center'] = {x, y};
+                roomMem['center'] = {x, y};
                 global.log(`已设置 ${roomName} 的布局中心为 (${x},${y})。`);
             } else {
                 let PosFlag = Game.flags.storagePos || Game.flags.centerPos;
                 if(PosFlag && PosFlag.room.name === roomName) {
-                    BotMemRooms[roomName]['center'] = {x: PosFlag.pos.x, y: PosFlag.pos.y};
+                    roomMem['center'] = {x: PosFlag.pos.x, y: PosFlag.pos.y};
                     global.log(`已设置 ${roomName} 的布局中心为 (${PosFlag.pos.x},${PosFlag.pos.y})。`);
                 }
             }
@@ -47,7 +48,7 @@ export default {
         },
         // 查看房间列表
         list() {
-            global.log(`房间控制列表：${Object.keys(Memory['RoomControlData']).join('、')}`);
+            global.log(`房间控制列表：${Object.keys(getRoomData()).join('、')}`);
             return OK;
         },
         // 设置房间模式
@@ -57,7 +58,7 @@ export default {
             if (!['main', 'stop', 'low'].includes(mode)) return Error('仅支持main、stop、low模式。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms =  Memory['RoomControlData'];
+            const BotMemRooms =  getRoomData();
             if(!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -71,7 +72,7 @@ export default {
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if(!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -84,7 +85,7 @@ export default {
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if(!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -101,7 +102,11 @@ export default {
             if(!room || !room.my) {
                 return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
-            const botMem = Memory['RoomControlData'][roomName];
+            const rooms = getRoomData();
+            if (!rooms[roomName]) {
+                return Error(`房间 ${roomName} 未添加到控制列表。`);
+            }
+            const botMem = rooms[roomName] as any;
             botMem['sign'] = text ?? signConstant[Math.floor(Math.random() * signConstant.length)];
             global.log(`已设置 ${roomName} 的房间签名为:\n ${text}`);
             return OK;
@@ -116,7 +121,7 @@ export default {
                 return -1;
             }
 
-            const botMem = Memory['StructControlData'][roomName];
+            const botMem = getStructData(roomName) as any;
             if (hits <= 1) {
                 botMem['ram_threshold'] = hits;
                 console.log(`已设置 ${roomName} 的刷墙上限比例为 ${hits}。`);
@@ -130,7 +135,7 @@ export default {
         send(roomName: string, targetRoom: string, type: string, amount: number) {
             if (!roomName.match(/^[EW][1-9]+[NS][1-9]+$/)) return Error(`房间名格式不正确。`);
             if (!targetRoom.match(/^[EW][1-9]+[NS][1-9]+$/)) return Error(`目标房间名格式不正确。`);
-            const RESOURCE_ABBREVIATIONS = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+            const RESOURCE_ABBREVIATIONS = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
             type = RESOURCE_ABBREVIATIONS[type] || type;
             if (!RESOURCES_ALL.includes(type as ResourceConstant)) return Error(`资源类型不正确。`);
             if (typeof amount !== 'number') return Error(`数量必须是数字。`);

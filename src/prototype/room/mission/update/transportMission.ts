@@ -1,6 +1,7 @@
 import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 import { isTickAligned } from '@/modules/utils/tick';
+import { getStructData } from '@/modules/utils/memory';
 
 
 
@@ -268,11 +269,9 @@ export default class TransportMission extends Room {
 
         if(room.getResAmount(RESOURCE_ENERGY) < 10000) return;
 
-        let center = Memory['RoomControlData'][room.name].center;
-        let centerPos: RoomPosition;
-        if (center) centerPos = new RoomPosition(center.x, center.y, room.name);
+        const centerPos = room.getCenter();
         if (isTickAligned(20, offset) && room.level == 8 && room.powerSpawn && storage &&
-            (!centerPos || !room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
+            (!room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
             const powerSpawn = room.powerSpawn;
             const amount = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
             if(powerSpawn && amount > 400 && energy >= amount) {
@@ -320,10 +319,8 @@ export default class TransportMission extends Room {
     UpdatePowerMission(offset = 0) {
         const room = this;
         if(room.level < 8 || !room.powerSpawn) return;
-        let center = Memory['RoomControlData'][room.name].center;
-        let centerPos: RoomPosition;
-        if (center) centerPos = new RoomPosition(center.x, center.y, room.name);
-        if (centerPos && room.powerSpawn.pos.inRangeTo(centerPos, 1)) return;
+        const centerPos = room.getCenter();
+        if (room.powerSpawn.pos.inRangeTo(centerPos, 1)) return;
     
         const storage = room.storage;
         const terminal = room.terminal;
@@ -417,7 +414,7 @@ export default class TransportMission extends Room {
         if (!storage) return;
         if (!room.lab || room.lab.length === 0) return;
 
-        const BotMemStructures = Memory['StructControlData'][room.name];
+        const BotMemStructures = getStructData(room.name);
 
         const { labA, labB, labAId, labBId } = getLabAB(room.name, room);
         const labAtype = BotMemStructures.labAtype;

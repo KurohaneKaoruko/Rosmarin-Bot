@@ -1,6 +1,8 @@
 /**
  * 任务提交
  */
+import { getMissionPools } from '@/modules/utils/memory';
+
 export default class MissionSubmit extends Room {
     // 提交运输任务
     submitTransportMission(id: Task['id'], amount: TransportTask['amount']) {
@@ -39,7 +41,7 @@ export default class MissionSubmit extends Room {
      */
     deleteSpawnMissionsByRole(roles: string[] | string): number {
         const roleSet = new Set(Array.isArray(roles) ? roles : [roles]);
-        const pools = Memory.MissionPools?.[this.name];
+        const pools = getMissionPools()?.[this.name];
         const tasks = pools?.spawn;
         if (!Array.isArray(tasks) || tasks.length === 0) return 0;
 

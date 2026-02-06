@@ -1,4 +1,5 @@
 import { inWhitelist } from '@/modules/utils/whitelist';
+import { getStructData } from '@/modules/utils/memory';
 
 export default class BaseFunction extends PowerCreep {
     isWhiteList() {
@@ -86,7 +87,7 @@ export default class BaseFunction extends PowerCreep {
         return false;
     }
     transferPower() {
-        const mem = Memory['StructControlData'][this.room.name];
+        const mem = getStructData(this.room.name);
         if(!mem || !mem.powerSpawn) return false;
 
         const powerSpawn = this.room.powerSpawn;

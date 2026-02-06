@@ -1,4 +1,5 @@
 import { compress, decompress } from '@/modules/utils/compress';
+import { getLayoutData, getStructData } from '@/modules/utils/memory';
 
 /**
  * 房间 Work 任务更新模块
@@ -97,11 +98,11 @@ export default class WorkMission extends Room {
      */
     UpdateWallRepairMission(offset = 0) {
         let WALL_HITS_MAX_THRESHOLD = 0.9;
-        const botMem = Memory['StructControlData'][this.name];
+        const botMem = getStructData(this.name);
         if (botMem['ram_threshold']) {
             WALL_HITS_MAX_THRESHOLD = Math.min(botMem['ram_threshold'], 1);
         }
-        const memory = Memory['LayoutData'][this.name] as { [key: string]: number[]} || {};
+        const memory = getLayoutData(this.name) as { [key: string]: number[]};
         let wallMem = memory['constructedWall'] || [];
         let rampartMem = memory['rampart'] || [];
         let structRampart = [];

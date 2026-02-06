@@ -1,4 +1,5 @@
 import { compress } from '@/modules/utils/compress';
+import { getLayoutData } from '@/modules/utils/memory';
 
 const RepairWork = function (creep: Creep) {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {}
@@ -6,7 +7,7 @@ const RepairWork = function (creep: Creep) {
     let target = Game.getObjectById(cache.targetId) as StructureRampart | StructureWall | null;
 
     if (!target || target.hits == target.hitsMax) {
-        const memory = Memory['LayoutData'][creep.room.name];
+        const memory = getLayoutData(creep.room.name);
         let wallMem = memory['constructedWall'] || [];
         let rampartMem = memory['rampart'] || [];
         let structRampart = [];
@@ -69,12 +70,11 @@ const RepairWork = function (creep: Creep) {
 const WithdrawLink = function (creep: Creep) {
     let linktarget = Game.getObjectById(creep.memory['linkId']) as any || undefined;
     if (!linktarget) {
-        const center = Memory['RoomControlData'][creep.room.name].center;
-        const centerPos = new RoomPosition(center.x, center.y, creep.room.name);
+        const centerPos = creep.room.getCenter();
         const sources = creep.room.source;
         const links = creep.room.link.filter(link => 
             link.store[RESOURCE_ENERGY] > 0 &&
-            (!center || !link.pos.isNearTo(centerPos)) &&
+            (!link.pos.isNearTo(centerPos)) &&
             (!sources || !link.pos.inRangeTo(sources[0].pos, 2)) &&
             (!sources || !link.pos.inRangeTo(sources[1].pos, 2)) &&
             (link.pos.findInRange(FIND_STRUCTURES, 5, {

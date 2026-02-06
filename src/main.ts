@@ -1,7 +1,6 @@
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
-import { MemoryInit, GlobalInit } from '@/init';
 import { roomRunner } from '@/boot/RoomRunner';
 import { creepRunner } from '@/boot/CreepRunner';
 import { powerCreepRunner } from '@/boot/PowerCreepRunner';
@@ -29,8 +28,6 @@ App.set('creep', creepRunner);           // creep运行
 App.set('powerCreep', powerCreepRunner); // powerCreep运行
 App.set('flag', flagRunner);             // flag运行
 
-App.on(MemoryInit);     // 初始化内存
-App.on(GlobalInit);     // 全局初始化
 App.on(EventModule);    // 事件模块
 App.on(TeamModule);     // 小队模块
 App.on(ResourceManage); // 资源调度管理
@@ -39,7 +36,6 @@ App.on(ClearModule);    // 过期数据清理
 App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
 App.on(DDModule);       // 消息模块
-
 
 
 export const loop = App.run;

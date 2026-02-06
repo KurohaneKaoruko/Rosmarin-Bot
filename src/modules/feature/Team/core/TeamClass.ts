@@ -2,12 +2,13 @@ import TeamUtils from './TeamUtils';
 import TeamAction from '../ai/TeamAction';
 import TeamBattle from '../ai/TeamBattle';
 import TeamVisual from '../debug/TeamVisual';
+import { getTeamData } from '@/modules/utils/memory';
 
 /**
  * 小队实体（Team 状态机）。
  *
  * @remarks
- * - 该类每 tick 会被 TeamController 实例化一次（非持久对象），真实状态落在 Memory.TeamData。\n
+ * - 该类每 tick 会被 TeamController 实例化一次（非持久对象），真实状态落在 Memory.RosmarinBot.TeamData。\n
  * - exec() 的顺序非常重要：Update（更新数据/绘制）→ Attack（选目标/火力/避让）→ Move（移动/集结/变阵）→ Adjust（朝向微调）→ Save。\n
  * - moved 用于保证每 tick 最多触发一次“移动类行为”，避免同 tick 多次 move 互相覆盖。
  */
@@ -32,7 +33,7 @@ class Team {
      *
      * @remarks
      * - creeps 列表会过滤掉已死亡成员（Game.getObjectById 为 null）。\n
-     * - cache 是可写的临时存储，会在 save() 时写回 Memory.TeamData[teamID].cache。
+     * - cache 是可写的临时存储，会在 save() 时写回 Memory.RosmarinBot.TeamData[teamID].cache。
      */
     constructor(teamData: TeamMemory) {
         const { name, status, toward, formation, homeRoom, targetRoom, moveMode, cache } = teamData;
@@ -86,14 +87,14 @@ class Team {
 
     // 保存数据
     /**
-     * 把运行时状态写回 Memory.TeamData。
+     * 把运行时状态写回 Memory.RosmarinBot.TeamData。
      *
      * @remarks
      * - creeps 会写回为 id 数组。\n
      * - teamData.room 用于记录队伍当前所在房间（取第一个成员）。
      */
     save(): void {
-        const teamData = Memory['TeamData'][this.name];
+        const teamData = getTeamData(this.name);
         if (!teamData) return;
 
         teamData.status = this.status;

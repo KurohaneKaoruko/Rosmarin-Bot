@@ -2,6 +2,7 @@ import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoadBuilder, RoadVisual } from '@/modules/feature/externalRoad';
 import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
 import { getQoS, shouldRun } from '@/modules/infra/qos';
+import { getOutMineData } from '@/modules/utils/memory';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
@@ -24,7 +25,7 @@ export default class OutMine extends Room {
         const qosLevel = getQoS()?.level || 'normal';
         const interval = qosLevel === 'constrained' ? 40 : 20;
         if (Game.time % interval != 0) return;
-        const Mem = Memory['OutMineData'][this.name]?.['energy'];
+        const Mem = getOutMineData(this.name)?.['energy'];
         if (!Mem || !Mem.length) return;
         // 孵化任务数统计
         this.getSpawnMissionNum();
@@ -113,7 +114,7 @@ export default class OutMine extends Room {
         const qosLevel = getQoS()?.level || 'normal';
         const interval = qosLevel === 'constrained' ? 20 : 10;
         if (Game.time % interval != 0) return;
-        const Mem = Memory['OutMineData'][this.name]?.['centerRoom'];
+        const Mem = getOutMineData(this.name)?.['centerRoom'];
         if (!Mem || !Mem.length) return;
         // 孵化任务数统计
         this.getSpawnMissionNum();

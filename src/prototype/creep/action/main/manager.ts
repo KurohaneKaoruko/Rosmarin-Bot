@@ -122,8 +122,8 @@ function LinkEnergyTransfer(creep: Creep) {
             controllerLink = link;
             continue;
         }
-        const center = Memory['RoomControlData'][creep.room.name]?.center;
-        if (center && link.pos.inRangeTo(center.x, center.y, 1) && link.pos.inRangeTo(storage, 2)) {
+        const centerPos = creep.room.getCenter();
+        if (link.pos.inRangeTo(centerPos, 1) && link.pos.inRangeTo(storage, 2)) {
             manageLink = link;
             continue;
         }
@@ -204,13 +204,10 @@ const ManagerAction = {
         }
         
         // 没有任务时移动到布局中心
-        const center = Memory['RoomControlData'][creep.room.name]?.center;
-        if (center && creep.pos.inRangeTo(center.x, center.y, 2)) {
-            const pos = new RoomPosition(center.x, center.y, creep.room.name);
-            if (!creep.pos.isEqualTo(pos)) {
-                creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
-                return;
-            }
+        const pos = creep.room.getCenter();
+        if (!creep.pos.isEqualTo(pos)) {
+            creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
+            return;
         }
         return;
     }

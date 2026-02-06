@@ -1,14 +1,13 @@
 import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/feature/externalRoad';
 import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
+import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
 // 外矿设置
 export default {
     mine: {
         add(roomName: string, targetRoom: string) {
             if (!roomName || !targetRoom) return -1;
-            const BotMem = Memory['OutMineData'];
-            if (!BotMem[roomName]) BotMem[roomName] = {};
-            const Mem = BotMem[roomName];
+            const Mem = getOutMineData(roomName) as any;
             const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
             const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom); // 非过道房间
             // 普通房间
@@ -51,7 +50,7 @@ export default {
         // 删除外矿
         remove(roomName: string, targetRoom: string) {
             if (!roomName || !targetRoom) return -1;
-            const BotMem = Memory['OutMineData'];
+            const BotMem = getOutMineData();
             if (!BotMem[roomName]) return ERR_NOT_FOUND;
             const Mem = BotMem[roomName];
             const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
@@ -91,7 +90,7 @@ export default {
         // 获取外矿列表
         list(roomName: string) {
             if (!roomName) return -1;
-            const BotMem = Memory['OutMineData'];
+            const BotMem = getOutMineData();
             if (!BotMem[roomName]) return '该房间没有外矿数据';
             return `energy: ${BotMem[roomName]['energy'] || []}\n` +
                    `highway: ${BotMem[roomName]['highway'] || []}\n` +
@@ -104,7 +103,8 @@ export default {
             return OK;
         },
         auto(roomName: string, type: 'power' | 'deposit') {
-            const BotMem = Memory['RoomControlData'][roomName];
+            const BotMem = getRoomData()[roomName];
+            if (!BotMem) return ERR_NOT_FOUND;
             if (type === 'power') {
                 BotMem['outminePower'] = !BotMem['outminePower'];
                 console.log(`房间 ${roomName} 的自动采集Power已设置为 ${BotMem['outminePower']}。`);
@@ -282,7 +282,7 @@ export default {
                 homeRooms.push(homeRoom);
             } else {
                 // 从 Memory 获取所有有外矿配置的房间
-                const outMineData = Memory['OutMineData'];
+                const outMineData = getOutMineData();
                 if (!outMineData || Object.keys(outMineData).length === 0) {
                     console.log('没有找到任何外矿配置');
                     return ERR_NOT_FOUND;
@@ -314,7 +314,7 @@ export default {
                 }
 
                 // 从 Memory 获取所有目标房间
-                const outMineData = Memory['OutMineData']?.[currentHomeRoom];
+                const outMineData = getOutMineData()?.[currentHomeRoom];
                 if (!outMineData) {
                     console.log(`[${currentHomeRoom}] 跳过 - 没有外矿配置`);
                     continue;

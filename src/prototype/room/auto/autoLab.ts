@@ -1,13 +1,13 @@
 import { LabMap, LabLevel } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
 import { getLabAB } from '@/modules/utils/labReservations';
+import { getAutoLabData, getStructData } from '@/modules/utils/memory';
 
 export default class AutoLab extends Room {
     autoLab() {
         if (Game.time % 50) return;
         if (!this.lab || !this.lab.length) return;
-        let botmem =  Memory['StructControlData'][this.name];
-        if (!botmem) botmem = Memory['StructControlData'][this.name] = {};
+        const botmem = getStructData(this.name) as any;
         if (botmem.lab === undefined) botmem.lab = true;
         if (!botmem.lab) return;
 
@@ -58,8 +58,8 @@ export default class AutoLab extends Room {
 }
 
 const getCustomizeTask = (room: Room) => {
-    const autoLabMap = Memory['AutoData']['AutoLabData'][room.name];
-    if (!autoLabMap || !Object.keys(autoLabMap).length) return [null, 0];
+    const autoLabMap = getAutoLabData(room.name);
+    if (!Object.keys(autoLabMap).length) return [null, 0];
 
     // 查找未到达限额且原料足够的任务, 按优先级选择
     let task = null;

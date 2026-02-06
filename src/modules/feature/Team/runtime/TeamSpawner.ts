@@ -1,5 +1,6 @@
 import { log } from "@/utils";
 import { compressBodyConfig } from "@/modules/utils/compress";
+import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/modules/utils/memory";
 import { TEAM_CONFIG } from "../config/TeamConfig";
 
 export default class TeamSpawner {
@@ -8,14 +9,14 @@ export default class TeamSpawner {
      *
      * @remarks
      * 结构示意：\n
-     * `Memory[TeamSpawnQueue][roomName] = { queue: {flagName, enqueueTime}[], active?: {teamID, flagName, startTime, timedOut?}, ignoreTeams?: { [teamID]: expireTick } }`
+     * `Memory.RosmarinBot.TeamSpawnQueue[roomName] = { queue: {flagName, enqueueTime}[], active?: {teamID, flagName, startTime, timedOut?}, ignoreTeams?: { [teamID]: expireTick } }`
      */
     private static readonly QUEUE_MEMORY_KEY = 'TeamSpawnQueue';
     /**
      * 写入到孵化旗 flag.memory 的“已入队”标记，用于去重。
      *
      * @remarks
-     * 该字段仅用于避免重复入队；真正的队列状态以 Memory.TeamSpawnQueue 为准。
+     * 该字段仅用于避免重复入队；真正的队列状态以 Memory.RosmarinBot.TeamSpawnQueue 为准。
      */
     private static readonly FLAG_QUEUED_MARK = 'teamSpawnQueuedAt';
     /**
@@ -42,8 +43,8 @@ export default class TeamSpawner {
     static run(): void {
         // 孵化四人小队
         if (Game.time % 10) return;
-        if (!Memory['TeamData']) Memory['TeamData'] = {};
-        if (!Memory[TeamSpawner.QUEUE_MEMORY_KEY]) Memory[TeamSpawner.QUEUE_MEMORY_KEY] = {};
+        getTeamData();
+        getTeamSpawnQueue();
 
         for (const flagName in Game.flags) {
             const flag = Game.flags[flagName];
@@ -72,13 +73,13 @@ export default class TeamSpawner {
      *
      * @remarks
      * 该旗帜一般由孵化流程创建（`createTeam`），用于在地图上标记队伍集合/移动点。\n
-     * 若 `Memory.TeamData[teamID]` 不存在，则说明队伍已被清理或从未成功创建，应删除该旗帜避免残留。
+     * 若 `Memory.RosmarinBot.TeamData[teamID]` 不存在，则说明队伍已被清理或从未成功创建，应删除该旗帜避免残留。
      */
     private static handleTeamFlag(flagName: string, flag: Flag): boolean {
         if (!flagName.startsWith('Team-')) return false;
         const teamID = flagName.match(/Team-(\w+)/)?.[1];
         if (!teamID) return true;
-        if (!Memory['TeamData'][teamID]) flag.remove();
+        if (!getTeamData(teamID)) flag.remove();
         return true;
     }
 
@@ -143,7 +144,7 @@ export default class TeamSpawner {
      * - 每房间每次 run 只会派发 1 支队伍，避免并行孵化打爆 lab/任务池。
      */
     private static dispatchQueues(): void {
-        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const root = getTeamSpawnQueue() as any;
         if (!root) return;
 
         for (const roomName in root) {
@@ -154,7 +155,7 @@ export default class TeamSpawner {
             if (!entry.active) {
                 const inferredTeamID = this.inferActiveTeamID(roomName, entry.ignoreTeams);
                 if (inferredTeamID) {
-                    entry.active = { teamID: inferredTeamID, flagName: '', startTime: Memory['TeamData']?.[inferredTeamID]?.time || Game.time };
+                    entry.active = { teamID: inferredTeamID, flagName: '', startTime: getTeamData(inferredTeamID)?.time || Game.time };
                 }
             }
 
@@ -252,7 +253,7 @@ export default class TeamSpawner {
      * 入队只存 flagName，避免复制配置/颜色等信息；flag 本身是唯一真源。
      */
     private static enqueue(roomName: string, flagName: string): void {
-        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const root = getTeamSpawnQueue() as any;
         if (!root[roomName]) root[roomName] = { queue: [], active: undefined };
         if (!root[roomName].queue) root[roomName].queue = [];
         root[roomName].queue.push({ flagName, enqueueTime: Game.time });
@@ -277,7 +278,7 @@ export default class TeamSpawner {
      * 判断旗帜是否已在指定房间的队列中。
      */
     private static isFlagQueued(roomName: string, flagName: string): boolean {
-        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const root = getTeamSpawnQueue() as any;
         const entry = root?.[roomName];
         if (!entry?.queue) return false;
         return entry.queue.some((r: any) => r?.flagName === flagName);
@@ -287,7 +288,7 @@ export default class TeamSpawner {
      * 判断旗帜是否正在作为该房间的 active 孵化请求执行中。
      */
     private static isFlagActive(roomName: string, flagName: string): boolean {
-        const root = Memory[TeamSpawner.QUEUE_MEMORY_KEY] as any;
+        const root = getTeamSpawnQueue() as any;
         const entry = root?.[roomName];
         if (!entry?.active) return false;
         return entry.active.flagName === flagName;
@@ -301,7 +302,7 @@ export default class TeamSpawner {
      * - 选择 time 最新的一支，避免误锁住更早的残留队伍。
      */
     private static inferActiveTeamID(roomName: string, ignoreTeams?: Record<string, number>): string | undefined {
-        const teams = Memory['TeamData'] as any;
+        const teams = getTeamData() as any;
         if (!teams) return;
         let best: { id: string; time: number } | undefined;
         for (const teamID in teams) {
@@ -327,7 +328,7 @@ export default class TeamSpawner {
     private static isActiveDone(active: any): boolean {
         const teamID: string | undefined = active?.teamID;
         if (!teamID) return true;
-        const teamData = Memory['TeamData']?.[teamID] as any;
+        const teamData = getTeamData(teamID) as any;
         if (!teamData) return true;
         if (teamData.status && teamData.status !== 'ready') return true;
         if (teamData.creeps && teamData.num && teamData.creeps.length >= teamData.num) return true;
@@ -452,17 +453,18 @@ export default class TeamSpawner {
      */
     private static createTeam(teamID: string, Team_Config: any[], room: Room, flag: Flag): void {
         // 创建小队
-        Memory['TeamData'][teamID] = {
-            'name': teamID,
-            'status': 'ready',
-            'toward': '↑',
-            'formation': 'line',
-            'creeps': [],
-            'num': Team_Config.length,
-            'time': Game.time,
-            'homeRoom': room.name,
-            'targetRoom': flag.pos.roomName,
-        };
+        const teamMem = ensureTeamData(teamID);
+        Object.assign(teamMem, {
+            name: teamID,
+            status: 'ready',
+            toward: '↑',
+            formation: 'line',
+            creeps: [],
+            num: Team_Config.length,
+            time: Game.time,
+            homeRoom: room.name,
+            targetRoom: flag.pos.roomName,
+        });
         try {
             flag.pos.createFlag(`Team-${teamID}`, flag.color, flag.secondaryColor);
         } catch (e) {
@@ -547,13 +549,13 @@ export default class TeamSpawner {
      *
      * @remarks
      * 以 `Game.time` 混合随机数，存在极低概率碰撞；若碰撞则递归重试。\n
-     * 这里依赖 `Memory.TeamData` 作为“已占用 ID 集合”。
+     * 这里依赖 `Memory.RosmarinBot.TeamData` 作为“已占用 ID 集合”。
      */
     private static genTeamID(): string {
         const gen = (): string => {
             const id = (Game.time * 36 * 36 + Math.floor(Math.random() * 36 * 36))
                 .toString(36).slice(-4).toUpperCase();
-            if (Memory['TeamData'][id]) return gen();
+            if (getTeamData(id)) return gen();
             return id;
         };
         return gen();

@@ -7,6 +7,7 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoomArray } from '@/modules/utils/roomArray';
 import { compress, decompress } from '@/modules/utils/compress';
+import { getLayoutData, getOutMineData } from '@/modules/utils/memory';
 
 // ============================================================
 // CostMatrix 缓存管理器
@@ -174,7 +175,7 @@ export class RoadMemory {
      */
     static setPath(homeRoom: string, targetRoom: string, targetPos: string, positions: RoomPosition[]): void {
         this.ensureMemory(homeRoom);
-        const mem = Memory['OutMineData'][homeRoom].RoadData!;
+        const mem = getOutMineData(homeRoom).RoadData!;
         
         if (!mem.routes[targetRoom]) {
             mem.routes[targetRoom] = {
@@ -206,7 +207,7 @@ export class RoadMemory {
      */
     static setPaths(homeRoom: string, targetRoom: string, pathsMap: Map<string, RoomPosition[]>): void {
         this.ensureMemory(homeRoom);
-        const mem = Memory['OutMineData'][homeRoom].RoadData!;
+        const mem = getOutMineData(homeRoom).RoadData!;
         
         mem.routes[targetRoom] = {
             paths: {},
@@ -449,17 +450,17 @@ export class RoadMemory {
      * 获取道路内存
      */
     private static getMemory(homeRoom: string): OutMineRoadMemory | undefined {
-        return Memory['OutMineData']?.[homeRoom]?.RoadData;
+        return getOutMineData()?.[homeRoom]?.RoadData;
     }
 
     /**
      * 确保内存结构存在
      */
     private static ensureMemory(homeRoom: string): void {
-        if (!Memory['OutMineData']) Memory['OutMineData'] = {};
-        if (!Memory['OutMineData'][homeRoom]) Memory['OutMineData'][homeRoom] = {};
-        if (!Memory['OutMineData'][homeRoom].RoadData) {
-            Memory['OutMineData'][homeRoom].RoadData = {
+        const outMineData = getOutMineData();
+        if (!outMineData[homeRoom]) outMineData[homeRoom] = {} as any;
+        if (!outMineData[homeRoom].RoadData) {
+            outMineData[homeRoom].RoadData = {
                 routes: {},
             };
         }
@@ -496,8 +497,7 @@ export class PathPlanner {
         const room = Game.rooms[homeRoom];
         if (!room) return undefined;
 
-        const center = Memory['RoomControlData']?.[homeRoom]?.center || { x: 25, y: 25 };
-        const startPos = new RoomPosition(center.x, center.y, homeRoom);
+        const startPos = room.getCenter();
 
         const result = PathFinder.search(startPos, { pos: target, range: 1 }, {
             plainCost: EXTERNAL_ROAD_CONFIG.PLAIN_COST,
@@ -529,8 +529,7 @@ export class PathPlanner {
         const room = Game.rooms[homeRoom];
         if (!room) return results;
 
-        const center = Memory['RoomControlData']?.[homeRoom]?.center || { x: 25, y: 25 };
-        const startPos = new RoomPosition(center.x, center.y, homeRoom);
+        const startPos = room.getCenter();
 
         // 按距离排序（近的先计算）
         const sortedTargets = [...targets].sort((a, b) => {
@@ -614,7 +613,7 @@ export class PathPlanner {
         const costs = new PathFinder.CostMatrix();
 
         // 将布局中的道路位置设置为 ROAD_COST
-        const layoutRoads = Memory['LayoutData']?.[roomName]?.['road'];
+        const layoutRoads = getLayoutData()?.[roomName]?.['road'];
         if (layoutRoads) {
             for (const compressed of layoutRoads) {
                 const [x, y] = decompress(compressed);
@@ -1390,13 +1389,11 @@ export class RoadVisual {
         const homeRoomsToDraw = new Set<string>();
 
         if (Game.flags['ALL/roadVisual']) {
-            const outMineData = Memory['OutMineData'];
-            if (outMineData) {
-                for (const homeRoom in outMineData) {
-                    const data = outMineData[homeRoom];
-                    if ((data.energy && data.energy.length > 0) || (data.centerRoom && data.centerRoom.length > 0)) {
-                        homeRoomsToDraw.add(homeRoom);
-                    }
+            const outMineData = getOutMineData();
+            for (const homeRoom in outMineData) {
+                const data = outMineData[homeRoom];
+                if ((data.energy && data.energy.length > 0) || (data.centerRoom && data.centerRoom.length > 0)) {
+                    homeRoomsToDraw.add(homeRoom);
                 }
             }
         }
@@ -1548,7 +1545,7 @@ export class RoadVisual {
     }
 
     private static getAllPathsCached(homeRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
-        const lastUpdate = Memory['OutMineData']?.[homeRoom]?.RoadData?.lastUpdate;
+        const lastUpdate = getOutMineData()?.[homeRoom]?.RoadData?.lastUpdate;
         const cacheKey = `${homeRoom}:${targetRoom}`;
         const cached = this.mapPathsCache[cacheKey];
         if (lastUpdate !== undefined && cached && cached.lastUpdate === lastUpdate) {

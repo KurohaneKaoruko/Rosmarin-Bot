@@ -1,10 +1,11 @@
 import {Goods,zipMap} from "@/constant/ResourceConstant";
+import { getAutoFactoryData, getStructData } from "@/modules/utils/memory";
 
 export default class AutoFactory extends Room {
     autoFactory() {
         if (Game.time % 50) return;
         if (!this.factory) return;
-        const botmem = Memory['StructControlData'][this.name];
+        const botmem = getStructData(this.name);
         if (!botmem) return;
         if (botmem.factory === undefined) botmem.factory = true;
         if (!botmem.factory) return;
@@ -26,7 +27,7 @@ export default class AutoFactory extends Room {
         }
 
         // 获取自动任务列表
-        const autoFactoryMap = Memory['AutoData']['AutoFactoryData'][this.name];
+        const autoFactoryMap = getAutoFactoryData(this.name);
         if (!autoFactoryMap || !Object.keys(autoFactoryMap).length) return;
 
         // 查找未到达限额且原料足够的任务

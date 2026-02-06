@@ -1,17 +1,18 @@
 import { log } from "@/utils";
+import { getAutoPowerData, getStructData } from "@/modules/utils/memory";
 
 export default class AutoPower extends Room {
     autoPower() {
         if (Game.time % 50) return;
 
-        const BotMem =  Memory['AutoData']['AutoPowerData'][this.name];
+        const BotMem = getAutoPowerData(this.name);
         if (!BotMem) return;
         
         const energy = BotMem['energy'] ?? 100e3;
         const power = BotMem['power'] ?? 10e3;
         if (energy == 0 && power == 0) return;
 
-        const BotMemStruct =  Memory['StructControlData'][this.name];
+        const BotMemStruct = getStructData(this.name);
         if (!BotMemStruct) return;
         
         const mode = BotMemStruct['powerSpawnMode'] ?? 'auto';

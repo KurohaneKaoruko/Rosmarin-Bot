@@ -1,5 +1,6 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
 import { inWhitelist } from '@/modules/utils/whitelist';
+import { getRoomData, getStructData } from '@/modules/utils/memory';
 
 const getCreepNumByHomeRoom = (() => {
     let cachedTick = -1;
@@ -46,6 +47,12 @@ export default class BaseFunction extends Room {
     // 判断是否在白名单中
     isWhiteList() {
         return inWhitelist(this.controller?.owner?.username);
+    }
+
+    getCenter() {
+        const center = getRoomData()?.[this.name]?.center;
+        if (center) return new RoomPosition(center.x, center.y, this.name);
+        return new RoomPosition(25, 25, this.name);
     }
 
     // 获取房间指定资源储备
@@ -525,7 +532,7 @@ export default class BaseFunction extends Room {
     getBoostLab(mineral: ResourceConstant): StructureLab | null {
         if (!this.lab || this.lab.length === 0) return null;
         
-        const botmem = Memory['StructControlData'][this.name];
+        const botmem = getStructData()?.[this.name] as any;
         
         // 1. 优先找已经有该资源的 Lab
         const readyLab = this.lab.find(l => 

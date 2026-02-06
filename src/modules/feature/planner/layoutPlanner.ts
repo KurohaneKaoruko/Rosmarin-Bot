@@ -4,6 +4,7 @@ import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import { autoPlanner } from '@/modules/feature/planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/feature/planner/dynamic/autoPlanner63';
 import * as StaticPlanner from '@/modules/feature/planner/static';
+import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 
 /**
  * 布局计算与可视化/落盘的通用模块
@@ -109,7 +110,7 @@ function normalizeDynamicPlannerResult(roomName: string, layoutType: string, raw
 function getLayoutPointsForRcl(room: Room, structureType: string, layoutArray: number[]): number[] {
     if (structureType === STRUCTURE_ROAD) {
         if (room.level < 3) return [];
-        const layoutType = Memory['RoomControlData']?.[room.name]?.layout;
+        const layoutType = getRoomData()?.[room.name]?.layout;
         switch (layoutType) {
             case 'tea':
                 if (room.level == 3) return layoutArray.slice(0, 11);
@@ -318,14 +319,14 @@ function getCachedDynamicBySig(sigKey: string): CachedLayout | null {
 
 /**
  * 解析布局中心点。
- * - 优先使用 Memory['RoomControlData'][roomName].center\n
+ * - 优先使用 Memory.RosmarinBot.RoomData[roomName].center\n
  * - 其次使用 storagePos/centerPos 旗帜\n
  * @param roomName 房间名
  * @returns 中心点；缺失返回 null
  * @internal
  */
 function resolveCenter(roomName: string): LayoutCenter | null {
-    const BotMemRooms = Memory['RoomControlData'];
+    const BotMemRooms = getRoomData();
     let center = BotMemRooms?.[roomName]?.center as LayoutCenter | undefined;
     const PosFlag = Game.flags.storagePos || Game.flags.centerPos;
     if (PosFlag && PosFlag.pos.roomName === roomName) {
@@ -673,7 +674,7 @@ function planHarvestInfra(room: Room, center: LayoutCenter, structMap: LayoutStr
 }
 
 /**
- * 将 structMap 压缩成可直接写入 Memory['LayoutData'] 的格式。
+ * 将 structMap 压缩成可直接写入 Memory.RosmarinBot.LayoutData 的格式。
  * @param structMap 结构点位映射（XY 列表）
  * @returns 压缩后的映射（number[] 列表）
  * @internal
@@ -832,7 +833,7 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
 /**
  * LayoutPlanner：静态/动态布局的统一入口。
  * - visual*：只在房间内显示点位，不写入 Memory\n
- * - build*：写入 Memory['LayoutData']，供后续自动建造流程消费\n
+ * - build*：写入 Memory.RosmarinBot.LayoutData，供后续自动建造流程消费\n
  * - ByFlags：使用 pa/pb/pc/pm 旗帜即时预览（不落盘、不走缓存）\n
  * @public
  */
@@ -917,7 +918,7 @@ export const LayoutPlanner = {
     },
 
     /**
-     * 静态布局构建：写入 Memory['LayoutData'][roomName]。
+     * 静态布局构建：写入 Memory.RosmarinBot.LayoutData[roomName]。
      * @param roomName 房间名
      * @param layoutType 静态模板名
      * @returns Screeps 错误码：OK/ERR_INVALID_ARGS/ERR_NOT_FOUND
@@ -930,8 +931,9 @@ export const LayoutPlanner = {
         }
         const computed = computeStatic(roomName, layoutType, center);
         if (!computed) return ERR_NOT_FOUND;
-        if (!Memory['LayoutData']) Memory['LayoutData'] = {};
-        Memory['LayoutData'][roomName] = computed.layoutMemory as any;
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        Object.assign(layoutMemory, computed.layoutMemory as any);
         log('LayoutPlanner', `静态布局构建成功: ${roomName} layout=${layoutType} center(${center.x},${center.y})`);
         return OK;
     },
@@ -950,20 +952,21 @@ export const LayoutPlanner = {
     },
 
     /**
-     * 动态布局(auto)构建：写入 Memory['LayoutData'][roomName] 并同步 RoomControlData.center/layout（若存在）。
+     * 动态布局(auto)构建：写入 Memory.RosmarinBot.LayoutData[roomName] 并同步 RoomData.center/layout（若存在）。
      * @param roomName 房间名
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     buildDynamic(roomName: string): number {
         const computed = computeDynamic(roomName, 'auto');
         if (!computed) return ERR_NOT_FOUND;
-        const BotMemRooms = Memory['RoomControlData'];
-        if (BotMemRooms?.[roomName]) {
-            BotMemRooms[roomName]['layout'] = 'auto';
-            BotMemRooms[roomName]['center'] = computed.center;
+        const rooms = getRoomData();
+        if (rooms?.[roomName]) {
+            rooms[roomName]['layout'] = 'auto';
+            rooms[roomName]['center'] = computed.center;
         }
-        if (!Memory['LayoutData']) Memory['LayoutData'] = {};
-        Memory['LayoutData'][roomName] = computed.layoutMemory as any;
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        Object.assign(layoutMemory, computed.layoutMemory as any);
         log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y})`);
         return OK;
     },
@@ -1020,20 +1023,21 @@ export const LayoutPlanner = {
     },
 
     /**
-     * 动态布局(63auto)构建：写入 Memory['LayoutData'][roomName] 并同步 RoomControlData.center/layout（若存在）。
+     * 动态布局(63auto)构建：写入 Memory.RosmarinBot.LayoutData[roomName] 并同步 RoomData.center/layout（若存在）。
      * @param roomName 房间名
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     buildDynamic63(roomName: string): number {
         const computed = computeDynamic(roomName, '63auto');
         if (!computed) return ERR_NOT_FOUND;
-        const BotMemRooms = Memory['RoomControlData'];
+        const BotMemRooms = getRoomData();
         if (BotMemRooms?.[roomName]) {
             BotMemRooms[roomName]['layout'] = '63auto';
             BotMemRooms[roomName]['center'] = computed.center;
         }
-        if (!Memory['LayoutData']) Memory['LayoutData'] = {};
-        Memory['LayoutData'][roomName] = computed.layoutMemory as any;
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        Object.assign(layoutMemory, computed.layoutMemory as any);
         log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y})`);
         return OK;
     },

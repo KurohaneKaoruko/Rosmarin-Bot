@@ -1,4 +1,6 @@
-import { log } from "@/utils";
+import { BASE_CONFIG } from '@/constant/config';
+import { log } from '@/utils';
+import { getMissionPools, getStructData } from "@/modules/utils/memory";
 
 // 基础与杂项
 const Base = {
@@ -72,12 +74,14 @@ const Base = {
             }
         },
         mission(roomName: string, type: string) {
-            Memory.MissionPools[roomName][type] = [];
+            const pools = getMissionPools();
+            if (!pools[roomName]) return Error(`房间 ${roomName} 任务池不存在`);
+            pools[roomName][type] = [];
             log('', `已清空房间 ${roomName} 的 ${type} 任务`);
             return OK;
         },
         boostTask(roomName: string) {
-            const boostmem = Memory['StructControlData'][roomName];
+            const boostmem = getStructData(roomName);
             if (boostmem?.boostLabs) {
                 for (const labId of Object.keys(boostmem.boostLabs)) {
                     if (boostmem.boostLabs[labId]?.mode === 'task') delete boostmem.boostLabs[labId];
@@ -120,7 +124,7 @@ const Base = {
     },
 
     log(text: string, ...args: any[]): OK | Error {
-        log(`${global.BOT_NAME}`, `${text}`, ...args);
+        log(`${BASE_CONFIG.BOT_NAME}`, `${text}`, ...args);
         return OK;
     },
 }

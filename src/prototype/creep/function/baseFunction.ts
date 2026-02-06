@@ -33,12 +33,12 @@ const getEnergyPickupSnapshot = (() => {
             ruins: [],
         };
 
-        const center = Memory.RoomControlData?.[room.name]?.center;
         const linkArr = (room as any).link as StructureLink[] | undefined;
-        if (center && linkArr && linkArr.length) {
+        if (linkArr && linkArr.length) {
+            const centerPos = room.getCenter();
             snapshot.centerLink = linkArr.find(l =>
                 l &&
-                l.pos.inRangeTo(center.x, center.y, 1) &&
+                l.pos.inRangeTo(centerPos, 1) &&
                 l.store[RESOURCE_ENERGY] >= 400
             ) || null;
         } else {

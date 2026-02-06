@@ -1,4 +1,6 @@
 import { getPrice, log } from "@/utils"
+import { BASE_CONFIG } from "@/constant/config";
+import { getAutoMarketData } from "@/modules/utils/memory";
 
 let cachedEnergyAvgPriceTick = -1;
 let cachedEnergyAvgPrice = 0.01;
@@ -25,8 +27,7 @@ export default class AutoMarket extends Room {
     // 自动市场交易
     autoMarket() {
         if (Game.time % 50 !== 0) return;
-        const autoMaket = Memory['AutoData']['AutoMarketData'][this.name];
-        if(!autoMaket) return;
+        const autoMaket = getAutoMarketData(this.name);
         for(const item of autoMaket) {
             if(item.orderType == 'buy') {
                 AutoBuy(this.name, item);
@@ -48,7 +49,7 @@ export default class AutoMarket extends Room {
 function AutoBuy(roomName: string, item: any) {
     const amount = item.amount;   // 资源自动购买上限
     const room = Game.rooms[roomName];
-    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+    const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
     const priceLimit = (item.price ?? Infinity) as number;
 
@@ -125,7 +126,7 @@ function AutoBuy(roomName: string, item: any) {
 function AutoSell(roomName: string, item: any) {
     const amount = item.amount;
     const room = Game.rooms[roomName];
-    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+    const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
     const priceLimit = (item.price ?? 0) as number;
 
@@ -197,7 +198,7 @@ function AutoDealBuy(roomName: string, item: any) {
     const price = item.price;   // 限制价格
     const room = Game.rooms[roomName];
 
-    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+    const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备
@@ -224,7 +225,7 @@ function AutoDealSell(roomName: string, item: any) {
     const price = item.price;   // 限制价格
     const room = Game.rooms[roomName];
 
-    const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+    const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
     const resourceType = RES[item.resourceType] || item.resourceType;
 
     // 检查房间资源储备

@@ -1,5 +1,6 @@
 import TransportMission from "./transportMission";
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
+import { getStructData, getTeamData } from '@/modules/utils/memory';
 
 export default class BoostMission extends TransportMission {
     /**
@@ -14,7 +15,7 @@ export default class BoostMission extends TransportMission {
         // 1. 清理无效预定
         this.cleanInvalidBoostTasks();
 
-        const botmem = Memory['StructControlData'][this.name];
+        const botmem = getStructData(this.name);
         const { labAId, labBId } = getLabAB(this.name, this);
         if (!this.lab || this.lab.length === 0) return;
         // boostLabs：单表预留（task=任务临时征用，fixed=长期固定配置），并在这里完成旧字段迁移
@@ -238,7 +239,7 @@ export default class BoostMission extends TransportMission {
                 // Team 有效性检查
                 else if (ownerId.startsWith('Team-')) {
                     const teamID = ownerId.slice(5);
-                    if (Memory['TeamData'] && !Memory['TeamData'][teamID]) {
+                    if (!getTeamData(teamID)) {
                         isValid = false;
                     }
                 }
@@ -266,7 +267,7 @@ export default class BoostMission extends TransportMission {
      * 清理所有 Boost 相关数据
      */
     private clearAllBoostData() {
-        const botmem = Memory['StructControlData'][this.name];
+        const botmem = getStructData(this.name);
         const { labAId, labBId } = getLabAB(this.name, this);
         const reactionActive = !!botmem?.lab && !!labAId && !!labBId && !!botmem?.labAtype && !!botmem?.labBtype;
         const boostLabs = botmem?.boostLabs;

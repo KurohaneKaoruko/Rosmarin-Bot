@@ -1,13 +1,14 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/modules/utils/compress';
 import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import LayoutPlanner from '@/modules/feature/planner/layoutPlanner';
+import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 
 export default {
     layout: {
         // 设置房间布局
         set(roomName: string, layout: string, x: number, y: number) {
             const room = Game.rooms[roomName];
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -28,7 +29,7 @@ export default {
         // 开关自动建筑
         auto(roomName: string, enable?: boolean) {
             const room = Game.rooms[roomName];
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
@@ -49,11 +50,11 @@ export default {
         // structType: 可选，仅放置某一种结构的工地
         site(roomName: string, structType?: string) {
             const room = Game.rooms[roomName];
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
-            const layoutMemory = Memory['LayoutData']?.[roomName];
+            const layoutMemory = getLayoutData()?.[roomName];
             if (!layoutMemory || !Object.keys(layoutMemory).length) {
                 console.log(`房间 ${roomName} 的布局memory不存在，请先执行 layout.build('${roomName}', true?)`);
                 return Error('布局Memory不存在');
@@ -67,19 +68,19 @@ export default {
         },
         // 清除房间布局memory
         remove(roomName: string) {
-            delete Memory['LayoutData'][roomName];
+            const layouts = getLayoutData();
+            delete layouts[roomName];
             global.log(`已清除 ${roomName} 的布局memory。`);
             return OK;
         },
         // 构建布局
         // overwriteMemory: 是否覆盖已有布局 memory（默认不覆盖，避免误操作）
         build(roomName: string, overwriteMemory: boolean = false) {
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if (!BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 未添加到控制列表。`);
             }
-            if (!Memory['LayoutData']) Memory['LayoutData'] = {};
-            const layoutMemory = Memory['LayoutData'][roomName];
+            const layoutMemory = getLayoutData(roomName);
             if (layoutMemory && Object.keys(layoutMemory).length) {
                 if (!overwriteMemory) {
                     console.log(`房间 ${roomName} 的布局memory已存在，未开启覆盖，已取消本次生成。`);
@@ -87,7 +88,8 @@ export default {
                     return Error('布局Memory已存在');
                 }
                 console.log(`房间 ${roomName} 的布局memory已存在，已开启覆盖，将删除并重新生成。`);
-                delete Memory['LayoutData'][roomName];
+                const layouts = getLayoutData();
+                delete layouts[roomName];
             }
             const layoutType = BotMemRooms[roomName]['layout'];
             // 如果没有设置布局就会使用自动布局
@@ -112,10 +114,10 @@ export default {
                     result = LayoutPlanner.visualStatic(roomName, layout);
                 }
             } else if (roomName) {
-                const layoutMemory = Memory['LayoutData'][roomName];
+                const layoutMemory = getLayoutData(roomName);
                 if (!layoutMemory || Object.keys(layoutMemory).length == 0) {
                     console.log(`房间 ${roomName} 的布局memory不存在，将根据自动布局可视化...`)
-                    const layoutType = Memory['RoomControlData']?.[roomName]?.layout;
+                    const layoutType = getRoomData()?.[roomName]?.layout;
                     result = layoutType == '63auto' ? LayoutPlanner.visualDynamic63(roomName) : LayoutPlanner.visualDynamic(roomName);
                 } else {
                     console.log(`将根据房间${roomName}的布局memory进行可视化...`)
@@ -140,13 +142,12 @@ export default {
         },
         // 将房间建筑加入布局memory
         save(roomName: string, struct?: string) {
-            const BotMemRooms = Memory['RoomControlData'];
+            const BotMemRooms = getRoomData();
             if (!BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 未添加到控制列表。`);
             }
             if (!struct) {
-                if (!Memory['LayoutData'][roomName]) Memory['LayoutData'][roomName] = {};
-                let layoutMemory = Memory['LayoutData'][roomName];
+                const layoutMemory = getLayoutData(roomName) as any;
                 const room = Game.rooms[roomName];
                 const structList = ['spawn', 'extension', 'link', 'tower', 'road', 'storage', 'terminal', 'factory', 'lab',
                     'nuker', 'observer', 'powerSpawn', 'container', 'extractor'];
@@ -157,10 +158,7 @@ export default {
                 }
                 console.log(`房间 ${roomName} 的布局已更新。`);
             } else {
-                let layoutMemory = Memory['LayoutData'][roomName];
-                if (!layoutMemory) {
-                    layoutMemory = Memory['LayoutData'][roomName] = {};
-                }
+                const layoutMemory = getLayoutData(roomName) as any;
                 const structList = ['spawn', 'extension', 'link', 'tower', 'road', 'storage', 'terminal', 'factory', 'lab',
                     'nuker', 'observer', 'powerSpawn', 'container', 'extractor', 'rampart', 'constructedWall'];
                 if (!structList.includes(struct)) return Error(`不支持的struct类型 ${struct}。`);
@@ -175,7 +173,7 @@ export default {
         },
         // 查看rampart最小血量, 只考虑布局中的
         ramhits(roomName: string) {
-            const layoutMemory = Memory['LayoutData'][roomName];
+            const layoutMemory = getLayoutData(roomName);
             if (!layoutMemory) {
                 return Error(`房间 ${roomName} 的布局memory不存在。`);
             }
@@ -244,7 +242,7 @@ export default {
             flag.remove();
             let count = 0;
             if (operate === 1) {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 if (!memory.rampart) memory.rampart = [];
                 for (const ram of rampart) {
                     if (!memory.rampart.includes(ram)) {
@@ -256,7 +254,7 @@ export default {
                 return OK;
             }
             else {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 for (const ram of rampart) {
                     if (memory.rampart.includes(ram)) {
                         memory.rampart.splice(memory.rampart.indexOf(ram), 1);
@@ -305,7 +303,7 @@ export default {
             flag.remove();
             let count = 0;
             if (operate === 1) {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 if (!memory.constructedWall) memory.constructedWall = [];
                 for (const wall of constructedWall) {
                     if (!memory.constructedWall.includes(wall)) {
@@ -317,7 +315,7 @@ export default {
                 return OK;
             }
             else {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 for (const wall of constructedWall) {
                     if (memory.constructedWall.includes(wall)) {
                         memory.constructedWall.splice(memory.constructedWall.indexOf(wall), 1);
@@ -381,7 +379,7 @@ export default {
             let wallcount = 0;
             let rampartcount = 0;
             if (operate === 1) {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 if (!memory.constructedWall) memory.constructedWall = [];
                 for (const wall of constructedWall) {
                     if (!memory.constructedWall.includes(wall)) {
@@ -400,7 +398,7 @@ export default {
                 return OK;
             }
             else {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 for (const wall of constructedWall) {
                     if (memory.constructedWall.includes(wall)) {
                         memory.constructedWall.splice(memory.constructedWall.indexOf(wall), 1);
@@ -435,7 +433,7 @@ export default {
                                 .map((s) => compress(s.x, s.y));
             let rampartcount = 0;
             if (operate === 1) {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 if (!memory.rampart) memory.rampart = [];
                 for (const ramp of rampart) {
                     if (!memory.rampart.includes(ramp)) {
@@ -445,7 +443,7 @@ export default {
                 }
                 console.log(`已添加${rampartcount}个rampart到布局memory`);
             } else {
-                const memory = Memory['LayoutData'][roomName];
+                const memory = getLayoutData(roomName);
                 if (!memory.rampart) memory.rampart = [];
                 for (const ramp of rampart) {
                     if (memory.rampart.includes(ramp)) {

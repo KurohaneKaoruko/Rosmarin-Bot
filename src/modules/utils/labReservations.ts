@@ -1,4 +1,5 @@
 import { compress } from '@/modules/utils/compress';
+import { getStructData } from '@/modules/utils/memory';
 
 /**
  * Lab 预留/解析工具
@@ -190,10 +191,8 @@ const getLabABCache = (() => {
 function computeLabAB(roomName: string, room: Room, mode: 'ensure' | 'get'): LabABResult {
     if (!room.lab || room.lab.length === 0) return emptyLabABResult;
 
-    const root = (Memory as any)['StructControlData'];
-    const botmem = mode === 'ensure'
-        ? (root || ((Memory as any)['StructControlData'] = {}))[roomName] || (((Memory as any)['StructControlData'])[roomName] = {})
-        : root?.[roomName];
+    const root = getStructData();
+    const botmem = mode === 'ensure' ? (root[roomName] ||= {}) : root?.[roomName];
 
     if (!botmem) return emptyLabABResult;
 
@@ -217,13 +216,7 @@ function computeLabAB(roomName: string, room: Room, mode: 'ensure' | 'get'): Lab
         // 仅在满 10 Lab 且未正确配置时自动推导，并写回 Memory
         
         // 尝试获取布局中心，以便 pickLabAB 优先选择靠近中心的 Lab
-        let centerPos: RoomPosition | undefined;
-        const rcd = (Memory as any)['RoomControlData']?.[roomName];
-        if (rcd?.center) {
-            centerPos = new RoomPosition(rcd.center.x, rcd.center.y, roomName);
-        }
-        if (!centerPos && room.storage) centerPos = room.storage.pos;
-        if (!centerPos && room.terminal) centerPos = room.terminal.pos;
+        const centerPos = room.getCenter();
 
         const pair = pickLabAB(room.lab, centerPos);
         if (pair) {
@@ -296,14 +289,14 @@ export type BoostLabsMemory = Record<string, { mineral: ResourceConstant; mode: 
  * 读取 boostLabs（只读）
  */
 export function getBoostLabs(roomName: string): BoostLabsMemory | undefined {
-    return (Memory as any)?.StructControlData?.[roomName]?.boostLabs as BoostLabsMemory | undefined;
+    return (Memory as any)?.RosmarinBot?.StructData?.[roomName]?.boostLabs as BoostLabsMemory | undefined;
 }
 
 /**
  * 确保 boostLabs 存在（可能写 Memory）
  */
 export function ensureBoostLabs(roomName: string): BoostLabsMemory {
-    const root = (Memory as any).StructControlData || (((Memory as any).StructControlData) = {});
+    const root = getStructData();
     const mem = root[roomName] || (root[roomName] = {});
 
     if (!mem.boostLabs) mem.boostLabs = {};

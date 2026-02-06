@@ -1,3 +1,5 @@
+import { BASE_CONFIG } from '@/constant/config';
+import { getRoomData } from '@/modules/utils/memory';
 
 const upgrade = function (creep: Creep) {
     const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2))
@@ -17,8 +19,8 @@ const upgrade = function (creep: Creep) {
     }
     if (creep.pos.inRangeTo(creep.room.controller, 3)) {
         creep.goUpgrade();
-        const botMem = Memory['RoomControlData'][creep.room.name];
-        const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
+        const botMem = getRoomData(creep.room.name);
+        const sign = botMem?.sign ?? BASE_CONFIG.DEFAULT_SIGN;
         const oldSign = creep.room.controller.sign?.text ?? '';
         if(creep.room.controller && sign && oldSign != sign) {
             if (creep.pos.inRangeTo(creep.room.controller, 1)) {

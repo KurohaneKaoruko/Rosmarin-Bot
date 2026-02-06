@@ -1,5 +1,6 @@
 import Team from "../core/TeamClass";
 import TeamCalc from "../infra/TeamCalc";
+import { getTeamData } from "@/modules/utils/memory";
 
 /**
  * Team 执行调度器（运行时）。
@@ -7,7 +8,7 @@ import TeamCalc from "../infra/TeamCalc";
  * @remarks
  * - 本模块是 Team 系统的执行端：驱动 Team creep 的 boost/归队，并驱动 Team 的状态机。\n
  * - 生成端（创建 TeamData、下发孵化）在 TeamSpawner。\n
- * - 数据源：Memory.TeamData[teamID]（队伍状态与成员列表）。
+ * - 数据源：Memory.RosmarinBot.TeamData[teamID]（队伍状态与成员列表）。
  */
 export default class TeamController {
     /**
@@ -29,7 +30,7 @@ export default class TeamController {
      * @remarks
      * - Team creep 判定：role 以 `team` 开头。\n
      * - boost：若 creep.memory.boostmap 存在，则调用 creep.goBoost({ must: true })，直到完成。\n
-     * - 归队：首次完成 boost 后，把 creep.id 推入 Memory.TeamData[teamID].creeps。\n
+     * - 归队：首次完成 boost 后，把 creep.id 推入 Memory.RosmarinBot.TeamData[teamID].creeps。\n
      * - 若 TeamData 已被删除，则 creep 自杀，避免残留占用资源。
      */
     private static runCreeps(): void {
@@ -60,13 +61,13 @@ export default class TeamController {
                 // 归队
                 if (!creep.memory['rejoin']) {
                     const teamID = creep.memory['teamID'];
-                    const team = Memory['TeamData'][teamID];
+                    const team = getTeamData(teamID);
                     if (!team) continue;
                     team.creeps.push(creep.id);
                     creep.memory['rejoin'] = true;
                 }
                 const teamID = creep.memory['teamID'];
-                if (!Memory['TeamData'][teamID]) creep.suicide();
+                if (!getTeamData(teamID)) creep.suicide();
             } else continue;
         }
     }
@@ -87,13 +88,13 @@ export default class TeamController {
         let noFullTeams = [];
 
         // 小队管理
-        if (!Memory['TeamData']) Memory['TeamData'] = {};
-        if (Object.keys(Memory['TeamData']).length === 0) return;
+        const teamRoot = getTeamData();
+        if (Object.keys(teamRoot).length === 0) return;
 
-        for (const teamID in Memory['TeamData']) {
+        for (const teamID in teamRoot) {
             let cpu = Game.cpu.getUsed();
 
-            const teamData = Memory['TeamData'][teamID] as TeamMemory;
+            const teamData = teamRoot[teamID] as TeamMemory;
             if (teamData.name !== teamID) teamData.name = teamID;
 
             // 检查小队成员是否齐全
@@ -106,7 +107,7 @@ export default class TeamController {
                 // 2. 空队超时 (5000 tick): 如果 creep 死光了还没组建好，说明失败
                 if (Game.time - teamData['time'] > 50000 || 
                    (teamData.creeps.length === 0 && Game.time - teamData['time'] > 5000)) {
-                    delete Memory['TeamData'][teamID];
+                    delete teamRoot[teamID];
                     console.log(`${teamID}小队因组建超时或失败已解散.`);
                     Game.flags[`Team-${teamID}`]?.remove();
                     continue;
@@ -138,7 +139,7 @@ export default class TeamController {
 
             // 检查小队是否全部死亡
             if (!team.creeps || team.creeps.length === 0) {
-                delete Memory['TeamData'][teamID];
+                delete teamRoot[teamID];
                 console.log(`${teamID}小队因成员全部死亡已解散.`);
                 Game.flags[`Team-${teamID}`]?.remove();
                 continue;
@@ -165,7 +166,8 @@ export default class TeamController {
             if (soloHealers.length === 0) break;
             let healer = soloHealers.pop();
             // 把creep从原来的队伍中去除
-            let creepTeamData = Memory['TeamData'][healer.memory['teamID']]
+            let creepTeamData = getTeamData(healer.memory['teamID'])
+            if (!creepTeamData) continue;
             let index = creepTeamData.creeps.indexOf(healer.id);
             creepTeamData.creeps.splice(index, 1);
             // 把creep加入新的队伍

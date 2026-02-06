@@ -1,4 +1,6 @@
 import { LabMap, Goods, BarList } from "@/constant/ResourceConstant";
+import { BASE_CONFIG } from "@/constant/config";
+import { getStructData } from "@/modules/utils/memory";
 
 const MANAGE_BALANCE = {
     // 自动调度资源阈值
@@ -119,7 +121,7 @@ function CheckFactoryResAmount(room: Room) {
     const storage = room.storage;
     if (!storage) return;
 
-    const mem = Memory['StructControlData'][room.name];
+    const mem = getStructData(room.name);
     if (!mem) return;
     
     const product = mem.factoryProduct;
@@ -170,10 +172,8 @@ function CheckFactoryResAmount(room: Room) {
 function CheckPowerSpawnResAmount(room: Room) {
     const powerSpawn = room.powerSpawn;
     if (!powerSpawn) return;
-    let center = Memory['RoomControlData'][room.name].center;
-    let centerPos: RoomPosition;
-    if (center) centerPos = new RoomPosition(center.x, center.y, room.name);
-    if (!centerPos || !powerSpawn.pos.inRangeTo(centerPos, 1)) return;
+    const centerPos = room.getCenter();
+    if (!powerSpawn.pos.inRangeTo(centerPos, 1)) return;
 
     const fillPowerSpawn = (resource: ResourceConstant, limit: number, amount: number) => {
         if (powerSpawn.store[resource] < limit) {
@@ -218,7 +218,7 @@ export default class ManageMission extends Room {
      * @param amount - 搬运数量（>0）
      */
     ManageMissionAdd(source: string, target: string, resourceType: ResourceConstant, amount: number) {
-        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
         if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
         const structures = {
             s: 'storage',
@@ -268,7 +268,7 @@ export default class ManageMission extends Room {
      * @param amount - 发送数量（>0）
      */
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
-        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
         if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
         let existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
         if (existingTaskId) {
@@ -289,7 +289,7 @@ export default class ManageMission extends Room {
      * @param maxAmount - 可选上限（防止一次性排队过多）
      */
     SendMissionUpsertMax(targetRoom: string, resourceType: string | ResourceConstant, amount: number, maxAmount?: number) {
-        const RES = global.BASE_CONFIG.RESOURCE_ABBREVIATIONS;
+        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
         if (RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
         if (!amount || typeof amount !== 'number' || amount <= 0) return false;
 

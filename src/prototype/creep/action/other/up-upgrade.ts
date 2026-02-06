@@ -1,4 +1,6 @@
 import { compress, decompress} from '@/modules/utils/compress';
+import { BASE_CONFIG } from '@/constant/config';
+import { getRoomData } from '@/modules/utils/memory';
 
 
 const upgrade = function (creep: Creep) {
@@ -16,8 +18,8 @@ const upgrade = function (creep: Creep) {
     }
     if (creep.pos.inRangeTo(creep.room.controller, 3)) {
         creep.upgradeController(creep.room.controller)
-        const botMem = Memory['RoomControlData'][creep.room.name];
-        const sign = botMem?.sign ?? global.BASE_CONFIG.DEFAULT_SIGN;
+        const botMem = getRoomData(creep.room.name);
+        const sign = botMem?.sign ?? BASE_CONFIG.DEFAULT_SIGN;
         const oldSign = creep.room.controller.sign?.text ?? '';
         if(creep.room.controller && sign && oldSign != sign) {
             if (creep.pos.inRangeTo(creep.room.controller, 1)) {

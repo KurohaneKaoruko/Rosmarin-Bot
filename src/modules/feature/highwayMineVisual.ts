@@ -1,3 +1,5 @@
+import { getOutMineData, getRoomData } from '@/modules/utils/memory';
+
 export class HighwayMineVisual {
     private static readonly MAP_DRAW_INTERVAL = 1;
     private static readonly POWER_STYLE = {
@@ -53,12 +55,10 @@ export class HighwayMineVisual {
         const homeRoomsToDraw = new Set<string>();
 
         if (this.globalEnabled || Game.flags['ALL/mineMapVisual']) {
-            const outMineData = Memory['OutMineData'];
-            if (outMineData) {
-                for (const homeRoom in outMineData) {
-                    const highway = outMineData[homeRoom]?.highway;
-                    if (highway && highway.length > 0) homeRoomsToDraw.add(homeRoom);
-                }
+            const outMineData = getOutMineData();
+            for (const homeRoom in outMineData) {
+                const highway = outMineData[homeRoom]?.highway;
+                if (highway && highway.length > 0) homeRoomsToDraw.add(homeRoom);
             }
         }
 
@@ -81,11 +81,11 @@ export class HighwayMineVisual {
     }
 
     static visualizeOnMap(homeRoom: string): void {
-        const powerEnabled = !!Memory['RoomControlData']?.[homeRoom]?.outminePower;
-        const depositEnabled = !!Memory['RoomControlData']?.[homeRoom]?.outmineDeposit;
+        const powerEnabled = !!getRoomData()?.[homeRoom]?.outminePower;
+        const depositEnabled = !!getRoomData()?.[homeRoom]?.outmineDeposit;
         if (!powerEnabled && !depositEnabled) return;
 
-        const highway = Memory['OutMineData']?.[homeRoom]?.highway || [];
+        const highway = getOutMineData()?.[homeRoom]?.highway || [];
         if (highway.length === 0) return;
 
         const homeCenter = new RoomPosition(25, 25, homeRoom);

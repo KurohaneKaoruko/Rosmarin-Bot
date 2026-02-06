@@ -189,6 +189,13 @@ interface Room {
      * @description 检查Memory['whitelist']中是否包含房间控制器所有者
      */
     isWhiteList(): boolean;
+
+    /**
+     * 获取房间中心位置
+     * @returns 房间中心的RoomPosition对象
+     * @description 计算房间中心位置，通常用于定位任务目标或可视化显示
+     */
+    getCenter(): RoomPosition;
     
     /** 
      * 获取房间指定资源储备

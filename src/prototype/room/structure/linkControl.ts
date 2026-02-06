@@ -4,10 +4,7 @@ export default class LinkControl extends Room {
         if (this.link.length < 2) return;  // 至少需要两个 Link
 
         if (Game.time % 10 != 0) return;
-        
-        let center = Memory['RoomControlData'][this.name]?.center
-        let centerPos: RoomPosition;
-        if (center) centerPos = new RoomPosition(center.x, center.y, this.name);
+        const centerPos = this.getCenter();
 
         let sourceLinks = []
         let controllerLink = null;
@@ -22,7 +19,7 @@ export default class LinkControl extends Room {
                 controllerLink = link;
                 continue;
             }
-            if(centerPos && link.pos.inRangeTo(centerPos, 1)) {
+            if(link.pos.inRangeTo(centerPos, 1)) {
                 manageLink = link;
                 continue;
             }

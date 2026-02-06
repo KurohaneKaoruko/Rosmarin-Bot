@@ -1,3 +1,5 @@
+import { getStructData } from '@/modules/utils/memory';
+
 export default class PowerSpawnControl extends Room {
     PowerSpawnWork() {
         if (this.level < 8) return;
@@ -5,7 +7,7 @@ export default class PowerSpawnControl extends Room {
         if (!powerSpawn) return;
         // 战争时不处理
         if (Memory['warmode']) return;
-        const mem = Memory['StructControlData'][this.name];
+        const mem = getStructData(this.name);
         // 关停时不处理
         if(!mem?.powerSpawn) return;
         // 能量不足不处理
