@@ -45,6 +45,26 @@ export default {
             global.log(`已${memory.autobuild ? '开启' : '关闭'} ${roomName} 的自动建筑.`);
             return OK;
         },
+        // 根据布局一键放置工地（放满到结构上限/工地上限为止）
+        // structType: 可选，仅放置某一种结构的工地
+        site(roomName: string, structType?: string) {
+            const room = Game.rooms[roomName];
+            const BotMemRooms = Memory['RoomControlData'];
+            if (!room || !room.my || !BotMemRooms[roomName]) {
+                return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
+            }
+            const layoutMemory = Memory['LayoutData']?.[roomName];
+            if (!layoutMemory || !Object.keys(layoutMemory).length) {
+                console.log(`房间 ${roomName} 的布局memory不存在，请先执行 layout.build('${roomName}', true?)`);
+                return Error('布局Memory不存在');
+            }
+            if (structType && (!layoutMemory[structType] || !layoutMemory[structType].length)) {
+                return Error(`房间 ${roomName} 的布局memory中不存在 ${structType}。`);
+            }
+            const created = LayoutPlanner.plannerCreateSite(room, layoutMemory, { structType });
+            console.log(`房间 ${roomName} 已放置 ${created} 个工地。`);
+            return OK;
+        },
         // 清除房间布局memory
         remove(roomName: string) {
             delete Memory['LayoutData'][roomName];
@@ -71,7 +91,9 @@ export default {
             }
             const layoutType = BotMemRooms[roomName]['layout'];
             // 如果没有设置布局就会使用自动布局
-            if (!layoutType || layoutType == '63auto') {
+            if (!layoutType || layoutType == 'auto') {
+                return LayoutPlanner.buildDynamic(roomName);
+            } else if (layoutType == '63auto') {
                 return LayoutPlanner.buildDynamic63(roomName);
             } else {
                 return LayoutPlanner.buildStatic(roomName, layoutType);
@@ -82,7 +104,9 @@ export default {
             let cpu = Game.cpu.getUsed();
             let result = null;
             if (roomName && layout) {
-                if (layout == '63') {
+                if (layout == 'auto') {
+                    result = LayoutPlanner.visualDynamic(roomName);
+                } else if (layout == '63auto') {
                     result = LayoutPlanner.visualDynamic63(roomName);
                 } else {
                     result = LayoutPlanner.visualStatic(roomName, layout);
@@ -91,7 +115,8 @@ export default {
                 const layoutMemory = Memory['LayoutData'][roomName];
                 if (!layoutMemory || Object.keys(layoutMemory).length == 0) {
                     console.log(`房间 ${roomName} 的布局memory不存在，将根据自动布局可视化...`)
-                    result = LayoutPlanner.visualDynamic63(roomName);
+                    const layoutType = Memory['RoomControlData']?.[roomName]?.layout;
+                    result = layoutType == '63auto' ? LayoutPlanner.visualDynamic63(roomName) : LayoutPlanner.visualDynamic(roomName);
                 } else {
                     console.log(`将根据房间${roomName}的布局memory进行可视化...`)
                     const structMap = {};
@@ -102,7 +127,7 @@ export default {
                     result = OK;
                 }
             } else {
-                result = LayoutPlanner.visualDynamic63ByFlags();
+                result = LayoutPlanner.visualDynamicByFlags();
             }
             if (result == OK) {
                 cpu = Game.cpu.getUsed() - cpu;

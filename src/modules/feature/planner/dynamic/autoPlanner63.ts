@@ -1171,13 +1171,13 @@ const ManagerPlanner = {
 		return {
 			roomName: roomName,
 			structMap: structMap,
-			storagePos: {storageX, storageY},
+			centerPos: {x: storageX, y: storageY},
 			labPos: {labX, labY},
 		};
 	}
 };
 
 export const autoPlanner63 = {
-	ManagerPlanner: ManagerPlanner,
-	LayoutVisual: LayoutVisual
+	name: '63auto',
+	ManagerPlanner: ManagerPlanner
 };
