@@ -69,7 +69,7 @@ export default class MoveFunction extends Creep {
         // detour 续行：刚从目标房间绕出时，优先走回目标房出口
         if (currentRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
             let exitPos = null;
-            const bm: any = (globalThis as any).BetterMove;
+            const bm: any = (global as any).BetterMove;
             if (bm && typeof bm.getClosestExitPos === 'function') {
                 exitPos = bm.getClosestExitPos(this.pos, roomName);
             } else {
