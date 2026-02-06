@@ -305,12 +305,12 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     const cpuColor = cpu > (avgCpu * 1.5) && cpu > 20 ? STYLE.colorWarn : STYLE.color;
     const bucketColor = bucket < 1000 ? STYLE.colorErr : (bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood);
     
-    visual.text(`CPU: ${cpu.toFixed(1)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
-    visual.text(`Avg: ${avgCpu.toFixed(1)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
+    visual.text(`CPU: ${cpu.toFixed(2)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
+    visual.text(`Avg: ${avgCpu.toFixed(2)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
     y += lineHeight;
 
     const qosLevel = stats.qos?.level || '-';
-    visual.text(`Bkt: ${formatK(bucket)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
+    visual.text(`Bkt: ${bucket}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
     visual.text(`QoS: ${qosLevel}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
     y += lineHeight;
 
