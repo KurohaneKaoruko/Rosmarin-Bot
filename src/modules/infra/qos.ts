@@ -87,3 +87,15 @@ export function shouldRun(options: ShouldRunOptions = {}): boolean {
 
     return true;
 }
+
+/**
+ * 检查当前 tick 是否与 modulo 对齐
+ * @param mod  modulo 值
+ * @param offset 偏移量（默认 0）
+ * @param tick 当前 tick（默认 Game.time）
+ * @returns 是否对齐
+ */
+export const isTickAligned = (mod: number, offset = 0, tick = Game.time) => {
+    const normalized = ((offset % mod) + mod) % mod
+    return tick % mod === normalized
+}

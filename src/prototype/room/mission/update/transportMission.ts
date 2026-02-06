@@ -1,6 +1,6 @@
 import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
-import { isTickAligned } from '@/modules/utils/tick';
+import { isTickAligned } from '@/modules/infra/qos';
 import { getStructData } from '@/modules/utils/memory';
 
 

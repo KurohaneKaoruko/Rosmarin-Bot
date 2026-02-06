@@ -2,7 +2,7 @@
  * 任务更新主模块
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
-import { isTickAligned } from '@/modules/utils/tick';
+import { isTickAligned } from '@/modules/infra/qos';
 
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
