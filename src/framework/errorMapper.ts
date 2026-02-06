@@ -9,6 +9,8 @@
 
 import { SourceMapConsumer } from 'source-map'
 
+const log = console['logUnsafe'] || console.log;
+
 // 缓存 SourceMap
 let consumer = null
 
@@ -18,7 +20,7 @@ const getConsumer = function () {
         try {
             consumer = new SourceMapConsumer(require("main.js.map"))
         } catch (e) {
-            console.log("无法加载 source map:", e)
+            log("无法加载 source map:", e)
             return null
         }
     }
@@ -44,8 +46,8 @@ const sourceMappedStackTrace = function (error: Error | string): string {
     const re = /^\s+at\s+(.+?\s+)?\(?([0-z._\-\\\/]+):(\d+):(\d+)\)?$/gm
     let match: RegExpExecArray
     let outStack = error.toString()
-    console.log("ErrorMapper -> sourceMappedStackTrace -> outStack", outStack)
-
+    log("ErrorMapper -> sourceMappedStackTrace -> outStack", outStack)
+    
     const consumer = getConsumer()
     if (!consumer) return stack
 
@@ -94,11 +96,10 @@ export const errorMapper = function (next: any, ...args: any) {
     catch (e) {
         if (e instanceof Error) {
             // 渲染报错调用栈，沙盒模式用不了这个
-            // @ts-ignore
             const errorMessage = Game.shard.name == 'sim' ?
                 `沙盒模式无法使用 source-map - 显示原始追踪栈<br>${_.escape(e.stack)}` :
                 `${_.escape(sourceMappedStackTrace(e))}`
-            console.log(`<text style="color:#ef9a9a">${errorMessage}</text>`)
+            log(`<text style="color:#ef9a9a">${errorMessage}</text>`)
         } else {
             // 抛出原报错
             throw e

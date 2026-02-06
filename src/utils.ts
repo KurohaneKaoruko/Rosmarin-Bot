@@ -12,7 +12,7 @@ export const assignPrototype = function(obj1: any, obj2: any) {
 };
 
 /** 日志输出
- * 输出日志到控制台
+ * 输出日志到控制台, 统一格式
  * @param type 日志类型
  * @param text 日志内容
  * @param args 日志参数
@@ -20,7 +20,7 @@ export const assignPrototype = function(obj1: any, obj2: any) {
 export function log(type: string, text: string, ...args: any[]) {
     if (!type) type = `${BASE_CONFIG.BOT_NAME}`;
     const str = `<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`
-    if (console['logUnsafe'] && typeof console['logUnsafe'] === 'function') {
+    if (typeof console['logUnsafe'] === 'function') {
         console['logUnsafe'](str, ...args);
     } else {
         console.log(str, ...args);
