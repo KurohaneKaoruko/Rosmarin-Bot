@@ -291,7 +291,6 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     if (typeof rclLvl === 'number') {
         title += ` RCL ${rclLvl}`;
         if (rclLvl === 8) {
-            title += " (Max)";
             rclColor = STYLE.barRcl;
         }
     }
@@ -306,16 +305,13 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     const cpuColor = cpu > (avgCpu * 1.5) && cpu > 20 ? STYLE.colorWarn : STYLE.color;
     const bucketColor = bucket < 1000 ? STYLE.colorErr : (bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood);
     
-    visual.text(`CPU: ${cpu.toFixed(1)} / ${avgCpu.toFixed(1)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
-    visual.text(`Bkt: ${formatK(bucket)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
+    visual.text(`CPU: ${cpu.toFixed(1)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
+    visual.text(`Avg: ${avgCpu.toFixed(1)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
     y += lineHeight;
 
-    // QoS/perf 由框架层写入（createApp），这里只负责展示
     const qosLevel = stats.qos?.level || '-';
-    const perfTotal = stats.perf?.last?.total;
-    const perfStr = typeof perfTotal === 'number' ? perfTotal.toFixed(1) : '-';
-    visual.text(`QoS: ${qosLevel}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
-    visual.text(`T: ${perfStr}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
+    visual.text(`Bkt: ${formatK(bucket)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
+    visual.text(`QoS: ${qosLevel}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
     y += lineHeight;
 
     // --- Global Progress: GCL & GPL (Vertical Stack) ---
