@@ -218,7 +218,7 @@ export default class BoostFunction extends Creep {
                 missing.push({ mineral: selected, amount });
             }
 
-            if (allowEnsure && missing.length > 0) {
+            if (must && allowEnsure && missing.length > 0) {
                 for (const m of missing) {
                     this.room.AssignBoostTask(m.mineral, m.amount, ownerId);
                 }
@@ -390,7 +390,7 @@ export default class BoostFunction extends Creep {
             const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
             const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
 
-            if (allowEnsure) {
+            if (must && allowEnsure) {
                 const boostPool = this.room.getAllMissionFromPool?.('boost') as any[] | undefined;
                 let reserved = 0;
                 if (boostPool) {
