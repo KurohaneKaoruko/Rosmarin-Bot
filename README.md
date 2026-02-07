@@ -62,7 +62,7 @@
 - 白名单系统
 - Pixel 生成
 - 信息统计
-- 寻路回避房间设置
+- 寻路优化
 
 ## 🚀 快速开始
 
@@ -144,6 +144,7 @@ bot.start('W1N1', 'rosemary')
 ```javascript
 room.add('W1N1', 'rosemary', 25, 25)
 // 参数: 房间名, 布局名(可选), 中心X(可选), 中心Y(可选)
+// 可通过旗帜 centerPos 设置布局中心
 ```
 
 **第二步：预览布局**
@@ -182,10 +183,13 @@ layout.auto('W1N1')
 | `helpLab` | Lab 合成指令 |
 | `helpFactory` | Factory 生产指令 |
 | `helpPower` | Power 相关指令 |
-| `helpSpawn` | 孵化控制指令 |
+| `helpSpawn` | 孵化相关（控制台/旗帜） |
+| `helpNuke` | 核弹（旗帜/控制台） |
+| `helpTeam` | Team 小队系统 |
 | `helpTerminal` | Terminal 操作指令 |
 | `helpResource` | 资源管理指令 |
 | `helpOther` | 其他功能指令 |
+
 
 ### 常用指令示例
 
@@ -216,7 +220,7 @@ resource.manage.set('W1N1', 'energy', {source: 500000, target: 100000})
 
 ```
 rosmarin-bot/
-├── plugins/                 # Rolldown/Rollup 插件
+├── plugins/                 # Rolldown 插件
 │   └── plugin-screeps.js
 ├── scripts/                 # 开发脚本
 │   ├── countFiles.js        # 统计代码量
@@ -244,7 +248,7 @@ rosmarin-bot/
 │   ├── modules/             # 功能模块
 │   │   ├── feature/         # 主要功能（布局/小队/外矿等）
 │   │   ├── infra/           # 基础设施（寻路/缓存/Profiler等）
-│   │   ├── runtime/         # 运行期模块（外矿/战争/统计等）
+│   │   ├── runtime/         # 运行时模块（外矿/战争/统计等）
 │   │   └── utils/           # 工具模块（包含 wasm）
 │   ├── prototype/           # 原型扩展
 │   ├── main.ts              # 入口文件
@@ -272,6 +276,7 @@ rosmarin-bot/
 | `clover` | 三叶草布局 |
 | `hoho` | hoho 布局 |
 | `tea` | tea布局 |
+| `63auto` | 63自动布局 |
 
 > 💡 如果不指定布局，会使用自动布局
 
@@ -296,10 +301,6 @@ rosmarin-bot/
 - 放置 Flag `labA` 和 `labB` 设置底物 Lab（可选；当房间有 10 个 Lab 且未设置时会自动推导）
 - Boost Lab 长期固定配置（会持续补能量/补矿）：在房间内放置 Flag `labset-{资源类型}`，然后执行 `lab.setboost(roomName)` 读取并写入配置（旗帜会被自动移除）
 - 可视化：底物 Lab 会以圆圈标记（A=粉色圈，B=蓝色圈）
-
-#### Memory 关键字段（高级）
-- `Memory.StructControlData[roomName].labA / labB`: 底物 Lab 的压缩坐标（`compress(x,y)`）
-- `Memory.StructControlData[roomName].boostLabs[labId] = { mineral, mode }`: Boost Lab 预留表（`mode: 'fixed' | 'task'`）
 
 ## 🤝 贡献
 
