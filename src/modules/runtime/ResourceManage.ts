@@ -270,7 +270,14 @@ export const ResourceManage = {
                     // 不在这里直接 terminal.send：改为下发 send 任务，复用 TerminalWork 执行与成本修正逻辑
                     const desiredTotal = queuedToTarget + sendAmount;
                     const rc = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
-                    if (rc !== OK) {
+                    if (rc === OK) {
+                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
+                        tryLog([
+                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('成功', LOG_COLORS.good, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
+                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
+                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))}`,
+                        ]);
+                    } else {
                         const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
                         tryLog([
                             `${c('资源调度', LOG_COLORS.theme, true)} ${c('失败', LOG_COLORS.danger, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
@@ -280,14 +287,7 @@ export const ResourceManage = {
                         continue;
                     }
 
-                    {
-                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
-                        tryLog([
-                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('成功', LOG_COLORS.good, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
-                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
-                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))}`,
-                        ]);
-                    }
+                    
                     addQueued(source.room.name, target.room.name, res, sendAmount);
                     pairsScheduled++;
 

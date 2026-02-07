@@ -551,7 +551,7 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
         const unitPrice = bestCost.toFixed(3);
         const linearDistance = Game.map.getRoomLinearDistance(r1, r2);
         logAuto([
-            `${c('DEAL', LOG_COLORS.theme, true)} ${c(r1, LOG_COLORS.theme, true)} ${c(direction, LOG_COLORS.neutral)} ${c(r2, LOG_COLORS.theme, true)} ${c(action, orderType === ORDER_SELL ? LOG_COLORS.good : LOG_COLORS.warning, true)} ${c('成功', LOG_COLORS.good, true)}`,
+            `${c('DEAL', LOG_COLORS.theme, true)} ${c('成功', LOG_COLORS.good, true)} ${c(r1, LOG_COLORS.theme, true)} ${c(direction, LOG_COLORS.neutral)} ${c(r2, LOG_COLORS.theme, true)} ${c(action, orderType === ORDER_SELL ? LOG_COLORS.good : LOG_COLORS.warning, true)}`,
             `${kv('资源', resTag(res))} | ${kv('数量', String(amount))} | ${kv('订单', mono(bestOrder.id, LOG_COLORS.neutral))}`,
             `${kv('挂单价', fmtPrice(bestOrder.price))} | ${kv('总金额', price)} | ${kv('能量成本', energyCost)}`,
             `${kv('综合单价', unitPrice)} | ${kv('距离', String(linearDistance))} | ${kv('credits', Game.market.credits.toFixed(0))}`,
@@ -579,7 +579,7 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
                 break;
         }
         logAuto([
-            `${c('DEAL', LOG_COLORS.theme, true)} ${c(r1, LOG_COLORS.theme, true)} ${c(direction, LOG_COLORS.neutral)} ${c(r2, LOG_COLORS.theme, true)} ${c(action, orderType === ORDER_SELL ? LOG_COLORS.good : LOG_COLORS.warning, true)} ${c('失败', LOG_COLORS.danger, true)}`,
+            `${c('DEAL', LOG_COLORS.theme, true)} ${c('失败', LOG_COLORS.danger, true)} ${c(r1, LOG_COLORS.theme, true)} ${c(direction, LOG_COLORS.neutral)} ${c(r2, LOG_COLORS.theme, true)} ${c(action, orderType === ORDER_SELL ? LOG_COLORS.good : LOG_COLORS.warning, true)}`,
             `${kv('资源', resTag(res))} | ${kv('数量', String(TotalDealAmount))} | ${kv('订单', mono(bestOrder.id, LOG_COLORS.neutral))}`,
             `${kv('错误码', String(result))} | ${kv('错误描述', ErrorDescription)}`,
         ]);
