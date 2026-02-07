@@ -176,7 +176,7 @@ const rowInfo = (roomName: string, rowIndex: number): string => {
     const room = Game.rooms[roomName];
     if (!room?.my) return '';
     
-    const structMem = getStructData()?.[roomName] || {};
+    const structMem = getStructData(roomName) || {};
     const rowStyle = rowIndex % 2 === 0 ? STYLES.even : STYLES.odd;
     
     const cells = [

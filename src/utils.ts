@@ -13,18 +13,32 @@ export const assignPrototype = function(obj1: any, obj2: any) {
 
 /** 日志输出
  * 输出日志到控制台, 统一格式
- * @param type 日志类型
- * @param text 日志内容
+ * @param typeOrText 只有一个参数时表示文本；两个参数且第二个是 string 时第一个表示前缀类型
+ * @param textOrArg 两个参数且为 string 时表示文本；否则会作为 console 参数输出
  * @param args 日志参数
  */
-export function log(type: string, text: string, ...args: any[]) {
-    if (!type) type = `${BASE_CONFIG.BOT_NAME}`;
-    const str = `<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`
-    if (typeof console['logUnsafe'] === 'function') {
-        console['logUnsafe'](str, ...args);
-    } else {
-        console.log(str, ...args);
+export function log(text: string, ...args: any[]): void;
+export function log(type: string, text: string, ...args: any[]): void;
+export function log(typeOrText: string, textOrArg?: any, ...args: any[]) {
+    const write = (message: string, rest: any[]) => {
+        if (typeof console['logUnsafe'] === 'function') {
+            console['logUnsafe'](message, ...rest);
+        } else {
+            console.log(message, ...rest);
+        }
+    };
+
+    if (typeof textOrArg === 'string') {
+        const type = typeOrText || `${BASE_CONFIG.BOT_NAME}`;
+        const text = textOrArg;
+        const str = `<span style="color: #D0CAE0;"><b>[${type}]</b></span> ${text}`;
+        write(str, args);
+        return;
     }
+
+    const text = typeOrText;
+    const rest = textOrArg === undefined ? args : [textOrArg, ...args];
+    write(text, rest);
 }
 
 /** 计算合适的订单价格

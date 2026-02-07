@@ -2,6 +2,42 @@ import {Goods, RESOURCE_BALANCE} from '@/constant/ResourceConstant'
 import { log } from '@/utils';
 import { getMissionPools, getResourceManage, getRoomData } from '@/modules/utils/memory';
 
+const br = '<br/>';
+const LOG_COLORS = {
+    theme: '#D0CAE0',
+    good: '#4CC9F0',
+    warning: '#FFC300',
+    danger: '#FF003C',
+    neutral: '#B8B8B8',
+    text: '#F0F0F0',
+    textMuted: '#B0B0B0',
+} as const;
+
+const c = (text: string, color: string, bold = false) =>
+    `<span style="color:${color};${bold ? 'font-weight:700;' : ''}">${text}</span>`;
+
+const mono = (text: string, color: string = LOG_COLORS.text) =>
+    `<span style="color:${color};font-family:Consolas,monospace;">${text}</span>`;
+
+const kv = (key: string, value: string) =>
+    `${c(key, LOG_COLORS.textMuted, true)} ${mono(value)}`;
+
+const fmtPct = (ratio: number) => `${(ratio * 100).toFixed(1)}%`;
+
+const logRM = (lines: string[]) => log('资源管理', lines.join(br));
+
+const getResourceIcon = (resourceType: any) => {
+    if (resourceType === 'empty') {
+        return `<span style="display:inline-block;width:12px;height:12px;border:1px dashed #555;border-radius:2px;margin-right:2px;vertical-align:middle;"></span>`;
+    }
+    const safeType = String(resourceType);
+    const baseUrl = 'https://s3.amazonaws.com/static.screeps.com/upload/mineral-icons/';
+    const iconUrl = baseUrl + encodeURIComponent(safeType) + '.png';
+    return `<img src="${iconUrl}" alt="${safeType}" style="height:12px;width:14px;object-fit:contain;vertical-align:middle;margin-right:3px;border-radius:2px;" />`;
+};
+
+const resTag = (resType: any, color: string = LOG_COLORS.text) => `${getResourceIcon(resType)}${mono(String(resType), color)}`;
+
 /** 资源管理模块 */
 export const ResourceManage = {
     tick: function () {
@@ -133,6 +169,18 @@ export const ResourceManage = {
             amountCache[roomName][res] = amount;
         }
 
+        let logged = 0;
+        let suppressed = 0;
+        const LOG_LIMIT = 10;
+        const tryLog = (lines: string[]) => {
+            if (logged >= LOG_LIMIT) {
+                suppressed++;
+                return;
+            }
+            logged++;
+            logRM(lines);
+        }
+
         for (let res in ResManageMap) {
             // Goods：终端单次发送最多 100；其它资源保持原先阈值约束
             const isGoods = Goods.includes(res as any);
@@ -223,11 +271,23 @@ export const ResourceManage = {
                     const desiredTotal = queuedToTarget + sendAmount;
                     const rc = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
                     if (rc !== OK) {
-                        log('资源管理', `${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}, result: ${rc}`);
+                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
+                        tryLog([
+                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('失败', LOG_COLORS.danger, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
+                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
+                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))} | ${kv('错误码', String(rc))}`,
+                        ]);
                         continue;
                     }
 
-                    log('资源管理', `${source.room.name} -> ${target.room.name}, ${sendAmount} ${res}, cost: ${cost}`);
+                    {
+                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
+                        tryLog([
+                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('成功', LOG_COLORS.good, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
+                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
+                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))}`,
+                        ]);
+                    }
                     addQueued(source.room.name, target.room.name, res, sendAmount);
                     pairsScheduled++;
 
@@ -247,6 +307,10 @@ export const ResourceManage = {
                     setResAmountCached(target.room.name, res, target.amount);
                 }
             }
+        }
+
+        if (suppressed > 0) {
+            logRM([`${c('资源调度', LOG_COLORS.theme, true)} ${c('提示', LOG_COLORS.warning, true)} ${kv('本 tick 省略日志', String(suppressed))}`]);
         }
     }
 }
