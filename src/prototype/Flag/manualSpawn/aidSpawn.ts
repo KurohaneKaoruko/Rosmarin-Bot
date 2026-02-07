@@ -1,22 +1,20 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
 import { log } from "@/utils";
-import { RoleBodys } from "./config";
+import { AidBodys } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
 export default class AidSpawnFunction extends Flag {
     // 旗帜触发的孵化控制
     handleAidSpawnFlag(): boolean {
         const flagName = this.name;
-        if (!this.isAidSpawnFlag(flagName)) return false;
-
         // 节流：每 10 tick 扫描一次，减少 CPU 开销
         if (Game.time % 10) return true;
-        if (this.handleAidBuildFlag(flagName)) return true;
-        if (this.handleAidUpgradeFlag(flagName)) return true;
-        if (this.handleAidUupFlag(flagName)) return true;
-        if (this.handleAidEnergyFlag(flagName)) return true;
-        if (this.handleClaimFlag(flagName)) return true;
-        if (this.handleReserveFlag(flagName)) return true;
+        if (flagName.startsWith('AID-BUILD/')) return this.handleAidBuildFlag(flagName);
+        if (flagName.startsWith('AID-UPGRADE/')) return this.handleAidUpgradeFlag(flagName);
+        if (flagName.startsWith('AID-UUP/')) return this.handleAidUupFlag(flagName);
+        if (flagName.startsWith('AID-ENERGY/')) return this.handleAidEnergyFlag(flagName);
+        if (flagName.startsWith('CLAIM/')) return this.handleClaimFlag(flagName);
+        if (flagName.startsWith('RESERVE/')) return this.handleReserveFlag(flagName);
 
         return true;
     }
@@ -40,8 +38,8 @@ export default class AidSpawnFunction extends Flag {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && RoleBodys['aid-build'][boost]) {
-            const config = RoleBodys['aid-build'][boost];
+        if (boost && AidBodys['aid-build'][boost]) {
+            const config = AidBodys['aid-build'][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
             if (room.CheckBoostRes(bodys, boostmap)) {
@@ -78,8 +76,8 @@ export default class AidSpawnFunction extends Flag {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && RoleBodys['aid-upgrade'][boost]) {
-            const config = RoleBodys['aid-upgrade'][boost];
+        if (boost && AidBodys['aid-upgrade'][boost]) {
+            const config = AidBodys['aid-upgrade'][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
             if (room.CheckBoostRes(bodys, boostmap)) {
@@ -136,9 +134,9 @@ export default class AidSpawnFunction extends Flag {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && RoleBodys['aid-carry'][boost]) {
-            bodys = RoleBodys['aid-carry'][boost].bodypart || [];
-            const boostmap = RoleBodys['aid-carry'][boost].boostmap || {};
+        if (boost && AidBodys['aid-carry'][boost]) {
+            bodys = AidBodys['aid-carry'][boost].bodypart || [];
+            const boostmap = AidBodys['aid-carry'][boost].boostmap || {};
             if (room.CheckBoostRes(bodys, boostmap)) {
                 memory['boostmap'] = boostmap;
                 memory['boostOwnerId'] = `${flagName}:${Game.time}`;
@@ -236,17 +234,6 @@ export default class AidSpawnFunction extends Flag {
         const targetRoom = this.pos.roomName;
         room.SpawnMissionAdd('', '', -1, 'reserver', { targetRoom });
         return true;
-    }
-
-    private isAidSpawnFlag(flagName: string) {
-        return (
-            flagName.startsWith('CLAIM/') ||
-            flagName.startsWith('RESERVE/') ||
-            flagName.startsWith('AID-BUILD/') ||
-            flagName.startsWith('AID-UPGRADE/') ||
-            flagName.startsWith('AID-UUP/') ||
-            flagName.startsWith('AID-ENERGY/')
-        );
     }
 
     private getBoostTierFromName(flagName: string): string | undefined {

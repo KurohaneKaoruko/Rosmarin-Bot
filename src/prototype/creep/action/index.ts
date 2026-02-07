@@ -20,7 +20,6 @@ import logistic from './other/logistic';
 import upUpgrade from './other/up-upgrade';
 import upRepair from './other/up-repair';
 import dismantle from './other/dismantle';
-import cleaner from './other/cleaner';
 import signer from './other/signer';
 import scout from './other/scout';
 
@@ -92,7 +91,7 @@ export const actionRegistry: Record<string, any> = {
     'harvester': harvester,
     'transport': transport,
     'manager': manager,
-    'cleaner': cleaner,
+    'cleaner': dismantle,
     'dismantle': dismantle,
     'signer': signer,
     'claimer': claimer,

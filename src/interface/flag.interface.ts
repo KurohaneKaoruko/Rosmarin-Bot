@@ -5,7 +5,7 @@ interface Flag {
     // 核弹打击旗帜（处理 nuke-* / nuke_*）
     handleNukeFlag(): boolean;
 
-    // 战争孵化旗帜（处理 AIO/CLEAN/ACLAIM 等战斗相关旗帜）
+    // 战争孵化旗帜（处理 AIO/CLEAN/ACLAIM/DIS/LOOT 等战斗相关旗帜）
     handleWarSpawnFlag(): boolean;
 
     // 旗帜触发孵化（CLAIM/RESERVE/AID-*）

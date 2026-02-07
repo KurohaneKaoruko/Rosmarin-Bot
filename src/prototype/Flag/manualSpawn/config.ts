@@ -1,6 +1,6 @@
 type BoostConfig = {
     bodypart: [BodyPartConstant, number][];
-    boostmap: { [bodypart: string]: MineralBoostConstant };
+    boostmap: BoostMap;
 };
 
 type BoostMap = { [bodypart: string]: MineralBoostConstant | MineralBoostConstant[] };
@@ -10,7 +10,12 @@ type AioConfig = {
     boostmap: BoostMap;
 };
 
-const RoleBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
+type LootConfig = {
+    bodypart: [BodyPartConstant, number][];
+    boostmap: BoostMap | null;
+};
+
+const AidBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
     'aid-build': {
         'T3': {
             bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
@@ -54,8 +59,24 @@ const AIO_CONFIG: { [key: string]: AioConfig } = {
     }
 }
 
+const LOOT_CONFIG: { [tier: string]: LootConfig } = {
+    'T0': {
+        bodypart: [[CARRY, 25], [MOVE, 25]],
+        boostmap: null,
+    },
+    'T1': {
+        bodypart: [[CARRY, 33], [MOVE, 17]],
+        boostmap: { [CARRY]: 'KH', [MOVE]: 'ZO' },
+    },
+    'T2': {
+        bodypart: [[CARRY, 37], [MOVE, 13]],
+        boostmap: { [CARRY]: 'KH2O', [MOVE]: 'ZHO2' },
+    },
+    'T3': {
+        bodypart: [[CARRY, 40], [MOVE, 10]],
+        boostmap: { [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' },
+    },
+}
 
-
-export type { BoostConfig, BoostMap, AioConfig }
-export { RoleBodys, AIO_CONFIG }
-
+export type { BoostConfig, BoostMap, AioConfig, LootConfig }
+export { AidBodys, AIO_CONFIG, LOOT_CONFIG }
