@@ -680,7 +680,6 @@ export function checkDDMessages(): void {
 export function mountDD(): void {
     if (typeof Structure !== 'undefined') Structure.prototype.notifyWhenAttacked = ddNotifyWhenAttacked as any
     if (typeof Creep !== 'undefined') Creep.prototype.notifyWhenAttacked = ddNotifyWhenAttacked as any
-    console.log('[DD] 攻击通知原型已挂载')
 }
 
 // ==================== 导出工具 ====================
