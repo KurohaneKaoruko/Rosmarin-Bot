@@ -2,7 +2,7 @@ interface Room {
     // ==================== 房间建筑缓存 ====================
     /** 
      * 房间中的source数组
-     * @description 缓存房间内所有能量源，每tick自动更新
+     * @description 缓存房间内所有能量源，由 room.update() 定期更新（默认每 10 tick）
      * @example const sources = room.source; // Source[]
      */
     source: Source[];
