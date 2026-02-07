@@ -1,6 +1,6 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
 import { log } from "@/utils";
-import { RoleBodys } from "../spawnConfig";
+import { RoleBodys } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
 export default class AidSpawnFunction extends Flag {
@@ -17,8 +17,6 @@ export default class AidSpawnFunction extends Flag {
         if (this.handleAidEnergyFlag(flagName)) return true;
         if (this.handleClaimFlag(flagName)) return true;
         if (this.handleReserveFlag(flagName)) return true;
-        if (this.handleCleanFlag(flagName)) return true;
-        if (this.handleAttackClaimFlag(flagName)) return true;
 
         return true;
     }
@@ -240,45 +238,10 @@ export default class AidSpawnFunction extends Flag {
         return true;
     }
 
-    // 清扫房间 (用于防御薄弱的房间)
-    private handleCleanFlag(flagName: string): boolean {
-        if (!flagName.startsWith('CLEAN/')) return false;
-
-        const spawnInterval = this.getSpawnIntervalFromName(500);
-        if (!this.timeCheck(spawnInterval)) return true;
-        const room = this.getSpawnRoomFromName();
-        if (!room) return true;
-        const targetRoom = this.pos.roomName;
-        room.SpawnMissionAdd('', '', -1, 'cleaner', { targetRoom });
-        return true;
-    }
-
-    // 攻击控制器
-    private handleAttackClaimFlag(flagName: string): boolean {
-        if (!flagName.startsWith('ACLAIM/')) return false;
-
-        const spawnInterval = this.getSpawnIntervalFromName(1000) || 500;
-        if (!this.timeCheck(spawnInterval)) return true;
-        const room = this.getSpawnRoomFromName();
-        if (!room) return true;
-
-        const targetRoom = this.pos.roomName;
-        let num = flagName.match(/\/N-(\d+)$/)?.[1] as any;
-        if (!num) num = 1;
-        else num = parseInt(num);
-        for (let i = 0; i < num; i++) {
-            room.SpawnMissionAdd('', '', num, 'attack-claimer', { targetRoom, num });
-        }
-        log('CLAIM', `${room.name} 孵化了 ${num} 个 attack-claimer 来攻击 ${targetRoom}`);
-        return true;
-    }
-
     private isAidSpawnFlag(flagName: string) {
         return (
             flagName.startsWith('CLAIM/') ||
             flagName.startsWith('RESERVE/') ||
-            flagName.startsWith('CLEAN/') ||
-            flagName.startsWith('ACLAIM/') ||
             flagName.startsWith('AID-BUILD/') ||
             flagName.startsWith('AID-UPGRADE/') ||
             flagName.startsWith('AID-UUP/') ||

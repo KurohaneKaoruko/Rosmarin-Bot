@@ -1,5 +1,6 @@
 import { RoleData } from "@/constant/CreepConstant";
-import { AIO_CONFIG, type BoostMap } from "../spawnConfig";
+import { log } from "@/utils";
+import { AIO_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
 export default class WarSpawnFunction extends Flag {
@@ -7,7 +8,9 @@ export default class WarSpawnFunction extends Flag {
         const flagName = this.name
         if (Game.time % 10) return true
         if (flagName.startsWith('AIO/')) return this.handleAioFlag(flagName)
-        return;
+        if (flagName.startsWith('CLEAN/')) return this.handleCleanFlag(flagName)
+        if (flagName.startsWith('ACLAIM/')) return this.handleAttackClaimFlag(flagName)
+        return false
     }
 
     private handleAioFlag(flagName: string): boolean {
@@ -52,6 +55,33 @@ export default class WarSpawnFunction extends Flag {
             this.remove()
         }
 
+        return true
+    }
+
+    // 清扫房间 (用于防御薄弱的房间)
+    private handleCleanFlag(flagName: string): boolean {
+        const spawnInterval = parseFlagNumber(flagName, 'T', 500)
+        if (!tickThrottle(this, spawnInterval)) return true
+        const room = getSpawnRoomOrRemove(this)
+        if (!room) return true
+        const targetRoom = this.pos.roomName
+        room.SpawnMissionAdd('', '', -1, 'cleaner', { targetRoom })
+        return true
+    }
+
+    // 攻击控制器
+    private handleAttackClaimFlag(flagName: string): boolean {
+        const spawnInterval = parseFlagNumber(flagName, 'T', 1000) || 500
+        if (!tickThrottle(this, spawnInterval)) return true
+        const room = getSpawnRoomOrRemove(this)
+        if (!room) return true
+
+        const targetRoom = this.pos.roomName
+        const num = parseFlagNumber(flagName, 'N', 1)
+        for (let i = 0; i < num; i++) {
+            room.SpawnMissionAdd('', '', num, 'attack-claimer', { targetRoom, num })
+        }
+        log('CLAIM', `${room.name} 孵化了 ${num} 个 attack-claimer 来攻击 ${targetRoom}`)
         return true
     }
 }
