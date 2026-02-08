@@ -145,6 +145,29 @@ export default class BaseFunction extends Room {
         return this.updateEnergyState(false);
     }
 
+    isDefending() {
+        if ((this.memory as any).defend) return true;
+        const until = (this.memory as any).defendUntil as number | undefined;
+        return !!(until && until > Game.time);
+    }
+
+    isResourceTransferInSafe() {
+        //  判断“是否允许向该房间转入资源”应基于实际攻防态（defend/breached/冷却），而不是用 tower 数量当代理。
+        if (!this.my) return false;
+        if (!this.storage || !this.terminal) return false;
+        if (this.level < 6) return false;
+        const owner = this.controller?.owner?.username;
+        if (owner && (this.storage.owner.username !== owner || this.terminal.owner.username !== owner)) return false;
+        if (this.controller?.safeMode) return true;
+
+        if (this.isDefending()) return false;
+        if ((this.memory as any).breached) return false;
+
+        const unsafeUntil = (this.memory as any).resourceUnsafeUntil as number | undefined;
+        if (unsafeUntil && unsafeUntil > Game.time) return false;
+        return true;
+    }
+
     // 获取绑定最少的能量源
     closestSource(creep: Creep) {
         // 初始化最少Creep绑定计数

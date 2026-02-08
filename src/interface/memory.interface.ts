@@ -122,6 +122,30 @@ interface RoomMemory {
      * 建议保留的最低能量储备（用于保证关键孵化/回填链路）
      */
     energyReserve?: number;
+
+    /**
+     * 房间防御态标记
+     * @description true 表示房间存在威胁或仍处于防御冷却窗口
+     */
+    defend: boolean;
+
+    /**
+     * 防御态粘性时间窗（Game.time）
+     * @description 避免敌人短暂消失造成状态频繁抖动
+     */
+    defendUntil?: number;
+
+    /**
+     * 防线是否被突破
+     * @description 由主动防御在有威胁时评估写入；用于决定是否加长资源转入冷却
+     */
+    breached?: boolean;
+
+    /**
+     * 资源转入禁用截止 tick（Game.time）
+     * @description 房间被打/被破后，跨房间调度不应立刻向该房间回填资源
+     */
+    resourceUnsafeUntil?: number;
 }
 
 // ============================================================

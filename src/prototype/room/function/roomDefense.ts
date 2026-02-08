@@ -90,6 +90,8 @@ export default class RoomDefense extends Room {
             return sum + s;
         }, 0);
         this.memory['defendUntil'] = Game.time + Math.min(200, 50 + threatScore * 2);
+        //  房间出现威胁时，短时间内禁止跨房间向该房间转入资源，避免“刚被打/刚被破”立刻回填给敌人搬走。
+        this.memory['resourceUnsafeUntil'] = Math.max(Number(this.memory['resourceUnsafeUntil'] || 0), Game.time + 200);
 
         // 如果房间等级小于4，则不进行主动防御
         if (this.level < 4) return;
@@ -116,6 +118,7 @@ export default class RoomDefense extends Room {
             const allowHeavyDefenseCalc = shouldRun({ minBucket: 2000, allowLevels: ['normal', 'constrained'] });
             if (!allowHeavyDefenseCalc) {
                 this.memory['breached'] = true;
+                this.memory['resourceUnsafeUntil'] = Math.max(Number(this.memory['resourceUnsafeUntil'] || 0), Game.time + 1500);
             } else {
                 const costs = this.getDefenseCostMatrix(false);
 
@@ -129,6 +132,9 @@ export default class RoomDefense extends Room {
                     }
                 }
                 this.memory['breached'] = breached;
+                if (breached) {
+                    this.memory['resourceUnsafeUntil'] = Math.max(Number(this.memory['resourceUnsafeUntil'] || 0), Game.time + 1500);
+                }
                 const rampartMinHits = breached ? 1e5 : 1e6;
 
                 let sumX = 0;
@@ -239,7 +245,7 @@ export default class RoomDefense extends Room {
             (enemyStats.boosted ? 8 : 0) +
             enemyStats.other * 3;
 
-        // 把态势写入内存，便于防御 creep 做“追击/撤退”决策（为什么：主防判定应统一，避免各自为政）。
+        // 把态势写入内存，便于防御 creep 做“追击/撤退”决策（ 主防判定应统一，避免各自为政）。
         this.memory['defenseState'] = breached
             ? 'breached'
             : enemyPressure >= 18 || enemyStats.boosted || enemyStats.heal > 0

@@ -252,6 +252,18 @@ interface Room {
      * 获取房间能量状态（内部可复用 updateEnergyState 的缓存）
      */
     getEnergyState(): NonNullable<RoomMemory['energyState']>;
+
+    /**
+     * 是否处于防御态（含 defendUntil 粘性窗口）
+     * @description 用于统一“房间正在被打/刚被打完”的判定口径
+     */
+    isDefending(): boolean;
+
+    /**
+     * 是否允许向该房间转入资源（跨房间调度/资源平衡）
+     * @description 基于攻防态/被破标记/冷却窗口判断，避免房间被攻破后继续被补给
+     */
+    isResourceTransferInSafe(): boolean;
     
     /** 
      * 获取房间内最近的source

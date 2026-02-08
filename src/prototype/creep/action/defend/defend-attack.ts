@@ -141,7 +141,7 @@ const autoDefend = function (creep: Creep) {
             const state = creep.room.memory['defenseState'];
             const hasRamparts = Array.isArray(creep.room[STRUCTURE_RAMPART]) && creep.room[STRUCTURE_RAMPART].length > 0;
             if (state === 'breached' || !hasRamparts) {
-                // 破口/无工事时必须主动贴脸，否则敌人会持续推进（为什么：近战是“止损位”，不出手就会丢核心）。
+                // 破口/无工事时必须主动贴脸，否则敌人会持续推进（ 近战是“止损位”，不出手就会丢核心）。
                 delete creep.memory['defenseRampartId'];
                 delete creep.memory['defenseRampartLockUntil'];
                 creep.memory['defenseRampartBlockedTicks'] = 0;
@@ -153,7 +153,7 @@ const autoDefend = function (creep: Creep) {
                 creep.room.CallTowerAttack(target);
                 return;
             }
-            // 有工事且未破口时不追击：继续守点压制入口（为什么：追击会导致防线被拉开、被对方逐个击破）。
+            // 有工事且未破口时不追击：继续守点压制入口（ 追击会导致防线被拉开、被对方逐个击破）。
             creep.room.CallTowerAttack(target);
         }
     }

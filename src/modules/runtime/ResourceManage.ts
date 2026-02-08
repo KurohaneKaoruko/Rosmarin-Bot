@@ -64,17 +64,20 @@ export const ResourceManage = {
         }
 
         const eligibleRooms: Room[] = [];
+        const productionRooms: Room[] = [];
 
         // 遍历所有房间的设置
         for (const roomName in getRoomData()) {
             const room = Game.rooms[roomName];
-            // 仅对满足条件的“己方房间”启用跨房间资源平衡
-            if (!room || !room.my || !room.terminal || !room.storage || room.level < 6 || 
+            // 跨房间资源平衡“是否转入资源”的风险，由房间攻防态决定。
+            // - productionRooms：用于排产/缺口统计（要求有 storage+terminal 且可用）
+            // - eligibleRooms：用于跨房间资源平衡的资源扫描与调度候选（转入是否允许在 target 分支单独判定）
+            if (!room || !room.my || !room.terminal || !room.storage || room.level < 6 ||
                 room.terminal.owner.username != room.controller.owner.username ||
-                room.storage.owner.username != room.controller.owner.username ||
-                room.tower.length < CONTROLLER_STRUCTURES['tower'][room.level]
+                room.storage.owner.username != room.controller.owner.username
             ) continue;
 
+            productionRooms.push(room);
             eligibleRooms.push(room);
 
             let Ress: string[] = [];
@@ -109,6 +112,7 @@ export const ResourceManage = {
                     if (room.terminal.cooldown) continue;
                     ResManageMap[res].source.push(roomName);
                 } else if (resAmount < targetThreshold) {
+                    if (!room.isResourceTransferInSafe()) continue;
                     ResManageMap[res].target.push(roomName);
                 }
             }
@@ -134,7 +138,7 @@ export const ResourceManage = {
             const getGlobalAmount = (res: string) => {
                 if (globalCache[res] !== undefined) return globalCache[res];
                 let total = 0;
-                for (const room of eligibleRooms) total += getResAmountCached(room, res);
+                    for (const room of productionRooms) total += getResAmountCached(room, res);
                 globalCache[res] = total;
                 return total;
             };
@@ -236,7 +240,7 @@ export const ResourceManage = {
                 const planList = buildLabPlanList();
                 if (planList.length) {
                     const planRooms: { room: Room; autoLabMap: Record<string, number>; botmem: any }[] = [];
-                    for (const room of eligibleRooms) {
+                    for (const room of productionRooms) {
                         const labs = (room as any).lab as StructureLab[] | undefined;
                         if (!Array.isArray(labs) || labs.length === 0) continue;
                         const botmem = getStructData(room.name) as any;
@@ -305,7 +309,7 @@ export const ResourceManage = {
                 }
             }
 
-            const planFactoryRooms = RESOURCE_PRODUCTION.factory.enabled ? eligibleRooms : [];
+            const planFactoryRooms = RESOURCE_PRODUCTION.factory.enabled ? productionRooms : [];
             if (planFactoryRooms.length && RESOURCE_PRODUCTION.factory.chain.enabled) {
                 const getRoomAvailWithFactory = (room: Room, res: string) => {
                     return getResAmountCached(room, res) + ((room.factory?.store as any)?.[res] || 0);
@@ -345,7 +349,7 @@ export const ResourceManage = {
                 const getGlobalAvail = (res: string) => {
                     if (globalAvailCache[res] !== undefined) return globalAvailCache[res];
                     let total = 0;
-                    for (const room of eligibleRooms) {
+                    for (const room of productionRooms) {
                         total += getResAmountCached(room, res);
                         total += ((room.factory?.store as any)?.[res] || 0);
                     }
@@ -501,6 +505,7 @@ export const ResourceManage = {
                         if (room.terminal?.cooldown) continue;
                         ResManageMap[res].source.push(room.name);
                     } else if (amount < targetThreshold) {
+                        if (!room.isResourceTransferInSafe()) continue;
                         ResManageMap[res].target.push(room.name);
                     }
                 }

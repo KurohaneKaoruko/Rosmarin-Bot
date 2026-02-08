@@ -262,7 +262,7 @@ export default class TowerControl extends Room {
             return true;
         }
 
-        // 打不动的目标不要每 tick 浪费 tower 能量：低频点射用于逼退/打断（为什么：有些极限 boost 需要等防御兵到位）。
+        // 打不动的目标不要每 tick 浪费 tower 能量：低频点射用于逼退/打断（ 有些极限 boost 需要等防御兵到位）。
         if (Game.time % 20 >= 5) return false;
         this.tower.forEach(tower => {
             if (tower['attacked']) return;

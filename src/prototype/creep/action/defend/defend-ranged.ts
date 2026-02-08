@@ -135,7 +135,7 @@ const autoDefend = function (creep: Creep) {
             const state = creep.room.memory['defenseState'];
             const hasRamparts = Array.isArray(creep.room[STRUCTURE_RAMPART]) && creep.room[STRUCTURE_RAMPART].length > 0;
             if (state === 'breached' || !hasRamparts) {
-                // 破口/无工事时需要前推输出，否则塔可能永远打不死（为什么：必须把战斗距离拉回到我方有效火力圈）。
+                // 破口/无工事时需要前推输出，否则塔可能永远打不死（ 必须把战斗距离拉回到我方有效火力圈）。
                 delete creep.memory['defenseRampartId'];
                 delete creep.memory['defenseRampartLockUntil'];
                 creep.memory['defenseRampartBlockedTicks'] = 0;
@@ -147,7 +147,7 @@ const autoDefend = function (creep: Creep) {
                 creep.room.CallTowerAttack(target);
                 return;
             }
-            // 有工事且未破口时不要追出防区，保持站位由塔集火（为什么：追击会把自己暴露在敌方火力下并破坏防线）。
+            // 有工事且未破口时不要追出防区，保持站位由塔集火（ 追击会把自己暴露在敌方火力下并破坏防线）。
             creep.room.CallTowerAttack(target);
             return;
         }
@@ -163,7 +163,7 @@ const autoDefend = function (creep: Creep) {
             return;
         }
         if (range <= 3) {
-            // 被贴脸且血量偏低时优先拉扯（为什么：远程防御的胜利条件是持续输出，而不是换血）。
+            // 被贴脸且血量偏低时优先拉扯（ 远程防御的胜利条件是持续输出，而不是换血）。
             if (range <= 2 && creep.hits < creep.hitsMax * 0.6 && !creep.pos.lookFor(LOOK_STRUCTURES).some(s => s.structureType === STRUCTURE_RAMPART)) {
                 if (creep.fleeFromHostiles(4)) return;
             }

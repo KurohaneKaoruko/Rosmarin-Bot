@@ -6,6 +6,7 @@ import { getStructData } from '@/modules/utils/memory';
  * @description
  * - 统一处理 Lab A/B 底物选择：使用坐标化存储（compress(x,y)）；在 Lab 数量为 10 且未配置时自动推导并写回
  * - 统一处理 Boost Lab 预留：用单一的 boostLabs 表描述临时征用(task)与长期固定(fixed)
+ * - 为了确保自动推导结果的正确，只有在10Lab才进行自动推导。
  *
  * 注意：
  * - `get*` 函数只读（不写 Memory），用于多数业务读取场景
