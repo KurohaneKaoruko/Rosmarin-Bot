@@ -9,7 +9,7 @@ const COLORS = {
     neutral: '#888888',   // Muted Grey
     info: '#4CC9F0',
     text: '#F0F0F0',
-    textMuted: '#666666',
+    textMuted: '#B0B0B0',
     levelLow: '#666666',
     levelMid: '#4CC9F0',
     levelHigh: '#D0CAE0', // Use Theme Color
@@ -61,13 +61,13 @@ const td = (text: string) => `<td style="${STYLES.td}">${text}</td>`;
 
 const th = (text: string) => `<th style="${STYLES.th}">${text}</th>`;
 
-const notBuilt = () => td(`<span style="color: ${COLORS.neutral}; opacity: 0.5;padding: 0;">- NULL -</span>`);
+const notBuilt = () => td(`<span style="color: ${COLORS.neutral}; opacity: 0.5;padding: 0;">- 未建造 -</span>`);
 
-const disabled = () => td(colorText(`${ICONS.danger} OFFLINE`, COLORS.danger));
+const disabled = () => td(colorText(`${ICONS.danger} 已关闭`, COLORS.danger));
 
-const idle = () => td(colorText(`${ICONS.warning} IDLE`, COLORS.warning));
+const idle = () => td(colorText(`${ICONS.warning} 闲置`, COLORS.warning));
 
-const lowResource = () => td(colorText(`${ICONS.warning} LOW_RES`, COLORS.warning));
+const lowResource = () => td(colorText(`${ICONS.warning} 资源不足`, COLORS.warning));
 
 // ENERGY 显示格式：默认千分位；达到百万级后转为 K 单位（保持逗号分隔）
 export const formatEnergy = (energy: number): string => {
@@ -160,7 +160,7 @@ const renderNuker = (room: Room): string => {
         room.nuker.store[RESOURCE_GHODIUM] < THRESHOLDS.nukerGhodium) {
         return lowResource();
     }
-    return td(colorText(`${ICONS.good} READY`, COLORS.good));
+    return td(colorText(`${ICONS.good} 就绪`, COLORS.good));
 };
 
 const renderEnergy = (room: Room): string => {

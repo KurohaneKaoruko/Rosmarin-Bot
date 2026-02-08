@@ -1,4 +1,5 @@
 import { showRoomInfo } from "@/modules/utils/showRoomInfo";
+import { showFactoryInfo, showLabInfo } from "@/modules/utils/showProductionInfo";
 import { getRoomData } from "@/modules/utils/memory";
 
 export default {
@@ -13,6 +14,22 @@ export default {
             // 获取需要显示的房间名列表
             const roomNames = roomName ? [roomName] : Object.keys(getRoomData());
             return showRoomInfo(roomNames);
+        },
+        lab(roomName?: string) {
+            if (roomName) {
+                const room = Game.rooms[roomName];
+                if (!room || !room.my) return Error(`房间 ${roomName} 不存在或未拥有。`);
+            }
+            const roomNames = roomName ? [roomName] : Object.keys(getRoomData());
+            return showLabInfo(roomNames);
+        },
+        factory(roomName?: string) {
+            if (roomName) {
+                const room = Game.rooms[roomName];
+                if (!room || !room.my) return Error(`房间 ${roomName} 不存在或未拥有。`);
+            }
+            const roomNames = roomName ? [roomName] : Object.keys(getRoomData());
+            return showFactoryInfo(roomNames);
         },
         // 查看所有资源储量
         res() {
