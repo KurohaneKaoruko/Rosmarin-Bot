@@ -16,22 +16,46 @@ export default class BaseFunction extends PowerCreep {
     }
     transferOPS(): boolean {
         if (this.store.getFreeCapacity() === 0 && this.store[RESOURCE_OPS] > 200) {
+            const storage = this.room.storage;
+            const terminal = this.room.terminal;
+            // storage 已满时，transfer 会一直 ERR_FULL；此处必须让出 tick 让 Operate_Storage 等技能逻辑继续执行，避免卡死。
+            let target: StructureStorage | StructureTerminal | null = null;
+            if (storage && storage.store.getFreeCapacity(RESOURCE_OPS) > 0) target = storage;
+            else if (terminal && terminal.store.getFreeCapacity(RESOURCE_OPS) > 0) target = terminal;
+            else return false;
+
             const halfOps = Math.floor(this.store[RESOURCE_OPS] / 2);
-            const amount = Math.min(halfOps, this.store[RESOURCE_OPS] - 200);
+            const free = target.store.getFreeCapacity(RESOURCE_OPS);
+            const amount = Math.min(halfOps, this.store[RESOURCE_OPS] - 200, free);
             if (amount <= 0) return false;
-            if (this.pos.isNearTo(this.room.storage)) {
-                this.transfer(this.room.storage, RESOURCE_OPS, amount);
+            if (this.pos.isNearTo(target)) {
+                const code = this.transfer(target, RESOURCE_OPS, amount);
+                if (code === OK) return true;
+                if (code === ERR_NOT_IN_RANGE) return true;
+                return false;
             } else {
-                this.moveTo(this.room.storage);
+                this.moveTo(target);
             }
             return true;
         }
         if(this.ticksToLive < 50 && this.store[RESOURCE_OPS] > 0) {
-            if (this.pos.isNearTo(this.room.storage)) {
-                this.transfer(this.room.storage, RESOURCE_OPS);
+            const storage = this.room.storage;
+            const terminal = this.room.terminal;
+            // 临死前转存也要避免 storage 满导致死循环；优先 storage，满则兜底 terminal。
+            let target: StructureStorage | StructureTerminal | null = null;
+            if (storage && storage.store.getFreeCapacity(RESOURCE_OPS) > 0) target = storage;
+            else if (terminal && terminal.store.getFreeCapacity(RESOURCE_OPS) > 0) target = terminal;
+            else return false;
+
+            if (this.pos.isNearTo(target)) {
+                const code = this.transfer(target, RESOURCE_OPS);
+                if (code === OK) return true;
+                if (code === ERR_NOT_IN_RANGE) return true;
+                return false;
             } else {
-                this.moveTo(this.room.storage);
+                this.moveTo(target);
             }
+            return true;
         }
         return false;
     }

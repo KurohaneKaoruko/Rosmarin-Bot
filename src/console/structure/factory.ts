@@ -39,7 +39,7 @@ export default {
             if(!COMMODITIES[product]) {
                 return Error(`生产目标 ${product} 不存在。`);
             }
-            const flv = room.factory?.level || getStructData(roomName)?.['factoryLevel'] || 0;
+            const flv = room.factory?.level || 0;
             if(COMMODITIES[product].level && COMMODITIES[product].level != flv) {
                 return Error(`生产目标 ${product} 需要factory等级为 ${COMMODITIES[product].level}, 而factory等级不匹配或未设置等级。`);
             }
@@ -50,22 +50,6 @@ export default {
                 BotMemStructures[roomName]['factory'] = true;
                 global.log(`[${roomName}] 已开启factory。`);
             }
-            return OK;
-        },
-        // 设置factory等级
-        setlevel(roomName: string, level: number) {
-            const room = Game.rooms[roomName];
-            const BotMemStructures =  getStructData();
-            if(!room || !room.my || !BotMemStructures[roomName]) {
-                global.log(`[${roomName}] 房间不存在、未拥有或未添加。`);
-                return;
-            }
-            if(level < 0 || level > 5) {
-                global.log(`[${roomName}] factory等级 ${level} 不存在。`);
-                return;
-            }
-            BotMemStructures[roomName]['factoryLevel'] = level;
-            global.log(`[${roomName}] 已设置factory等级为 ${level}。`);
             return OK;
         },
         auto: {
@@ -81,7 +65,7 @@ export default {
                     global.log(`资源 ${product} 不存在。`);
                     return;
                 }
-                const flv = room.factory?.level || getStructData(roomName)?.['factoryLevel'];
+                const flv = room.factory?.level || 0;
                 if(COMMODITIES[product].level && COMMODITIES[product].level != flv) {
                     global.log(`资源 ${product} 的等级 ${COMMODITIES[product].level} 不匹配 factory 等级 ${flv}。`);
                     return;

@@ -6,7 +6,7 @@ import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 export default {
     layout: {
         // 设置房间布局
-        set(roomName: string, layout: string, x: number, y: number) {
+        set(roomName: string, layout: string, x?: number, y?: number) {
             const room = Game.rooms[roomName];
             const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
@@ -18,12 +18,21 @@ export default {
                 global.log(`已清除 ${roomName} 的布局设置。`);
                 return OK;
             }
-            if (!x || !y) {
-                return Error(`需要输入正确的布局中心坐标。`);
+            let cx = typeof x === 'number' ? x : undefined;
+            let cy = typeof y === 'number' ? y : undefined;
+            if (cx == null || cy == null) {
+                const flag = Game.flags.centerPos;
+                if (flag?.pos?.roomName === roomName) {
+                    cx = flag.pos.x;
+                    cy = flag.pos.y;
+                }
+            }
+            if (cx == null || cy == null || cx < 0 || cx > 49 || cy < 0 || cy > 49) {
+                return Error(`需要输入正确的布局中心坐标（x,y）或在房间内放置 centerPos 旗帜。`);
             }
             BotMemRooms[roomName]['layout'] = layout;
-            BotMemRooms[roomName]['center'] = { x, y };
-            global.log(`已设置 ${roomName} 的布局为 ${layout}, 布局中心为 (${x},${y})`);
+            BotMemRooms[roomName]['center'] = { x: cx, y: cy };
+            global.log(`已设置 ${roomName} 的布局为 ${layout}, 布局中心为 (${cx},${cy})`);
             return OK;
         },
         // 开关自动建筑
@@ -56,7 +65,7 @@ export default {
             }
             const layoutMemory = getLayoutData()?.[roomName];
             if (!layoutMemory || !Object.keys(layoutMemory).length) {
-                console.log(`房间 ${roomName} 的布局memory不存在，请先执行 layout.build('${roomName}', true?)`);
+                console.log(`房间 ${roomName} 的布局memory不存在，请先执行 layout.build('${roomName}') 或 layout.build('${roomName}', 'auto'|'63auto'|静态布局名)`);
                 return Error('布局Memory不存在');
             }
             if (structType && (!layoutMemory[structType] || !layoutMemory[structType].length)) {
@@ -74,31 +83,30 @@ export default {
             return OK;
         },
         // 构建布局
-        // overwriteMemory: 是否覆盖已有布局 memory（默认不覆盖，避免误操作）
-        build(roomName: string, overwriteMemory: boolean = false) {
+        // layoutType: 可选，指定布局类型（传入则覆盖 RoomData.layout，并覆盖布局内存；不传则用当前设置且不覆盖布局内存）
+        build(roomName: string, layoutType?: string) {
             const BotMemRooms = getRoomData();
             if (!BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 未添加到控制列表。`);
             }
             const layoutMemory = getLayoutData(roomName);
-            if (layoutMemory && Object.keys(layoutMemory).length) {
-                if (!overwriteMemory) {
-                    console.log(`房间 ${roomName} 的布局memory已存在，未开启覆盖，已取消本次生成。`);
-                    console.log(`如需覆盖，请执行 layout.build('${roomName}', true)`);
-                    return Error('布局Memory已存在');
-                }
-                console.log(`房间 ${roomName} 的布局memory已存在，已开启覆盖，将删除并重新生成。`);
-                const layouts = getLayoutData();
-                delete layouts[roomName];
+            if ((!layoutType || layoutType === '') && layoutMemory && Object.keys(layoutMemory).length) {
+                console.log(`房间 ${roomName} 的布局memory已存在，未指定布局类型，本次不覆盖。`);
+                return OK;
             }
-            const layoutType = BotMemRooms[roomName]['layout'];
+
+            if (layoutType) {
+                BotMemRooms[roomName]['layout'] = layoutType;
+            }
+
+            const currentLayout = (layoutType || BotMemRooms[roomName]['layout']) as any;
             // 如果没有设置布局就会使用自动布局
-            if (!layoutType || layoutType == 'auto') {
+            if (!currentLayout || currentLayout == 'auto') {
                 return LayoutPlanner.buildDynamic(roomName);
-            } else if (layoutType == '63auto') {
+            } else if (currentLayout == '63auto') {
                 return LayoutPlanner.buildDynamic63(roomName);
             } else {
-                return LayoutPlanner.buildStatic(roomName, layoutType);
+                return LayoutPlanner.buildStatic(roomName, currentLayout);
             }
         },
         // 查看布局可视化

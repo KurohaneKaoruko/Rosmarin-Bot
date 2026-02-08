@@ -109,25 +109,33 @@ export default class PowerCreepUsePower extends PowerCreep {
         // 没有factory时不处理
         const factory = this.room.factory;
         if(!factory) return false;
+        // ops不足时不处理
+        if(this.store[RESOURCE_OPS] < 100) return false;
+        // 已有效果未结束时不处理
+        if(factory.effects && factory.effects.some(e => e.effect == PWR_OPERATE_FACTORY && e.ticksRemaining > 0)) return false;
+
+        // 为什么：当 factory 没有等级时，先用一次技能固定等级，避免资源管理分配任务时无法正确判断房间的 factory 等级。
+        if (!factory.level) {
+            if (this.pos.inRangeTo(factory, 3)) {
+                this.usePower(PWR_OPERATE_FACTORY, factory);
+            } else {
+                this.moveTo(factory);
+            }
+            return true;
+        }
+
         // 没有任务时不处理
         const memory = getStructData(this.room.name);
         if(!memory || !memory.factoryProduct) return false;
-        // ops不足时不处理
-        if(this.store[RESOURCE_OPS] < 100) return false;
-        // factory等级不匹配时不处理
-        if(!factory.level && (!memory.factoryLevel || memory.factoryLevel <= 0))
-            return false;
-        if(COMMODITIES[memory.factoryProduct].level != (factory.level || memory.factoryLevel))
-            return false;
+
+        // factory等级不匹配时不处理（不再依赖 memory.factoryLevel）
+        if(COMMODITIES[memory.factoryProduct].level != factory.level) return false;
         // 资源不充足时不处理
         const components = COMMODITIES[memory.factoryProduct]?.components;
         for(const resource in components) {
             if(factory.store[resource] < components[resource]) return false;
         }
-        // 已有效果未结束时不处理
-        if(factory.effects && factory.effects.some(e => e.effect == PWR_OPERATE_FACTORY && e.ticksRemaining > 0)) return false;
         if(factory.level && factory.level !== this.powers[PWR_OPERATE_FACTORY].level) return false;
-        if(!factory.level && memory.factoryLevel != this.powers[PWR_OPERATE_FACTORY].level) return false;
 
         if (this.pos.inRangeTo(factory, 3)) {
             this.usePower(PWR_OPERATE_FACTORY, factory);
