@@ -377,5 +377,74 @@ const getFallbackTask = (room: Room, botmem: any, factoryLevel: number, getAvail
         }
     }
 
+    // 5) 降级策略：当所有任务都达到目标库存时，降低阈值重新尝试
+    const degradeRatio = 0.5;
+    let degradeAttempt = 0;
+    const getReducedThreshold = (targetKeep: number, attempt: number) => Math.max(targetKeep * Math.pow(degradeRatio, attempt), 100);
+
+    while (degradeAttempt < 3) {
+        for (const product of [RESOURCE_COMPOSITE, RESOURCE_CRYSTAL, RESOURCE_LIQUID]) {
+            if (isBanned && isBanned(product)) continue;
+            const keep = Number(keepInRoom[product] || 0);
+            if (keep <= 0) continue;
+            const level = Number((COMMODITIES as any)?.[product]?.level ?? 0);
+            if (!isFactoryLevelCompatible(effectiveLevel, level)) continue;
+            const reducedKeep = getReducedThreshold(keep, degradeAttempt);
+            if (getAvail(product as any) >= keep) {
+                const reducedKeep = getReducedThreshold(keep, degradeAttempt);
+                if (getAvail(product as any) < reducedKeep) {
+                    const resolved = resolveProducible(product, 0, getMinQuota(product as any));
+                    if (resolved && resolved.product === (product as any)) {
+                        return { product: resolved.product, limit: reducedKeep };
+                    }
+                }
+            }
+        }
+
+        for (const product of [RESOURCE_WIRE, RESOURCE_CELL, RESOURCE_ALLOY, RESOURCE_CONDENSATE]) {
+            if (isBanned && isBanned(product)) continue;
+            const keep = Number(keepInRoom[product] || 0);
+            if (keep <= 0) continue;
+            const level = Number((COMMODITIES as any)?.[product]?.level ?? 0);
+            if (!isFactoryLevelCompatible(effectiveLevel, level)) continue;
+            const reducedKeep = getReducedThreshold(keep, degradeAttempt);
+            if (getAvail(product as any) >= keep) {
+                const reducedKeep = getReducedThreshold(keep, degradeAttempt);
+                if (getAvail(product as any) < reducedKeep) {
+                    const resolved = resolveProducible(product, 0, getMinQuota(product as any));
+                    if (resolved && resolved.product === (product as any)) {
+                        return { product: resolved.product, limit: reducedKeep };
+                    }
+                }
+            }
+        }
+
+        if (Number.isFinite(effectiveLevel) && effectiveLevel >= 0) {
+            const keep = Number(keepByLevelInRoom[effectiveLevel] || 0);
+            if (keep > 0) {
+                for (const product of Object.keys(COMMODITIES as any)) {
+                    const info = (COMMODITIES as any)[product];
+                    const level = Number(info?.level ?? 0);
+                    if (level !== effectiveLevel) continue;
+                    const tags = classify(product);
+                    if (!tags.colored) continue;
+                    if ((tags.rootsMask & ~availableMask) !== 0) continue;
+                    const have = getAvail(product as any);
+                    if (have >= keep) {
+                        const reducedKeep = getReducedThreshold(keep, degradeAttempt);
+                        if (have < reducedKeep) {
+                            const resolved = resolveProducible(product, 0, getMinQuota(product as any));
+                            if (resolved && resolved.product === (product as any)) {
+                                return { product: resolved.product, limit: reducedKeep };
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        degradeAttempt++;
+    }
+
     return null;
 };

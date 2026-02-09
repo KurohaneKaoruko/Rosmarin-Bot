@@ -264,6 +264,10 @@ const renderFactorySituation = (room: Room, struct: any, autoFactory: Record<str
 
     if (!product) {
         if (!autoFactory || Object.keys(autoFactory).length === 0) return colorText(`${ICONS.neutral} 暂无计划`, COLORS.neutral);
+        const hasBanned = renderFactoryBanned(room);
+        if (hasBanned !== mono('-', COLORS.textMuted)) {
+            return [colorText(`${ICONS.warning} 已Ban`, COLORS.warning), hasBanned].join(br);
+        }
         return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
     }
 
@@ -279,6 +283,21 @@ const renderFactorySituation = (room: Room, struct: any, autoFactory: Record<str
     const lackInFactory = Object.entries(components).some(([c, need]) => (store as any)[c] < Number(need));
     if (lackInFactory) return colorText(`${ICONS.warning} 等待填装`, COLORS.warning);
     return colorText(`${ICONS.good} 正在生产`, COLORS.good);
+};
+
+const renderFactoryBanned = (room: Room) => {
+    const botmem = peekStruct(room.name);
+    const banned = botmem?.factoryBan || {};
+    const now = Game.time;
+    const lines: string[] = [];
+    for (const [product, until] of Object.entries(banned)) {
+        const remaining = Number(until) - now;
+        if (remaining > 0) {
+            const rounds = Math.ceil(remaining / 50);
+            lines.push(`${mono(product)} ${colorText(`${rounds}轮`, COLORS.warning)}`);
+        }
+    }
+    return lines.length ? lines.join(br) : mono('-', COLORS.textMuted);
 };
 
 const renderFactoryTask = (room: Room, struct: any) => {
@@ -342,6 +361,7 @@ const roomRow = (roomName: string, idx: number, kind: 'lab' | 'factory') => {
         td(renderFactoryTask(room, struct)),
         td(renderAutoPlan(room, autoFactory, (r) => getFactoryAvail(room, r))),
         td(renderFactoryNeed(room, struct)),
+        td(renderFactoryBanned(room)),
     ];
     return `<tr style="${STYLES.tr} ${rowStyle}">${headers.join('')}</tr>`;
 };
@@ -356,7 +376,7 @@ export const showLabInfo = (rooms: string[]) => {
 };
 
 export const showFactoryInfo = (rooms: string[]) => {
-    const headers = ['房间', '状态', '情况', '任务', '计划', '缺口'];
+    const headers = ['房间', '状态', '情况', '任务', '计划', '缺口', 'Ban'];
     const rows = rooms.map((r, i) => roomRow(r, i, 'factory')).filter(Boolean).join('');
     return wrapTable('// FACTORY_PRODUCTION', headers, rows);
 };

@@ -541,36 +541,44 @@ export const ResourceManage = {
                         };
 
                         for (const { room, autoFactoryMap } of list) {
-                            const picked = pickForRoom();
-                            if (!picked) break;
+                            const maxPlans = (RESOURCE_PRODUCTION.factory.chain as any).maxPlansPerRoom ?? 1;
+                            const assignedProducts = new Set<string>();
+                            for (let planIdx = 0; planIdx < maxPlans; planIdx++) {
+                                const picked = pickForRoom();
+                                if (!picked) break;
 
-                            const def = picked.def;
-                            const batch = Math.max(0, Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom, def));
-                            const pickedLevel = Number((COMMODITIES as any)?.[picked.product]?.level ?? 0);
-                            const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[pickedLevel] ?? PRODUCTION_MIN.commodityByLevel[0];
-                            if (batch < minBatch) continue;
-                            specialRemaining[picked.product] = def - batch;
+                                const def = picked.def;
+                                const isPrimary = planIdx === 0;
+                                const batch = Math.max(0, Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom / (isPrimary ? 1 : 2), def));
+                                const pickedLevel = Number((COMMODITIES as any)?.[picked.product]?.level ?? 0);
+                                const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[pickedLevel] ?? PRODUCTION_MIN.commodityByLevel[0];
+                                if (batch < minBatch) continue;
+                                specialRemaining[picked.product] = def - batch;
 
-                            for (const k of Object.keys(autoFactoryMap)) {
-                                if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                                for (const k of Object.keys(autoFactoryMap)) {
+                                    if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                                }
+                                autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
+                                assignedProducts.add(picked.product);
+
+                                const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                                const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                                const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
+                                for (const [comp, need] of Object.entries(components)) {
+                                    const n = Number(need) || 0;
+                                    if (n <= 0) continue;
+                                    const minByRun = n * craftsNeed;
+                                    const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                                    noteNeed(room.name, comp, Math.max(minByRun, buffer));
+                                }
+
+                                tryLog([
+                                    `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
+                                    `${kv('产物', resTag(picked.product))} | ${kv('等级', String(pickedLevel))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))} | ${kv('类型', isPrimary ? '主' : '备用')}`,
+                                ]);
                             }
-                            autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
 
-                            const components = (COMMODITIES as any)?.[picked.product]?.components || {};
-                            const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
-                            const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
-                            for (const [comp, need] of Object.entries(components)) {
-                                const n = Number(need) || 0;
-                                if (n <= 0) continue;
-                                const minByRun = n * craftsNeed;
-                                const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
-                                noteNeed(room.name, comp, Math.max(minByRun, buffer));
-                            }
-
-                            tryLog([
-                                `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
-                                `${kv('产物', resTag(picked.product))} | ${kv('等级', String(pickedLevel))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))}`,
-                            ]);
+                            if (assignedProducts.size === 0) continue;
                             specialAssigned.add(room.name);
                         }
                     }
@@ -592,35 +600,44 @@ export const ResourceManage = {
 
                     for (const { room, autoFactoryMap } of list) {
                         if (specialAssigned.has(room.name)) continue;
-                        const picked = pickForRoom();
-                        if (!picked) break;
 
-                        const def = picked.def;
-                        const batch = Math.max(0, Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom, def));
-                        const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
-                        if (batch < minBatch) continue;
-                        remaining[`${level}:${picked.product}`] = def - batch;
+                        const maxPlans = (RESOURCE_PRODUCTION.factory.chain as any).maxPlansPerRoom ?? 1;
+                        const assignedProducts = new Set<string>();
+                        for (let planIdx = 0; planIdx < maxPlans; planIdx++) {
+                            const picked = pickForRoom();
+                            if (!picked) break;
 
-                        for (const k of Object.keys(autoFactoryMap)) {
-                            if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                            const def = picked.def;
+                            const isPrimary = planIdx === 0;
+                            const batch = Math.max(0, Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom / (isPrimary ? 1 : 2), def));
+                            const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
+                            if (batch < minBatch) continue;
+                            remaining[`${level}:${picked.product}`] = def - batch;
+
+                            for (const k of Object.keys(autoFactoryMap)) {
+                                if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                            }
+                            autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
+                            assignedProducts.add(picked.product);
+
+                            const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                            const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                            const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
+                            for (const [comp, need] of Object.entries(components)) {
+                                const n = Number(need) || 0;
+                                if (n <= 0) continue;
+                                const minByRun = n * craftsNeed;
+                                const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                                noteNeed(room.name, comp, Math.max(minByRun, buffer));
+                            }
+
+                            tryLog([
+                                `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
+                                `${kv('产物', resTag(picked.product))} | ${kv('等级', String(level))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))} | ${kv('类型', isPrimary ? '主' : '备用')}`,
+                            ]);
                         }
-                        autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
 
-                        const components = (COMMODITIES as any)?.[picked.product]?.components || {};
-                        const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
-                        const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
-                        for (const [comp, need] of Object.entries(components)) {
-                            const n = Number(need) || 0;
-                            if (n <= 0) continue;
-                            const minByRun = n * craftsNeed;
-                            const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
-                            noteNeed(room.name, comp, Math.max(minByRun, buffer));
-                        }
-
-                        tryLog([
-                            `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
-                            `${kv('产物', resTag(picked.product))} | ${kv('等级', String(level))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))}`,
-                        ]);
+                        if (assignedProducts.size === 0) continue;
                     }
                 }
             }

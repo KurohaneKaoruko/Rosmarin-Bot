@@ -382,8 +382,10 @@ export const RESOURCE_PRODUCTION = {
                 [RESOURCE_REDUCTANT]: 10e3,
                 [RESOURCE_PURIFIER]: 10e3,
             } as Record<string, number>,
-            /** 单房间单轮写入 AutoFactoryData 的“增量限额” */
+            /** 单房间单轮写入 AutoFactoryData 的"增量限额" */
             batchPerRoom: 5e3,
+            /** 单房间单轮最多写入的备用计划数（避免因主计划缺料/Ban导致长期闲置） */
+            maxPlansPerRoom: 2,
             /**
              * 各等级四色商品希望维持的目标库存
              * @description
