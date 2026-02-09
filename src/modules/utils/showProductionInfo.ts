@@ -272,9 +272,12 @@ const renderFactorySituation = (room: Room, struct: any, autoFactory: Record<str
     if (!components) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
     if (info?.level && Number(info.level) !== flv) return colorText(`${ICONS.danger} 等级不符`, COLORS.danger);
 
+    const lackInRoom = Object.entries(components).some(([c, need]) => getFactoryAvail(room, c as any) < Number(need));
+    if (lackInRoom) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+
     const store = (room.factory?.store as any) || {};
-    const lack = Object.entries(components).some(([c, need]) => (store as any)[c] < Number(need));
-    if (lack) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+    const lackInFactory = Object.entries(components).some(([c, need]) => (store as any)[c] < Number(need));
+    if (lackInFactory) return colorText(`${ICONS.warning} 等待填装`, COLORS.warning);
     return colorText(`${ICONS.good} 正在生产`, COLORS.good);
 };
 

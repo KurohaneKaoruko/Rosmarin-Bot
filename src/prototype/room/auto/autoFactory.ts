@@ -49,19 +49,42 @@ export default class AutoFactory extends Room {
                     delete (botmem as any).factoryWaitSince;
                     return;
                 }
-                const missingSet = new Set<string>(missing.map(([c]) => String(c)));
                 const pools = getMissionPools() as any;
                 const manageTasks = pools?.[this.name]?.manage;
-                const hasSupplyManage = Array.isArray(manageTasks) && manageTasks.some((t: any) =>
-                    t?.type === 'manage' &&
-                    t?.data?.target === 'factory' &&
-                    typeof t?.data?.amount === 'number' &&
-                    t.data.amount > 0 &&
-                    missingSet.has(String(t.data.resourceType))
-                );
-                const hasInStock = Array.from(missingSet).some(r => this.getResAmount(r as any) > 0);
-                if (!hasSupplyManage && !hasInStock) {
+                const hasManageFor = (res: string) => {
+                    if (!Array.isArray(manageTasks)) return false;
+                    return manageTasks.some((t: any) => {
+                        if (t?.type !== 'manage') return false;
+                        const d = t?.data as any;
+                        if (!d || d.target !== 'factory') return false;
+                        if (String(d.resourceType) !== res) return false;
+                        if (typeof d.amount !== 'number' || d.amount <= 0) return false;
+                        const source = d.source;
+                        const sourceObj = source ? (this as any)[source] : null;
+                        const sourceAmount = sourceObj?.store?.[res] || 0;
+                        return sourceAmount > 0;
+                    });
+                };
+
+                const missingDetails = missing.map(([c, need]) => {
+                    const res = String(c);
+                    const needTotal = Number(need) || 0;
+                    const haveInFactory = Number((store as any)[res] || 0);
+                    const needRemain = Math.max(0, needTotal - haveInFactory);
+                    return { res, needRemain };
+                });
+
+                const supplyPossible = missingDetails.every(({ res, needRemain }) => {
+                    if (needRemain <= 0) return true;
+                    if (hasManageFor(res)) return true;
+                    return this.getResAmount(res as any) >= needRemain;
+                });
+
+                const hasSupplyManage = missingDetails.some(({ res }) => hasManageFor(res));
+                if (!supplyPossible) {
                     missReasons.push('no_supply');
+                } else if (!hasSupplyManage) {
+                    missReasons.push('not_scheduled');
                 }
             }
 
@@ -78,17 +101,26 @@ export default class AutoFactory extends Room {
                     if (!isFactoryLevelCompatible(flv, level)) return false;
                     return canStartTask(getAvail, p as any);
                 });
-                const waitLimit = hasAlternativeRunnable
+                const waitLimit = missReasons.includes('not_scheduled')
+                    ? Number((AUTO_FACTORY_CONFIG as any).waitTimeoutTicksWhenAlternatives ?? 50)
+                    : hasAlternativeRunnable
                     ? Number((AUTO_FACTORY_CONFIG as any).waitTimeoutTicksWhenAlternatives ?? AUTO_FACTORY_CONFIG.waitTimeoutTicks)
                     : AUTO_FACTORY_CONFIG.waitTimeoutTicks;
                 const since = (botmem as any).factoryWaitSince ?? Game.time;
                 (botmem as any).factoryWaitSince = since;
                 if (Game.time - since < waitLimit) return;
 
+                const fillTimeout = missReasons.includes('not_scheduled');
                 botmem.factoryProduct = null;
                 botmem.factoryAmount = 0;
                 delete (botmem as any).factoryWaitSince;
-                global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+                if (!botmem.factoryBan) botmem.factoryBan = Object.create(null);
+                if (fillTimeout) {
+                    botmem.factoryBan[Product as any] = Game.time + (AUTO_FACTORY_CONFIG as any).banTicksAfterFillTimeout;
+                    global.log(`[${this.name}] 已自动结束factory生产任务(超时未填装): ${Product}. ban 至 ${botmem.factoryBan[Product as any]}`)
+                } else {
+                    global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+                }
             }
         }
 
@@ -96,13 +128,18 @@ export default class AutoFactory extends Room {
         let task: ResourceConstant | null = null;
         let taskAmount = 0;
 
+        const isBanned = (p: string) => {
+            const until = (botmem as any)?.factoryBan?.[p];
+            return typeof until === 'number' && Game.time < until;
+        };
+
         if (hasAutoList) {
-            task = getTask(this, getAvail, flv, autoFactoryMap);
+            task = getTask(this, getAvail, flv, autoFactoryMap, isBanned);
             taskAmount = task ? autoFactoryMap[task] : 0;
         }
 
         if (!task) {
-            const picked = getFallbackTask(this, botmem as any, flv, getAvail);
+            const picked = getFallbackTask(this, botmem as any, flv, getAvail, isBanned);
             if (picked) {
                 task = picked.product as any;
                 taskAmount = picked.limit;
@@ -121,7 +158,7 @@ export default class AutoFactory extends Room {
     }
 }
 
-const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, factoryLevel: number, autoFactoryMap: any) => {
+const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, factoryLevel: number, autoFactoryMap: any, isBanned?: (p: string) => boolean) => {
     let task: ResourceConstant | null = null;
     let bestDef = 0;
     let bestLevel = -Infinity;
@@ -129,6 +166,7 @@ const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, factor
         const info = (COMMODITIES as any)?.[res];
         const level = Number(info?.level || 0);
         if (!isFactoryLevelCompatible(factoryLevel, level)) continue;
+        if (isBanned && isBanned(res)) continue;
         const limit = Number(autoFactoryMap[res] || 0);
         const cur = getAvail(res as any);
         if (limit > 0) {
@@ -189,7 +227,7 @@ const getCraftsNeedForOutput = (product: ResourceConstant, targetOutput: number)
 type FallbackPick = { product: ResourceConstant; limit: number };
 
 // 兜底策略：当计划为空/计划不可做时，按阈值驱动“压缩/白色根/基础中间件/四色链条”自动补链
-const getFallbackTask = (room: Room, botmem: any, factoryLevel: number, getAvail: (res: ResourceConstant) => number): FallbackPick | null => {
+const getFallbackTask = (room: Room, botmem: any, factoryLevel: number, getAvail: (res: ResourceConstant) => number, isBanned?: (p: string) => boolean): FallbackPick | null => {
     if (!AUTO_FACTORY_FALLBACK.enabled) return null;
     if (!room.factory) return null;
 
@@ -276,6 +314,7 @@ const getFallbackTask = (room: Room, botmem: any, factoryLevel: number, getAvail
     };
 
     const pickKeeped = (product: string) => {
+        if (isBanned && isBanned(product)) return null;
         const keep = Number(keepInRoom[product] || 0);
         if (keep <= 0) return null;
         if (getAvail(product as any) >= keep) return null;

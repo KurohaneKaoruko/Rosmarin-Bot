@@ -405,6 +405,8 @@ export const AUTO_FACTORY_CONFIG = {
     waitTimeoutTicks: 500,
     /** 缺料且存在其它可开工计划时的等待上限（避免长期占用任务阻塞切换） */
     waitTimeoutTicksWhenAlternatives: 50,
+    /** 因“填装不足”超时结束任务后，对同一产物的冷却期（避免立刻重分配抖动） */
+    banTicksAfterFillTimeout: 200,
     /** goods 组件目标倍数（默认保持与旧逻辑一致） */
     goodsComponentMultiplier: 10,
     /** 非 goods 组件库存门槛（默认保持与旧逻辑一致） */
