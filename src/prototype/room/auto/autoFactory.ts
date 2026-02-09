@@ -82,6 +82,8 @@ export default class AutoFactory extends Room {
             const info = (COMMODITIES as any)?.[task as any];
             const level = Number(info?.level || 0);
             const minQuota = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
+            // minQuota 表达“最小生产额度(产物数量)”，而 crafts 是“可生产次数”，需要换算为可产出数量后再比较。
+            const per = Number(info?.amount || 1);
             const comps = info?.components as Record<string, number> | undefined;
             if (!comps) return false;
             let crafts = Infinity;
@@ -91,7 +93,8 @@ export default class AutoFactory extends Room {
                 crafts = Math.min(crafts, Math.floor(getAvail(c as any) / n));
             }
             if (!Number.isFinite(crafts)) crafts = 0;
-            return crafts > minQuota;
+            const output = crafts * per;
+            return output >= minQuota;
         })();
         if (!canStart) return;
 
@@ -116,6 +119,8 @@ const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, autoFa
     for (const res in autoFactoryMap) {
         const info = (COMMODITIES as any)?.[res];
         const level = Number(info?.level || 0);
+        // minQuota 表达“最小生产额度(产物数量)”，需要用 crafts*amount 判断是否值得开工。
+        const per = Number(info?.amount || 1);
         const components = info?.components as Record<string, number> | undefined;
         if (!components) continue;
         const limit = Number(autoFactoryMap[res] || 0);
@@ -131,8 +136,9 @@ const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, autoFa
             crafts = Math.min(crafts, Math.floor(getAvail(c as any) / n));
         }
         if (!Number.isFinite(crafts)) crafts = 0;
-        if (crafts <= minQuota) continue;
-        const def = limit > 0 ? Math.max(0, limit - cur) : crafts;
+        const output = crafts * per;
+        if (output < minQuota) continue;
+        const def = limit > 0 ? Math.max(0, limit - cur) : output;
         if (def > bestDef || (def === bestDef && level > bestLevel)) {
             bestDef = def;
             bestLevel = level;

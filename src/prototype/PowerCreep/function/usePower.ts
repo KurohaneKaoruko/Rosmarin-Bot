@@ -114,7 +114,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         // 已有效果未结束时不处理
         if(factory.effects && factory.effects.some(e => e.effect == PWR_OPERATE_FACTORY && e.ticksRemaining > 0)) return false;
 
-        // 为什么：当 factory 没有等级时，先用一次技能固定等级，避免资源管理分配任务时无法正确判断房间的 factory 等级。
+        // 当 factory 没有等级时，先用一次技能固定等级，避免资源管理分配任务时无法正确判断房间的 factory 等级。
         if (!factory.level) {
             if (this.pos.inRangeTo(factory, 3)) {
                 this.usePower(PWR_OPERATE_FACTORY, factory);

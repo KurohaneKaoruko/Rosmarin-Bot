@@ -1,5 +1,6 @@
 import { showRoomInfo } from "@/modules/utils/showRoomInfo";
 import { showFactoryInfo, showLabInfo } from "@/modules/utils/showProductionInfo";
+import { showCraftableInfo } from "@/modules/utils/showCraftableInfo";
 import { getRoomData } from "@/modules/utils/memory";
 
 export default {
@@ -38,6 +39,9 @@ export default {
         // 查看房间资源占用空间
         roomres() {
             return global.HelperRoomResource.showRoomRes();
+        },
+        craft() {
+            return showCraftableInfo();
         },
     }
 }

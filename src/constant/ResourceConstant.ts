@@ -317,6 +317,8 @@ export const RESOURCE_PRODUCTION = {
             enabled: true,
             /** 单房间单轮写入 AutoLabData 的“增量限额” */
             batchPerRoom: 10000,
+            /** 单房间单轮最多写入的候选计划条数（避免因单条计划缺料导致长期闲置） */
+            maxPlansPerRoom: 3,
             /** ResourceManage 注入到生产房间的原料需求阈值（用于触发跨房间调度补料） */
             inputMin: {
                 t1: 6000,
@@ -335,6 +337,25 @@ export const RESOURCE_PRODUCTION = {
             maxLevel: 5,
             /** 白色商品不自动合成（白色链：composite/crystal/liquid 及其派生物） */
             excludeWhite: true,
+            /**
+             * 专项保有库存（不走四色链条筛选）
+             * @description
+             * - 用于白色根商品与关键中间件：Composite/Crystal/Liquid/Gbar(ghodium_melt)\n
+             * - 目标库存不需要太多，默认每种 10k，足够作为后续合成原料\n
+             */
+            specialKeep: {
+                [RESOURCE_COMPOSITE]: 10000,
+                [RESOURCE_CRYSTAL]: 10000,
+                [RESOURCE_LIQUID]: 10000,
+                [RESOURCE_GHODIUM_MELT]: 10000,
+                [RESOURCE_UTRIUM_BAR]: 10000,
+                [RESOURCE_LEMERGIUM_BAR]: 10000,
+                [RESOURCE_ZYNTHIUM_BAR]: 10000,
+                [RESOURCE_KEANIUM_BAR]: 10000,
+                [RESOURCE_OXIDANT]: 10000,
+                [RESOURCE_REDUCTANT]: 10000,
+                [RESOURCE_PURIFIER]: 10000,
+            } as Record<string, number>,
             /** 单房间单轮写入 AutoFactoryData 的“增量限额” */
             batchPerRoom: 5000,
             /**

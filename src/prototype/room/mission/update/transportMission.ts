@@ -421,10 +421,12 @@ export default class TransportMission extends Room {
         const labBtype = BotMemStructures.labBtype;
 
         const isShutDown = !BotMemStructures.lab || !labA || !labB || !labAtype || !labBtype;
+        const hasBoostTasks = (this.getAllMissionFromPool('boost') as any[])?.length > 0;
 
         room.lab.forEach(lab => {
             if (isShutDown) {
-                if (this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
+                //合成结束后需要回收 A/B 底物；且房间无 boost 任务时，所有 lab 都应搬空避免残留底物。
+                if (hasBoostTasks && this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
                 if (!lab.store[lab.mineralType] || lab.store[lab.mineralType] === 0) return;
                 
                 this.addTransportMission(this.TransportLevel('lab'), {

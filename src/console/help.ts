@@ -103,6 +103,7 @@ const helpTexts: Record<string, string> = {
         `${cmd('info.room(roomName?)')}：查看房间工作状态（不填 roomName 显示所有房间）`,
         `${cmd('info.res()')}：查看所有资源储量`,
         `${cmd('info.roomres()')}：查看房间资源占用空间`,
+        `${cmd('info.craft()')}：分析全局资源可合成产物（仅显示资源管理会自动合成且可合成>0）`,
         line(),
     ].join(br),
 
