@@ -1,10 +1,29 @@
-// @ts-nocheck
+/**
+ * creep对穿+跨房间寻路+寻路缓存
+ * 应用此模块会导致creep.moveTo可选参数中这些项失效：
+ * reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
+ */
 
-/*
-creep对穿+跨房间寻路+寻路缓存 
-应用此模块会导致creep.moveTo可选参数中这些项失效：
-reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
-*/
+import '@/interface/moveOptimization.global.d.ts';
+
+import type {
+    MyPath,
+    MoveTimer,
+    CreepPaths,
+    CMs,
+    GlobalPathCache,
+    RoomStartKeyRefs,
+    RoomEndKeyRefs,
+    EndKeyStartKeyRefs,
+    CostMatrixRevision,
+    CostMatrixCacheTimer,
+    ObserverData,
+    ObTaskQueueItem,
+    BypassCostMatReuseCache,
+    SquadDerivedMatCache,
+    RouteCache,
+    AnalyzeCPU
+} from '@/interface/moveOptimization.interface';
 
 /***************************************
  *  模块参数
@@ -121,6 +140,7 @@ let unWalkableCCost = 255;
  * @description moveOpt 内部会频繁对 roomName 做正则解析，这里做轻量缓存减少重复计算
  */
 let roomNameParseCache = Object.create(null);
+// @ts-ignore
 cache.roomNameParseCache = roomNameParseCache;
 
 /**
