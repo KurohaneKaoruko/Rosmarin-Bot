@@ -1,4 +1,4 @@
-import {outSignConstant} from "@/constant/SignConstant";
+import { outSignConstant } from "@/constant/NameConstant";
 
 const OUTMINE_SIGN_OVERWRITE = true;
 

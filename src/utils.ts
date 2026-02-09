@@ -191,7 +191,7 @@ export const isHighWay = (roomName: string) => {
 };
 
 
-import { FlowerNames } from '@/constant/CreepName';
+import { FlowerNames } from '@/constant/NameConstant';
 
 /** 生成一个短编码
  * 用于生成唯一的 creep 名称

@@ -1,4 +1,4 @@
-import { signConstant } from "@/constant/SignConstant";
+import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
 import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memory";
