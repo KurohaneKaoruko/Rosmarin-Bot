@@ -210,6 +210,26 @@ const renderLabStatus = (room: Room, struct: any) => {
     return colorText(`${ICONS.good} 运行中`, COLORS.good);
 };
 
+const renderLabSituation = (room: Room, struct: any, autoLab: Record<string, number> | undefined) => {
+    const labAtype = struct?.labAtype as ResourceConstant | undefined;
+    const labBtype = struct?.labBtype as ResourceConstant | undefined;
+
+    if (!labAtype || !labBtype) {
+        if (!autoLab || Object.keys(autoLab).length === 0) return colorText(`${ICONS.neutral} 暂无计划`, COLORS.neutral);
+        return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+    }
+
+    const { lab: labA } = resolveLabFromMem(room, struct?.labA);
+    const { lab: labB } = resolveLabFromMem(room, struct?.labB);
+    if (!labA || !labB) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+
+    const aOk = labA.mineralType === labAtype && ((labA.store as any)[labAtype] || 0) >= 5;
+    const bOk = labB.mineralType === labBtype && ((labB.store as any)[labBtype] || 0) >= 5;
+    if (!aOk || !bOk) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+
+    return colorText(`${ICONS.good} 正在生产`, COLORS.good);
+};
+
 const renderLabTask = (room: Room, struct: any) => {
     const labAtype = struct?.labAtype as ResourceConstant | undefined;
     const labBtype = struct?.labBtype as ResourceConstant | undefined;
@@ -236,6 +256,26 @@ const renderFactoryStatus = (room: Room, struct: any) => {
     const hasTask = !!struct?.factoryProduct;
     if (!hasTask) return colorText(`${ICONS.warning} 闲置`, COLORS.warning);
     return colorText(`${ICONS.good} 运行中`, COLORS.good);
+};
+
+const renderFactorySituation = (room: Room, struct: any, autoFactory: Record<string, number> | undefined) => {
+    const product = struct?.factoryProduct as ResourceConstant | undefined;
+    const flv = Number(room.factory?.level || struct?.factoryLevel || 0);
+
+    if (!product) {
+        if (!autoFactory || Object.keys(autoFactory).length === 0) return colorText(`${ICONS.neutral} 暂无计划`, COLORS.neutral);
+        return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+    }
+
+    const info = (COMMODITIES as any)?.[product];
+    const components = info?.components as Record<string, number> | undefined;
+    if (!components) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+    if (info?.level && Number(info.level) !== flv) return colorText(`${ICONS.danger} 等级不符`, COLORS.danger);
+
+    const store = (room.factory?.store as any) || {};
+    const lack = Object.entries(components).some(([c, need]) => (store as any)[c] < Number(need));
+    if (lack) return colorText(`${ICONS.warning} 资源不足`, COLORS.warning);
+    return colorText(`${ICONS.good} 正在生产`, COLORS.good);
 };
 
 const renderFactoryTask = (room: Room, struct: any) => {
@@ -284,6 +324,7 @@ const roomRow = (roomName: string, idx: number, kind: 'lab' | 'factory') => {
         const headers = [
             td(mono(roomName)),
             td(renderLabStatus(room, struct)),
+            td(renderLabSituation(room, struct, autoLab)),
             td(renderLabTask(room, struct)),
             td(renderAutoPlan(room, autoLab, (r) => getLabAvail(room, r))),
             td(renderLabNeed(room, struct)),
@@ -294,6 +335,7 @@ const roomRow = (roomName: string, idx: number, kind: 'lab' | 'factory') => {
     const headers = [
         td(mono(roomName)),
         td(renderFactoryStatus(room, struct)),
+        td(renderFactorySituation(room, struct, autoFactory)),
         td(renderFactoryTask(room, struct)),
         td(renderAutoPlan(room, autoFactory, (r) => getFactoryAvail(room, r))),
         td(renderFactoryNeed(room, struct)),
@@ -305,13 +347,13 @@ const wrapTable = (title: string, headers: string[], rows: string) =>
     `<div style="font-family:Consolas,monospace;padding:10px;background-color:${COLORS.bgDark};"><div style="${STYLES.title}"><span>${title}</span></div><table style="${STYLES.table}"><thead><tr style="${STYLES.header}">${headers.map(th).join('')}</tr></thead><tbody>${rows}</tbody><tfoot><tr><td colspan="${headers.length}" style="${STYLES.footer}">SYSTEM_TIME: ${new Date().toISOString()} | TICK: ${Game.time}</td></tr></tfoot></table></div>`;
 
 export const showLabInfo = (rooms: string[]) => {
-    const headers = ['房间', '状态', '任务', '计划', '缺口'];
+    const headers = ['房间', '状态', '情况', '任务', '计划', '缺口'];
     const rows = rooms.map((r, i) => roomRow(r, i, 'lab')).filter(Boolean).join('');
     return wrapTable('// LAB_PRODUCTION', headers, rows);
 };
 
 export const showFactoryInfo = (rooms: string[]) => {
-    const headers = ['房间', '状态', '任务', '计划', '缺口'];
+    const headers = ['房间', '状态', '情况', '任务', '计划', '缺口'];
     const rows = rooms.map((r, i) => roomRow(r, i, 'factory')).filter(Boolean).join('');
     return wrapTable('// FACTORY_PRODUCTION', headers, rows);
 };

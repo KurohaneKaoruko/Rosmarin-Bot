@@ -1,5 +1,5 @@
-import { AUTO_FACTORY_CONFIG, Goods, PRODUCTION_MIN, RESOURCE_PRODUCTION, zipMap } from "@/constant/ResourceConstant";
-import { getAutoFactoryData, getStructData } from "@/modules/utils/memory";
+import { AUTO_FACTORY_CONFIG, AUTO_FACTORY_FALLBACK, Goods, PRODUCTION_MIN, zipMap } from "@/constant/ResourceConstant";
+import { getAutoFactoryData, getMissionPools, getStructData } from "@/modules/utils/memory";
 
 export default class AutoFactory extends Room {
     autoFactory() {
@@ -15,6 +15,10 @@ export default class AutoFactory extends Room {
         const getAvail = (res: ResourceConstant) => {
             return this.getResAmount(res) + (this.factory?.store?.[res] || 0);
         };
+        const flv = Number(this.factory.level || (botmem as any)?.factoryLevel || 0);
+
+        const autoFactoryMap = getAutoFactoryData(this.name);
+        const hasAutoList = !!(autoFactoryMap && Object.keys(autoFactoryMap).length);
 
         // 产物
         const Product = botmem.factoryProduct;
@@ -34,69 +38,80 @@ export default class AutoFactory extends Room {
             }
         }
 
-        // 原料充足则继续，直到原料不足才结束
-        if (checkTask(this, getAvail, Product, components)) {
-            delete (botmem as any).factoryWaitSince;
-            return;
-        }
-
-        // 缺料：优先保持任务等待补料（资源管理/搬运任务可能正在路上）
-        if (Product && components) {
-            const since = (botmem as any).factoryWaitSince ?? Game.time;
-            (botmem as any).factoryWaitSince = since;
-            if (Game.time - since < AUTO_FACTORY_CONFIG.waitTimeoutTicks) return;
-        }
-
         if (Product) {
-            botmem.factoryProduct = null;
-            botmem.factoryAmount = 0;
-            delete (botmem as any).factoryWaitSince;
-            global.log(`[${this.name}] 已自动结束factory生产任务: ${Product}. 现库存: ${getAvail(Product as any)}`)
-        }
+            const missReasons: string[] = [];
+            if (!components) {
+                missReasons.push('no_recipe');
+            } else {
+                const store = (this.factory.store as any) || {};
+                const missing = Object.entries(components).filter(([c, need]) => (store as any)[c] < Number(need));
+                if (missing.length === 0) {
+                    delete (botmem as any).factoryWaitSince;
+                    return;
+                }
+                const missingSet = new Set<string>(missing.map(([c]) => String(c)));
+                const pools = getMissionPools() as any;
+                const manageTasks = pools?.[this.name]?.manage;
+                const hasSupplyManage = Array.isArray(manageTasks) && manageTasks.some((t: any) =>
+                    t?.type === 'manage' &&
+                    t?.data?.target === 'factory' &&
+                    typeof t?.data?.amount === 'number' &&
+                    t.data.amount > 0 &&
+                    missingSet.has(String(t.data.resourceType))
+                );
+                const hasInStock = Array.from(missingSet).some(r => this.getResAmount(r as any) > 0);
+                if (!hasSupplyManage && !hasInStock) {
+                    missReasons.push('no_supply');
+                }
+            }
 
-        // 获取自动任务列表
-        const autoFactoryMap = getAutoFactoryData(this.name);
-        const hasAutoList = !!(autoFactoryMap && Object.keys(autoFactoryMap).length);
+            if (missReasons.includes('no_supply')) {
+                botmem.factoryProduct = null;
+                botmem.factoryAmount = 0;
+                delete (botmem as any).factoryWaitSince;
+                global.log(`[${this.name}] 已自动结束factory生产任务(无补料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+            } else {
+                const hasAlternativeRunnable = hasAutoList && Object.keys(autoFactoryMap).some((p) => {
+                    if (!p || p === Product) return false;
+                    const info = (COMMODITIES as any)?.[p];
+                    const level = Number(info?.level || 0);
+                    if (!isFactoryLevelCompatible(flv, level)) return false;
+                    return canStartTask(getAvail, p as any);
+                });
+                const waitLimit = hasAlternativeRunnable
+                    ? Number((AUTO_FACTORY_CONFIG as any).waitTimeoutTicksWhenAlternatives ?? AUTO_FACTORY_CONFIG.waitTimeoutTicks)
+                    : AUTO_FACTORY_CONFIG.waitTimeoutTicks;
+                const since = (botmem as any).factoryWaitSince ?? Game.time;
+                (botmem as any).factoryWaitSince = since;
+                if (Game.time - since < waitLimit) return;
+
+                botmem.factoryProduct = null;
+                botmem.factoryAmount = 0;
+                delete (botmem as any).factoryWaitSince;
+                global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+            }
+        }
 
         // 查找未到达限额且原料足够的任务
         let task: ResourceConstant | null = null;
         let taskAmount = 0;
 
         if (hasAutoList) {
-            task = getTask(this, getAvail, autoFactoryMap);
+            task = getTask(this, getAvail, flv, autoFactoryMap);
             taskAmount = task ? autoFactoryMap[task] : 0;
         }
 
-        if (!task) task = getBasicCommoditiesTask(this);
-
-        if (!task) [ task, taskAmount ] = getZipTask(this);
-
-        if (!task && RESOURCE_PRODUCTION.enabled && RESOURCE_PRODUCTION.factory.chain.enabled) {
-            task = getFactoryChainTask(this, botmem as any, getAvail);
-            taskAmount = 0;
+        if (!task) {
+            const picked = getFallbackTask(this, botmem as any, flv, getAvail);
+            if (picked) {
+                task = picked.product as any;
+                taskAmount = picked.limit;
+            }
         }
 
         if (!task) return;
 
-        const canStart = (() => {
-            const info = (COMMODITIES as any)?.[task as any];
-            const level = Number(info?.level || 0);
-            const minQuota = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
-            // minQuota 表达“最小生产额度(产物数量)”，而 crafts 是“可生产次数”，需要换算为可产出数量后再比较。
-            const per = Number(info?.amount || 1);
-            const comps = info?.components as Record<string, number> | undefined;
-            if (!comps) return false;
-            let crafts = Infinity;
-            for (const [c, need] of Object.entries(comps)) {
-                const n = Number(need) || 0;
-                if (n <= 0) continue;
-                crafts = Math.min(crafts, Math.floor(getAvail(c as any) / n));
-            }
-            if (!Number.isFinite(crafts)) crafts = 0;
-            const output = crafts * per;
-            return output >= minQuota;
-        })();
-        if (!canStart) return;
+        if (!canStartTask(getAvail, task as any)) return;
 
         botmem.factoryProduct = task;
         botmem.factoryAmount = taskAmount;
@@ -106,38 +121,21 @@ export default class AutoFactory extends Room {
     }
 }
 
-// 检查是否继续现有任务
-const checkTask = (room: Room, getAvail: (res: ResourceConstant) => number, Product: string, components: any) => {
-    if (!Product || !components) return false;
-    return Object.entries(components).every(([c, need]) => getAvail(c as any) >= (need as number));
-}
-
-const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, autoFactoryMap: any) => {
+const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, factoryLevel: number, autoFactoryMap: any) => {
     let task: ResourceConstant | null = null;
     let bestDef = 0;
     let bestLevel = -Infinity;
     for (const res in autoFactoryMap) {
         const info = (COMMODITIES as any)?.[res];
         const level = Number(info?.level || 0);
-        // minQuota 表达“最小生产额度(产物数量)”，需要用 crafts*amount 判断是否值得开工。
-        const per = Number(info?.amount || 1);
-        const components = info?.components as Record<string, number> | undefined;
-        if (!components) continue;
+        if (!isFactoryLevelCompatible(factoryLevel, level)) continue;
         const limit = Number(autoFactoryMap[res] || 0);
         const cur = getAvail(res as any);
-        const minQuota = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
         if (limit > 0) {
             if (cur >= limit * 0.9) continue;
         }
-        let crafts = Infinity;
-        for (const [c, need] of Object.entries(components)) {
-            const n = Number(need) || 0;
-            if (n <= 0) continue;
-            crafts = Math.min(crafts, Math.floor(getAvail(c as any) / n));
-        }
-        if (!Number.isFinite(crafts)) crafts = 0;
-        const output = crafts * per;
-        if (output < minQuota) continue;
+        if (!canStartTask(getAvail, res as any)) continue;
+        const output = getCraftableOutput(getAvail, res as any);
         const def = limit > 0 ? Math.max(0, limit - cur) : output;
         if (def > bestDef || (def === bestDef && level > bestLevel)) {
             bestDef = def;
@@ -148,8 +146,60 @@ const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, autoFa
     return task;
 }
 
-function getFactoryChainTask(room: Room, botmem: any, getAvail: (res: ResourceConstant) => number): ResourceConstant | null {
-    const maxLevel = RESOURCE_PRODUCTION.factory.chain.maxLevel;
+const isFactoryLevelCompatible = (factoryLevel: number, commodityLevel: number) => {
+    if (!commodityLevel) return true;
+    return Number(factoryLevel) === Number(commodityLevel);
+};
+
+// 判定某产物是否值得开工：房间内原料足够至少达到“最小生产额度”
+const canStartTask = (getAvail: (res: ResourceConstant) => number, product: ResourceConstant) => {
+    const info = (COMMODITIES as any)?.[product as any];
+    const level = Number(info?.level || 0);
+    const minQuota = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
+    return getCraftableOutput(getAvail, product) >= minQuota;
+};
+
+const getCraftableOutput = (getAvail: (res: ResourceConstant) => number, product: ResourceConstant) => {
+    const info = (COMMODITIES as any)?.[product as any];
+    const per = Number(info?.amount || 1);
+    const comps = info?.components as Record<string, number> | undefined;
+    if (!comps) return 0;
+    let crafts = Infinity;
+    for (const [c, need] of Object.entries(comps)) {
+        const n = Number(need) || 0;
+        if (n <= 0) continue;
+        crafts = Math.min(crafts, Math.floor(getAvail(c as any) / n));
+    }
+    if (!Number.isFinite(crafts)) crafts = 0;
+    return crafts * per;
+};
+
+const getMinQuota = (product: ResourceConstant) => {
+    const info = (COMMODITIES as any)?.[product as any];
+    const level = Number(info?.level || 0);
+    return (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
+};
+
+const getCraftsNeedForOutput = (product: ResourceConstant, targetOutput: number) => {
+    const info = (COMMODITIES as any)?.[product as any];
+    const per = Math.max(1, Number(info?.amount || 1));
+    return Math.max(1, Math.ceil(targetOutput / per));
+};
+
+type FallbackPick = { product: ResourceConstant; limit: number };
+
+// 兜底策略：当计划为空/计划不可做时，按阈值驱动“压缩/白色根/基础中间件/四色链条”自动补链
+const getFallbackTask = (room: Room, botmem: any, factoryLevel: number, getAvail: (res: ResourceConstant) => number): FallbackPick | null => {
+    if (!AUTO_FACTORY_FALLBACK.enabled) return null;
+    if (!room.factory) return null;
+
+    const keepInRoom = AUTO_FACTORY_FALLBACK.keepInRoom as unknown as Record<string, number>;
+    const keepByLevelInRoom = AUTO_FACTORY_FALLBACK.keepByLevelInRoom as unknown as Record<number, number>;
+    const zipRawSurplusMin = AUTO_FACTORY_FALLBACK.zipRawSurplusMin as unknown as Record<string, number>;
+
+    const effectiveLevel = Number(factoryLevel || 0);
+
+    const classCache = Object.create(null) as Record<string, { colored: boolean; white: boolean; rootsMask: number }>;
     const WHITE_ROOTS = new Set<string>([RESOURCE_COMPOSITE, RESOURCE_CRYSTAL, RESOURCE_LIQUID]);
     const COLOR_ROOTS = new Set<string>([RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_SILICON, RESOURCE_MIST]);
     const ROOT_BIT: Record<string, number> = {
@@ -158,7 +208,6 @@ function getFactoryChainTask(room: Room, botmem: any, getAvail: (res: ResourceCo
         [RESOURCE_SILICON]: 4,
         [RESOURCE_MIST]: 8,
     };
-    const classCache = Object.create(null) as Record<string, { colored: boolean; white: boolean; rootsMask: number }>;
     const classify = (res: string): { colored: boolean; white: boolean; rootsMask: number } => {
         const hit = classCache[res];
         if (hit) return hit;
@@ -182,67 +231,112 @@ function getFactoryChainTask(room: Room, botmem: any, getAvail: (res: ResourceCo
         (getAvail(RESOURCE_SILICON) > 0 ? 4 : 0) |
         (getAvail(RESOURCE_MIST) > 0 ? 8 : 0);
 
-    const effectiveLevel = Number(room.factory?.level || botmem?.factoryLevel || 0);
-    if (effectiveLevel < 0 || effectiveLevel > maxLevel) return null;
-    const keep = (RESOURCE_PRODUCTION.factory.chain.keepByLevel as any)?.[effectiveLevel] ?? 0;
+    const visited = new Set<string>();
+    const resolveProducible = (product: string, depth: number, targetOutput: number): { product: ResourceConstant; needOutput: number } | null => {
+        if (depth > AUTO_FACTORY_FALLBACK.maxResolveDepth) return null;
+        if (visited.has(product)) return null;
+        visited.add(product);
 
-    let best: ResourceConstant | null = null;
-    let bestHave = Infinity;
-    for (const product of Object.keys(COMMODITIES as any)) {
-        const info = (COMMODITIES as any)[product];
-        const level = Number(info?.level ?? 0);
-        if (level !== effectiveLevel) continue;
-        const tags = classify(product);
-        if (!tags.colored) continue;
-        if (RESOURCE_PRODUCTION.factory.chain.excludeWhite && tags.white) continue;
-        if ((tags.rootsMask & ~availableMask) !== 0) continue;
+        const productLevel = Number((COMMODITIES as any)?.[product]?.level ?? 0);
+        if (!isFactoryLevelCompatible(effectiveLevel, productLevel)) return null;
 
-        if (keep > 0 && getAvail(product as any) >= keep) continue;
+        const minQuota = getMinQuota(product as any);
+        const desired = Math.max(minQuota, Math.floor(targetOutput) || 0);
+
+        if (canStartTask(getAvail, product as any)) return { product: product as any, needOutput: desired };
+
+        const info = (COMMODITIES as any)?.[product];
         const components = info?.components as Record<string, number> | undefined;
-        if (!components) continue;
-        if (Object.entries(components).some(([c, need]) => getAvail(c as any) < Number(need))) continue;
+        if (!components) return null;
 
-        const have = getAvail(product as any);
-        if (have < bestHave) {
-            bestHave = have;
-            best = product as any;
+        const craftsNeed = getCraftsNeedForOutput(product as any, desired);
+        const missingList: { comp: string; missing: number }[] = [];
+        for (const [comp, needRaw] of Object.entries(components)) {
+            const needPerCraft = Number(needRaw) || 0;
+            if (needPerCraft <= 0) continue;
+            const needTotal = needPerCraft * craftsNeed;
+            const cur = getAvail(comp as any);
+            const missing = needTotal - cur;
+            if (missing > 0) missingList.push({ comp, missing });
+        }
+
+        missingList.sort((a, b) => b.missing - a.missing || a.comp.localeCompare(b.comp));
+
+        for (const { comp, missing } of missingList) {
+            if (!(COMMODITIES as any)?.[comp]) continue;
+            const compLevel = Number((COMMODITIES as any)?.[comp]?.level ?? 0);
+            if (!isFactoryLevelCompatible(effectiveLevel, compLevel)) continue;
+            const compMinQuota = getMinQuota(comp as any);
+            const compDesired = Math.max(compMinQuota, missing);
+            const resolved = resolveProducible(comp, depth + 1, compDesired);
+            if (resolved) return resolved;
+        }
+
+        return null;
+    };
+
+    const pickKeeped = (product: string) => {
+        const keep = Number(keepInRoom[product] || 0);
+        if (keep <= 0) return null;
+        if (getAvail(product as any) >= keep) return null;
+        const level = Number((COMMODITIES as any)?.[product]?.level ?? 0);
+        if (!isFactoryLevelCompatible(effectiveLevel, level)) return null;
+        const resolved = resolveProducible(product, 0, getMinQuota(product as any));
+        if (!resolved) return null;
+        if (resolved.product === (product as any)) return { product: resolved.product, limit: keep };
+        const cur = getAvail(resolved.product as any);
+        return { product: resolved.product, limit: cur + resolved.needOutput };
+    };
+
+    // 1) 压缩：zipMap 全量（不局限 mineralType），但需要底物明显富余
+    for (const [raw, zip] of Object.entries(zipMap as any)) {
+        const rawKeep = zipRawSurplusMin[raw];
+        if (rawKeep && getAvail(raw as any) < rawKeep) continue;
+        const picked = pickKeeped(String(zip));
+        if (picked) return picked;
+    }
+
+    // 2) 白色根商品（作为高阶商品/后续链条底物）
+    for (const product of [RESOURCE_COMPOSITE, RESOURCE_CRYSTAL, RESOURCE_LIQUID]) {
+        const picked = pickKeeped(product);
+        if (picked) return picked;
+    }
+
+    // 3) 基础四色中间件（wire/cell/alloy/condensate）
+    for (const product of [RESOURCE_WIRE, RESOURCE_CELL, RESOURCE_ALLOY, RESOURCE_CONDENSATE]) {
+        const picked = pickKeeped(product);
+        if (picked) return picked;
+    }
+
+    // 4) 四色链条兜底：按工厂有效等级，挑“最缺的可生产项”
+    if (Number.isFinite(effectiveLevel) && effectiveLevel >= 0) {
+        const keep = Number(keepByLevelInRoom[effectiveLevel] || 0);
+        if (keep > 0) {
+            let best: FallbackPick | null = null;
+            let bestHave = Infinity;
+            for (const product of Object.keys(COMMODITIES as any)) {
+                const info = (COMMODITIES as any)[product];
+                const level = Number(info?.level ?? 0);
+                if (level !== effectiveLevel) continue;
+                const tags = classify(product);
+                if (!tags.colored) continue;
+                if ((tags.rootsMask & ~availableMask) !== 0) continue;
+                const have = getAvail(product as any);
+                if (have >= keep) continue;
+                const resolved = resolveProducible(product, 0, getMinQuota(product as any));
+                if (!resolved) continue;
+                const resolvedHave = getAvail(resolved.product as any);
+                if (resolvedHave < bestHave) {
+                    bestHave = resolvedHave;
+                    const limit = resolved.product === (product as any)
+                        ? keep
+                        : getAvail(resolved.product as any) + resolved.needOutput;
+                    best = { product: resolved.product, limit };
+                }
+            }
+            if (best) return best;
         }
     }
 
-    return best;
-}
-
-function getBasicCommoditiesTask(room: Room) {
-    if (room.getResAmount(RESOURCE_SILICON) >= 5000 &&
-        room.getResAmount(RESOURCE_UTRIUM_BAR) >= 1000
-    ) return RESOURCE_WIRE;
-    
-    if (room.getResAmount(RESOURCE_BIOMASS) >= 5000 &&
-        room.getResAmount(RESOURCE_LEMERGIUM_BAR) >= 1000
-    ) return RESOURCE_CELL;
-
-    if (room.getResAmount(RESOURCE_METAL) >= 5000 &&
-        room.getResAmount(RESOURCE_ZYNTHIUM_BAR) >= 1000
-    ) return RESOURCE_ALLOY;
-
-    if (room.getResAmount(RESOURCE_MIST) >= 5000 &&
-        room.getResAmount(RESOURCE_KEANIUM_BAR) >= 1000
-    ) return RESOURCE_CONDENSATE;
-
-    return null
-}
-
-function getZipTask(room: Room): [ResourceConstant | null, number] {
-    const res = room.mineral?.mineralType;
-    if (!res) return [null, 0];
-    const zip = (zipMap as any)[res] as ResourceConstant | undefined;
-    if (!zip) return [null, 0];
-
-    const resAmount = room.getResAmount(res);
-    const zipAmount = room.getResAmount(zip);
-
-    if (resAmount > 100e3 && zipAmount < resAmount / 20) {
-        return [zip as any, Math.floor(resAmount / 20)];
-    }
-    return [null, 0];
-}
+    return null;
+};

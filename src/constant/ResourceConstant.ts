@@ -403,10 +403,64 @@ export const AUTO_FACTORY_CONFIG = {
     tickInterval: 50,
     /** 缺料时最多保持任务的 tick 数，超过后允许自动切换/清空 */
     waitTimeoutTicks: 500,
+    /** 缺料且存在其它可开工计划时的等待上限（避免长期占用任务阻塞切换） */
+    waitTimeoutTicksWhenAlternatives: 50,
     /** goods 组件目标倍数（默认保持与旧逻辑一致） */
     goodsComponentMultiplier: 10,
     /** 非 goods 组件库存门槛（默认保持与旧逻辑一致） */
     componentMin: 10000,
+} as const;
+
+/**
+ * AutoFactory 兜底生产配置
+ * @description
+ * - 当 AutoFactoryData 为空或其中所有计划都不可生产时，AutoFactory 会按此配置进行兜底生产选择。
+ * - 该配置是“房间内保有量”口径（storage+terminal+factory.store）。
+ */
+export const AUTO_FACTORY_FALLBACK = {
+    enabled: true,
+    /** 递归回退补链的最大深度（避免无限依赖） */
+    maxResolveDepth: 3,
+    /** zip（压缩/解压）只在底物明显富余时才触发 */
+    zipRawSurplusMin: {
+        [RESOURCE_UTRIUM]: 20000,
+        [RESOURCE_LEMERGIUM]: 20000,
+        [RESOURCE_ZYNTHIUM]: 20000,
+        [RESOURCE_KEANIUM]: 20000,
+        [RESOURCE_GHODIUM]: 20000,
+        [RESOURCE_OXYGEN]: 20000,
+        [RESOURCE_HYDROGEN]: 20000,
+        [RESOURCE_CATALYST]: 20000,
+    } as Record<string, number>,
+    /** 兜底任务的“目标库存上限”（达到则自动结束并换下一个缺口项） */
+    keepInRoom: {
+        [RESOURCE_COMPOSITE]: 3000,
+        [RESOURCE_CRYSTAL]: 3000,
+        [RESOURCE_LIQUID]: 3000,
+
+        [RESOURCE_UTRIUM_BAR]: 3000,
+        [RESOURCE_LEMERGIUM_BAR]: 3000,
+        [RESOURCE_ZYNTHIUM_BAR]: 3000,
+        [RESOURCE_KEANIUM_BAR]: 3000,
+        [RESOURCE_GHODIUM_MELT]: 3000,
+        [RESOURCE_OXIDANT]: 3000,
+        [RESOURCE_REDUCTANT]: 3000,
+        [RESOURCE_PURIFIER]: 3000,
+
+        [RESOURCE_WIRE]: 2000,
+        [RESOURCE_CELL]: 2000,
+        [RESOURCE_ALLOY]: 2000,
+        [RESOURCE_CONDENSATE]: 2000,
+    } as Record<string, number>,
+    /** 四色链条商品按等级的兜底保有量（房间维度） */
+    keepByLevelInRoom: {
+        0: 5000,
+        1: 2000,
+        2: 1000,
+        3: 500,
+        4: 200,
+        5: 50,
+    } as Record<number, number>,
 } as const;
 
 /**

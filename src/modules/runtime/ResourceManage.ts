@@ -1,4 +1,4 @@
-import {Goods, LAB_T1_PRIORITY, LabMap, PRODUCTION_MIN, RESOURCE_BALANCE, RESOURCE_PRODUCTION, t1, t2, t3} from '@/constant/ResourceConstant'
+import { AUTO_FACTORY_CONFIG, Goods, LAB_T1_PRIORITY, LabMap, PRODUCTION_MIN, RESOURCE_BALANCE, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
 import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/modules/utils/memory';
 import { getLabAB } from '@/modules/utils/labReservations';
@@ -557,8 +557,14 @@ export const ResourceManage = {
                             autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
 
                             const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                            const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                            const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
                             for (const [comp, need] of Object.entries(components)) {
-                                noteNeed(room.name, comp, Math.max(Number(need) * 5, 100));
+                                const n = Number(need) || 0;
+                                if (n <= 0) continue;
+                                const minByRun = n * craftsNeed;
+                                const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                                noteNeed(room.name, comp, Math.max(minByRun, buffer));
                             }
 
                             tryLog([
@@ -601,8 +607,14 @@ export const ResourceManage = {
                         autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
 
                         const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                        const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                        const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
                         for (const [comp, need] of Object.entries(components)) {
-                            noteNeed(room.name, comp, Math.max(Number(need) * 5, 100));
+                            const n = Number(need) || 0;
+                            if (n <= 0) continue;
+                            const minByRun = n * craftsNeed;
+                            const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                            noteNeed(room.name, comp, Math.max(minByRun, buffer));
                         }
 
                         tryLog([
