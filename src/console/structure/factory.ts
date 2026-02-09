@@ -1,12 +1,27 @@
 import { BASE_CONFIG } from '@/constant/config';
-import { getAutoFactoryData, getStructData } from '@/modules/utils/memory';
+import { getAutoFactoryData, getRoomData, getStructData } from '@/modules/utils/memory';
 
 export default {
     factory: {
         // 开启factory
-        open(roomName: string) {
-            const room = Game.rooms[roomName];
+        open(roomName?: string) {
             const BotMemStructures =  getStructData();
+            if (!roomName) {
+                let ok = 0;
+                let skip = 0;
+                for (const rn of Object.keys(getRoomData())) {
+                    const room = Game.rooms[rn];
+                    if(!room || !room.my || !BotMemStructures[rn]) {
+                        skip++;
+                        continue;
+                    }
+                    BotMemStructures[rn]['factory'] = true;
+                    ok++;
+                }
+                global.log(`已开启全部房间factory: 成功 ${ok}, 跳过 ${skip}`);
+                return OK;
+            }
+            const room = Game.rooms[roomName];
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
@@ -16,9 +31,24 @@ export default {
             return OK;
         },
         // 关闭factory
-        stop(roomName: string) {
-            const room = Game.rooms[roomName];
+        stop(roomName?: string) {
             const BotMemStructures =  getStructData();
+            if (!roomName) {
+                let ok = 0;
+                let skip = 0;
+                for (const rn of Object.keys(getRoomData())) {
+                    const room = Game.rooms[rn];
+                    if(!room || !room.my || !BotMemStructures[rn]) {
+                        skip++;
+                        continue;
+                    }
+                    BotMemStructures[rn]['factory'] = false;
+                    ok++;
+                }
+                global.log(`已关闭全部房间factory: 成功 ${ok}, 跳过 ${skip}`);
+                return OK;
+            }
+            const room = Game.rooms[roomName];
             if(!room || !room.my || !BotMemStructures[roomName]) {
                 global.log(`房间 ${roomName} 不存在、未拥有或未添加。`);
                 return;
