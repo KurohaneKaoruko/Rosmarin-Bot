@@ -27,7 +27,7 @@ const TransportLevelMap: Record<TransportLevelKey, number> = {
  */
 export default class TransportMission extends Room {
     private static LAB_FILL_AMOUNT = 3000;
-    private static LAB_TRIGGER_AMOUNT = 1000;
+    private static LAB_TRIGGER_AMOUNT = 50;
     private static LAB_MIN_CAPACITY = 100;
 
     private static getNukeDemandCache() {

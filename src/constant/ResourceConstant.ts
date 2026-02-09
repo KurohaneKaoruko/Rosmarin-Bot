@@ -388,6 +388,7 @@ export const AUTO_LAB_CONFIG = {
     tickInterval: 50,
     /** A/B lab 内原料达到该值即认为“可以继续维持任务”等待补料 */
     continueLabStoreMin: 5,
+    continueInputMin: 1000,
     /** 自定义 AutoLabData 任务选择时，raw1/raw2 的最低库存门槛（默认沿用旧逻辑） */
     customTaskInputMin: 6000,
     /** 缺料时最多保持任务的 tick 数，超过后允许自动切换/清空，避免永久卡死 */

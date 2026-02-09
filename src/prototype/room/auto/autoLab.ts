@@ -48,12 +48,13 @@ export default class AutoLab extends Room {
                 return;
             }
 
-            const storageOk = getAvail(botmem.labAtype as ResourceConstant) >= 5
-                && getAvail(botmem.labBtype as ResourceConstant) >= 5;
+            const continueInputMin = Number((AUTO_LAB_CONFIG as any).continueInputMin ?? AUTO_LAB_CONFIG.continueLabStoreMin ?? 5);
+            const storageOk = getAvail(botmem.labAtype as ResourceConstant) >= continueInputMin
+                && getAvail(botmem.labBtype as ResourceConstant) >= continueInputMin;
             const labStoreOk = labA.mineralType === botmem.labAtype &&
                 labB.mineralType === botmem.labBtype &&
-                (labA.store[botmem.labAtype] || 0) >= AUTO_LAB_CONFIG.continueLabStoreMin &&
-                (labB.store[botmem.labBtype] || 0) >= AUTO_LAB_CONFIG.continueLabStoreMin;
+                (labA.store[botmem.labAtype] || 0) >= continueInputMin &&
+                (labB.store[botmem.labBtype] || 0) >= continueInputMin;
 
             if (storageOk || labStoreOk) {
                 delete botmem.labWaitSince;
