@@ -103,7 +103,11 @@ const helpTexts: Record<string, string> = {
         `${cmd('info.room(roomName?)')}：查看房间工作状态（不填 roomName 显示所有房间）`,
         `${cmd('info.res()')}：查看所有资源储量`,
         `${cmd('info.roomres()')}：查看房间资源占用空间`,
-        `${cmd('info.craft()')}：分析全局资源可合成产物（仅显示资源管理会自动合成且可合成>0）`,
+        `${cmd('info.craft(filter?)')}：分析全局资源可合成产物（默认仅显示自动合成且可合成>0；支持过滤）`,
+        `- filter=lab/factory：仅显示对应生产类型`,
+        `- filter=T0/T1/T2/T3：仅显示对应等级的化合物（Lab）`,
+        `- filter=0/1/2/3/4/5（数字或字符串）：仅显示对应等级的商品（Factory）`,
+        `- filter=资源名/缩写：仅显示指定资源（即使不可合成/不在自动生产）`,
         line(),
     ].join(br),
 

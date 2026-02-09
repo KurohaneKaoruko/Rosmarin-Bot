@@ -40,8 +40,8 @@ export default {
         roomres() {
             return global.HelperRoomResource.showRoomRes();
         },
-        craft() {
-            return showCraftableInfo();
+        craft(filter?: string | number) {
+            return showCraftableInfo(filter);
         },
     }
 }
