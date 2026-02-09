@@ -150,12 +150,14 @@ function clearRoomTickCache(room: Room, type?: string) {
 		for (const t of multipleList) delete room['_' + t];
 		for (const t of additionalList) delete room['_' + t];
 		delete room._mass_stores;
+		delete (room as any)._resAmountCache;
 		delete room._structures;
 		delete room._structures_fetch_time;
 		return;
 	}
 	delete room['_' + type];
 	if (type === 'mass_stores') delete room._mass_stores;
+	if (type === 'mass_stores') delete (room as any)._resAmountCache;
 	if (type === 'structures') {
 		delete room._structures;
 		delete room._structures_fetch_time;
@@ -506,22 +508,22 @@ Object.defineProperty(Room.prototype, 'level', {
  * - 缓存粒度：每个资源类型各自维护一个 `sum`，在同一个 tick 内重复访问不会重复计算
  */
 for (const type of RESOURCES_ALL) {
-	let last_fetch_time = -1;
-	let sum: number = 0;
 	Object.defineProperty(Room.prototype, type, {
 		get() {
-			if (last_fetch_time !== Game.time) {
-				sum = this.mass_stores.reduce((temp_sum, s) => {
+			const cache = (this as any)._resAmountCache ?? ((this as any)._resAmountCache = {});
+			const entry = cache[type];
+			if (!entry || entry.time !== Game.time) {
+				const sum = this.mass_stores.reduce((temp_sum, s) => {
 					const used = s.store.getUsedCapacity(type) || 0;
 					return temp_sum + used;
 				}, 0);
-				last_fetch_time = Game.time;
+				cache[type] = { time: Game.time, value: sum };
 			}
-			return sum;
+			return cache[type].value;
 		},
 		set(amount) {
-			sum = amount;
-			last_fetch_time = Game.time;
+			const cache = (this as any)._resAmountCache ?? ((this as any)._resAmountCache = {});
+			cache[type] = { time: Game.time, value: amount };
 		},
 		enumerable: false,
 		configurable: true

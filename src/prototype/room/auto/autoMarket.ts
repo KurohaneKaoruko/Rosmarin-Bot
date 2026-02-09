@@ -1,5 +1,6 @@
 import { getPrice, log } from "@/utils"
 import { BASE_CONFIG } from "@/constant/config";
+import { AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/utils/memory";
 
 const br = '<br/>';
@@ -39,6 +40,8 @@ const getResourceIcon = (resourceType: any) => {
 
 const resTag = (resType: any, color: string = LOG_COLORS.text) => `${getResourceIcon(resType)}${mono(String(resType), color)}`;
 
+const normalizeResType = (resType: any) => (BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType) as ResourceConstant;
+
 let cachedEnergyAvgPriceTick = -1;
 let cachedEnergyAvgPrice = 0.01;
 function getEnergyAvgPrice(): number {
@@ -60,11 +63,66 @@ function findMyOrder(roomName: string, resourceType: ResourceConstant, type: ORD
     return null;
 }
 
+function hasAutoOrder(autoMarket: AutoMarketTask[], resourceType: ResourceConstant, orderTypes: AutoMarketTask['orderType'][]) {
+    return autoMarket.some(item =>
+        normalizeResType(item.resourceType) === resourceType &&
+        orderTypes.includes(item.orderType)
+    );
+}
+
+function getRoomStoreCapacity(room: Room) {
+    const storageCap = room.storage?.store.getCapacity() ?? 0;
+    const terminalCap = room.terminal?.store.getCapacity() ?? 0;
+    return storageCap + terminalCap;
+}
+
+function injectDefaultAutoMarket(room: Room, autoMarket: AutoMarketTask[]) {
+    const energyCfg = AUTO_MARKET_DEFAULT.energy;
+    if (!hasAutoOrder(autoMarket, RESOURCE_ENERGY, ['buy', 'dealbuy'])) {
+        autoMarket.push({ resourceType: RESOURCE_ENERGY, amount: energyCfg.buyBelow, orderType: 'buy' });
+    }
+    if (!hasAutoOrder(autoMarket, RESOURCE_ENERGY, ['sell', 'dealsell'])) {
+        autoMarket.push({ resourceType: RESOURCE_ENERGY, amount: energyCfg.sellAbove, orderType: 'sell' });
+    }
+
+    const capacity = getRoomStoreCapacity(room);
+    const sellAbove = capacity >= AUTO_MARKET_DEFAULT.storageCapacitySplit
+        ? AUTO_MARKET_DEFAULT.harvestableMineralSellAboveLargeStorage
+        : AUTO_MARKET_DEFAULT.harvestableMineralSellAboveSmallStorage;
+    for (const mineral of AUTO_MARKET_DEFAULT.harvestableMinerals) {
+        if (!hasAutoOrder(autoMarket, mineral, ['sell', 'dealsell'])) {
+            autoMarket.push({ resourceType: mineral, amount: sellAbove, orderType: 'sell' });
+        }
+    }
+}
+
+function hasEnergySupplierRoom(targetRoom: Room, balanceAt: number) {
+    for (const room of Object.values(Game.rooms)) {
+        if (room.name === targetRoom.name) continue;
+        if (!room.controller?.my) continue;
+        if (!room.terminal || room.terminal.cooldown > 0) continue;
+        if (room.getResAmount(RESOURCE_ENERGY) > balanceAt) return true;
+    }
+    return false;
+}
+
+function hasEnergyReceiverRoom(sourceRoom: Room, balanceAt: number) {
+    for (const room of Object.values(Game.rooms)) {
+        if (room.name === sourceRoom.name) continue;
+        if (!room.controller?.my) continue;
+        if (!room.terminal || room.terminal.cooldown > 0) continue;
+        if (room.terminal.store.getFreeCapacity() <= 0) continue;
+        if (room.getResAmount(RESOURCE_ENERGY) < balanceAt) return true;
+    }
+    return false;
+}
+
 export default class AutoMarket extends Room {
     // 自动市场交易
     autoMarket() {
         if (Game.time % 50 !== 0) return;
         const autoMaket = getAutoMarketData(this.name);
+        injectDefaultAutoMarket(this, autoMaket);
         for(const item of autoMaket) {
             if(item.orderType == 'buy') {
                 AutoBuy(this.name, item);
@@ -106,6 +164,10 @@ function AutoBuy(roomName: string, item: any) {
         totalAmount = terminalAmount + storageAmount
     }
     if (totalAmount >= amount) return;
+    if (resourceType === RESOURCE_ENERGY &&
+        totalAmount < amount &&
+        hasEnergySupplierRoom(room, AUTO_MARKET_DEFAULT.energy.balanceAt)
+    ) return;
 
     // 计算需要购买的数量
     const totalBuyAmount = amount - totalAmount;  // 总购买量
@@ -253,6 +315,10 @@ function AutoSell(roomName: string, item: any) {
     const totalAmount = (!storage || !terminal.pos.inRangeTo(storage, 2)) ? terminalAmount : (terminalAmount + storageAmount);
     
     if (totalAmount < amount) return;
+    if (resourceType === RESOURCE_ENERGY &&
+        totalAmount > amount &&
+        hasEnergyReceiverRoom(room, AUTO_MARKET_DEFAULT.energy.balanceAt)
+    ) return;
 
     // 计算需要出售的数量
     const sellAmount = totalAmount - amount;

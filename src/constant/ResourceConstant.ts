@@ -5,8 +5,34 @@
  * 需求阈值: 资源需求的最小阈值，低于此值时会触发资源需求
  * 供应阈值: 资源供应的最大阈值，高于此值时会触发资源供应
  */
+export const AUTO_ENERGY_POLICY = {
+    buyBelow: 100e3,
+    balanceAt: 200e3,
+    sellAbove: 300e3,
+} as const;
+
+export const AUTO_MARKET_DEFAULT = {
+    energy: {
+        buyBelow: 100e3,
+        sellAbove: 300e3,
+        balanceAt: 200e3,
+    },
+    storageCapacitySplit: 3e6,
+    harvestableMineralSellAboveSmallStorage: 500e3,
+    harvestableMineralSellAboveLargeStorage: 1e6,
+    harvestableMinerals: [
+        RESOURCE_HYDROGEN,
+        RESOURCE_OXYGEN,
+        RESOURCE_UTRIUM,
+        RESOURCE_LEMERGIUM,
+        RESOURCE_KEANIUM,
+        RESOURCE_ZYNTHIUM,
+        RESOURCE_CATALYST,
+    ] as ResourceConstant[],
+} as const;
+
 export const RESOURCE_BALANCE = {
-    'energy': [300e3, 400e3],
+    'energy': [AUTO_ENERGY_POLICY.balanceAt, AUTO_ENERGY_POLICY.balanceAt],
     'power': [5e3, 10e3],
     'ops': [5e3, 10e3],
     
@@ -316,14 +342,14 @@ export const RESOURCE_PRODUCTION = {
         chain: {
             enabled: true,
             /** 单房间单轮写入 AutoLabData 的“增量限额” */
-            batchPerRoom: 10000,
+            batchPerRoom: 10e3,
             /** 单房间单轮最多写入的候选计划条数（避免因单条计划缺料导致长期闲置） */
             maxPlansPerRoom: 3,
             /** ResourceManage 注入到生产房间的原料需求阈值（用于触发跨房间调度补料） */
             inputMin: {
-                t1: 6000,
-                t2: 6000,
-                t3: 5000,
+                t1: 6e3,
+                t2: 6e3,
+                t3: 5e3,
             },
             /** true：房间存在手动 AutoLabData（非链条键）时不覆盖 */
             respectManualAutoData: true,
@@ -344,20 +370,20 @@ export const RESOURCE_PRODUCTION = {
              * - 目标库存不需要太多，默认每种 10k，足够作为后续合成原料\n
              */
             specialKeep: {
-                [RESOURCE_COMPOSITE]: 10000,
-                [RESOURCE_CRYSTAL]: 10000,
-                [RESOURCE_LIQUID]: 10000,
-                [RESOURCE_GHODIUM_MELT]: 10000,
-                [RESOURCE_UTRIUM_BAR]: 10000,
-                [RESOURCE_LEMERGIUM_BAR]: 10000,
-                [RESOURCE_ZYNTHIUM_BAR]: 10000,
-                [RESOURCE_KEANIUM_BAR]: 10000,
-                [RESOURCE_OXIDANT]: 10000,
-                [RESOURCE_REDUCTANT]: 10000,
-                [RESOURCE_PURIFIER]: 10000,
+                [RESOURCE_COMPOSITE]: 10e3,
+                [RESOURCE_CRYSTAL]: 10e3,
+                [RESOURCE_LIQUID]: 10e3,
+                [RESOURCE_GHODIUM_MELT]: 10e3,
+                [RESOURCE_UTRIUM_BAR]: 10e3,
+                [RESOURCE_LEMERGIUM_BAR]: 10e3,
+                [RESOURCE_ZYNTHIUM_BAR]: 10e3,
+                [RESOURCE_KEANIUM_BAR]: 10e3,
+                [RESOURCE_OXIDANT]: 10e3,
+                [RESOURCE_REDUCTANT]: 10e3,
+                [RESOURCE_PURIFIER]: 10e3,
             } as Record<string, number>,
             /** 单房间单轮写入 AutoFactoryData 的“增量限额” */
-            batchPerRoom: 5000,
+            batchPerRoom: 5e3,
             /**
              * 各等级四色商品希望维持的目标库存
              * @description
@@ -365,11 +391,11 @@ export const RESOURCE_PRODUCTION = {
              * - 这些是“全局目标”（资源管理视角），按需可自行调节
              */
             keepByLevel: {
-                0: 20000,
-                1: 10000,
-                2: 5000,
-                3: 2000,
-                4: 1000,
+                0: 20e3,
+                1: 10e3,
+                2: 5e3,
+                3: 2e3,
+                4: 1e3,
                 5: 500,
             } as Record<number, number>,
             /** true：房间存在手动 AutoFactoryData（非四色链条键）时不覆盖 */
@@ -388,9 +414,9 @@ export const AUTO_LAB_CONFIG = {
     tickInterval: 50,
     /** A/B lab 内原料达到该值即认为“可以继续维持任务”等待补料 */
     continueLabStoreMin: 5,
-    continueInputMin: 1000,
+    continueInputMin: 1e3,
     /** 自定义 AutoLabData 任务选择时，raw1/raw2 的最低库存门槛（默认沿用旧逻辑） */
-    customTaskInputMin: 6000,
+    customTaskInputMin: 6e3,
     /** 缺料时最多保持任务的 tick 数，超过后允许自动切换/清空，避免永久卡死 */
     waitTimeoutTicks: 500,
 } as const;
@@ -411,7 +437,7 @@ export const AUTO_FACTORY_CONFIG = {
     /** goods 组件目标倍数（默认保持与旧逻辑一致） */
     goodsComponentMultiplier: 10,
     /** 非 goods 组件库存门槛（默认保持与旧逻辑一致） */
-    componentMin: 10000,
+    componentMin: 10e3,
 } as const;
 
 /**
@@ -426,40 +452,40 @@ export const AUTO_FACTORY_FALLBACK = {
     maxResolveDepth: 3,
     /** zip（压缩/解压）只在底物明显富余时才触发 */
     zipRawSurplusMin: {
-        [RESOURCE_UTRIUM]: 20000,
-        [RESOURCE_LEMERGIUM]: 20000,
-        [RESOURCE_ZYNTHIUM]: 20000,
-        [RESOURCE_KEANIUM]: 20000,
-        [RESOURCE_GHODIUM]: 20000,
-        [RESOURCE_OXYGEN]: 20000,
-        [RESOURCE_HYDROGEN]: 20000,
-        [RESOURCE_CATALYST]: 20000,
+        [RESOURCE_UTRIUM]: 20e3,
+        [RESOURCE_LEMERGIUM]: 20e3,
+        [RESOURCE_ZYNTHIUM]: 20e3,
+        [RESOURCE_KEANIUM]: 20e3,
+        [RESOURCE_GHODIUM]: 20e3,
+        [RESOURCE_OXYGEN]: 20e3,
+        [RESOURCE_HYDROGEN]: 20e3,
+        [RESOURCE_CATALYST]: 20e3,
     } as Record<string, number>,
     /** 兜底任务的“目标库存上限”（达到则自动结束并换下一个缺口项） */
     keepInRoom: {
-        [RESOURCE_COMPOSITE]: 3000,
-        [RESOURCE_CRYSTAL]: 3000,
-        [RESOURCE_LIQUID]: 3000,
+        [RESOURCE_COMPOSITE]: 3e3,
+        [RESOURCE_CRYSTAL]: 3e3,
+        [RESOURCE_LIQUID]: 3e3,
 
-        [RESOURCE_UTRIUM_BAR]: 3000,
-        [RESOURCE_LEMERGIUM_BAR]: 3000,
-        [RESOURCE_ZYNTHIUM_BAR]: 3000,
-        [RESOURCE_KEANIUM_BAR]: 3000,
-        [RESOURCE_GHODIUM_MELT]: 3000,
-        [RESOURCE_OXIDANT]: 3000,
-        [RESOURCE_REDUCTANT]: 3000,
-        [RESOURCE_PURIFIER]: 3000,
+        [RESOURCE_UTRIUM_BAR]: 3e3,
+        [RESOURCE_LEMERGIUM_BAR]: 3e3,
+        [RESOURCE_ZYNTHIUM_BAR]: 3e3,
+        [RESOURCE_KEANIUM_BAR]: 3e3,
+        [RESOURCE_GHODIUM_MELT]: 3e3,
+        [RESOURCE_OXIDANT]: 3e3,
+        [RESOURCE_REDUCTANT]: 3e3,
+        [RESOURCE_PURIFIER]: 3e3,
 
-        [RESOURCE_WIRE]: 2000,
-        [RESOURCE_CELL]: 2000,
-        [RESOURCE_ALLOY]: 2000,
-        [RESOURCE_CONDENSATE]: 2000,
+        [RESOURCE_WIRE]: 2e3,
+        [RESOURCE_CELL]: 2e3,
+        [RESOURCE_ALLOY]: 2e3,
+        [RESOURCE_CONDENSATE]: 2e3,
     } as Record<string, number>,
     /** 四色链条商品按等级的兜底保有量（房间维度） */
     keepByLevelInRoom: {
-        0: 5000,
-        1: 2000,
-        2: 1000,
+        0: 5e3,
+        1: 2e3,
+        2: 1e3,
         3: 500,
         4: 200,
         5: 50,
@@ -473,9 +499,9 @@ export const AUTO_FACTORY_FALLBACK = {
  * - 商品（Factory）按等级逐级递减，5 级最小生产额度为 10
  */
 export const PRODUCTION_MIN = {
-    compound: 1000,
+    compound: 1e3,
     commodityByLevel: {
-        0: 1000,
+        0: 1e3,
         1: 500,
         2: 200,
         3: 100,
