@@ -1,10 +1,16 @@
-// @ts-nocheck
-
 /*
-creep对穿+跨房间寻路+寻路缓存 
+creep对穿+跨房间寻路+寻路缓存
 应用此模块会导致creep.moveTo可选参数中这些项失效：
 reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
+
+TODO: 渐进式类型改善
+- 已添加 Creep、RoomPosition 原型扩展声明
+- 已添加 Memory 全局扩展声明
+- 已添加 BetterMove 全局变量声明
+- 动态属性访问（Object.create(null)）需要进一步重构
 */
+
+import '@/declarations/moveOptimization.d.ts';
 
 /***************************************
  *  模块参数
