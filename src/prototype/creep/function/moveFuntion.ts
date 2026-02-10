@@ -1,4 +1,4 @@
-
+import { parseShardRoomName } from '@/modules/infra/shardRoom';
 
 export default class MoveFunction extends Creep {
     /**
@@ -10,6 +10,9 @@ export default class MoveFunction extends Creep {
     moveToRoom(roomName: string, options = {}) {
         if (this.fatigue > 0) return ERR_TIRED;
 
+        const { full: fullRoomName, roomName: localRoomName, shard } = parseShardRoomName(roomName);
+        const sameShard = !shard || shard === Game.shard.name;
+
         const DETOUR_WINDOW = 20;
         const COOLDOWN_TTL = 15;
         const currentRoom = this.pos.roomName;
@@ -19,9 +22,9 @@ export default class MoveFunction extends Creep {
 
         // moveToRoom 状态缓存：降低跨房抖动并保持目标点稳定
         let state = this.memory._moveToRoomState;
-        if (!state || state.targetRoom !== roomName) {
+        if (!state || state.targetRoom !== fullRoomName) {
             state = this.memory._moveToRoomState = {
-                targetRoom: roomName,
+                targetRoom: fullRoomName,
                 targetPos: null,
                 lastRoom: currentRoom,
                 leftTargetTick: 0,
@@ -30,31 +33,35 @@ export default class MoveFunction extends Creep {
         }
 
         // 记录跨房切换与“离开目标房间”时间点
-        const lastRoom = state.lastRoom || currentRoom;
-        if (lastRoom !== currentRoom) {
-            if (lastRoom === roomName && currentRoom !== roomName) {
-                state.leftTargetTick = Game.time;
+        if (sameShard) {
+            const lastRoom = state.lastRoom || currentRoom;
+            if (lastRoom !== currentRoom) {
+                if (lastRoom === localRoomName && currentRoom !== localRoomName) {
+                    state.leftTargetTick = Game.time;
+                }
+                if (currentRoom === localRoomName && lastRoom !== localRoomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+                    state.cooldownUntil = Game.time + COOLDOWN_TTL;
+                }
+                state.lastRoom = currentRoom;
             }
-            if (currentRoom === roomName && lastRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
-                state.cooldownUntil = Game.time + COOLDOWN_TTL;
-            }
-            state.lastRoom = currentRoom;
         }
 
         // 目标点策略：目标房间有视野时优先使用 controller 坐标，否则使用稳定随机点
         let targetPos = state.targetPos as { x: number; y: number; roomName?: string } | null;
-        const targetRoom = Game.rooms[roomName];
-        const targetController = targetRoom?.controller;
-        if (targetController) {
-            const p = targetController.pos;
-            if (!targetPos || targetPos.x !== p.x || targetPos.y !== p.y) {
-                targetPos = { x: p.x, y: p.y };
-                state.targetPos = targetPos;
+        if (sameShard) {
+            const targetRoom = Game.rooms[localRoomName];
+            const targetController = targetRoom?.controller;
+            if (targetController) {
+                const p = targetController.pos;
+                if (!targetPos || targetPos.x !== p.x || targetPos.y !== p.y) {
+                    targetPos = { x: p.x, y: p.y };
+                    state.targetPos = targetPos;
+                }
             }
         }
-        if (!targetPos || ('roomName' in targetPos && targetPos.roomName !== roomName)) {
+        if (!targetPos) {
             let seed = 0;
-            const s = `${this.name}|${roomName}`;
+            const s = `${this.name}|${fullRoomName}`;
             for (let i = 0; i < s.length; i++) seed = (seed * 31 + s.charCodeAt(i)) >>> 0;
             const centerX = 25;
             const centerY = 25;
@@ -67,13 +74,13 @@ export default class MoveFunction extends Creep {
         }
 
         // detour 续行：刚从目标房间绕出时，优先走回目标房出口
-        if (currentRoom !== roomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
+        if (sameShard && currentRoom !== localRoomName && state.leftTargetTick && (Game.time - state.leftTargetTick) <= DETOUR_WINDOW) {
             let exitPos = null;
             const bm: any = (global as any).BetterMove;
             if (bm && typeof bm.getClosestExitPos === 'function') {
-                exitPos = bm.getClosestExitPos(this.pos, roomName);
+                exitPos = bm.getClosestExitPos(this.pos, localRoomName);
             } else {
-                const exitDir = this.room.findExitTo(roomName);
+                const exitDir = this.room.findExitTo(localRoomName);
                 if (exitDir === FIND_EXIT_TOP || exitDir === FIND_EXIT_RIGHT || exitDir === FIND_EXIT_BOTTOM || exitDir === FIND_EXIT_LEFT) {
                     const exits = this.room.find(exitDir);
                     exitPos = exits.length ? this.pos.findClosestByRange(exits) : null;
@@ -86,12 +93,15 @@ export default class MoveFunction extends Creep {
         }
 
         // 冷却期内收敛 maxRooms，避免刚回房又绕出
-        if (currentRoom === roomName && state.cooldownUntil && Game.time < state.cooldownUntil && opts.maxRooms === undefined) {
+        if (sameShard && currentRoom === localRoomName && state.cooldownUntil && Game.time < state.cooldownUntil && opts.maxRooms === undefined) {
             opts.maxRooms = 1;
         }
 
-        const tarPos = new RoomPosition(targetPos.x, targetPos.y, roomName);
-        return this.moveTo(tarPos, opts);
+        if (sameShard) {
+            const tarPos = new RoomPosition(targetPos.x, targetPos.y, localRoomName);
+            return this.moveTo(tarPos, opts);
+        }
+        return this.moveTo({ x: targetPos.x, y: targetPos.y, roomName: fullRoomName } as any, opts);
     }
 
     /**
@@ -100,7 +110,8 @@ export default class MoveFunction extends Creep {
      */
     moveHomeRoom(): boolean {
         if(!this.memory.home) { return true; }
-        if(this.room.name === this.memory.home) { return true; }
+        const { roomName: localHome, shard } = parseShardRoomName(this.memory.home);
+        if ((!shard || shard === Game.shard.name) && this.room.name === localHome) { return true; }
         this.moveToRoom(this.memory.home, { visualizePathStyle: { stroke: '#ff0000' } });
         return false;
     }
@@ -115,7 +126,8 @@ export default class MoveFunction extends Creep {
         if (!targetRoom) { return true; }
         
         // 检查是否已到达目标房间且不在边缘
-        if (this.room.name === targetRoom && !this.handleRoomEdge()) {
+        const { roomName: localTarget, shard } = parseShardRoomName(targetRoom);
+        if ((!shard || shard === Game.shard.name) && this.room.name === localTarget && !this.handleRoomEdge()) {
             return true;
         }
         
@@ -133,7 +145,8 @@ export default class MoveFunction extends Creep {
         if (!sourceRoom) { return true; }
         
         // 检查是否已到达资源房间且不在边缘
-        if (this.room.name === sourceRoom && !this.handleRoomEdge()) {
+        const { roomName: localSource, shard } = parseShardRoomName(sourceRoom);
+        if ((!shard || shard === Game.shard.name) && this.room.name === localSource && !this.handleRoomEdge()) {
             return true;
         }
         

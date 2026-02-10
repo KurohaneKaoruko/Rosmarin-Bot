@@ -4,10 +4,7 @@ const OUTMINE_SIGN_OVERWRITE = true;
 
 const Reserve = {
     target: function(creep: Creep) {
-        if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-            creep.moveToRoom(creep.memory.targetRoom);
-            return false;
-        }
+        if (!creep.moveToTargetRoom()) return false;
 
         const controller = creep.room.controller;
         

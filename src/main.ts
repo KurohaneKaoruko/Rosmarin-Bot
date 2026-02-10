@@ -14,6 +14,7 @@ import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
 import { NukeModule } from '@/modules/runtime/NukeModule';
+import { ExpandModule } from '@/modules/runtime/ExpandModule';
 
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
@@ -38,6 +39,7 @@ App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
 App.on(MoveOptModule);  // 移动优化相关
 App.on(DDModule);       // 消息模块
+App.on(ExpandModule);   // 跨 shard 扩张计划
 
 
 export const loop = App.run;

@@ -45,6 +45,7 @@ const helpTexts: Record<string, string> = {
         `- ${cmd('helpFactory')}：Factory 相关指令`,
         `- ${cmd('helpPower')}：Power 相关指令`,
         `- ${cmd('helpSpawn')}：孵化相关（控制台/旗帜）`,
+        `- ${cmd('helpExpand')}：扩张相关指令`,
         `- ${cmd('helpNuke')}：核弹（旗帜/控制台）`,
         `- ${cmd('helpTeam')}：Team 小队系统`,
         `- ${cmd('helpTerminal')}：Terminal 相关指令`,
@@ -282,6 +283,17 @@ const helpTexts: Record<string, string> = {
         `- 放置旗帜 ${cmd('${pcname}-home')}：作为回家点（operate 模式下优先回 home）`,
         `- 放置旗帜 ${cmd('${pcname}-move')}：强制移动到指定点（优先级最高）`,
         `- 放置旗帜 ${cmd('${pcname}-assist')}：进入支援模式（assist）`,
+        line(),
+    ].join(br),
+
+    helpExpand: [
+        title('🧭', '扩张指令列表'),
+        line(),
+        `- ${cmd("expand.set('shard/room' | 'room', 'shard/room' | 'room', {claimer?, builder?, carry?, upgrader?}?)")}：启动占领+援建计划（省略 shard 默认当前 shard）`,
+        `- ${cmd('expand.list()')}：查看扩张计划`,
+        `- ${cmd('expand.pause(idOrTarget)')}：暂停扩张计划`,
+        `- ${cmd('expand.resume(idOrTarget)')}：恢复扩张计划`,
+        `- ${cmd('expand.remove(idOrTarget)')}：删除扩张计划`,
         line(),
     ].join(br),
 

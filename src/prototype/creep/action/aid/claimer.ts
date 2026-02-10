@@ -23,10 +23,7 @@ const claimer = {
         }
 
         // 如果不在目标房间，向目标房间移动
-        if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-            creep.moveToRoom(creep.memory.targetRoom);
-            return;
-        }
+        if (!creep.moveToTargetRoom()) return;
     
         const controller = creep.room.controller;
 
