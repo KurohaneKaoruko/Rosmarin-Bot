@@ -32,11 +32,131 @@ let avoidRoomsVersion = 0;
 function markAvoidRoomsChanged() {
     avoidRoomsVersion = (avoidRoomsVersion + 1) | 0;
 }
-let avoidExits = {
-    'fromRoom': 'toRoom'
-}   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
+let avoidExits = Object.create(null);   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
+let avoidExitsVersion = 0;
+function markAvoidExitsChanged() {
+    avoidExitsVersion = (avoidExitsVersion + 1) | 0;
+}
 /** @type {{id:string, roomName:string, taskQueue:{path:MyPath, idx:number, roomName:string}[]}[]} */
 let observers = [];  // 如果想用ob寻路，把ob的id放这里
+
+let portalScanTick = -1;
+let portalPruneTick = -1;
+const PORTAL_SCAN_INTERVAL = 20;
+const PORTAL_ENTRY_TTL = 50000;
+
+function getPortalRegistry() {
+    if (!global._bmPortals || typeof global._bmPortals !== 'object') {
+        global._bmPortals = { v: 1, list: [], updated: 0 };
+    }
+    if (!global._bmPortals.list || !Array.isArray(global._bmPortals.list)) {
+        global._bmPortals.list = [];
+    }
+    return global._bmPortals;
+}
+
+function scanPortals(force) {
+    if (!force) {
+        if (portalScanTick !== -1 && (Game.time - portalScanTick) < PORTAL_SCAN_INTERVAL) return;
+    }
+    portalScanTick = Game.time;
+
+    const reg = getPortalRegistry();
+    const list = reg.list;
+    const indexById = Object.create(null);
+    for (let i = list.length; i--;) {
+        const it = list[i];
+        if (it && it.id) indexById[it.id] = it;
+    }
+
+    for (const roomName in Game.rooms) {
+        const room = Game.rooms[roomName];
+        if (!room) continue;
+        const portals = room.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_PORTAL });
+        if (!portals || !portals.length) continue;
+
+        for (let i = portals.length; i--;) {
+            const portal = portals[i];
+            const id = portal.id;
+            const dest = portal.destination;
+            if (!dest) continue;
+
+            let destShard = Game.shard && Game.shard.name ? Game.shard.name : '';
+            let destRoom = '';
+            let destX = 25;
+            let destY = 25;
+
+            if (typeof dest.shard === 'string') destShard = dest.shard;
+            if (typeof dest.room === 'string') destRoom = dest.room;
+            else if (typeof dest.roomName === 'string') destRoom = dest.roomName;
+            if (typeof dest.x === 'number') destX = dest.x;
+            if (typeof dest.y === 'number') destY = dest.y;
+
+            if (!destRoom) continue;
+
+            let entry = indexById[id];
+            if (!entry) {
+                entry = indexById[id] = {
+                    id,
+                    roomName: portal.pos.roomName,
+                    x: portal.pos.x,
+                    y: portal.pos.y,
+                    destShard,
+                    destRoom,
+                    destX,
+                    destY,
+                    lastSeen: Game.time
+                };
+                list.push(entry);
+            } else {
+                entry.roomName = portal.pos.roomName;
+                entry.x = portal.pos.x;
+                entry.y = portal.pos.y;
+                entry.destShard = destShard;
+                entry.destRoom = destRoom;
+                entry.destX = destX;
+                entry.destY = destY;
+                entry.lastSeen = Game.time;
+            }
+        }
+    }
+
+    reg.updated = Game.time;
+
+    if (portalPruneTick === -1 || (Game.time - portalPruneTick) >= 1000) {
+        portalPruneTick = Game.time;
+        // 清理长期未见的 portal 记录，避免 global 膨胀
+        for (let i = list.length; i--;) {
+            const it = list[i];
+            if (!it || !it.lastSeen || (Game.time - it.lastSeen) > PORTAL_ENTRY_TTL) {
+                list.splice(i, 1);
+            }
+        }
+    }
+}
+
+function pickPortalToShard(fromRoomName, targetShard, targetRoomName) {
+    const reg = getPortalRegistry();
+    const list = reg.list;
+    if (!list || !list.length) return null;
+
+    let best = null;
+    let bestCost = Infinity;
+    for (let i = list.length; i--;) {
+        const p = list[i];
+        if (!p || !p.destShard || p.destShard !== targetShard) continue;
+        if (!p.roomName || !p.destRoom) continue;
+
+        const a = Game.map.getRoomLinearDistance(fromRoomName, p.roomName);
+        const b = Game.map.getRoomLinearDistance(p.destRoom, targetRoomName);
+        const cost = a + b * 1.2;
+        if (cost < bestCost) {
+            bestCost = cost;
+            best = p;
+        }
+    }
+    return best;
+}
 
 /**
  * 同步avoidRooms从传入的数组
@@ -274,6 +394,20 @@ function getAdjacents(pos) {
         }
     }
     return posArray;
+}
+
+/**
+ * 解析带 shard 前缀的房间名（约定格式：shardX/W1N1）
+ * @param {string} roomName
+ * @returns {{ shard: string | null, room: string }}
+ */
+function parseShardRoomName(roomName) {
+    if (typeof roomName !== 'string') return { shard: null, room: roomName };
+    const idx = roomName.indexOf('/');
+    if (idx === -1) return { shard: null, room: roomName };
+    const shard = roomName.slice(0, idx);
+    const room = roomName.slice(idx + 1);
+    return { shard: shard || null, room };
 }
 
 /**
@@ -902,12 +1036,15 @@ let routeCache = Object.create(null);
 
 function getRouteCacheKey(fromRoomName, toRoomName, bypass) {
     if (!bypass) {
-        return `${fromRoomName}|${toRoomName}|0|${avoidRoomsVersion}`;
+        return `${fromRoomName}|${toRoomName}|0|${avoidRoomsVersion}|${avoidExitsVersion}`;
     }
-    return `${fromRoomName}|${toRoomName}|1|${avoidRoomsVersion}|${temporalAvoidFrom}|${temporalAvoidTo}|${bounceAvoidFrom}|${bounceAvoidTo}|${bounceAvoidUntil || 0}|${Game.time}`;
+    return `${fromRoomName}|${toRoomName}|1|${avoidRoomsVersion}|${avoidExitsVersion}|${temporalAvoidFrom}|${temporalAvoidTo}|${bounceAvoidFrom}|${bounceAvoidTo}|${bounceAvoidUntil || 0}|${Game.time}`;
 }
 
 function routeCallback(nextRoomName, fromRoomName) {    // 避开avoidRooms设置了的
+    if (fromRoomName && avoidExits[fromRoomName] && avoidExits[fromRoomName][nextRoomName]) {
+        return Infinity;
+    }
     if (nextRoomName in avoidRooms) {
         //console.log('Infinity at ' + nextRoomName);
         return Infinity;
@@ -985,6 +1122,9 @@ function bypassMy(creep) {
 }
 let bypassRoomName, bypassCostMat, bypassIgnoreCondition, userCostCallback, costMat, route;
 let bypassCostMatReuseCache = Object.create(null);
+let findPathPortalPos = null;
+let findPathPortalMat = null;
+let findPathAllowPortal = false;
 
 function getReusableBypassCostMatrix(roomName, ignoreCondition) {
     const key = `${roomName}|${ignoreCondition ? 1 : 0}`;
@@ -1180,6 +1320,14 @@ function roomCallback(roomName) {
             costMat = resultCostMat;
         }
     }
+    if (findPathAllowPortal && findPathPortalPos && roomName === findPathPortalPos.roomName) {
+        if (!findPathPortalMat) {
+            // 跨 shard 走 portal：允许把 portal 这一格视为可走，否则路径无法踩上 portal 触发传送
+            findPathPortalMat = costMat.clone();
+            findPathPortalMat.set(findPathPortalPos.x, findPathPortalPos.y, 1);
+        }
+        return findPathPortalMat;
+    }
     return costMat;
 }
 function roomCallbackWithRoute(roomName) {
@@ -1191,6 +1339,14 @@ function roomCallbackWithRoute(roomName) {
             if (resultCostMat instanceof PathFinder.CostMatrix) {
                 costMat = resultCostMat;
             }
+        }
+        if (findPathAllowPortal && findPathPortalPos && roomName === findPathPortalPos.roomName) {
+            if (!findPathPortalMat) {
+                // 跨 shard 走 portal：允许把 portal 这一格视为可走，否则路径无法踩上 portal 触发传送
+                findPathPortalMat = costMat.clone();
+                findPathPortalMat.set(findPathPortalPos.x, findPathPortalPos.y, 1);
+            }
+            return findPathPortalMat;
         }
         return costMat;
     }
@@ -1212,6 +1368,9 @@ function findPath(fromPos, toPos, ops) {
 
     findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
     userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
+    findPathAllowPortal = !!ops._bmAllowPortal;
+    findPathPortalPos = findPathAllowPortal ? toPos : null;
+    findPathPortalMat = null;
 
     /**@type {PathFinderOpts} */
     let PathFinderOpts = createPathFinderBaseOpts(ops);
@@ -1658,6 +1817,7 @@ function wrapFn(fn, name) {
             obTick = Game.time;
             checkObResult();
             doObTask();
+            scanPortals(false);
         }
         let code = fn.apply(this, arguments);
         endTime = Game.cpu.getUsed();
@@ -1970,10 +2130,32 @@ function betterMoveTo(firstArg, secondArg, opts) {
 
     // moveTo 调用临时变量（局部声明，避免跨调用串值）
     const args = resolveMoveToArgs(this, firstArg, secondArg, opts);
-    const toPos = args.toPos;
+    let toPos = args.toPos;
     const ops = normalizeMoveToOpts(args.ops);
 
+    const parsedTarget = parseShardRoomName(toPos.roomName);
+    if (parsedTarget.shard && parsedTarget.shard === Game.shard.name) {
+        // 同 shard 调用允许携带 shard 前缀：自动剥离，避免后续 parseRoomName/PathFinder 失败
+        toPos = { x: toPos.x, y: toPos.y, roomName: parsedTarget.room };
+    } else if (parsedTarget.shard && parsedTarget.shard !== Game.shard.name) {
+        // 跨 shard 寻路：本 shard 只负责把 creep 送到通往目标 shard 的 portal
+        scanPortals(false);
+        const portal = pickPortalToShard(this.pos.roomName, parsedTarget.shard, parsedTarget.room);
+        if (!portal) {
+            return ERR_NO_PATH;
+        }
+        // portal 必须“踩上去”才会触发传送，因此强制 range=0，并允许 portal 格可走
+        ops.range = 0;
+        ops._bmAllowPortal = true;
+        toPos = { x: portal.x, y: portal.y, roomName: portal.roomName };
+    }
+
     registerRoomBounceGuard(this, toPos.roomName);
+
+    if (config.autoVisual && !ops.visualizePathStyle) {
+        // 自动绘制路径：调用方未传 visualizePathStyle 时注入默认样式
+        ops.visualizePathStyle = {};
+    }
 
     if (config.enableSameRoomDetourCooldown) {
         // 同房目标的“绕房承诺/冷却”：
@@ -2001,10 +2183,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
         }
     }
 
+    const moveToRange = ops.range === undefined ? 1 : ops.range;
     if (typeof toPos.x != "number" || typeof toPos.y != "number") {   // 房名无效或目的坐标不是数字，不合法
         //this.say('no tar');
         return ERR_INVALID_TARGET;
-    } else if (inRange(this.pos, toPos, ops.range || 1)) {   // 已到达
+    } else if (inRange(this.pos, toPos, moveToRange)) {   // 已到达
         if (isEqual(toPos, this.pos) || ops.range) {  // 已到达
             return OK;
         } // else 走一步
@@ -2017,7 +2200,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         normalLogicalCost += t > 0.2 ? t - 0.2 : t;
         return originMove.call(this, getDirection(this.pos, toPos));
     }
-    ops.range = ops.range || 1;
+    if (ops.range === undefined) ops.range = 1;
 
     if (!hasActiveBodypart(this.body, MOVE)) {
         return ERR_NO_BODYPART;
@@ -2582,6 +2765,61 @@ function bmSetConfig(partial) {
     return OK;
 }
 
+function bmResolvePosArg(posOrObj) {
+    if (!posOrObj) return null;
+    const pos = posOrObj.pos || posOrObj;
+    if (!pos || typeof pos !== 'object') return null;
+    if (typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.roomName !== 'string') return null;
+    return pos;
+}
+
+function bmDeltePath(fromPos, toPos, opts) {   // BetterMove 历史拼写：deltePath
+    const from = bmResolvePosArg(fromPos);
+    const to = bmResolvePosArg(toPos);
+    if (!from || !to) return ERR_INVALID_ARGS;
+
+    const ops = (opts && typeof opts === 'object') ? opts : {};
+    ops.range = ops.range || 1;
+
+    const fromFormalPos = formalize(from);
+    const toFormalPos = formalize(to);
+    if (typeof fromFormalPos.x !== 'number' || typeof fromFormalPos.y !== 'number' || typeof toFormalPos.x !== 'number' || typeof toFormalPos.y !== 'number') {
+        return ERR_INVALID_ARGS;
+    }
+
+    // 复用缓存索引的扫描策略：起点 3x3 + 终点 endKey 范围过滤
+    const minY = toFormalPos.x + toFormalPos.y - 1 - ops.range;
+    const maxY = toFormalPos.x + toFormalPos.y + 1 + ops.range;
+    let deleted = 0;
+
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            const startKey = ((fromFormalPos.x + dx) << 16) | ((fromFormalPos.y + dy) & 0xFFFF);
+            const xBucket = globalPathCache[startKey];
+            if (!xBucket) continue;
+
+            for (let combinedYKey in xBucket) {
+                const combinedY = +combinedYKey;
+                if (combinedY < minY || combinedY > maxY) continue;
+                const pathArray = xBucket[combinedYKey];
+                if (!pathArray || !pathArray.length) continue;
+
+                for (let i = pathArray.length; i--;) {
+                    const path = pathArray[i];
+                    if (!path || !path.posArray || !path.posArray.length) continue;
+                    if (!isSameOps(path, ops)) continue;
+                    if (!isNear(path.start, fromFormalPos)) continue;
+                    if (!inRange(path.end, toFormalPos, ops.range)) continue;
+                    deletePath(path);
+                    deleted++;
+                }
+            }
+        }
+    }
+
+    return deleted ? OK : ERR_NOT_FOUND;
+}
+
 global.BetterMove= {
     // getPosMoveAble (pos){
     //     generateCostMatrix(Game.rooms[pos.roomName])
@@ -2595,10 +2833,7 @@ global.BetterMove= {
     setPathClearDelay: bmSetPathClearDelay,
     setHostileCostMatrixClearDelay: bmSetHostileCostMatrixClearDelay,
     deleteCostMatrix: bmDeleteCostMatrix,
-    // deltePath (fromPos, toPos, opts) {   // TODO
-    //     //if(!(fromPos instanceof RoomPosition))
-    //     return 'not implemented'
-    // },
+    deltePath: bmDeltePath,
     getAvoidRoomsMap: bmGetAvoidRoomsMap,
     addAvoidRooms: bmAddAvoidRooms,
     deleteAvoidRooms: bmDeleteAvoidRooms,
@@ -2611,6 +2846,7 @@ global.BetterMove= {
     addAvoidExits (fromRoomName, toRoomName) {    // 【未启用】
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             avoidExits[fromRoomName] ? avoidExits[fromRoomName][toRoomName] = 1 : avoidExits[fromRoomName] = { [toRoomName]: 1 };
+            markAvoidExitsChanged();
             return OK;
         } else {
             return ERR_INVALID_ARGS;
@@ -2621,10 +2857,31 @@ global.BetterMove= {
             if (fromRoomName in avoidExits && toRoomName in avoidExits[fromRoomName]) {
                 delete avoidExits[fromRoomName][toRoomName];
             }
+            markAvoidExitsChanged();
             return OK;
         } else {
             return ERR_INVALID_ARGS;
         }
+    },
+    syncPortals() {
+        // 立即扫描一次可见房间中的 portal，并写入 global._bmPortals
+        scanPortals(true);
+        return getPortalRegistry();
+    },
+    printPortals(targetShard) {
+        // 打印当前 shard 已登记的 portal（可选按目标 shard 过滤）
+        const reg = getPortalRegistry();
+        const list = reg.list || [];
+        const filtered = typeof targetShard === 'string' && targetShard
+            ? list.filter((p) => p && p.destShard === targetShard)
+            : list;
+        console.log(`[BetterMove] shard=${Game.shard?.name || ''} portals=${filtered.length}`);
+        for (let i = 0; i < filtered.length; i++) {
+            const p = filtered[i];
+            if (!p) continue;
+            console.log(`- ${p.roomName} (${p.x},${p.y}) -> ${p.destShard}/${p.destRoom} (${p.destX},${p.destY}) lastSeen=${p.lastSeen}`);
+        }
+        return filtered;
     },
     print: bmPrint,
     clear: () => { }
