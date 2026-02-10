@@ -27,16 +27,16 @@ let config = {
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
 let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的其他玩家房间的costMatrix
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
-export let avoidRooms: Record<string, 1> = {}; // 永不踏入这些房间
-export let avoidRoomsVersion = 0;
-export function markAvoidRoomsChanged() {
+let avoidRooms: Record<string, 1> = {}; // 永不踏入这些房间
+let avoidRoomsVersion = 0;
+function markAvoidRoomsChanged() {
     avoidRoomsVersion = (avoidRoomsVersion + 1) | 0;
 }
 let avoidExits = {
     'fromRoom': 'toRoom'
 }   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
 /** @type {{id:string, roomName:string, taskQueue:{path:MyPath, idx:number, roomName:string}[]}[]} */
-export let observers = [];  // 如果想用ob寻路，把ob的id放这里
+let observers = [];  // 如果想用ob寻路，把ob的id放这里
 
 /**
  * 同步avoidRooms从传入的数组
@@ -91,6 +91,7 @@ export function autoDiscoverObservers(): void {
 /** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string}[] }} */
 let obTimer = Object.create(null);   // 【未启用】用于登记ob调用，在相应的tick查看房间对象
 let obTick = Game.time;
+let autoDiscoverObserverTick = -1;
 /** @type {Paths} */
 let globalPathCache = Object.create(null);     // 缓存path
 let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
@@ -490,13 +491,36 @@ function isObstacleStructure(room, pos, ignoreStructures) {
  * @param {number} idx
  */
 function addObTask(path, idx) {
-    let roomName = path.posArray[idx].roomName;
+    if (!path || !path.posArray || !(idx in path.posArray)) return;
+    const pos = path.posArray[idx];
+    if (!pos || typeof pos !== 'object') return;
+    let roomName = pos.roomName;
     //console.log('准备ob ' + roomName);
+    // 同一路径同一 idx 在短时间内只登记一次，防止队列膨胀（失败时允许后续重试）
+    const obDedup = path._bmObDedup || (path._bmObDedup = Object.create(null));
+    const last = obDedup[idx];
+    if (last && Game.time - last < 5) return;
+    obDedup[idx] = Game.time;
+    if (!observers.length && autoDiscoverObserverTick !== Game.time) {
+        // global 重置后 MoveOptModule.end 可能还没跑到，这里兜底自动发现一次
+        autoDiscoverObserverTick = Game.time;
+        autoDiscoverObservers();
+    }
+    let best = null;
+    let bestDist = Infinity;
+    let bestQueueLen = Infinity;
     for (let obData of observers) {
-        if (Game.map.getRoomLinearDistance(obData.roomName, roomName) <= 10) {
-            obData.taskQueue.push({ path: path, idx: idx, roomName: roomName });
-            break;
+        const dist = Game.map.getRoomLinearDistance(obData.roomName, roomName);
+        if (dist > 10) continue;
+        const qlen = obData.taskQueue ? obData.taskQueue.length : 0;
+        if (dist < bestDist || (dist === bestDist && qlen < bestQueueLen)) {
+            best = obData;
+            bestDist = dist;
+            bestQueueLen = qlen;
         }
+    }
+    if (best) {
+        best.taskQueue.push({ path: path, idx: idx, roomName: roomName });
     }
 }
 
@@ -509,10 +533,28 @@ function doObTask() {
         while (queue.length) {  // 没有task就pass
             let task = queue[queue.length - 1];
             let roomName = task.roomName;
+            if (!task.path || !task.path.posArray || !task.path.posArray.length || typeof task.path.posArray[0] !== 'object') {
+                // 路径已被失效/删除（posArray 会被置为无效值），丢弃该任务避免浪费 ob/CPU
+                queue.pop();
+                continue;
+            }
+            if (roomName in Game.rooms) { // 已有视野则无需 observeRoom，直接校验并补齐 direction
+                const ok = checkRoom(Game.rooms[roomName], task.path, task.idx - 1); // checkRoom要传有direction的idx
+                if (!ok) {
+                    // OB 已确认堵路，立即失效该缓存路径，避免 creep 走到才重算
+                    deletePath(task.path);
+                }
+                queue.pop();
+                continue;
+            }
             if (roomName in costMatrixCache) {  // 有过视野不用再ob
                 if (!task.path.directionArray[task.idx]) {
                     //console.log(roomName + ' 有视野了无需ob');
-                    checkRoom({ name: roomName }, task.path, task.idx - 1);
+                    const ok = checkRoom({ name: roomName }, task.path, task.idx - 1);
+                    if (!ok) {
+                        // OB 校验发现堵路，立即失效该缓存路径
+                        deletePath(task.path);
+                    }
                 }
                 queue.pop();
                 continue;
@@ -521,7 +563,12 @@ function doObTask() {
             let ob = Game.getObjectById(obData.id);
             if (ob) {
                 //console.log('ob ' + roomName);
-                ob.observeRoom(roomName);
+                const code = ob.observeRoom(roomName);
+                if (code !== OK) {
+                    // observeRoom 失败（通常是参数/距离问题），丢弃该任务避免队列卡死
+                    queue.pop();
+                    continue;
+                }
                 if (!(Game.time + 1 in obTimer)) {
                     obTimer[Game.time + 1] = [];
                 }
@@ -555,7 +602,14 @@ function checkObResult() {
         for (let result of obTimer[tickKey]) {
             if (result.roomName in Game.rooms) {
                 //console.log('ob得到 ' + result.roomName);
-                checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
+                if (!result.path || !result.path.posArray || !result.path.posArray.length || typeof result.path.posArray[0] !== 'object') {
+                    continue;
+                }
+                const ok = checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
+                if (!ok) {
+                    // OB 已确认堵路，立即失效该缓存路径，避免 creep 走到才重算
+                    deletePath(result.path);
+                }
             }
         }
         delete obTimer[tickKey];
