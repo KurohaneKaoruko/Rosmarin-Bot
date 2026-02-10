@@ -764,7 +764,7 @@ export const ResourceManage = {
         for (let res in ResManageMap) {
             // Goods：终端单次发送最多 100；其它资源保持原先阈值约束
             const isGoods = Goods.includes(res as any);
-            const minSendAmount = isGoods ? 100 : (res == RESOURCE_ENERGY ? 5000 : 1000);
+            const minSendAmount = isGoods ? 10 : (res == RESOURCE_ENERGY ? 5000 : 1000);
             const maxSendAmount = isGoods ? 100 : Infinity;
             // 调度上限：用于实现“一次性尽量下发完，但不至于某个富余房间排队爆炸”
             const perPairCap = isGoods ? 100 : (res == RESOURCE_ENERGY ? 50000 : 10000);

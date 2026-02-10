@@ -1,6 +1,7 @@
 import { compress, decompress } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
+import { Goods } from '@/constant/ResourceConstant';
 
 /**
  * 任务获取模块
@@ -189,7 +190,8 @@ export default class MissionGet extends Room {
             const resourceType = data.resourceType;
             // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个"最小批量"
             // 否则可能出现任务存在但永远取不到（terminal 资源少于门槛）导致卡住
-            const minBatch = resourceType === RESOURCE_ENERGY ? THRESHOLDS.ENERGY.SEND_BATCH_ENERGY : THRESHOLDS.ENERGY.SEND_BATCH_MINERAL;
+            const isGoods = Goods.includes(resourceType as any);
+            const minBatch = resourceType === RESOURCE_ENERGY ? THRESHOLDS.ENERGY.SEND_BATCH_ENERGY : (isGoods ? 10 : THRESHOLDS.ENERGY.SEND_BATCH_MINERAL);
             return (terminal.store[resourceType] || 0) >= Math.min(data.amount, minBatch);
         }
         const task = this.getMissionFromPoolFirst('terminal', checkFunc);
