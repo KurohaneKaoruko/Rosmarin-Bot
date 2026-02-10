@@ -27,16 +27,63 @@ let config = {
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
 let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的其他玩家房间的costMatrix
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
-let avoidRooms: any[] = Memory.bypassRooms ? Memory.bypassRooms : []; // 永不踏入这些房间
-let avoidRoomsVersion = 0;
-function markAvoidRoomsChanged() {
+export let avoidRooms: Record<string, 1> = {}; // 永不踏入这些房间
+export let avoidRoomsVersion = 0;
+export function markAvoidRoomsChanged() {
     avoidRoomsVersion = (avoidRoomsVersion + 1) | 0;
 }
 let avoidExits = {
     'fromRoom': 'toRoom'
 }   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
 /** @type {{id:string, roomName:string, taskQueue:{path:MyPath, idx:number, roomName:string}[]}[]} */
-let observers = [];  // 如果想用ob寻路，把ob的id放这里
+export let observers = [];  // 如果想用ob寻路，把ob的id放这里
+
+/**
+ * 同步avoidRooms从传入的数组
+ * @param bypassRooms - 房间名数组
+ */
+export function syncAvoidRooms(bypassRooms: string[]): void {
+    // Clear all keys from avoidRooms object
+    for (const key in avoidRooms) delete avoidRooms[key];
+
+    // Add each room name as a key to avoidRooms object
+    if (bypassRooms) {
+        for (const roomName of bypassRooms) {
+            avoidRooms[roomName] = 1;
+        }
+    }
+
+    // Mark version as changed to trigger cache invalidation
+    markAvoidRoomsChanged();
+}
+
+/**
+ * 自动发现并注册所有拥有的Observer结构
+ */
+export function autoDiscoverObservers(): void {
+    const newObservers: { id: string; roomName: string; taskQueue: any[] }[] = [];
+
+    for (const id in Game.structures) {
+        const structure = Game.structures[id];
+        if (structure.structureType === STRUCTURE_OBSERVER && structure.my) {
+            const observer = structure as StructureObserver;
+            // Check if this observer is already registered
+            const existing = observers.find(ob => ob.id === id);
+            if (existing) {
+                newObservers.push(existing);
+            } else {
+                // Add new observer
+                newObservers.push({ id, roomName: observer.room.name, taskQueue: [] });
+            }
+        }
+    }
+
+    // Replace observers array with auto-discovered ones
+    observers.length = 0;
+    for (const obs of newObservers) {
+        observers.push(obs);
+    }
+}
 
 /***************************************
  *  局部缓存
@@ -2144,18 +2191,8 @@ function moveOneStepReverse(creep, visualStyle, toPos) {    // deprecated
  *  Creep.prototype.flee()、RoomPosition.prototype.findSquadPathTo()函数将在v1.1或v1.2加入
  *  checkSquadPath()有小概率会写
  */
-avoidRooms = avoidRooms.reduce((temp, roomName) => {
-    temp[roomName] = 1;
-    return temp;
-}, Object.create(null));
 
-observers = observers.reduce((temp, id) => {
-    let ob = Game.getObjectById(id);
-    if (ob && ob.observeRoom && ob.my) {
-        temp.push({ id, roomName: ob.room.name, taskQueue: [] });
-    }
-    return temp;
-}, []);
+// Observers are now auto-discovered by MoveOptModule in each tick
 
 function applyConfig() {
     bmSetChangeMove(!!config.changeMove);

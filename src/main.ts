@@ -8,7 +8,8 @@ import { flagRunner } from '@/boot/FlagRunner';
 import { EventModule } from '@/modules/runtime/event';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
 import { GeneratePixel } from '@/modules/runtime/Pixel';
-import { Statistics } from '@/modules/runtime/Statistics'
+import { Statistics } from '@/modules/runtime/Statistics';
+import { MoveOptModule } from '@/modules/runtime/MoveOptModule';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
@@ -35,6 +36,7 @@ App.on(NukeModule);     // 核弹打击
 App.on(ClearModule);    // 过期数据清理
 App.on(GeneratePixel);  // 搓像素
 App.on(Statistics);     // 统计数据
+App.on(MoveOptModule);  // 移动优化相关
 App.on(DDModule);       // 消息模块
 
 
