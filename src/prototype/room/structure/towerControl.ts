@@ -324,7 +324,8 @@ export default class TowerControl extends Room {
                     if (s.hits > hits) continue;
 
                     let pri = 0;
-                    if (s.hits < s.hitsMax * URGENT_STRUCTURE_THRESHOLD) pri = 0;
+                    if (s.structureType === STRUCTURE_ROAD && s.hits < 3000) pri = 0.5;
+                    else if (s.hits < s.hitsMax * URGENT_STRUCTURE_THRESHOLD) pri = 0;
                     else if (s.hits < s.hitsMax * NORMAL_STRUCTURE_THRESHOLD) pri = 1;
                     else continue;
 

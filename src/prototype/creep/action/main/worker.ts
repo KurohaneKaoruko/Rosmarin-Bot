@@ -178,7 +178,10 @@ const BuildRepairWork = function (creep: Creep) {
 
                     let level = Infinity;
                     let targetHits = 0;
-                    if (s.hits < s.hitsMax * URGENT_STRUCTURE_THRESHOLD) {
+                    if (s.structureType === STRUCTURE_ROAD && s.hits < 3000) {
+                        level = 2;
+                        targetHits = s.hitsMax;
+                    } else if (s.hits < s.hitsMax * URGENT_STRUCTURE_THRESHOLD) {
                         level = 1;
                         targetHits = s.hitsMax * URGENT_STRUCTURE_THRESHOLD;
                     } else if (s.hits < s.hitsMax * NORMAL_STRUCTURE_THRESHOLD) {
