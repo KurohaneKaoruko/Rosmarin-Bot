@@ -1966,6 +1966,31 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
     if (typeof ops.range != 'number') {
         return ERR_INVALID_ARGS
     }
+
+    const ttl = creep.ticksToLive;
+    if (typeof ttl === 'number') {
+        if (typeof ops.maxRooms === 'number') {
+            const roomsBudget = Math.ceil(ttl / 50) + 2;
+            const maxRoomsByTTL = Math.max(1, Math.min(64, roomsBudget));
+            if (ops.maxRooms > maxRoomsByTTL) {
+                ops.maxRooms = maxRoomsByTTL;
+            }
+            if (creep.pos.roomName !== toPos.roomName) {
+                const needRooms = Game.map.getRoomLinearDistance(creep.pos.roomName, toPos.roomName, false) + 1;
+                if (needRooms > ops.maxRooms) return ERR_NO_PATH;
+            }
+        }
+
+        const a = formalize(creep.pos);
+        const b = formalize(toPos);
+        if (typeof a.x === 'number' && typeof a.y === 'number' && typeof b.x === 'number' && typeof b.y === 'number') {
+            const dx = Math.abs(a.x - b.x);
+            const dy = Math.abs(a.y - b.y);
+            const lb = Math.max(dx, dy) - (ops.range || 0);
+            if (lb > ttl) return ERR_NO_PATH;
+        }
+    }
+
     const fromFormalPos = formalize(creep.pos);
     const toFormalPos = formalize(toPos);
     const found = creep.pos.roomName == toPos.roomName ?
@@ -2004,6 +2029,15 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
         addPathIntoCache(newPath);
         //console.log(creep, creep.pos, 'miss');
         creepCache.path = newPath;
+    }
+
+    if (typeof ttl === 'number') {
+        const steps = (creepCache.path?.posArray?.length || 0) - 1;
+        if (steps > ttl) {
+            creepCache.path = undefined;
+            creepCache.dst = undefined;
+            return ERR_NO_PATH;
+        }
     }
 
     creepCache.dst = toPos;
