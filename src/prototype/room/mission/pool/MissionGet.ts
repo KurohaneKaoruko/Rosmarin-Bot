@@ -1,5 +1,6 @@
 import { compress, decompress } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { getLayoutData, getStructData } from '@/modules/utils/memory';
 
 /**
  * 任务获取模块
@@ -60,26 +61,122 @@ export default class MissionGet extends Room {
     getWallMission(creep: Creep) {
         if (this[RESOURCE_ENERGY] < THRESHOLDS.ENERGY.WALL_MIN) return null;
 
-        if (!global.WallRampartRepairMission) return null;
-        if (!global.WallRampartRepairMission[this.name]) return null;
-    
-        let taskMap = global.WallRampartRepairMission[this.name];
-
-        let tasks = null;
-        for (let lv = 0; lv <= 100; lv++) {
-            if (!taskMap[lv]) continue;
-            if (taskMap[lv].length == 0) continue;
-            tasks = taskMap[lv];
-            break;
+        global._wallMissionTickCache ??= {};
+        const tickCache = global._wallMissionTickCache as any;
+        const cached = tickCache[this.name];
+        if (cached && cached.tick === Game.time) {
+            return cached.task;
         }
 
-        if (!tasks) return null;
+        const botMem = getStructData(this.name) as any;
+        botMem.wallRepair ??= {};
 
-        return tasks.reduce((prev, curr) => {
-            const prevHits = prev.hits;
-            const currHits = curr.hits;
-            return prevHits <= currHits ? prev : curr;
-        });
+        const cachedPos = botMem.wallRepair.pos;
+        const cachedHits = botMem.wallRepair.hits;
+        const cachedUntil = botMem.wallRepair.until;
+        if (cachedPos != null && cachedHits != null && cachedUntil && Game.time < cachedUntil) {
+            const [x, y] = decompress(cachedPos);
+            const structs = this.lookForAt(LOOK_STRUCTURES, x, y).filter((s) =>
+                s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART
+            );
+            const s = structs[0] as any;
+            if (s && s.hits < cachedHits) {
+                const task = { pos: cachedPos, hits: cachedHits };
+                tickCache[this.name] = { tick: Game.time, task };
+                return task;
+            }
+        }
+
+        let WALL_HITS_MAX_THRESHOLD: number = THRESHOLDS.REPAIR.RAMPIRT_MAX_THRESHOLD;
+        if (botMem['ram_threshold']) {
+            WALL_HITS_MAX_THRESHOLD = Math.min(botMem['ram_threshold'], 1);
+        }
+
+        const layout = getLayoutData(this.name) as any;
+        const wallMem: number[] = layout['constructedWall'] || [];
+        let rampartMem: number[] = layout['rampart'] || [];
+        const structRampart: number[] = [];
+        for (let s of ['spawn', 'tower', 'storage', 'terminal', 'factory', 'lab', 'nuker', 'powerSpawn']) {
+            if (layout[s]) {
+                structRampart.push(...(layout[s] || []));
+            } else {
+                if (Array.isArray((this as any)[s])) {
+                    const poss = (this as any)[s].map((s) => compress(s.pos.x, s.pos.y));
+                    structRampart.push(...poss);
+                } else if ((this as any)[s]) {
+                    structRampart.push(compress((this as any)[s].pos.x, (this as any)[s].pos.y));
+                }
+            }
+        }
+        rampartMem = [...new Set(rampartMem.concat(structRampart))];
+        const candidates = wallMem.concat(rampartMem);
+        if (!candidates.length) {
+            tickCache[this.name] = { tick: Game.time, task: null };
+            return null;
+        }
+
+        const roomNukes = this.find(FIND_NUKES) || [];
+        const cursor = botMem.wallRepair.cursor || 0;
+        const scanLimit = 40;
+        let bestPos = null;
+        let bestTargetHits = 0;
+        let bestScore = Infinity;
+        let bestCursor = cursor;
+
+        for (let i = 0; i < Math.min(scanLimit, candidates.length); i++) {
+            const idx = (cursor + i) % candidates.length;
+            const posInfo = candidates[idx];
+            const [x, y] = decompress(posInfo);
+            if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+            const structs = this.lookForAt(LOOK_STRUCTURES, x, y).filter((s) =>
+                s.hits < s.hitsMax &&
+                (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART)
+            );
+            if (!structs.length) continue;
+            const structure = structs[0] as any;
+
+            let targetHits = 0;
+            let score = Infinity;
+            if (roomNukes.length > 0) {
+                const pos = new RoomPosition(x, y, this.name);
+                const areaNukeDamage = roomNukes.filter((n) => pos.inRangeTo(n.pos, 2))
+                    .reduce((hits, nuke) => pos.isEqualTo(nuke.pos) ? hits + 1e7 : hits + 5e6, 0);
+                if (areaNukeDamage > 0 && structure.hits < areaNukeDamage + 1e6) {
+                    targetHits = areaNukeDamage + 1e6;
+                    score = 0;
+                }
+            }
+            if (score !== 0) {
+                const maxHits = Math.floor(structure.hitsMax * WALL_HITS_MAX_THRESHOLD);
+                if (structure.hits >= maxHits) continue;
+                targetHits = maxHits;
+                score = structure.hits / structure.hitsMax;
+            }
+
+            if (score < bestScore) {
+                bestScore = score;
+                bestPos = posInfo;
+                bestTargetHits = targetHits;
+                bestCursor = idx;
+            }
+        }
+
+        botMem.wallRepair.cursor = (cursor + scanLimit) % candidates.length;
+        if (!bestPos) {
+            delete botMem.wallRepair.pos;
+            delete botMem.wallRepair.hits;
+            botMem.wallRepair.until = Game.time + 10;
+            tickCache[this.name] = { tick: Game.time, task: null };
+            return null;
+        }
+
+        botMem.wallRepair.pos = bestPos;
+        botMem.wallRepair.hits = bestTargetHits;
+        botMem.wallRepair.until = Game.time + 20;
+        botMem.wallRepair.cursor = (bestCursor + 1) % candidates.length;
+        const task = { pos: bestPos, hits: bestTargetHits };
+        tickCache[this.name] = { tick: Game.time, task };
+        return task;
     }
 
 

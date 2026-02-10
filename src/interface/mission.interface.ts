@@ -467,12 +467,12 @@ interface BuildTask {
      * 建造目标ID
      * @description 建筑工地或建筑的ID
      */
-    target: Id<Structure> | Id<ConstructionSite>;
+    target?: Id<Structure> | Id<ConstructionSite>;
     
     /** 
      * 任务位置索引
      */
-    pos: number;
+    pos?: number;
 }
 
 /**
@@ -483,18 +483,18 @@ interface RepairTask {
     /** 
      * 维修目标ID
      */
-    target: Id<Structure> | Id<ConstructionSite>;
+    target?: Id<Structure> | Id<ConstructionSite>;
     
     /** 
      * 任务位置索引
      */
-    pos: number;
+    pos?: number;
     
     /** 
      * 目标血量
      * @description 维修到该血量后任务完成
      */
-    hits: number;
+    hits?: number;
 }
 
 /**

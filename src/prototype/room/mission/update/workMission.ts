@@ -14,63 +14,51 @@ export default class WorkMission extends Room {
      * - 扫描工地，按建筑类型与施工进度计算优先级入队 build
      */
     UpdateBuildRepairMission(offset = 0) {
-        const allStructures = this.find(FIND_STRUCTURES, {
-            filter: (structure) => structure.hits < structure.hitsMax
-        });
+        const buildPool = this.getAllMissionFromPool('build') || [];
+        for (const t of buildPool.slice()) {
+            if (t && t.type === 'build' && t.data && (t.data as any).target) {
+                this.deleteMissionFromPool('build', t.id);
+            }
+        }
+        const buildPlaceholders = (this.getAllMissionFromPool('build') || []).filter((t: any) => t && t.type === 'build' && !(t.data && t.data.target));
+        for (let i = 1; i < buildPlaceholders.length; i++) {
+            this.deleteMissionFromPool('build', buildPlaceholders[i].id);
+        }
 
-        const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
-        const URGENT_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.URGENT_STRUCTURE;
-        const NORMAL_WALL_HITS = this.level < 7 ? THRESHOLDS.REPAIR.NORMAL_WALL.BELOW_RCL7 : THRESHOLDS.REPAIR.NORMAL_WALL.RCL8;
-        const URGENT_WALL_HITS = THRESHOLDS.REPAIR.URGENT_WALL;
-
-        for (const structure of allStructures) {
-            const { hitsMax, structureType, hits, id, pos } = structure;
-            const posInfo = compress(pos.x, pos.y);
-            if (structureType !== STRUCTURE_WALL && structureType !== STRUCTURE_RAMPART) {
-                if (hits < hitsMax * URGENT_STRUCTURE_THRESHOLD) {
-                    const data = {target: id, pos: posInfo, hits: hitsMax * URGENT_STRUCTURE_THRESHOLD};
-                    this.BuildRepairMissionAdd('repair', 1, data)
-                    continue;
-                }
-
-                if (hits < hitsMax * NORMAL_STRUCTURE_THRESHOLD) {
-                    const data = {target: id, pos: posInfo, hits: hitsMax * NORMAL_STRUCTURE_THRESHOLD};
-                    this.BuildRepairMissionAdd('repair', 3, data)
-                    continue;
-                }
-            } else {
-                if (hits < URGENT_WALL_HITS) {
-                    const data = {target: id, pos: posInfo, hits: URGENT_WALL_HITS};
-                    this.BuildRepairMissionAdd('repair', 2, data)
-                    continue;
-                }
-                if (hits < NORMAL_WALL_HITS) {
-                    const data = {target: id, pos: posInfo, hits: NORMAL_WALL_HITS};
-                    this.BuildRepairMissionAdd('repair', 4, data)
-                    continue;
-                }
+        const constructionSites = ((this as any).constructionSite || this.find(FIND_CONSTRUCTION_SITES)).filter((s) => s && (s as any).my);
+        if (constructionSites.length > 0) {
+            const existingTaskId = this.checkSameMissionInPool('build', 'build', {} as any);
+            if (!existingTaskId) {
+                this.addMissionToPool('build', 'build', 5, {} as any);
             }
         }
 
-        const constructionSites = this.find(FIND_CONSTRUCTION_SITES);
-        for(const site of constructionSites) {
-            const posInfo = compress(site.pos.x, site.pos.y);
-            const data = {target: site.id, pos: posInfo};
-            let level = Math.round((1 - site.progress / site.progressTotal) * 4);
-            if (site.structureType === STRUCTURE_TERMINAL ||
-                site.structureType === STRUCTURE_STORAGE ||
-                site.structureType === STRUCTURE_SPAWN) {
-                level = 0;
-            } else if (site.structureType === STRUCTURE_EXTENSION ||
-                site.structureType === STRUCTURE_ROAD) {
-                level += 0;
-            } else if (site.structureType === STRUCTURE_LINK ||
-                site.structureType === STRUCTURE_TOWER) {
-                level += 4;
-            } else {
-                level += 8;
+        const repairPool = this.getAllMissionFromPool('repair') || [];
+        for (const t of repairPool.slice()) {
+            if (t && t.type === 'repair' && t.data && (t.data as any).target) {
+                this.deleteMissionFromPool('repair', t.id);
             }
-            this.BuildRepairMissionAdd('build', level, data)
+        }
+        const repairPlaceholders = (this.getAllMissionFromPool('repair') || []).filter((t: any) => t && t.type === 'repair' && !(t.data && t.data.target));
+        for (let i = 1; i < repairPlaceholders.length; i++) {
+            this.deleteMissionFromPool('repair', repairPlaceholders[i].id);
+        }
+
+        const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
+
+        const all = (this as any).structures || this.find(FIND_STRUCTURES);
+        let hasRepairTarget = false;
+        for (const structure of all) {
+            if (!structure || structure.hits >= structure.hitsMax) continue;
+            if (structure.structureType === STRUCTURE_WALL || structure.structureType === STRUCTURE_RAMPART) continue;
+            if (structure.hits < structure.hitsMax * NORMAL_STRUCTURE_THRESHOLD) { hasRepairTarget = true; break; }
+        }
+
+        if (hasRepairTarget) {
+            const existingTaskId = this.checkSameMissionInPool('repair', 'repair', {} as any);
+            if (!existingTaskId) {
+                this.addMissionToPool('repair', 'repair', 5, {} as any);
+            }
         }
     }
 
@@ -82,11 +70,11 @@ export default class WorkMission extends Room {
      * @returns OK/false 等任务池写入结果
      */
     BuildRepairMissionAdd(type: 'build' | 'repair', level: number, data: BuildTask | RepairTask) {
-        let existingTaskId = this.checkSameMissionInPool(type, type, { target: data.target } as any);
+        let existingTaskId = this.checkSameMissionInPool(type, type, {} as any);
         if (existingTaskId) {
-            return this.updateMissionPool(type, existingTaskId, {level, data});
+            return this.updateMissionPool(type, existingTaskId, {level});
         } else {
-            return this.addMissionToPool(type, type, level, data);
+            return this.addMissionToPool(type, type, level, {} as any);
         }
     }
 
@@ -98,96 +86,13 @@ export default class WorkMission extends Room {
      * - 以耐久百分比映射为优先级分组写入 global.WallRampartRepairMission
      */
     UpdateWallRepairMission(offset = 0) {
-        let WALL_HITS_MAX_THRESHOLD: number = THRESHOLDS.REPAIR.RAMPIRT_MAX_THRESHOLD;
-        const botMem = getStructData(this.name);
-        if (botMem['ram_threshold']) {
-            WALL_HITS_MAX_THRESHOLD = Math.min(botMem['ram_threshold'], 1);
-        }
-        const memory = getLayoutData(this.name) as { [key: string]: number[]};
-        let wallMem = memory['constructedWall'] || [];
-        let rampartMem = memory['rampart'] || [];
-        let structRampart = [];
-        for (let s of ['spawn', 'tower', 'storage', 'terminal', 'factory', 'lab', 'nuker', 'powerSpawn']) {
-            if (memory[s]) {
-                structRampart.push(...(memory[s] || []));
-            } else {
-                if (Array.isArray(this[s])) {
-                    const poss = this[s].map((s) => compress(s.pos.x, s.pos.y));
-                    structRampart.push(...poss);
-                } else if (this[s]) {
-                    structRampart.push(compress(this[s].pos.x, this[s].pos.y));
-                }
-            }
-        }
-        rampartMem = [...new Set(rampartMem.concat(structRampart))];
-        const ramwalls = [];
-        [...wallMem, ...rampartMem].forEach((pos) => {
-            const [x, y] = decompress(pos);
-            if (x < 0 || x > 49 || y < 0 || y > 49) return;
-            let rws = this.lookForAt(LOOK_STRUCTURES, x, y).filter((s) =>
-                s.hits < s.hitsMax &&
-                (s.structureType === STRUCTURE_WALL ||
-                s.structureType === STRUCTURE_RAMPART)
-            );
-            ramwalls.push(...rws);
-        })
-    
-        if (!global.WallRampartRepairMission) {
-            global.WallRampartRepairMission = {}
-        }
-    
-        let tasks = global.WallRampartRepairMission[this.name] = {};
-        
-        const roomNukes = this.find(FIND_NUKES) || [];
-        for(const structure of ramwalls) {
-            const { hitsMax, hits, id, pos } = structure;
-            const posInfo = compress(pos.x, pos.y);
-            if (roomNukes.length > 0) {
-                const areaNukeDamage = roomNukes.filter((n) => pos.inRangeTo(n.pos, 2))
-                .reduce((hits, nuke) => pos.isEqualTo(nuke.pos) ? hits + 1e7 : hits + 5e6, 0);
-                if (hits < areaNukeDamage + 1e6) {
-                    const data = {target: id, pos: posInfo, hits: areaNukeDamage + 1e6};
-                    if (!tasks[0]) tasks[0] = [];
-                    tasks[0].push(data);
-                    continue;
-                }
-            }
-            if(hits < hitsMax * WALL_HITS_MAX_THRESHOLD) {
-                const level = Math.round(hits / hitsMax * 100) + 1;
-                const maxHits = Math.floor(hitsMax * WALL_HITS_MAX_THRESHOLD);
-                const targetHits = Math.min(Math.ceil(level / 100 * hitsMax), maxHits);
-                const data = {target: id, pos: posInfo, hits: targetHits};
-                if (!tasks[level]) tasks[level] = [];
-                tasks[level].push(data);
-                continue;
-            }
+        const botMem = getStructData(this.name) as any;
+        if (!botMem.wallRepair) botMem.wallRepair = {};
+        if (global.WallRampartRepairMission && global.WallRampartRepairMission[this.name]) {
+            delete global.WallRampartRepairMission[this.name];
         }
     }
 
-    /**
-     * 清理刷墙任务表中已完成/失效条目
-     * @description 对 global.WallRampartRepairMission[this.name] 做就地清理
-     */
-    checkWallMission() {
-        if (!global.WallRampartRepairMission) return;
-        const wallTaskMap = global.WallRampartRepairMission[this.name];
-        if (!wallTaskMap) return;
-
-        for (const lvStr of Object.keys(wallTaskMap)) {
-            const lv = Number(lvStr);
-            const tasks = wallTaskMap[lv];
-            if (!tasks || tasks.length === 0) { delete wallTaskMap[lv]; continue; }
-
-            for (let i = tasks.length - 1; i >= 0; i--) {
-                const task = tasks[i];
-                const { target, hits } = task;
-                const structure = Game.getObjectById(target) as Structure | null;
-                if (!structure || structure.hits >= hits) tasks.splice(i, 1);
-            }
-
-            if (tasks.length === 0) delete wallTaskMap[lv];
-        }
-    }
 
     /**
      * 检查 build/repair 任务池有效性并清理无效任务
@@ -197,19 +102,20 @@ export default class WorkMission extends Room {
      * - 同时清理刷墙任务表
      */
     BuildRepairMissionCheck() {
-        const checkFunc = (task: Task) => {
-            const data = task.data as BuildTask | RepairTask;
-            const {target} = data;
-            const structure = Game.getObjectById(target) as Structure | null;
-            if(!structure) return false;
-            if ((task.type === 'repair') && 'hits' in data &&
-                structure.hits >= (data as RepairTask).hits) return false;
-            return true;
+        const hasBuildTarget = (((this as any).constructionSite || this.find(FIND_CONSTRUCTION_SITES)).some((s) => s && (s as any).my));
+        const buildCheck = (task: Task) => task.type === 'build' && hasBuildTarget;
+        this.checkMissionPool('build', buildCheck);
+
+        const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
+        const all = (this as any).structures || this.find(FIND_STRUCTURES);
+        let hasRepairTarget = false;
+        for (const structure of all) {
+            if (!structure || structure.hits >= structure.hitsMax) continue;
+            if (structure.structureType === STRUCTURE_WALL || structure.structureType === STRUCTURE_RAMPART) continue;
+            if (structure.hits < structure.hitsMax * NORMAL_STRUCTURE_THRESHOLD) { hasRepairTarget = true; break; }
         }
+        const repairCheck = (task: Task) => task.type === 'repair' && hasRepairTarget;
+        this.checkMissionPool('repair', repairCheck);
 
-        this.checkMissionPool('build', checkFunc);
-        this.checkMissionPool('repair', checkFunc);
-
-        this.checkWallMission();
     }
 }

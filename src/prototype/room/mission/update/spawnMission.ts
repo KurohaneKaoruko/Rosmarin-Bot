@@ -133,8 +133,7 @@ const RoleSpawnCheck = {
             if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
 
             if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
-                const WR_Tasks = global.WallRampartRepairMission?.[room.name];
-                if (WR_Tasks && Object.keys(WR_Tasks)?.length > 0) return true;
+                if (room.getWallMission(null as any)) return true;
             }
             if (!room.tower || room.tower.length === 0) {
                 return room.getMissionNumInPool('repair') >= 20;
