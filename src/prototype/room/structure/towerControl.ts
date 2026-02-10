@@ -1,5 +1,6 @@
 import { compress } from '@/modules/utils/compress';
 import { pickTowerFocusTarget } from '@/modules/utils/defenseUtils';
+import { THRESHOLDS } from '@/constant/Thresholds';
 
 export default class TowerControl extends Room {
     // 处理 Tower 防御和修复逻辑
@@ -293,19 +294,51 @@ export default class TowerControl extends Room {
                 const task = this.getMissionFromPool('repair', posInfo,
                     (t) => {
                         const repairData = t.data as RepairTask;
-                        const obj = Game.getObjectById(repairData.target);
+                        if (!repairData || !(repairData as any).target) return false;
+                        const obj = Game.getObjectById((repairData as any).target);
                         return (obj as Structure)?.hits <= hits;
                     }
                 );
-                if(!task) return false;
-                const repairData = task.data as RepairTask;
-                const target = Game.getObjectById(repairData.target) as Structure | null;
-                if(!target) return false;
-                if (target.hits >= repairData.hits) {
-                    this.deleteMissionFromPool('repair', task.id);
-                    return false;
+                if (task) {
+                    const repairData = task.data as RepairTask;
+                    if (repairData && (repairData as any).target) {
+                        const target = Game.getObjectById((repairData as any).target) as Structure | null;
+                        if (!target) return false;
+                        if ((repairData as any).hits != null && target.hits >= (repairData as any).hits) {
+                            this.deleteMissionFromPool('repair', task.id);
+                            return false;
+                        }
+                        targetCache[this.name] = target.id;
+                        // 选定目标后继续走后续统一的 tower repair 执行逻辑
+                    }
                 }
-                targetCache[this.name] = target.id;
+
+                const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
+                const URGENT_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.URGENT_STRUCTURE;
+                const all = (this as any).structures || this.find(FIND_STRUCTURES);
+                let best: Structure | null = null;
+                let bestScore = Infinity;
+                for (const s of all) {
+                    if (!s || s.hits >= s.hitsMax) continue;
+                    if (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART) continue;
+                    if (s.hits > hits) continue;
+
+                    let pri = 0;
+                    if (s.hits < s.hitsMax * URGENT_STRUCTURE_THRESHOLD) pri = 0;
+                    else if (s.hits < s.hitsMax * NORMAL_STRUCTURE_THRESHOLD) pri = 1;
+                    else continue;
+
+                    const dist = centerPos.getRangeTo(s.pos);
+                    const ratio = s.hitsMax > 0 ? s.hits / s.hitsMax : 1;
+                    const score = pri * 100 + ratio * 10 + dist;
+                    if (score < bestScore) {
+                        bestScore = score;
+                        best = s;
+                    }
+                }
+                if (best) {
+                    targetCache[this.name] = best.id;
+                }
             }
         }
         const target = Game.getObjectById(targetCache[this.name]) as Structure;

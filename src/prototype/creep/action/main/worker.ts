@@ -51,8 +51,22 @@ const BuildRepairWork = function (creep: Creep) {
 
     if (!cache.task) {
         let task = creep.room.getBuildMission(creep);
-        if (!task && (!creep.room.tower || creep.room.tower.length == 0)) {
-            task = creep.room.getRepairMission(creep);
+        if (!task) {
+            let allowRepair = true;
+            const towers = creep.room.tower;
+            if (towers && towers.length > 0) {
+                const sleep = (creep.room.memory as any)?.towerRepairSleep || 0;
+                if (sleep <= 0) {
+                    allowRepair = towers.every((t) => {
+                        const cap = t.store.getCapacity(RESOURCE_ENERGY) || 0;
+                        const cur = t.store[RESOURCE_ENERGY] || 0;
+                        return cap > 0 ? cur < cap * 0.75 : true;
+                    });
+                }
+            }
+            if (allowRepair) {
+                task = creep.room.getRepairMission(creep);
+            }
         }
         if (!task) return false;
 
