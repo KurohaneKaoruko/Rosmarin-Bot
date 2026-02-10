@@ -341,7 +341,7 @@ export default class MineMission extends Room {
             if (!targetRoom) continue;
 
             if (outminePower) {
-                const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName });
+                const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName } as any);
                 if (!existId) {
                     let P_num = (PowerBankCheck as any)(targetRoom);
                     if (P_num) {
@@ -359,7 +359,7 @@ export default class MineMission extends Room {
             }
 
             if (outmineDeposit) {
-                const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName });
+                const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName } as any);
                 if (!existId) {
                     let D_num = (DepositCheck as any)(targetRoom);
                     if (D_num > 0) {

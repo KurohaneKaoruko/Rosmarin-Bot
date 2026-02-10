@@ -2,6 +2,7 @@ import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 import { isTickAligned } from '@/modules/infra/qos';
 import { getStructData } from '@/modules/utils/memory';
+import { THRESHOLDS } from '@/constant/Thresholds';
 
 
 
@@ -26,9 +27,9 @@ const TransportLevelMap: Record<TransportLevelKey, number> = {
  * - 提供任务池校验清理（TransportMissionCheck）
  */
 export default class TransportMission extends Room {
-    private static LAB_FILL_AMOUNT = 3000;
-    private static LAB_TRIGGER_AMOUNT = 50;
-    private static LAB_MIN_CAPACITY = 100;
+    private static LAB_FILL_AMOUNT = THRESHOLDS.ENERGY.LAB_FILL;
+    private static LAB_TRIGGER_AMOUNT = THRESHOLDS.ENERGY.LAB_TRIGGER;
+    private static LAB_MIN_CAPACITY = THRESHOLDS.ENERGY.LAB_MIN_CAPACITY;
 
     private static getNukeDemandCache() {
         const g = global as any;
@@ -111,7 +112,7 @@ export default class TransportMission extends Room {
      */
     TransportMissionAdd(level: number, data: TransportTask) {
         let existingTaskId = this.checkSameMissionInPool('transport', 'transport',
-                    {source:data.source, target:data.target, resourceType:data.resourceType});
+                    {source:data.source, target:data.target, resourceType:data.resourceType} as any);
         if (existingTaskId) {
             return this.updateMissionPool('transport', existingTaskId, {level, data});
         } else {
@@ -175,7 +176,7 @@ export default class TransportMission extends Room {
         const storage = room.storage;
         const terminal = room.terminal;
         let energy = (storage?.store[RESOURCE_ENERGY]||0) + (terminal?.store[RESOURCE_ENERGY]||0);
-        if(energy < 3000) return;
+        if(energy < THRESHOLDS.ENERGY.TRANSPORT_MIN) return;
 
         let storageOrTerminal = null;
 
@@ -218,7 +219,7 @@ export default class TransportMission extends Room {
 
         if(room.level >= 3 && room.tower && room.tower.length > 0) {
             const towers = room.tower
-                .filter((t: StructureTower) => t && t.store.getFreeCapacity(RESOURCE_ENERGY) > 200);
+                .filter((t: StructureTower) => t && t.store.getFreeCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.TOWER_REPAIR_THRESHOLD);
             towers.forEach((t: StructureTower) => {
                 const amount = t.store.getFreeCapacity(RESOURCE_ENERGY);
                 if(energy < amount) return;
@@ -234,14 +235,14 @@ export default class TransportMission extends Room {
         }
 
         if (room.level >= 6 && room.lab) {
-            // 对能量极低 (<2000) 的 Lab 取消频率限制，其他 Lab 保持频率限制
-            const checkAllLabs = isTickAligned(20, offset);
+            // 对能量极低 (<LAB_MIN_ENERGY) 的 Lab 取消频率限制，其他 Lab 保持频率限制
+            const checkAllLabs = isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
             const labs = room.lab.filter((l: StructureLab) => {
                 if (!l) return false;
                 const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
                 if (freeCap <= 0) return false;
-                // 能量不足 2000 的优先填充，或者到了定期检查时间
-                return l.store[RESOURCE_ENERGY] < 2000 || checkAllLabs;
+                // 能量不足 LAB_MIN_ENERGY 的优先填充，或者到了定期检查时间
+                return l.store[RESOURCE_ENERGY] < THRESHOLDS.ENERGY.LAB_MIN_ENERGY || checkAllLabs;
             });
 
             const labEnergySource = storage || terminal
@@ -267,14 +268,14 @@ export default class TransportMission extends Room {
         const state = room.memory.energyState || room.updateEnergyState?.(false);
         if (state === 'LOW' || state === 'CRITICAL') return;
 
-        if(room.getResAmount(RESOURCE_ENERGY) < 10000) return;
+        if(room.getResAmount(RESOURCE_ENERGY) < THRESHOLDS.ENERGY.SEND_REQUEST_MIN) return;
 
         const centerPos = room.getCenter();
-        if (isTickAligned(20, offset) && room.level == 8 && room.powerSpawn && storage &&
+        if (isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset) && room.level == 8 && room.powerSpawn && storage &&
             (!room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
             const powerSpawn = room.powerSpawn;
             const amount = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
-            if(powerSpawn && amount > 400 && energy >= amount) {
+            if(powerSpawn && amount > THRESHOLDS.ENERGY.LINK_MIN && energy >= amount) {
                 energy -= amount;
                 this.addTransportMission(this.TransportLevel('powerSpawn'), {
                     pos: powerSpawn,
@@ -296,7 +297,7 @@ export default class TransportMission extends Room {
             if (!shouldFill) return OK;
 
             const cap = nuker.store.getFreeCapacity(RESOURCE_ENERGY);
-            const amount = urgent ? cap : Math.min(cap, 3000);
+            const amount = urgent ? cap : Math.min(cap, THRESHOLDS.ENERGY.TRANSPORT_MIN);
             if(amount > 0 && energy >= amount) {
                 energy -= amount;
                 this.addTransportMission(this.TransportLevel('nuker'), {
@@ -355,7 +356,7 @@ export default class TransportMission extends Room {
      */
     UpdateNukerMission(offset = 0) {
         const room = this;
-        if (!isTickAligned(50, offset)) return;
+        if (!isTickAligned(THRESHOLDS.TICK.NUKER_CHECK, offset)) return;
         if(room.level < 8) return;
         if(!room.nuker) return;
         const storage = room.storage;

@@ -402,11 +402,11 @@ interface Task {
      */
     type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit' | 'boost';
     
-    /** 
+    /**
      * 任务数据
      * @description 根据任务类型存储不同的数据结构
      */
-    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | PowerMineTask | DepositMineTask | BoostTask | any;
+    data: TransportTask | BuildTask | RepairTask | ManageTask | SendTask | SpawnTask | PowerMineTask | DepositMineTask | BoostTask;
     
     /** 
      * 任务是否被锁定
@@ -552,31 +552,31 @@ interface SendTask {
  * @description 用于孵化creep的任务
  */
 interface SpawnTask {
-    /** 
+    /**
      * creep名称
      * @description 必须唯一，最大100字符
      */
     name: string;
-    
-    /** 
+
+    /**
      * 体型配置
-     * @description 压缩形式的体型数组，如[[WORK, 5], [CARRY, 1], [MOVE, 3]]
+     * @description 可以是压缩形式的体型数组（如[[WORK, 5], [CARRY, 1], [MOVE, 3]]）或压缩字符串
      */
-    body: ((BodyPartConstant | number)[])[];
-    
-    /** 
+    body: ((BodyPartConstant | number)[])[] | string;
+
+    /**
      * creep初始memory
      * @description 包含role等基础信息
      */
     memory: CreepMemory;
-    
-    /** 
+
+    /**
      * 孵化所需能量
      * @description 预计算的能量消耗
      */
     energy: number;
-    
-    /** 
+
+    /**
      * 是否使用升级版体型
      * @description 某些角色有多种体型配置
      */

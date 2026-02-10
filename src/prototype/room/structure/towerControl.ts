@@ -291,12 +291,17 @@ export default class TowerControl extends Room {
                 const posInfo = compress(centerPos.x, centerPos.y);
                 const hits = this[RESOURCE_ENERGY] > 200000 ? 1e6 : this[RESOURCE_ENERGY] > 100000 ? 3e5 : 3e4;
                 const task = this.getMissionFromPool('repair', posInfo,
-                    (t) => (Game.getObjectById(t.data.target) as any)?.hits <= hits
+                    (t) => {
+                        const repairData = t.data as RepairTask;
+                        const obj = Game.getObjectById(repairData.target);
+                        return (obj as Structure)?.hits <= hits;
+                    }
                 );
                 if(!task) return false;
-                const target = Game.getObjectById(task.data.target) as Structure;
+                const repairData = task.data as RepairTask;
+                const target = Game.getObjectById(repairData.target) as Structure | null;
                 if(!target) return false;
-                if (target.hits >= task.data.hits) {
+                if (target.hits >= repairData.hits) {
                     this.deleteMissionFromPool('repair', task.id);
                     return false;
                 }

@@ -1,15 +1,16 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
 import { decompressBodyConfig } from "@/modules/utils/compress";
+import { THRESHOLDS } from '@/constant/Thresholds';
 
 // 孵化相关
-const SPAWN_MIN_ENERGY = 50e3;
+const SPAWN_MIN_ENERGY = THRESHOLDS.SPAWN.EMERGENCY_ENERGY_THRESHOLD * 50;
 // 维修相关
-const REPAIR_MIN_ENERGY = 100e3;
+const REPAIR_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN * 2;
 // 刷墙相关
-const WALL_MIN_ENERGY = 50000;
+const WALL_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN;
 // 搬运任务生成阈值
-const TRANSPORT_MIN = 10000;
-const TRANSPORT_HIGH = 100000;
+const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
+const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
 
 const getEnergyState = (room: Room) => {
     return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
@@ -110,7 +111,7 @@ const RoleSpawnCheck = {
         // 1. 只要有建造需求，就先保证至少 1 个 worker
         if (needBuilder && current < 1) {
             // 条件可以适当放宽：房间当前能量或总能量至少能支撑一个基础体型
-            if (room.energyAvailable >= 300 || totalEnergy >= cap) {
+            if (room.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY || totalEnergy >= cap) {
                 return true;
             }
         }
@@ -121,7 +122,7 @@ const RoleSpawnCheck = {
             if ((state === 'SURPLUS' || state === 'NORMAL') && buildNum > 10 && current < 2) {
                 return true;
             }
-            if (state === 'LOW' && current < 1 && totalEnergy >= Math.max(1000, cap * 2)) {
+            if (state === 'LOW' && current < 1 && totalEnergy >= Math.max(THRESHOLDS.SPAWN.BODY_REDUCTION_THRESHOLD, cap * 2)) {
                 // 如果你觉得多余，也可以直接删掉这句，只保留上面的“至少一个”逻辑
                 return true;
             }

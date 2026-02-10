@@ -1,3 +1,5 @@
+import { THRESHOLDS } from '@/constant/Thresholds';
+
 type CarrierLockEntry = {
     name: string;
     expire: number;
@@ -123,24 +125,24 @@ const getStorageOrTerminal = (creep: Creep) => {
     const controllerContainer = container?.find((c: StructureContainer) => c.pos.inRangeTo(controller, 1));
     const controllerLink = link?.find((l: StructureLink) => l.pos.inRangeTo(controller, 2));
     
-    const needEnergy = creep.room.CheckSpawnAndTower() || 
-                       (!controllerLink && controllerContainer?.store.getFreeCapacity(RESOURCE_ENERGY) > 500);
+    const needEnergy = creep.room.CheckSpawnAndTower() ||
+                       (!controllerLink && controllerContainer?.store.getFreeCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.CONTAINER_MIN);
     
     const storageEnergy = storage?.store[RESOURCE_ENERGY] || 0;
     const terminalEnergy = terminal?.store[RESOURCE_ENERGY] || 0;
     
     if (needEnergy) {
         // 优先从能量更多的结构取
-        if (storageEnergy > 1000 && terminalEnergy > 1000) {
+        if (storageEnergy > THRESHOLDS.ENERGY.STORAGE_MIN && terminalEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) {
             return storageEnergy < terminalEnergy ? terminal : storage;
         }
-        if (storageEnergy > 1000) return storage;
-        if (terminalEnergy > 1000) return terminal;
+        if (storageEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) return storage;
+        if (terminalEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) return terminal;
     }
-    
+
     // 平衡 terminal 和 storage 的能量
-    if (terminal && storage && terminalEnergy > 10000 && 
-        storage.store.getFreeCapacity() > 10000 && terminalEnergy > storageEnergy) {
+    if (terminal && storage && terminalEnergy > THRESHOLDS.TRANSPORT.MIN_AMOUNT &&
+        storage.store.getFreeCapacity() > THRESHOLDS.TRANSPORT.MIN_AMOUNT && terminalEnergy > storageEnergy) {
         return terminal;
     }
     
@@ -189,7 +191,7 @@ const checkAndFillNearbyExtensions = (creep: Creep) => {
     for (let i = 0; i < extensions.length; i++) {
         const ext = Game.getObjectById(extensions[i]) as AnyStoreStructure | null;
         if (!ext) continue;
-        if (ext.structureType === STRUCTURE_TOWER && ext.store.getFreeCapacity(RESOURCE_ENERGY) <= 100) continue;
+        if (ext.structureType === STRUCTURE_TOWER && ext.store.getFreeCapacity(RESOURCE_ENERGY) <= THRESHOLDS.TOWER.HEAL_THRESHOLD) continue;
         if (ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
             if (creep.transfer(ext, RESOURCE_ENERGY) === OK) {
                 extensions.splice(i, 1);
@@ -238,7 +240,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
         const rangeScore = scoreByRange(pos.getRangeTo(r));
 
         // 能量掉落只有在数量较大时才抢占优先级，避免反复捡小堆
-        if (r.resourceType === RESOURCE_ENERGY && r.amount < 200) continue;
+        if (r.resourceType === RESOURCE_ENERGY && r.amount < THRESHOLDS.ENERGY.PICKUP_THRESHOLD * 2) continue;
 
         candidates.push({
             score: base + amountScore + rangeScore,
@@ -302,8 +304,8 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
         if (!type) continue;
 
         const amount = c.store.getUsedCapacity(type);
-        const min = Math.min(666, freeCap);
-        if (amount < Math.min(min, type === RESOURCE_ENERGY ? 150 : 50)) continue;
+        const min = Math.min(THRESHOLDS.ENERGY.PICKUP_LARGE * 0.666, freeCap);
+        if (amount < Math.min(min, type === RESOURCE_ENERGY ? THRESHOLDS.ENERGY.CONTAINER_MIN * 0.3 : THRESHOLDS.ENERGY.PICKUP_THRESHOLD * 0.5)) continue;
 
         candidates.push({
             score: 45 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(c)),
@@ -314,7 +316,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
     // 优先级4：从 storage/terminal 取能量（仅用于补能模式的兜底）
     if (urgentEnergy && freeCap > 0) {
         const source = getStorageOrTerminal(creep) as (StructureStorage | StructureTerminal | null);
-        if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > 1000) {
+        if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.STORAGE_MIN) {
             candidates.push({
                 score: 20 + Math.min(20, Math.floor(source.store.getUsedCapacity(RESOURCE_ENERGY) / 1000)) + scoreByRange(pos.getRangeTo(source)),
                 plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : 'storage', resourceType: RESOURCE_ENERGY, lockTtl: 1 }

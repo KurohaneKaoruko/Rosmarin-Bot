@@ -9,7 +9,8 @@ export default class TerminalControl extends Room {
         const task = this.getSendMission();
         if (!task) return;
 
-        const { targetRoom, resourceType, amount } = task.data;
+        const sendData = task.data as SendTask;
+        const { targetRoom, resourceType, amount } = sendData;
         if (!targetRoom || !resourceType || !amount || amount <= 0) {
             this.deleteMissionFromPool('terminal', task.id);
             return;
@@ -49,7 +50,7 @@ export default class TerminalControl extends Room {
         if (result === OK) {
             const remaining = amount - sendAmount;
             if (remaining > 0) {
-                this.updateMissionPool('terminal', task.id, {data: {amount: remaining}});
+                this.updateMissionPool('terminal', task.id, {data: {...sendData, amount: remaining}} as any);
             } else {
                 this.deleteMissionFromPool('terminal', task.id);
             }

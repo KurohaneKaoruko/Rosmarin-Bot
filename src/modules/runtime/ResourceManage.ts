@@ -44,6 +44,8 @@ export const ResourceManage = {
     tick: function () {
         // 降低全局资源平衡的 CPU 占用：固定间隔执行
         if (Game.time % 50) return;
+        // 初始化市场交易成本缓存
+        if (!Memory.marketCostCache) Memory.marketCostCache = {};
         const ResManageMem = getResourceManage() || {};
         // 全局默认参与平衡的资源类型（可被 Memory.RosmarinBot.ResourceManage 的房间自定义条目扩展）
         const balanceResKeys = Object.keys(RESOURCE_BALANCE);
@@ -702,13 +704,16 @@ export const ResourceManage = {
         const costRatioCache = Object.create(null) as Record<string, Record<string, number>>;
 
         const getCostRatio = (sourceRoomName: string, targetRoomName: string) => {
-            if (sourceRoomName === targetRoomName) return Infinity;
-            if (!costRatioCache[sourceRoomName]) costRatioCache[sourceRoomName] = Object.create(null) as Record<string, number>;
-            const cached = costRatioCache[sourceRoomName][targetRoomName];
-            if (cached !== undefined) return cached;
-            const sampleAmount = 1000;
-            const ratio = Game.market.calcTransactionCost(sampleAmount, sourceRoomName, targetRoomName) / sampleAmount;
-            costRatioCache[sourceRoomName][targetRoomName] = ratio;
+            const key = `${sourceRoomName}->${targetRoomName}`;
+            const cached = Memory.marketCostCache?.[key];
+            const CACHE_EXPIRY = 1000;
+
+            if (cached && Game.time - cached.tick < CACHE_EXPIRY) {
+                return cached.ratio;
+            }
+
+            const ratio = Game.market.calcTransactionCost(1000, sourceRoomName, targetRoomName) / 1000;
+            Memory.marketCostCache[key] = { ratio, tick: Game.time };
             return ratio;
         }
 
@@ -837,8 +842,8 @@ export const ResourceManage = {
                     sendAmount = Math.floor(sendAmount);
                     if (sendAmount < minSendAmount) continue;
 
-                    // 精确计算该发送量的成本（前面 ratio 只是估算，用于减少 calcTransactionCost 调用次数）
-                    const cost = Game.market.calcTransactionCost(sendAmount, source.room.name, target.room.name);
+                    // 精确计算该发送量的成本（使用缓存的 ratio 来减少 calcTransactionCost 调用）
+                    const cost = sendAmount * ratio;
                     if (cost > sendAmount) continue;
                     if (res == RESOURCE_ENERGY && sendAmount + cost > source.surplus) continue;
 

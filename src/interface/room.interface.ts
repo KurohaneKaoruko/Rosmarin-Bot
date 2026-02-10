@@ -1,53 +1,53 @@
 interface Room {
     // ==================== 房间建筑缓存 ====================
-    /** 
+    /**
      * 房间中的source数组
      * @description 缓存房间内所有能量源，由 room.update() 定期更新（默认每 10 tick）
      * @example const sources = room.source; // Source[]
      */
-    source: Source[];
+    source?: Source[];
     
-    /** 
+    /**
      * 房间中的mineral对象
      * @description 缓存房间内的矿物资源点
      */
-    mineral: Mineral;
+    mineral?: Mineral;
     
-    /** 
+    /**
      * 房间中的spawn数组
      * @description 缓存房间内所有孵化器
      */
-    spawn: StructureSpawn[];
+    spawn?: StructureSpawn[];
     
-    /** 
+    /**
      * 房间中的extension数组
      * @description 缓存房间内所有扩展
      */
-    extension: StructureExtension[];
+    extension?: StructureExtension[];
     
-    /** 
+    /**
      * 房间中的powerSpawn对象
      * @description 缓存房间内的PowerSpawn建筑
      */
-    powerSpawn: StructurePowerSpawn;
+    powerSpawn?: StructurePowerSpawn;
     
-    /** 
+    /**
      * 房间中的factory对象
      * @description 缓存房间内的工厂建筑
      */
-    factory: StructureFactory;
+    factory?: StructureFactory;
     
-    /** 
+    /**
      * 房间中的tower数组
      * @description 缓存房间内所有防御塔
      */
-    tower: StructureTower[];
+    tower?: StructureTower[];
     
-    /** 
+    /**
      * 房间中的nuker对象
      * @description 缓存房间内的核弹发射井
      */
-    nuker: StructureNuker;
+    nuker?: StructureNuker;
 
     /**
      * 判断本房间 nuker 是否已满足发射资源条件
@@ -76,41 +76,53 @@ interface Room {
      */
     NukerLaunchTo(targetPos: RoomPosition): ScreepsReturnCode;
     
-    /** 
+    /**
      * 房间中的lab数组
      * @description 缓存房间内所有实验室
      */
-    lab: StructureLab[];
+    lab?: StructureLab[];
 
-    /** 
+    /**
      * 房间中的link数组
      * @description 缓存房间内所有Link建筑
      */
-    link: StructureLink[];
+    link?: StructureLink[];
     
-    /** 
+    /**
      * 房间中的container数组
      * @description 缓存房间内所有容器
      */
-    container: StructureContainer[];
+    container?: StructureContainer[];
     
-    /** 
+    /**
      * 房间中的extractor对象
      * @description 缓存房间内的矿物提取器
      */
-    extractor: StructureExtractor;
+    extractor?: StructureExtractor;
     
-    /** 
+    /**
      * 房间中的observer对象
      * @description 缓存房间内的观察者建筑
      */
-    observer: StructureObserver;
+    observer?: StructureObserver;
+
+    /**
+     * 房间中的storage对象
+     * @description 缓存房间内的存储建筑
+     */
+    storage?: StructureStorage;
+
+    /**
+     * 房间中的terminal对象
+     * @description 缓存房间内的终端建筑
+     */
+    terminal?: StructureTerminal;
 
     /**
      * 房间中的Road对象
      * @description 缓存房间内的路建筑
      */
-    road: StructureRoad[];
+    road?: StructureRoad[];
     
     /** 
      * 得到包括此房间所有（按此顺序：）storage、terminal、factory、container的数组

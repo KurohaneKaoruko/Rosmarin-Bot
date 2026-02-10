@@ -1,4 +1,5 @@
-import { compress,decompress } from '@/modules/utils/compress';
+import { compress, decompress } from '@/modules/utils/compress';
+import { THRESHOLDS } from '@/constant/Thresholds';
 
 /**
  * 任务获取模块
@@ -57,7 +58,7 @@ export default class MissionGet extends Room {
 
     // 获取刷墙任务
     getWallMission(creep: Creep) {
-        if (this[RESOURCE_ENERGY] < 50000) return null;
+        if (this[RESOURCE_ENERGY] < THRESHOLDS.ENERGY.WALL_MIN) return null;
 
         if (!global.WallRampartRepairMission) return null;
         if (!global.WallRampartRepairMission[this.name]) return null;
@@ -89,9 +90,9 @@ export default class MissionGet extends Room {
             if (task.type != 'send') return false;
             const data = task.data as SendTask;
             const resourceType = data.resourceType;
-            // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个“最小批量”
+            // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个"最小批量"
             // 否则可能出现任务存在但永远取不到（terminal 资源少于门槛）导致卡住
-            const minBatch = resourceType === RESOURCE_ENERGY ? 5000 : 100;
+            const minBatch = resourceType === RESOURCE_ENERGY ? THRESHOLDS.ENERGY.SEND_BATCH_ENERGY : THRESHOLDS.ENERGY.SEND_BATCH_MINERAL;
             return (terminal.store[resourceType] || 0) >= Math.min(data.amount, minBatch);
         }
         const task = this.getMissionFromPoolFirst('terminal', checkFunc);
@@ -105,7 +106,7 @@ export default class MissionGet extends Room {
         for(const task of tasks) {
             const data = task.data as SendTask;
             const resTotalAmount = (this.terminal?.store[data.resourceType] || 0) + (this.storage?.store[data.resourceType] || 0);
-            if(resTotalAmount < Math.min(data.amount, 10000)) {
+            if(resTotalAmount < Math.min(data.amount, THRESHOLDS.ENERGY.SEND_REQUEST_MIN)) {
                 this.deleteMissionFromPool('terminal', task.id);
                 continue;
             }

@@ -100,6 +100,25 @@ interface Memory {
      * @description 存储改bot运行时的数据，包括任务队列、资源管理等
      */
     RosmarinBot: BotMemory;
+
+    /**
+     * 市场交易成本缓存
+     * @description 缓存房间间资源传输的成本比例，减少重复计算
+     * @example
+     * ```typescript
+     * {
+     *     'W1N1->W2N2': { ratio: 0.1, tick: 12345 }
+     * }
+     * ```
+     */
+    marketCostCache?: {
+        [key: string]: {
+            /** 成本比例 cost/amount */
+            ratio: number;
+            /** 缓存创建时间 (Game.time) */
+            tick: number;
+        };
+    };
 }
 
 /**

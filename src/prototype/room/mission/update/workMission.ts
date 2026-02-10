@@ -1,5 +1,6 @@
 import { compress, decompress } from '@/modules/utils/compress';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
+import { THRESHOLDS } from '@/constant/Thresholds';
 
 /**
  * 房间 Work 任务更新模块
@@ -17,10 +18,10 @@ export default class WorkMission extends Room {
             filter: (structure) => structure.hits < structure.hitsMax
         });
 
-        const NORMAL_STRUCTURE_THRESHOLD = 0.8;
-        const URGENT_STRUCTURE_THRESHOLD = 0.1;
-        const NORMAL_WALL_HITS = this.level < 7 ? 300e3 : 1e6;
-        const URGENT_WALL_HITS = 3000;
+        const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
+        const URGENT_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.URGENT_STRUCTURE;
+        const NORMAL_WALL_HITS = this.level < 7 ? THRESHOLDS.REPAIR.NORMAL_WALL.BELOW_RCL7 : THRESHOLDS.REPAIR.NORMAL_WALL.RCL8;
+        const URGENT_WALL_HITS = THRESHOLDS.REPAIR.URGENT_WALL;
 
         for (const structure of allStructures) {
             const { hitsMax, structureType, hits, id, pos } = structure;
@@ -81,7 +82,7 @@ export default class WorkMission extends Room {
      * @returns OK/false 等任务池写入结果
      */
     BuildRepairMissionAdd(type: 'build' | 'repair', level: number, data: BuildTask | RepairTask) {
-        let existingTaskId = this.checkSameMissionInPool(type, type, { target: data.target });
+        let existingTaskId = this.checkSameMissionInPool(type, type, { target: data.target } as any);
         if (existingTaskId) {
             return this.updateMissionPool(type, existingTaskId, {level, data});
         } else {
@@ -97,7 +98,7 @@ export default class WorkMission extends Room {
      * - 以耐久百分比映射为优先级分组写入 global.WallRampartRepairMission
      */
     UpdateWallRepairMission(offset = 0) {
-        let WALL_HITS_MAX_THRESHOLD = 0.9;
+        let WALL_HITS_MAX_THRESHOLD: number = THRESHOLDS.REPAIR.RAMPIRT_MAX_THRESHOLD;
         const botMem = getStructData(this.name);
         if (botMem['ram_threshold']) {
             WALL_HITS_MAX_THRESHOLD = Math.min(botMem['ram_threshold'], 1);
@@ -197,11 +198,12 @@ export default class WorkMission extends Room {
      */
     BuildRepairMissionCheck() {
         const checkFunc = (task: Task) => {
-            const {target, hits} = task.data;
+            const data = task.data as BuildTask | RepairTask;
+            const {target} = data;
             const structure = Game.getObjectById(target) as Structure | null;
             if(!structure) return false;
-            if ((task.type === 'repair') &&
-                structure.hits >= hits) return false;
+            if ((task.type === 'repair') && 'hits' in data &&
+                structure.hits >= (data as RepairTask).hits) return false;
             return true;
         }
 

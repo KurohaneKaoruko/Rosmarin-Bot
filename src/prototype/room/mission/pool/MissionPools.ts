@@ -136,7 +136,7 @@ export default class MissionPools extends Room {
                 minLevel = task.level;
                 bestTask = task;
                 // 如果需要计算距离，则初始化距离（如果有位置信息）
-                if (pos != null && task.data?.pos != null) {
+                if (pos != null && 'pos' in task.data && task.data.pos != null) {
                     minDistance = this.getDistance(task.data.pos, pos);
                 } else {
                     minDistance = Infinity;
@@ -145,7 +145,7 @@ export default class MissionPools extends Room {
             }
 
             // 2. 同优先级下的距离检查（仅当 pos 存在时）
-            if (task.level === minLevel && pos != null && task.data?.pos != null) {
+            if (task.level === minLevel && pos != null && 'pos' in task.data && task.data.pos != null) {
                 const dist = this.getDistance(task.data.pos, pos);
                 if (dist < minDistance) {
                     minDistance = dist;

@@ -1,0 +1,46 @@
+export const THRESHOLDS = {
+    ENERGY: {
+        WALL_MIN: 50000,
+        SEND_BATCH_ENERGY: 5000,
+        SEND_BATCH_MINERAL: 100,
+        SEND_REQUEST_MIN: 10000,
+        TRANSPORT_MIN: 3000,
+        TOWER_REPAIR_THRESHOLD: 200,
+        PICKUP_THRESHOLD: 100,
+        PICKUP_LARGE: 1000,
+        CONTAINER_MIN: 500,
+        LINK_MIN: 400,
+        STORAGE_MIN: 5000,
+        LAB_MIN_ENERGY: 2000,
+        LAB_FILL: 3000,
+        LAB_TRIGGER: 50,
+        LAB_MIN_CAPACITY: 100,
+    },
+    SPAWN: {
+        MIN_ENERGY: 200,
+        EMERGENCY_ENERGY_THRESHOLD: 1000,
+        BODY_REDUCTION_THRESHOLD: 1000,
+    },
+    REPAIR: {
+        URGENT_STRUCTURE: 0.1,
+        NORMAL_STRUCTURE: 0.8,
+        NORMAL_WALL: { BELOW_RCL7: 300000, RCL8: 1000000 },
+        URGENT_WALL: 3000,
+        RAMPIRT_MAX_THRESHOLD: 0.9,
+    },
+    TRANSPORT: {
+        MIN_AMOUNT: 10000,
+        HIGH_AMOUNT: 100000,
+    },
+    TOWER: {
+        HEAL_THRESHOLD: 100,
+        TARGET_RANGE: 50,
+    },
+    TICK: {
+        BUILD_CHECK: 100,
+        ROOM_EXECUTE_OFFSET: 100,
+        NUKER_CHECK: 50,
+        LAB_CHECK: 20,
+        WALL_REPAIR_COOLDOWN: 5,
+    }
+} as const;

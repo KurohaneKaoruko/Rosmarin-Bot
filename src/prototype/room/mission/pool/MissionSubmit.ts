@@ -24,7 +24,7 @@ export default class MissionSubmit extends Room {
     submitSpawnMission(id: Task['id']) {
         const task = this.getMissionFromPoolById('spawn', id);
         if (!task) return;
-        const role = task.data.memory.role;
+        const role = (task.data as SpawnTask).memory.role;
         this.deleteMissionFromPool('spawn', id);
 
         if (!global.SpawnMissionNum) global.SpawnMissionNum = {};

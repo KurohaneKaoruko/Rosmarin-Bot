@@ -50,7 +50,7 @@ export default class SpawnControl extends Room {
         }
 
         let usedBudget = false;
-        let body: ((BodyPartConstant | number)[])[] = data.body;
+        let body: ((BodyPartConstant | number)[])[] | string = data.body;
         if (typeof body == 'string' && body) {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {

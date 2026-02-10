@@ -142,7 +142,7 @@ export default class BoostMission extends TransportMission {
                 const exist = this.checkSameMissionInPool('transport', 'transport', {
                     source: lab.id,
                     resourceType: lab.mineralType
-                });
+                } as any);
                 if (!exist && this.storage) {
                     this.addTransportMission(this.TransportLevel('boost'), {
                         source: lab.id,
@@ -177,7 +177,7 @@ export default class BoostMission extends TransportMission {
                 const exist = this.checkSameMissionInPool('transport', 'transport', {
                     target: lab.id,
                     resourceType: mineral
-                });
+                } as any);
 
                 if (!exist) {
                     this.addTransportMission(this.TransportLevel('boost'), {
@@ -196,7 +196,7 @@ export default class BoostMission extends TransportMission {
             const existEnergy = this.checkSameMissionInPool('transport', 'transport', {
                 target: lab.id,
                 resourceType: RESOURCE_ENERGY
-            });
+            } as any);
             if (!existEnergy && this.storage && this.storage.store[RESOURCE_ENERGY] > 0) {
                 this.addTransportMission(this.TransportLevel('boost'), {
                     source: this.storage.id,
@@ -281,7 +281,7 @@ export default class BoostMission extends TransportMission {
                     const exist = this.checkSameMissionInPool('transport', 'transport', {
                         source: lab.id,
                         resourceType: lab.mineralType
-                    });
+                    } as any);
                     if (!exist) {
                         this.addTransportMission(this.TransportLevel('boost'), {
                             source: lab.id,

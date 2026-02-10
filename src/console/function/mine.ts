@@ -177,7 +177,7 @@ export default {
             };
             
             // 先尝试删除旧任务（如果存在）
-            const existId = room.checkSameMissionInPool('mine', 'power', { targetRoom });
+            const existId = room.checkSameMissionInPool('mine', 'power', { targetRoom } as any);
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'power', 1, data);
@@ -197,7 +197,7 @@ export default {
             }
 
             // 先尝试删除旧任务（如果存在）
-            const existId = room.checkSameMissionInPool('mine', 'deposit', { targetRoom });
+            const existId = room.checkSameMissionInPool('mine', 'deposit', { targetRoom } as any);
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'deposit', 1, data);
@@ -225,7 +225,7 @@ export default {
             const spawnmission = room.getAllMissionFromPool('spawn');
             if (!spawnmission) return OK;
             for (const mission of spawnmission) {
-                const data = mission.data;
+                const data = mission.data as SpawnTask;
                 if (data.memory.targetRoom == targetRoom) {
                     // 如果指定了类型，则需要进一步检查 role
                     if (type === 'power' && !data.memory.role.startsWith('power-')) continue;
