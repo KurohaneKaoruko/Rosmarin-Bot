@@ -3,6 +3,7 @@ import { compress, compressBatch, decompress } from '@/modules/utils/compress';
 import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import { autoPlanner } from '@/modules/feature/planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/feature/planner/dynamic/63Planner';
+import { scorpiorPlanner } from '@/modules/feature/planner/dynamic/ScorpiorPlanner';
 import * as StaticPlanner from '@/modules/feature/planner/static';
 import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 
@@ -737,6 +738,7 @@ function computeStatic(roomName: string, layoutType: string, center: LayoutCente
  */
 function pickDynamicPlanner(layoutType: string) {
     if (layoutType === '63auto') return autoPlanner63;
+    if (layoutType === 'scorpior') return scorpiorPlanner;
     return autoPlanner;
 }
 
@@ -1039,6 +1041,39 @@ export const LayoutPlanner = {
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
         log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y})`);
+        return OK;
+    },
+
+    /**
+     * 动态布局(scorpior)可视化（不落盘）。
+     * @param roomName 房间名
+     * @returns Screeps 错误码：OK/ERR_NOT_FOUND
+     */
+    visualDynamicScorpior(roomName: string): number {
+        const computed = computeDynamic(roomName, 'scorpior');
+        if (!computed) return ERR_NOT_FOUND;
+        LayoutVisual.showRoomStructures(roomName, computed.structMap);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y})`);
+        return OK;
+    },
+
+    /**
+     * 动态布局(scorpior)构建：写入 Memory.RosmarinBot.LayoutData[roomName] 并同步 RoomData.center/layout（若存在）。
+     * @param roomName 房间名
+     * @returns Screeps 错误码：OK/ERR_NOT_FOUND
+     */
+    buildDynamicScorpior(roomName: string): number {
+        const computed = computeDynamic(roomName, 'scorpior');
+        if (!computed) return ERR_NOT_FOUND;
+        const BotMemRooms = getRoomData();
+        if (BotMemRooms?.[roomName]) {
+            BotMemRooms[roomName]['layout'] = 'scorpior';
+            BotMemRooms[roomName]['center'] = computed.center;
+        }
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        Object.assign(layoutMemory, computed.layoutMemory as any);
+        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y})`);
         return OK;
     },
 

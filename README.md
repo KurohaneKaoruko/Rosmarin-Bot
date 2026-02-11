@@ -25,7 +25,7 @@
 - 常驻 Creep 自动孵化与能量/资源填充
 - 能量矿与元素矿自动采集
 - 自动升级、建造、维修
-- 预设布局自动放置工地（支持多种布局：`rosemary`、`clover`、`hoho`、`tea`）
+- 预设布局自动放置工地（支持多种布局：`rosemary`、`clover`、`hoho`、`tea`、`scorpior`）
 - 多种房间运行模式：正常 / 停止 / 低功耗
 - 自动刷墙，支持设置血量上限
 
@@ -277,6 +277,7 @@ rosmarin-bot/
 | `hoho` | hoho 布局 |
 | `tea` | tea布局 |
 | `63auto` | 63自动布局 |
+| `scorpior` | scorpior 动态布局 |
 
 > 💡 如果不指定布局，会使用自动布局
 
