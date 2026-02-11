@@ -180,23 +180,31 @@ const cleanupExpandSpawnMissions = (roomName: string, expandId: string): number 
     return removed;
 };
 
-const runOnePlanInRoom = (room: Room, plan: LocalExpandPlan, creepCounts: any) => {
+const closePlan = (mem: LocalExpandMemory, plan: LocalExpandPlan) => {
+    plan.status = 'done';
+    plan.updated = Game.time;
+    if (plan.homeRoom) {
+        cleanupExpandSpawnMissions(plan.homeRoom, plan.id);
+    } else {
+        for (const roomName of Object.keys(getMissionPools() || {})) {
+            cleanupExpandSpawnMissions(roomName, plan.id);
+        }
+    }
+    delete mem.plans[plan.id];
+    removePublishedExpandPlan(plan.id);
+};
+
+const runOnePlanInRoom = (mem: LocalExpandMemory, room: Room, plan: LocalExpandPlan, creepCounts: any) => {
     if (plan.status !== 'running') return;
     if (plan.homeRoom !== room.name) return;
 
     if (isRemoteDone(plan)) {
-        plan.status = 'done';
-        plan.updated = Game.time;
-        publishExpandPlanSummary({ ...plan });
-        publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: 'done' });
+        closePlan(mem, plan);
         return;
     }
 
     if (shouldComplete(plan)) {
-        plan.status = 'done';
-        plan.updated = Game.time;
-        publishExpandPlanSummary({ ...plan });
-        publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: 'done' });
+        closePlan(mem, plan);
         return;
     }
 
@@ -267,10 +275,13 @@ export const ExpandController = {
         for (const plan of plans) {
             if (!plan) continue;
             const room = Game.rooms[plan.homeRoom];
-            if (!room || !room.controller?.my) continue;
-            runOnePlanInRoom(room, plan, creepCounts);
-            publishExpandPlanSummary({ ...plan });
-            publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: plan.status });
+            if (room && room.controller?.my) {
+                runOnePlanInRoom(mem, room, plan, creepCounts);
+            }
+            if (mem.plans[plan.id]) {
+                publishExpandPlanSummary({ ...plan });
+                publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: plan.status });
+            }
         }
     }
 };

@@ -1,5 +1,6 @@
 import { parseShardRoomName } from '@/modules/infra/shardRoom';
 import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/infra/interShard';
+import { getBotMemory } from '@/modules/utils/memory';
 
 const genId = () => {
     const t = Game.time.toString(16);
@@ -99,14 +100,28 @@ const readRoot = (shardName: string) => shardName === Game.shard.name ? readInte
 
 const listPlans = () => {
     const plans: any[] = [];
+    const seen = new Set<string>();
     for (const shardName of getKnownShardNames()) {
         const root = readRoot(shardName);
         const entries = Object.values(root.plans || {});
         for (const p of entries) {
             if (!p) continue;
+            if (seen.has(p.id)) continue;
             const st = root.status?.[p.id];
             const status = st ? `${st.state}@${st.shard}` : p.status;
+            seen.add(p.id);
             plans.push({ ...p, status });
+        }
+    }
+
+    const local = getBotMemory() as any;
+    const localPlans = local?.Expand?.plans;
+    if (localPlans && typeof localPlans === 'object') {
+        for (const p of Object.values(localPlans)) {
+            if (!p) continue;
+            if (seen.has((p as any).id)) continue;
+            seen.add((p as any).id);
+            plans.push({ ...(p as any), status: (p as any).status });
         }
     }
     return plans;
