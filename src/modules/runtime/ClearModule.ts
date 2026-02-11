@@ -82,11 +82,10 @@ function orderClear() {
     const TIME_THRESHOLD = 50000; // 过期时间阈值
     const MAX_ORDERS = 250; // 最大允许订单数
     const TARGET_ORDERS = 50; // 清理到
-    const CANCEL_LIMIT = 30;
+    const CANCEL_LIMIT = 100;
 
     const orders = Object.values(Game.market.orders);
     const currentTime = Game.time;
-    const sortedOrders = orders.slice().sort((a, b) => a.created - b.created);
 
     let needReduce = 0;
     if (orders.length > MAX_ORDERS) {
@@ -99,7 +98,7 @@ function orderClear() {
     let expiredCount = 0;
     let reduceCount = 0;
 
-    for (const order of sortedOrders) {
+    for (const order of orders) {
         if (ordersToDelete.length >= CANCEL_LIMIT) break;
         if (selected.has(order.id)) continue;
 
@@ -110,7 +109,7 @@ function orderClear() {
         if (needReduce > 0) needReduce--;
     }
 
-    for (const order of sortedOrders) {
+    for (const order of orders) {
         if (ordersToDelete.length >= CANCEL_LIMIT) break;
         if (selected.has(order.id)) continue;
 
@@ -123,15 +122,19 @@ function orderClear() {
         if (needReduce > 0) needReduce--;
     }
 
-    for (const order of sortedOrders) {
-        if (ordersToDelete.length >= CANCEL_LIMIT) break;
-        if (needReduce <= 0) break;
-        if (selected.has(order.id)) continue;
+    if (needReduce > 0 && ordersToDelete.length < CANCEL_LIMIT) {
+        const sortedOrders = orders
+            .filter((o) => !selected.has(o.id))
+            .sort((a, b) => a.created - b.created);
+        for (const order of sortedOrders) {
+            if (ordersToDelete.length >= CANCEL_LIMIT) break;
+            if (needReduce <= 0) break;
 
-        ordersToDelete.push(order.id);
-        selected.add(order.id);
-        needReduce--;
-        reduceCount++;
+            ordersToDelete.push(order.id);
+            selected.add(order.id);
+            needReduce--;
+            reduceCount++;
+        }
     }
 
     if (ordersToDelete.length <= 0) return;
