@@ -76,6 +76,6 @@ export const CreepMemoryTransfer = {
     run() {
         restoreIncoming();
         sendOutgoing();
-        if (Game.time % 10 === 0) cleanupCreepTransfers();
+        cleanupCreepTransfers();
     }
 };

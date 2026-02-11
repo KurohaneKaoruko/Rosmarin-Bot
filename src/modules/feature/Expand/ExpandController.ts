@@ -139,8 +139,9 @@ const applyCmds = (mem: LocalExpandMemory) => {
                     cleanupExpandSpawnMissions(roomName, id);
                 }
             }
+            publishExpandStatus(id, { shard: Game.shard.name, time: Game.time, state: 'removed' });
             delete mem.plans[id];
-            removePublishedExpandPlan(id);
+            removePublishedExpandPlan(id, true);
         }
     }
 };
@@ -190,8 +191,9 @@ const closePlan = (mem: LocalExpandMemory, plan: LocalExpandPlan) => {
             cleanupExpandSpawnMissions(roomName, plan.id);
         }
     }
+    publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: 'done' });
     delete mem.plans[plan.id];
-    removePublishedExpandPlan(plan.id);
+    removePublishedExpandPlan(plan.id, true);
 };
 
 const runOnePlanInRoom = (mem: LocalExpandMemory, room: Room, plan: LocalExpandPlan, creepCounts: any) => {

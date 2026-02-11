@@ -13,13 +13,15 @@ export type InterShardExpandPlanSummary = {
     status: 'running' | 'paused' | 'done';
     created: number;
     updated: number;
+    ttl?: number;
 };
 
 export type InterShardExpandStatus = {
     shard: string;
     time: number;
-    state: 'running' | 'paused' | 'done';
+    state: 'running' | 'paused' | 'done' | 'removed';
     note?: string;
+    ttl?: number;
 };
 
 export type InterShardCreepTransfer = {
@@ -47,15 +49,12 @@ const safeJsonParse = (raw: string) => {
     try { return JSON.parse(raw); } catch { return null; }
 };
 
-export function getKnownShardNames(): string[] {
-    const limits = (Game.cpu as any)?.shardLimits;
-    const fromLimits = limits && typeof limits === 'object' ? Object.keys(limits) : [];
-    const unique = new Set<string>(fromLimits.length ? fromLimits : ['shard0', 'shard1', 'shard2', 'shard3']);
-    unique.add(Game.shard.name);
-    return Array.from(unique);
-}
+let cacheEnabled = false;
+let cachedTick = -1;
+let cachedRoot: InterShardRoot | null = null;
+let dirty = false;
 
-export function readInterShardLocalRoot(): InterShardRoot {
+const loadLocalRoot = (): InterShardRoot => {
     const raw = (typeof InterShardMemory !== 'undefined' && InterShardMemory.getLocal) ? InterShardMemory.getLocal() : '';
     const parsed = raw ? safeJsonParse(raw) : null;
     const root: InterShardRoot = { v: 1, seq: 0 };
@@ -71,11 +70,54 @@ export function readInterShardLocalRoot(): InterShardRoot {
     if (p.creepTransfers && typeof p.creepTransfers === 'object') root.creepTransfers = p.creepTransfers;
     if (p.transferAcks && typeof p.transferAcks === 'object') root.transferAcks = p.transferAcks;
     return root;
+};
+
+export function getKnownShardNames(): string[] {
+    const limits = (Game.cpu as any)?.shardLimits;
+    const fromLimits = limits && typeof limits === 'object' ? Object.keys(limits) : [];
+    const unique = new Set<string>(fromLimits.length ? fromLimits : ['shard0', 'shard1', 'shard2', 'shard3']);
+    unique.add(Game.shard.name);
+    return Array.from(unique);
+}
+
+export function readInterShardLocalRoot(): InterShardRoot {
+    if (cacheEnabled && cachedRoot && cachedTick === Game.time) return cachedRoot;
+    const root = loadLocalRoot();
+    if (cacheEnabled) {
+        cachedRoot = root;
+        cachedTick = Game.time;
+        dirty = false;
+    }
+    return root;
 }
 
 export function writeInterShardLocalRoot(root: InterShardRoot): void {
     if (typeof InterShardMemory === 'undefined' || !InterShardMemory.setLocal) return;
+    if (cacheEnabled) {
+        cachedRoot = root;
+        cachedTick = Game.time;
+        dirty = true;
+        return;
+    }
     InterShardMemory.setLocal(JSON.stringify(root));
+}
+
+export function beginInterShardTick(): void {
+    cacheEnabled = true;
+    cachedTick = Game.time;
+    cachedRoot = loadLocalRoot();
+    dirty = false;
+}
+
+export function endInterShardTick(): void {
+    if (!cacheEnabled) return;
+    if (dirty && cachedRoot) {
+        if (typeof InterShardMemory !== 'undefined' && InterShardMemory.setLocal) {
+            InterShardMemory.setLocal(JSON.stringify(cachedRoot));
+        }
+    }
+    cacheEnabled = false;
+    dirty = false;
 }
 
 export function readInterShardRemoteRoot(shardName: string): InterShardRoot {
@@ -162,6 +204,7 @@ export function cleanupOutboxAgainstRemoteAcks(): void {
 export function publishExpandPlanSummary(summary: InterShardExpandPlanSummary): void {
     const local = readInterShardLocalRoot();
     local.plans ??= {};
+    if (typeof summary.ttl !== 'number') summary.ttl = Game.time + 5000;
     local.plans[summary.id] = summary;
     writeInterShardLocalRoot(local);
 }
@@ -169,6 +212,8 @@ export function publishExpandPlanSummary(summary: InterShardExpandPlanSummary): 
 export function publishExpandStatus(planId: string, status: InterShardExpandStatus): void {
     const local = readInterShardLocalRoot();
     local.status ??= {};
+    if (typeof status.ttl !== 'number' && status.state === 'removed') status.ttl = Game.time + 500;
+    if (typeof status.ttl !== 'number' && status.state === 'done') status.ttl = Game.time + 2000;
     local.status[planId] = status;
     writeInterShardLocalRoot(local);
 }
@@ -183,10 +228,10 @@ export function publishExpandCreepCounts(counts: Record<string, Record<string, n
     writeInterShardLocalRoot(local);
 }
 
-export function removePublishedExpandPlan(planId: string): void {
+export function removePublishedExpandPlan(planId: string, keepStatus = false): void {
     const local = readInterShardLocalRoot();
     if (local.plans) delete local.plans[planId];
-    if (local.status) delete local.status[planId];
+    if (!keepStatus && local.status) delete local.status[planId];
     writeInterShardLocalRoot(local);
 }
 
@@ -229,6 +274,45 @@ export function cleanupCreepTransfers(): void {
             }
         }
         if (Object.keys(map).length === 0) delete local.creepTransfers[toShard];
+    }
+    writeInterShardLocalRoot(local);
+}
+
+export function cleanupInterShardLocalRoot(): void {
+    const local = readInterShardLocalRoot();
+    const now = Game.time;
+    if (local.plans) {
+        for (const [id, p] of Object.entries(local.plans)) {
+            if (!p) {
+                delete local.plans[id];
+                continue;
+            }
+            const ttl = (p as any).ttl;
+            if (typeof ttl === 'number' && ttl < now) {
+                delete local.plans[id];
+                if (local.status) delete local.status[id];
+            }
+        }
+    }
+    if (local.status) {
+        for (const [id, st] of Object.entries(local.status)) {
+            if (!st) {
+                delete local.status[id];
+                continue;
+            }
+            const ttl = (st as any).ttl;
+            if (typeof ttl === 'number' && ttl < now) {
+                delete local.status[id];
+                continue;
+            }
+            if (!local.plans?.[id] && (st as any).state !== 'removed') {
+                // 避免 status 漂浮：无计划且非 removed，超过一段时间就删除
+                const time = (st as any).time;
+                if (typeof time === 'number' && now - time > 2000) {
+                    delete local.status[id];
+                }
+            }
+        }
     }
     writeInterShardLocalRoot(local);
 }
