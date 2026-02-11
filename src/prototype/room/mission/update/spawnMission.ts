@@ -149,6 +149,9 @@ const RoleSpawnCheck = {
         if (!room.storage) return false;
         if (!room.extractor) return false;
         if (room.mineral.mineralAmount <= 0) return false;
+        const mineralPos = room.mineral.pos;
+        const hasMineralContainer = room.container?.some(c => c.pos.isNearTo(mineralPos));
+        if (!hasMineralContainer) return false;
         // 检查storage是否有足够空间
         const store = room.storage.store;
         if (store.getUsedCapacity() > store.getCapacity() * 0.95) return false;

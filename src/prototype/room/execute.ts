@@ -3,34 +3,45 @@ import { getRoomData, getStructData } from '@/modules/utils/memory';
 
 export default class RoomExecute extends Room {
     exec() {
+        const mode = getRoomData()?.[this.name]?.mode;
+        if (mode === 'stop') return;
+        const lowMode = mode === 'low';
         this.updateEnergyState(false);
         // 更新任务池
         this.MissionUpdate();
 
         // 主动防御处理
-        this.activeDefense();
+        if (!lowMode || Game.time % 15 === 0) {
+            this.activeDefense();
+        }
 
         // 管理房间中的建筑物
         this.SpawnWork();
         this.TowerWork();
         this.LinkWork();
-        this.LabWork();
         this.TerminalWork();
-        this.FactoryWork();
-        this.PowerSpawnWork();
+        if (!lowMode) {
+            this.LabWork();
+            this.FactoryWork();
+            this.PowerSpawnWork();
+        }
 
         if(!shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
         
         // 自动化处理
         this.autoMarket();       // 自动市场交易
-        this.autoBuild();        // 自动建筑
-        this.autoLab();          // 自动Lab合成
-        this.autoFactory();      // 自动Factory生产
-        this.autoPower();        // 自动Power处理
-        this.outMine();          // 外矿采集
+        if (!lowMode) {
+            this.autoBuild();        // 自动建筑
+            this.autoLab();          // 自动Lab合成
+            this.autoFactory();      // 自动Factory生产
+            this.autoPower();        // 自动Power处理
+            this.outMine();          // 外矿采集
+        }
         
         // 显示防御cost矩阵
-        this.showDefenseCostMatrix();
+        if (!lowMode) {
+            this.showDefenseCostMatrix();
+        }
     }
 
     // 房间初始化

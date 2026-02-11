@@ -70,6 +70,8 @@ export const ResourceManage = {
 
         // 遍历所有房间的设置
         for (const roomName in getRoomData()) {
+            const roomMem = getRoomData(roomName) as any;
+            if (roomMem?.mode === 'stop') continue;
             const room = Game.rooms[roomName];
             // 跨房间资源平衡“是否转入资源”的风险，由房间攻防态决定。
             // - productionRooms：用于排产/缺口统计（要求有 storage+terminal 且可用）
@@ -79,7 +81,9 @@ export const ResourceManage = {
                 room.storage.owner.username != room.controller.owner.username
             ) continue;
 
-            productionRooms.push(room);
+            if (roomMem?.mode !== 'low') {
+                productionRooms.push(room);
+            }
             eligibleRooms.push(room);
 
             let Ress: string[] = [];
