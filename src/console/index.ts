@@ -5,6 +5,7 @@ import mine from './function/mine';
 import layout from './function/layout';
 import market from './function/market';
 import resource from './function/resource';
+import expand from './function/expand';
 import spawn from './structure/spawn';
 import terminal from './structure/terminal';
 import lab from './structure/lab';
@@ -21,6 +22,7 @@ const plugins = [
     market,
     mine,
     resource,
+    expand,
     lab,
     spawn,
     nuker,
@@ -37,4 +39,3 @@ export const ConsoleExtension = function () {
         Object.defineProperty(global, item.alias, { get: item.exec })
     })
 }
-

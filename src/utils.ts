@@ -197,10 +197,10 @@ import { FlowerNames } from '@/constant/NameConstant';
  * 用于生成唯一的 creep 名称
  * @returns 短编码字符串
  */
-export function GenShortNumber() {
+export function GenShortNumber(len = 4) {
     return (Game.time*1296 + Math.floor(Math.random()*1296))
             .toString(36)
-            .slice(-4)
+            .slice(-len)
             .toUpperCase();
 }
 /** 生成一个 creep 名称

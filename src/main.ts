@@ -14,6 +14,8 @@ import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
 import { NukeModule } from '@/modules/runtime/NukeModule';
+import { ExpandModule } from '@/modules/runtime/ExpandModule';
+import { InterShardModule } from '@/modules/runtime/InterShardModule';
 
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
@@ -32,12 +34,14 @@ App.set('flag', flagRunner);             // flag运行
 App.on(EventModule);    // 事件模块
 App.on(TeamModule);     // 小队模块
 App.on(ResourceManage); // 资源调度管理
-App.on(NukeModule);     // 核弹打击
-App.on(ClearModule);    // 过期数据清理
-App.on(GeneratePixel);  // 搓像素
-App.on(Statistics);     // 统计数据
 App.on(MoveOptModule);  // 移动优化相关
+App.on(InterShardModule); // InterShardMemory 缓存与清理
+App.on(ExpandModule);   // 跨 shard 扩张
+App.on(NukeModule);     // 核弹打击
 App.on(DDModule);       // 消息模块
+App.on(ClearModule);    // 过期数据清理
+App.on(Statistics);     // 统计数据
+App.on(GeneratePixel);  // 搓像素
 
 
 export const loop = App.run;

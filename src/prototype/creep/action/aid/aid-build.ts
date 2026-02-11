@@ -1,3 +1,5 @@
+import { parseShardRoomName } from '@/modules/infra/shardRoom';
+
 const aid_build = {
     run: function (creep: Creep) {
         if (!creep.memory.ready) {
@@ -35,9 +37,13 @@ const aid_build = {
     harvest: function (creep: Creep) {
         const sourceRoom = creep.memory.sourceRoom || creep.memory.targetRoom;
         // 兼容仅配置 targetRoom（未配置 sourceRoom）的情况：默认在 targetRoom 获取能量
-        if (sourceRoom && creep.room.name != sourceRoom) {
-            creep.moveToRoom(sourceRoom);
-            return;
+        if (sourceRoom) {
+            const { roomName: localRoom, shard } = parseShardRoomName(sourceRoom);
+            const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom && !creep.pos.isRoomEdge();
+            if (!arrived) {
+                creep.moveToRoom(sourceRoom);
+                return;
+            }
         }
 
         if (creep.store.getFreeCapacity() === 0) {
@@ -98,9 +104,13 @@ const aid_build = {
         }
 
         const targetRoom = creep.memory.targetRoom;
-        if (targetRoom && creep.room.name != creep.memory.targetRoom && creep.pos.isRoomEdge()) {
-            creep.moveToRoom(creep.memory.targetRoom);
-            return;
+        if (targetRoom) {
+            const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
+            const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
+            if (!arrived) {
+                creep.moveToRoom(targetRoom);
+                return;
+            }
         }
 
         if (creep.pos.isRoomEdge()) {
@@ -131,9 +141,13 @@ const aid_build = {
         }
 
         const targetRoom = creep.memory.targetRoom;
-        if (targetRoom && creep.room.name != creep.memory.targetRoom) {
-            creep.moveToRoom(creep.memory.targetRoom);
-            return;
+        if (targetRoom) {
+            const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
+            const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
+            if (!arrived) {
+                creep.moveToRoom(targetRoom);
+                return;
+            }
         }
 
         if (creep.pos.isRoomEdge()) {
@@ -187,9 +201,13 @@ const aid_build = {
         }
 
         const targetRoom = creep.memory.targetRoom;
-        if (targetRoom && creep.room.name != creep.memory.targetRoom) {
-            creep.moveToRoom(creep.memory.targetRoom);
-            return;
+        if (targetRoom) {
+            const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
+            const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
+            if (!arrived) {
+                creep.moveToRoom(targetRoom);
+                return;
+            }
         }
 
 
