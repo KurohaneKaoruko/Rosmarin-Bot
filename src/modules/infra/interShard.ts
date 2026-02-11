@@ -117,6 +117,12 @@ export function pullIncomingCommands(): InterShardCommand[] {
     const result: InterShardCommand[] = [];
     const myShard = Game.shard.name;
 
+    const localOut = local.outbox?.[myShard];
+    if (localOut && Array.isArray(localOut) && localOut.length > 0) {
+        result.push(...localOut.filter((c) => c));
+        delete local.outbox![myShard];
+    }
+
     for (const shardName of getKnownShardNames()) {
         if (shardName === myShard) continue;
         const remote = readInterShardRemoteRoot(shardName);
