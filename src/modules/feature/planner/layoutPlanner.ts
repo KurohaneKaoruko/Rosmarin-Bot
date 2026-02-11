@@ -59,6 +59,18 @@ type CachedLayout = {
 /** 缓存有效期（tick） */
 const CACHE_TTL = 50;
 
+function cpuNow(): number {
+    return Game.cpu.getUsed();
+}
+
+function cpuDelta(start: number): number {
+    return Game.cpu.getUsed() - start;
+}
+
+function cpuFmt(v: number): string {
+    return v.toFixed(2);
+}
+
 /**
  * 动态规划器（auto/63auto）computeManor 的可能返回结构（兼容不同版本）。
  * @internal
@@ -912,10 +924,15 @@ export const LayoutPlanner = {
             log('LayoutPlanner', `静态布局可视化失败: ${roomName} 缺少中心点(Memory.center 或 storagePos/centerPos 旗帜)`);
             return ERR_INVALID_ARGS;
         }
+        const computeStart = cpuNow();
         const computed = computeStatic(roomName, layoutType, center);
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, computed.structMap);
-        log('LayoutPlanner', `静态布局可视化成功: ${roomName} layout=${layoutType} center(${center.x},${center.y})`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `静态布局计算完成: ${roomName} layout=${layoutType} computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `静态布局可视化成功: ${roomName} layout=${layoutType} center(${center.x},${center.y}) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     },
 
@@ -931,12 +948,18 @@ export const LayoutPlanner = {
             log('LayoutPlanner', `静态布局构建失败: ${roomName} 缺少中心点(Memory.center 或 storagePos/centerPos 旗帜)`);
             return ERR_INVALID_ARGS;
         }
+        const totalStart = cpuNow();
+        const computeStart = cpuNow();
         const computed = computeStatic(roomName, layoutType, center);
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const writeStart = cpuNow();
         const layoutMemory = getLayoutData(roomName) as any;
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
-        log('LayoutPlanner', `静态布局构建成功: ${roomName} layout=${layoutType} center(${center.x},${center.y})`);
+        const writeCpu = cpuDelta(writeStart);
+        const totalCpu = cpuDelta(totalStart);
+        log('LayoutPlanner', `静态布局构建成功: ${roomName} layout=${layoutType} center(${center.x},${center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
         return OK;
     },
 
@@ -946,10 +969,15 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     visualDynamic(roomName: string): number {
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, 'auto');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, computed.structMap);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y})`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=auto computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y}) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     },
 
@@ -959,8 +987,12 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     buildDynamic(roomName: string): number {
+        const totalStart = cpuNow();
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, 'auto');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const writeStart = cpuNow();
         const rooms = getRoomData();
         if (rooms?.[roomName]) {
             rooms[roomName]['layout'] = 'auto';
@@ -969,7 +1001,9 @@ export const LayoutPlanner = {
         const layoutMemory = getLayoutData(roomName) as any;
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y})`);
+        const writeCpu = cpuDelta(writeStart);
+        const totalCpu = cpuDelta(totalStart);
+        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
         return OK;
     },
 
@@ -999,15 +1033,20 @@ export const LayoutPlanner = {
         const storagePos = Game.flags.storagePos || Game.flags.centerPos;
         if (storagePos && storagePos.pos.roomName !== roomName) storagePos.remove();
 
+        const computeStart = cpuNow();
         const computeManor = autoPlanner.ManagerPlanner.computeManor;
         const roomStructsData = computeManor(roomName, [pc, pm, pa, pb]);
+        const computeCpu = cpuDelta(computeStart);
         if (!roomStructsData) {
             log('LayoutPlanner', `动态布局可视化失败: planner 返回空 room=${roomName} layout=auto(flags)`);
             return ERR_NOT_FOUND;
         }
 
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, roomStructsData.structMap);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=auto(flags)`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=auto(flags) computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=auto(flags) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     },
 
@@ -1017,10 +1056,15 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     visualDynamic63(roomName: string): number {
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, '63auto');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, computed.structMap);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y})`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=63auto computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     },
 
@@ -1030,8 +1074,12 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     buildDynamic63(roomName: string): number {
+        const totalStart = cpuNow();
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, '63auto');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const writeStart = cpuNow();
         const BotMemRooms = getRoomData();
         if (BotMemRooms?.[roomName]) {
             BotMemRooms[roomName]['layout'] = '63auto';
@@ -1040,7 +1088,9 @@ export const LayoutPlanner = {
         const layoutMemory = getLayoutData(roomName) as any;
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y})`);
+        const writeCpu = cpuDelta(writeStart);
+        const totalCpu = cpuDelta(totalStart);
+        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
         return OK;
     },
 
@@ -1050,10 +1100,15 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     visualDynamicScorpior(roomName: string): number {
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, 'scorpior');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, computed.structMap);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y})`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=scorpior computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y}) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     },
 
@@ -1063,8 +1118,12 @@ export const LayoutPlanner = {
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
     buildDynamicScorpior(roomName: string): number {
+        const totalStart = cpuNow();
+        const computeStart = cpuNow();
         const computed = computeDynamic(roomName, 'scorpior');
+        const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
+        const writeStart = cpuNow();
         const BotMemRooms = getRoomData();
         if (BotMemRooms?.[roomName]) {
             BotMemRooms[roomName]['layout'] = 'scorpior';
@@ -1073,7 +1132,9 @@ export const LayoutPlanner = {
         const layoutMemory = getLayoutData(roomName) as any;
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y})`);
+        const writeCpu = cpuDelta(writeStart);
+        const totalCpu = cpuDelta(totalStart);
+        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
         return OK;
     },
 
@@ -1103,15 +1164,20 @@ export const LayoutPlanner = {
         const storagePos = Game.flags.storagePos || Game.flags.centerPos;
         if (storagePos && storagePos.pos.roomName !== roomName) storagePos.remove();
 
+        const computeStart = cpuNow();
         const computeManor = autoPlanner63.ManagerPlanner.computeManor;
         const roomStructsData = computeManor(roomName, [pc, pm, pa, pb]);
+        const computeCpu = cpuDelta(computeStart);
         if (!roomStructsData) {
             log('LayoutPlanner', `动态布局可视化失败: planner 返回空 room=${roomName} layout=63auto(flags)`);
             return ERR_NOT_FOUND;
         }
 
+        const visualStart = cpuNow();
         LayoutVisual.showRoomStructures(roomName, roomStructsData.structMap);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=63auto(flags)`);
+        const visualCpu = cpuDelta(visualStart);
+        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=63auto(flags) computeCpu=${cpuFmt(computeCpu)}`);
+        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=63auto(flags) visualCpu=${cpuFmt(visualCpu)}`);
         return OK;
     }
 };

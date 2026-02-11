@@ -1,5 +1,6 @@
 .*/
-node_modules
 .secret.json
-dist
-test
+node_modules/
+dist/
+target/
+test/

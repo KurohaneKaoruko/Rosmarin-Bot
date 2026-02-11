@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "rolldown -c",
+    "build:wasm:planner-kernel": "pwsh -File ./scripts/build-planner-kernel-wasm.ps1",
     "push": "node ./scripts/submit.js",
     "push:main": "cross-env DEST=main rolldown -c",
     "push:sim": "cross-env DEST=sim rolldown -c",
