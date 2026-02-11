@@ -2,7 +2,7 @@ import { log } from '@/utils';
 import { compress, compressBatch, decompress } from '@/modules/utils/compress';
 import LayoutVisual from '@/modules/feature/planner/layoutVisual';
 import { autoPlanner } from '@/modules/feature/planner/dynamic/autoPlanner';
-import { autoPlanner63 } from '@/modules/feature/planner/dynamic/autoPlanner63';
+import { autoPlanner63 } from '@/modules/feature/planner/dynamic/63Planner';
 import * as StaticPlanner from '@/modules/feature/planner/static';
 import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 

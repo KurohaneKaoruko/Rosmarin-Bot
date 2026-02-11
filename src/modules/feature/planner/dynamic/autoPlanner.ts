@@ -1,4 +1,4 @@
-import { autoPlanner63 } from './autoPlanner63';
+import { autoPlanner63 } from './63Planner';
 
 export const autoPlanner = {
 	name: 'auto',
