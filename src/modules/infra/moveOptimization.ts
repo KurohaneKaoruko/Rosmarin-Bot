@@ -2174,14 +2174,104 @@ function betterMoveTo(firstArg, secondArg, opts) {
     } else if (parsedTarget.shard && parsedTarget.shard !== Game.shard.name) {
         // 跨 shard 寻路：本 shard 只负责把 creep 送到通往目标 shard 的 portal
         scanPortals(false);
-        const portal = pickPortalToShard(this.pos.roomName, parsedTarget.shard, parsedTarget.room);
+        let portal = pickPortalToShard(this.pos.roomName, parsedTarget.shard, parsedTarget.room);
         if (!portal) {
-            return ERR_NO_PATH;
+            scanPortals(true);
+            portal = pickPortalToShard(this.pos.roomName, parsedTarget.shard, parsedTarget.room);
         }
-        // portal 必须“踩上去”才会触发传送，因此强制 range=0，并允许 portal 格可走
-        ops.range = 0;
-        ops._bmAllowPortal = true;
-        toPos = { x: portal.x, y: portal.y, roomName: portal.roomName };
+        if (!portal) {
+            const mem = this.memory._bmPortalSearch;
+
+            let step = 0;
+            let roomName = '';
+            let until = 0;
+            if (mem && mem.shard === parsedTarget.shard && typeof mem.until === 'number' && mem.until > Game.time && typeof mem.step === 'number') {
+                step = mem.step;
+                roomName = mem.roomName || '';
+                until = mem.until;
+                if (roomName && this.pos.roomName === roomName) {
+                    step = step + 1;
+                    roomName = '';
+                }
+            }
+            if (!roomName) {
+                const parse = (rn) => {
+                    const m = /^([WE])(\d+)([NS])(\d+)$/.exec(rn);
+                    if (!m) return null;
+                    const hx = m[1];
+                    const vx = m[3];
+                    const xNum = Number(m[2]);
+                    const yNum = Number(m[4]);
+                    const x = hx === 'E' ? xNum : -xNum - 1;
+                    const y = vx === 'S' ? yNum : -yNum - 1;
+                    return { x, y };
+                };
+                const format = (x, y) => {
+                    const hx = x >= 0 ? 'E' : 'W';
+                    const vx = y >= 0 ? 'S' : 'N';
+                    const xNum = x >= 0 ? x : -x - 1;
+                    const yNum = y >= 0 ? y : -y - 1;
+                    return `${hx}${xNum}${vx}${yNum}`;
+                };
+
+                const cur = parse(this.pos.roomName);
+                if (!cur) return ERR_NO_PATH;
+
+                const nearMul10 = (v) => {
+                    const a = Math.floor(v / 10) * 10;
+                    const b = Math.ceil(v / 10) * 10;
+                    return a === b ? [a] : [a, b];
+                };
+                const xs = nearMul10(cur.x);
+                const ys = nearMul10(cur.y);
+
+                let baseX = xs[0];
+                let baseY = ys[0];
+                let best = Infinity;
+                for (const x of xs) {
+                    for (const y of ys) {
+                        const d = Math.max(Math.abs(x - cur.x), Math.abs(y - cur.y));
+                        if (d < best) {
+                            best = d;
+                            baseX = x;
+                            baseY = y;
+                        }
+                    }
+                }
+
+                const radius = 10 * (Math.floor(step / 8) + 1);
+                const dxs = [-radius, 0, radius];
+                const dys = [-radius, 0, radius];
+                const candidates = [];
+                const seen = Object.create(null);
+                for (const dx of dxs) {
+                    for (const dy of dys) {
+                        const rn = format(baseX + dx, baseY + dy);
+                        if (rn === this.pos.roomName) continue;
+                        if (seen[rn]) continue;
+                        seen[rn] = 1;
+                        const d = Game.map.getRoomLinearDistance(this.pos.roomName, rn, true);
+                        candidates.push({ rn, d });
+                    }
+                }
+                candidates.sort((a, b) => a.d - b.d);
+                if (!candidates.length) return ERR_NO_PATH;
+
+                roomName = candidates[0].rn;
+            }
+            until = Game.time + 100;
+            this.memory._bmPortalSearch = { shard: parsedTarget.shard, roomName, step, until };
+            if (Game.time % 25 === 0) this.say('PORTAL?');
+            toPos = { x: 25, y: 25, roomName };
+            if (ops.maxRooms === undefined) ops.maxRooms = 32;
+            if (ops.range === undefined) ops.range = 20;
+        }
+        if (portal) {
+            // portal 必须“踩上去”才会触发传送，因此强制 range=0，并允许 portal 格可走
+            ops.range = 0;
+            ops._bmAllowPortal = true;
+            toPos = { x: portal.x, y: portal.y, roomName: portal.roomName };
+        }
     }
 
     registerRoomBounceGuard(this, toPos.roomName);
