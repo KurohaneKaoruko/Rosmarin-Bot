@@ -6,6 +6,24 @@ import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memo
 // 房间控制
 export default {
     room: {
+        // 快速开始
+        start(roomName: string, layout?: string) {
+            // 添加房间
+            if (!layout) global.room.add(roomName);
+            else {
+                const centerPos = Game.flags['centerPos']?.pos;
+                if (!centerPos || centerPos.roomName !== roomName) {
+                    return Error('未设置中心, 请将centerPos放置到需要设置的布局中心位置。')
+                } else {
+                    global.room.add(roomName, layout);
+                }
+            }
+            // 构建布局
+            global.layout.build(roomName);
+            // 开启自动建造
+            global.layout.auto(roomName, true);
+            return OK;
+        },
         // 添加房间
         add(roomName: string, layout?: string, x?: number, y?: number) {
             if (!roomName) return Error('请输入房间名。');

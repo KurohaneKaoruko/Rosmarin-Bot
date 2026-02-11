@@ -5,22 +5,42 @@ import { getMissionPools, getStructData } from "@/modules/utils/memory";
 // 基础与杂项
 const Base = {
     bot: {
-        // 快速开始
-        start(roomName: string, layout?: string) {
-            // 添加房间
-            if (!layout) global.room.add(roomName);
-            else {
-                const centerPos = Game.flags['centerPos']?.pos;
-                if (!centerPos || centerPos.roomName !== roomName) {
-                    return Error('未设置中心, 请将centerPos放置到需要设置的布局中心位置。')
+        mode(mode: string) {
+            if (mode !== 'default' && mode !== 'auto') return Error('请输入正确的模式(default/auto)');
+            Memory['mode'] = mode;
+            log('', `Bot运行模式已切换到 ${
+                mode === 'default' ? '默认' : '全自动'
+            } 模式`);
+            return OK;
+        },
+        // 开关全局战争模式
+        warmode() {
+            Memory['warmode'] = !Memory['warmode'];
+            log('', `战争模式已${Memory['warmode'] ? '开启' : '关闭'}`);
+            return OK;
+        },
+
+        pixel() {
+            Memory['GenPixel'] = !Memory['GenPixel'];
+            log('', `搓Pixel功能已${Memory['GenPixel'] ? '开启' : '关闭'}`);
+            return OK;
+        },
+
+        stats() {
+            const flagName = 'ALL/stats';
+            const flag = Game.flags[flagName];
+            if (flag) {
+                flag.remove();
+                log('', `信息统计功能已关闭 (Removed ${flagName})`);
+            } else {
+                const room = Object.values(Game.rooms).find(r => r.controller && r.controller.my);
+                if (room) {
+                    room.createFlag(room.controller!.pos.x, room.controller!.pos.y + 1, flagName);
+                    log('', `信息统计功能已开启 (Created ${flagName} in ${room.name})`);
                 } else {
-                    global.room.add(roomName, layout);
+                    return Error('未找到己方房间，无法创建统计旗帜');
                 }
             }
-            // 构建布局
-            global.layout.build(roomName);
-            // 开启自动建造
-            global.layout.auto(roomName, true);
             return OK;
         },
     },
@@ -90,37 +110,6 @@ const Base = {
             log('', `已清空房间 ${roomName} 的 boost 任务`);
             return OK;
         }
-    },
-    
-    // 开关全局战争模式
-    warmode() {
-        Memory['warmode'] = !Memory['warmode'];
-        log('', `战争模式已${Memory['warmode'] ? '开启' : '关闭'}`);
-        return OK;
-    },
-
-    pixel() {
-        Memory['GenPixel'] = !Memory['GenPixel'];
-        log('', `搓Pixel功能已${Memory['GenPixel'] ? '开启' : '关闭'}`);
-        return OK;
-    },
-
-    stats() {
-        const flagName = 'ALL/stats';
-        const flag = Game.flags[flagName];
-        if (flag) {
-            flag.remove();
-            log('', `信息统计功能已关闭 (Removed ${flagName})`);
-        } else {
-            const room = Object.values(Game.rooms).find(r => r.controller && r.controller.my);
-            if (room) {
-                room.createFlag(room.controller!.pos.x, room.controller!.pos.y + 1, flagName);
-                log('', `信息统计功能已开启 (Created ${flagName} in ${room.name})`);
-            } else {
-                return Error('未找到己方房间，无法创建统计旗帜');
-            }
-        }
-        return OK;
     },
 
     log(text: string, ...args: any[]): OK | Error {

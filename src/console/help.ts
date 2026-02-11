@@ -24,7 +24,7 @@ const sub = (emoji: string, text: string) => `<span style="color:#C8C8C8"><b>${e
 const helpTexts: Record<string, string> = {
     help: [
         title('🚀', '启动流程'),
-        `0) ${cmd('bot.start(roomName, layout?)')}：快速启动房间（一条指令执行完整流程）`,
+        `0) ${cmd('room.start(roomName, layout?)')}：快速启动房间（一条指令执行完整流程）`,
         `- roomName：房间名；layout：布局名称(留空使用自动布局)；`,
         `- 如果有centerPos旗帜则会设置布局中心, 如果使用静态布局则必须要有这个旗帜`,
         `1) ${cmd('room.add(roomName, layout?, x?, y?)')}：添加房间到控制列表（列表中的房间才会自动运行）`,
@@ -57,6 +57,7 @@ const helpTexts: Record<string, string> = {
     helpRoom: [
         title('🏠', '房间指令列表'),
         line(),
+        `${cmd('room.start(roomName, layout?)')}：快速启动房间`,
         `${cmd('room.add(roomName, layout?, x?, y?)')}：添加房间到控制列表`,
         `- roomName：房间名；layout：布局；x,y：布局中心`,
         `- layout：使用的布局（留空则不使用）`,
