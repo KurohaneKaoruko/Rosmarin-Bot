@@ -82,20 +82,62 @@ function orderClear() {
     const TIME_THRESHOLD = 50000; // 过期时间阈值
     const MAX_ORDERS = 250; // 最大允许订单数
     const TARGET_ORDERS = 50; // 清理到
+    const CANCEL_LIMIT = 30;
 
     const orders = Object.values(Game.market.orders);
-    if (orders.length < MAX_ORDERS) return;
-
     const currentTime = Game.time;
-    const completedOrders = orders.filter(order => order.remainingAmount === 0)
-        .sort((a, b) => a.created - b.created);
+    const sortedOrders = orders.slice().sort((a, b) => a.created - b.created);
 
-    const ordersToDelete = completedOrders.filter((order, index) =>
-        (currentTime - order.created > TIME_THRESHOLD) || (index < orders.length - TARGET_ORDERS)
-    ).map(order => order.id);
-
-    if (ordersToDelete.length > 0) {
-        ordersToDelete.forEach(orderId => Game.market.cancelOrder(orderId));
-        console.log(`已清理 ${ordersToDelete.length} 个已完成的订单`);
+    let needReduce = 0;
+    if (orders.length > MAX_ORDERS) {
+        needReduce = Math.max(0, orders.length - TARGET_ORDERS);
     }
+
+    const ordersToDelete: string[] = [];
+    const selected = new Set<string>();
+    let completedCount = 0;
+    let expiredCount = 0;
+    let reduceCount = 0;
+
+    for (const order of sortedOrders) {
+        if (ordersToDelete.length >= CANCEL_LIMIT) break;
+        if (selected.has(order.id)) continue;
+
+        if (order.remainingAmount !== 0) continue;
+        ordersToDelete.push(order.id);
+        selected.add(order.id);
+        completedCount++;
+        if (needReduce > 0) needReduce--;
+    }
+
+    for (const order of sortedOrders) {
+        if (ordersToDelete.length >= CANCEL_LIMIT) break;
+        if (selected.has(order.id)) continue;
+
+        const expired = (currentTime - order.created) > TIME_THRESHOLD;
+        if (!expired) continue;
+
+        ordersToDelete.push(order.id);
+        selected.add(order.id);
+        expiredCount++;
+        if (needReduce > 0) needReduce--;
+    }
+
+    for (const order of sortedOrders) {
+        if (ordersToDelete.length >= CANCEL_LIMIT) break;
+        if (needReduce <= 0) break;
+        if (selected.has(order.id)) continue;
+
+        ordersToDelete.push(order.id);
+        selected.add(order.id);
+        needReduce--;
+        reduceCount++;
+    }
+
+    if (ordersToDelete.length <= 0) return;
+
+    for (const orderId of ordersToDelete) {
+        Game.market.cancelOrder(orderId);
+    }
+    console.log(`已清理 ${ordersToDelete.length} 个订单（完成 ${completedCount}，超时 ${expiredCount}，压缩 ${reduceCount}）`);
 }
