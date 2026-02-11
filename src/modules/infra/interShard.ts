@@ -38,6 +38,7 @@ export type InterShardRoot = {
     cmdAcks?: Record<string, number>;
     plans?: Record<string, InterShardExpandPlanSummary>;
     status?: Record<string, InterShardExpandStatus>;
+    expandCreepCounts?: Record<string, { time: number; roles: Record<string, number> }>;
     creepTransfers?: Record<string, Record<string, InterShardCreepTransfer>>;
     transferAcks?: Record<string, Record<string, string>>;
 };
@@ -66,6 +67,7 @@ export function readInterShardLocalRoot(): InterShardRoot {
     if (p.cmdAcks && typeof p.cmdAcks === 'object') root.cmdAcks = p.cmdAcks;
     if (p.plans && typeof p.plans === 'object') root.plans = p.plans;
     if (p.status && typeof p.status === 'object') root.status = p.status;
+    if (p.expandCreepCounts && typeof p.expandCreepCounts === 'object') root.expandCreepCounts = p.expandCreepCounts;
     if (p.creepTransfers && typeof p.creepTransfers === 'object') root.creepTransfers = p.creepTransfers;
     if (p.transferAcks && typeof p.transferAcks === 'object') root.transferAcks = p.transferAcks;
     return root;
@@ -88,6 +90,7 @@ export function readInterShardRemoteRoot(shardName: string): InterShardRoot {
     if (p.cmdAcks && typeof p.cmdAcks === 'object') root.cmdAcks = p.cmdAcks;
     if (p.plans && typeof p.plans === 'object') root.plans = p.plans;
     if (p.status && typeof p.status === 'object') root.status = p.status;
+    if (p.expandCreepCounts && typeof p.expandCreepCounts === 'object') root.expandCreepCounts = p.expandCreepCounts;
     if (p.creepTransfers && typeof p.creepTransfers === 'object') root.creepTransfers = p.creepTransfers;
     if (p.transferAcks && typeof p.transferAcks === 'object') root.transferAcks = p.transferAcks;
     return root;
@@ -167,6 +170,16 @@ export function publishExpandStatus(planId: string, status: InterShardExpandStat
     const local = readInterShardLocalRoot();
     local.status ??= {};
     local.status[planId] = status;
+    writeInterShardLocalRoot(local);
+}
+
+export function publishExpandCreepCounts(counts: Record<string, Record<string, number>>): void {
+    const local = readInterShardLocalRoot();
+    local.expandCreepCounts = {};
+    for (const [planId, roles] of Object.entries(counts || {})) {
+        if (!roles || typeof roles !== 'object') continue;
+        local.expandCreepCounts[planId] = { time: Game.time, roles: roles as Record<string, number> };
+    }
     writeInterShardLocalRoot(local);
 }
 

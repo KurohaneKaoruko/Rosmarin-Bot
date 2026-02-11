@@ -1,5 +1,5 @@
 import { parseShardRoomName } from '@/modules/infra/shardRoom';
-import { cleanupOutboxAgainstRemoteAcks, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, removePublishedExpandPlan } from '@/modules/infra/interShard';
+import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/infra/interShard';
 import { getBotMemory } from '@/modules/utils/memory';
 
 type LocalExpandPlan = {
@@ -32,15 +32,39 @@ const getExpandCreepCounts = (() => {
     return () => {
         if (cachedTick === Game.time) return cached;
         cachedTick = Game.time;
-        cached = {};
+        const localCounts: Record<string, Record<string, number>> = {};
         for (const creep of Object.values(Game.creeps)) {
             if (!creep) continue;
             const id = (creep.memory as any).expandId;
             if (!id) continue;
             const role = creep.memory.role || 'unknown';
-            if (!cached[id]) cached[id] = {};
-            cached[id][role] = (cached[id][role] || 0) + 1;
+            if (!localCounts[id]) localCounts[id] = {};
+            localCounts[id][role] = (localCounts[id][role] || 0) + 1;
         }
+        publishExpandCreepCounts(localCounts);
+
+        const merged: Record<string, Record<string, number>> = { ...localCounts };
+        const maxStale = 100;
+        for (const shardName of getKnownShardNames()) {
+            if (shardName === Game.shard.name) continue;
+            const remote = readInterShardRemoteRoot(shardName);
+            const map = remote.expandCreepCounts;
+            if (!map || typeof map !== 'object') continue;
+            for (const [planId, entry] of Object.entries(map)) {
+                if (!entry || typeof entry !== 'object') continue;
+                const time = (entry as any).time;
+                if (typeof time === 'number' && Game.time - time > maxStale) continue;
+                const roles = (entry as any).roles;
+                if (!roles || typeof roles !== 'object') continue;
+                for (const [role, count] of Object.entries(roles)) {
+                    if (typeof count !== 'number') continue;
+                    merged[planId] ??= {};
+                    merged[planId][role] = (merged[planId][role] || 0) + count;
+                }
+            }
+        }
+
+        cached = merged;
         return cached;
     };
 })();
@@ -66,6 +90,14 @@ const shouldComplete = (plan: LocalExpandPlan): boolean => {
     if (!room.spawn || room.spawn.length === 0) return false;
     if (room.find(FIND_CONSTRUCTION_SITES).length > 0) return false;
     return true;
+};
+
+const isRemoteDone = (plan: LocalExpandPlan): boolean => {
+    const { shard } = parseShardRoomName(plan.targetRoom);
+    if (!shard || shard === Game.shard.name) return false;
+    const remote = readInterShardRemoteRoot(shard);
+    const st = remote.status?.[plan.id];
+    return !!(st && st.state === 'done');
 };
 
 const applyCmds = (mem: LocalExpandMemory) => {
@@ -109,6 +141,14 @@ const runOnePlanInRoom = (room: Room, plan: LocalExpandPlan, creepCounts: any) =
     if (plan.status !== 'running') return;
     if (plan.homeRoom !== room.name) return;
 
+    if (isRemoteDone(plan)) {
+        plan.status = 'done';
+        plan.updated = Game.time;
+        publishExpandPlanSummary({ ...plan });
+        publishExpandStatus(plan.id, { shard: Game.shard.name, time: Game.time, state: 'done' });
+        return;
+    }
+
     if (shouldComplete(plan)) {
         plan.status = 'done';
         plan.updated = Game.time;
@@ -151,6 +191,24 @@ const runOnePlanInRoom = (room: Room, plan: LocalExpandPlan, creepCounts: any) =
     }
 };
 
+const publishRemoteCompletions = () => {
+    const myShard = Game.shard.name;
+    const seen = new Set<string>();
+    for (const shardName of getKnownShardNames()) {
+        const root = shardName === myShard ? readInterShardLocalRoot() : readInterShardRemoteRoot(shardName);
+        const plans = Object.values(root.plans || {});
+        for (const p of plans) {
+            if (!p || seen.has(p.id)) continue;
+            seen.add(p.id);
+            const { shard } = parseShardRoomName(p.targetRoom);
+            if (shard !== myShard) continue;
+            if (shouldComplete(p as any)) {
+                publishExpandStatus(p.id, { shard: myShard, time: Game.time, state: 'done' });
+            }
+        }
+    }
+};
+
 export const ExpandController = {
     run() {
         if (Game.time % 5 !== 0) return;
@@ -158,10 +216,11 @@ export const ExpandController = {
         const mem = getLocalExpandMemory();
         applyCmds(mem);
 
-        const plans = Object.values(mem.plans || {});
-        if (!plans.length) return;
+        publishRemoteCompletions();
 
         const creepCounts = getExpandCreepCounts();
+        const plans = Object.values(mem.plans || {});
+        if (!plans.length) return;
         for (const plan of plans) {
             if (!plan) continue;
             const room = Game.rooms[plan.homeRoom];
