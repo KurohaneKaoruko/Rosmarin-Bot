@@ -27,6 +27,11 @@ const getRoomCarrierLocks = (roomName: string): Record<string, CarrierLockEntry>
     return (roomMem.carrierLocks ||= {}) as Record<string, CarrierLockEntry>;
 };
 
+const getRoomCarrierNoPath = (roomName: string): Record<string, number> => {
+    const roomMem = ((Memory.rooms as any)[roomName] ||= {});
+    return (roomMem.carrierNoPath ||= {}) as Record<string, number>;
+};
+
 const cleanupRoomCarrierLocks = (roomName: string) => {
     const locks = getRoomCarrierLocks(roomName);
     for (const id in locks) {
@@ -34,9 +39,27 @@ const cleanupRoomCarrierLocks = (roomName: string) => {
     }
 };
 
+const cleanupRoomCarrierNoPath = (roomName: string) => {
+    const noPath = getRoomCarrierNoPath(roomName);
+    for (const id in noPath) {
+        if (noPath[id] <= Game.time) delete noPath[id];
+    }
+};
+
 const isLockedByOtherCarrier = (roomName: string, id: string, creepName: string): boolean => {
     const lock = getRoomCarrierLocks(roomName)[id];
     return !!lock && lock.expire > Game.time && lock.name !== creepName;
+};
+
+const isNoPath = (roomName: string, id: string): boolean => {
+    const expire = getRoomCarrierNoPath(roomName)[id];
+    return typeof expire === 'number' && expire > Game.time;
+};
+
+const markNoPath = (roomName: string, id: string, ttl: number) => {
+    if (!id) return;
+    const noPath = getRoomCarrierNoPath(roomName);
+    noPath[id] = Game.time + ttl;
 };
 
 const lockCarrierTarget = (roomName: string, id: string, creepName: string, ttl: number) => {
@@ -217,6 +240,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
     const roomAny = room as any;
 
     cleanupRoomCarrierLocks(room.name);
+    cleanupRoomCarrierNoPath(room.name);
 
     const claimed = getClaimedTargetIdsByCarrier(room.name);
 
@@ -233,6 +257,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
 
     for (const r of dropped) {
         if (!canCarryResourceSafely(creep, r.resourceType)) continue;
+        if (isNoPath(room.name, r.id)) continue;
         if (claimed.has(r.id) || isLockedByOtherCarrier(room.name, r.id, creep.name)) continue;
 
         const base = r.resourceType === RESOURCE_ENERGY ? 50 : 80;
@@ -253,6 +278,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
         filter: (t: Tombstone) => t.store.getUsedCapacity() > 0
     });
     for (const t of tombstones) {
+        if (isNoPath(room.name, t.id)) continue;
         if (claimed.has(t.id) || isLockedByOtherCarrier(room.name, t.id, creep.name)) continue;
         const type = pickBestWithdrawTypeFromStore(creep, t.store, urgentEnergy ? 'energy' : 'nonEnergy');
         if (!type) continue;
@@ -269,6 +295,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
         filter: (r: Ruin) => r.store.getUsedCapacity() > 0
     });
     for (const r of ruins) {
+        if (isNoPath(room.name, r.id)) continue;
         if (claimed.has(r.id) || isLockedByOtherCarrier(room.name, r.id, creep.name)) continue;
         const type = pickBestWithdrawTypeFromStore(creep, r.store, urgentEnergy ? 'energy' : 'nonEnergy');
         if (!type) continue;
@@ -286,6 +313,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
     if (urgentEnergy || !hasStorage) {
         const links = (roomAny.link || []).filter((l: StructureLink) => l?.store[RESOURCE_ENERGY] > 0) as StructureLink[];
         for (const l of links) {
+            if (isNoPath(room.name, l.id)) continue;
             if (claimed.has(l.id) || isLockedByOtherCarrier(room.name, l.id, creep.name)) continue;
             candidates.push({
                 score: 55 + Math.min(35, Math.floor((l.store[RESOURCE_ENERGY] || 0) / 100)) + scoreByRange(pos.getRangeTo(l)),
@@ -296,6 +324,7 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
 
     const containers = (roomAny.container || []).filter((c: StructureContainer) => c && c.store?.getUsedCapacity?.() > 0) as StructureContainer[];
     for (const c of containers) {
+        if (isNoPath(room.name, c.id)) continue;
         if (controller && c.pos.inRangeTo(controller, 1) && (urgentEnergy || !hasStorage)) continue;
         if (claimed.has(c.id) || isLockedByOtherCarrier(room.name, c.id, creep.name)) continue;
 
@@ -317,10 +346,12 @@ const selectWithdrawPlan = (creep: Creep): WithdrawPlan | null => {
     if (urgentEnergy && freeCap > 0) {
         const source = getStorageOrTerminal(creep) as (StructureStorage | StructureTerminal | null);
         if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.STORAGE_MIN) {
+            if (!isNoPath(room.name, source.id)) {
             candidates.push({
                 score: 20 + Math.min(20, Math.floor(source.store.getUsedCapacity(RESOURCE_ENERGY) / 1000)) + scoreByRange(pos.getRangeTo(source)),
                 plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : 'storage', resourceType: RESOURCE_ENERGY, lockTtl: 1 }
             });
+            }
         }
     }
 
@@ -374,7 +405,13 @@ const withdraw = (creep: Creep) => {
             const result = creep.pickup(res);
             return result === OK && res.amount >= store.getFreeCapacity();
         }
-        creep.moveTo(res, { visualizePathStyle: { stroke: '#ffaa00' } });
+        const ret = creep.moveTo(res, { visualizePathStyle: { stroke: '#ffaa00' } });
+        if (ret === ERR_NO_PATH) {
+            markNoPath(room.name, res.id, 100);
+            cache.sourceId = undefined;
+            cache.sourceKind = undefined;
+            cache.resourceType = undefined;
+        }
         return false;
     }
 
@@ -395,7 +432,14 @@ const withdraw = (creep: Creep) => {
         return result === OK && storeTarget.store[resourceType] >= store.getFreeCapacity();
     }
 
-    creep.moveTo(storeTarget, { visualizePathStyle: { stroke: '#ffaa00' } });
+    const ret = creep.moveTo(storeTarget, { visualizePathStyle: { stroke: '#ffaa00' } });
+    if (ret === ERR_NO_PATH) {
+        markNoPath(room.name, storeTarget.id, 100);
+        cache.sourceId = undefined;
+        cache.sourceKind = undefined;
+        cache.resourceType = undefined;
+        return false;
+    }
 };
 
 // 运送资源阶段
@@ -451,7 +495,7 @@ const carry = (creep: Creep) => {
                 target = creep.findBestStoreTarget(t);
             }
 
-            if (target && target.store.getFreeCapacity(t) > 0) {
+            if (target && !isNoPath(room.name, target.id) && target.store.getFreeCapacity(t) > 0) {
                 resourceType = t;
                 cache.targetId = target.id;
                 cache.resourceType = t;
@@ -493,7 +537,13 @@ const carry = (creep: Creep) => {
         return;
     }
 
-    creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
+    const ret = creep.moveTo(target, { visualizePathStyle: { stroke: '#ffffff' } });
+    if (ret === ERR_NO_PATH) {
+        markNoPath(room.name, target.id, 100);
+        cache.targetId = undefined;
+        cache.resourceType = undefined;
+        return;
+    }
 };
 
 // 生成安全模式
