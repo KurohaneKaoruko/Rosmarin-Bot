@@ -1,6 +1,6 @@
 import { parseShardRoomName } from '@/modules/infra/shardRoom';
 import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/infra/interShard';
-import { getBotMemory } from '@/modules/utils/memory';
+import { getBotMemory, getMissionPools } from '@/modules/utils/memory';
 
 type LocalExpandPlan = {
     id: string;
@@ -131,10 +131,53 @@ const applyCmds = (mem: LocalExpandMemory) => {
             const p = cmd.payload as any;
             const id = p?.id;
             if (!id) continue;
+            const plan = mem.plans[id];
+            if (plan?.homeRoom) {
+                cleanupExpandSpawnMissions(plan.homeRoom, id);
+            } else {
+                for (const roomName of Object.keys(getMissionPools() || {})) {
+                    cleanupExpandSpawnMissions(roomName, id);
+                }
+            }
             delete mem.plans[id];
             removePublishedExpandPlan(id);
         }
     }
+};
+
+const cleanupExpandSpawnMissions = (roomName: string, expandId: string): number => {
+    const pools = getMissionPools()?.[roomName];
+    const tasks = pools?.spawn;
+    if (!Array.isArray(tasks) || tasks.length === 0) return 0;
+
+    let removed = 0;
+    const removedByRole: Record<string, number> = {};
+    const remaining: Task[] = [];
+
+    for (const task of tasks) {
+        const mem = (task as any)?.data?.memory;
+        if (mem?.expandId === expandId) {
+            removed++;
+            const role = mem?.role;
+            if (role) removedByRole[role] = (removedByRole[role] || 0) + 1;
+            continue;
+        }
+        remaining.push(task as any);
+    }
+
+    pools.spawn = remaining as any;
+
+    const room = Game.rooms[roomName];
+    if (room) delete (room as any)['SpawnMissionNumChecked'];
+
+    if (global.SpawnMissionNum?.[roomName]) {
+        for (const [role, num] of Object.entries(removedByRole)) {
+            const old = global.SpawnMissionNum[roomName][role] || 0;
+            global.SpawnMissionNum[roomName][role] = Math.max(0, old - num);
+        }
+    }
+
+    return removed;
 };
 
 const runOnePlanInRoom = (room: Room, plan: LocalExpandPlan, creepCounts: any) => {
