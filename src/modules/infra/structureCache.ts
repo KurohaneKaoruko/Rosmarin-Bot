@@ -26,10 +26,10 @@
  * - room.structures：本 tick 的 FIND_STRUCTURES 快照（按 tick 缓存）
  *
  * 便捷访问：
- * - room[id]：仅对 24 位 hex 字符串 id 生效，返回 Game.getObjectById(id)
+ * - room.getById(id)：仅对 24 位 hex 字符串 id 生效，返回 Game.getObjectById(id)（同 tick 缓存）
  *
  * 缓存说明：
- * - 索引缓存存放在 local[room.name]（唯一建筑存 id，多建筑存 Set<id>）
+ * - 索引缓存存放在 local[room.name]（唯一建筑存 id，多建筑存 id 数组）
  * - 拆除导致的失效 id 会在 getter 中自动剔除
  * - 新建筑/新对象需要调用 room.update() 刷新索引（项目默认每 10 tick 调用一次）
  */
@@ -41,9 +41,9 @@
  * 这是一个基于 `Room.prototype` 的“属性式缓存轮子”，把常用的查找操作封装成 `room.spawn / room.container / room.deposit ...` 这类 getter。
  *
  * 设计要点：
- * - **跨 tick 缓存**：以 `local[room.name]` 保存“结构类型 -> id/Set(id)”的索引；需要 `room.update()` 才会重建索引（项目默认每 10 tick 更新一次）。
+ * - **跨 tick 缓存**：以 `local[room.name]` 保存“结构类型 -> id/id[]”的索引；需要 `room.update()` 才会重建索引（项目默认每 10 tick 更新一次）。
  * - **同 tick 缓存**：getter 会把解析出的对象/数组缓存在 `room._<type>` 上，避免同 tick 重复 `Game.getObjectById`。
- * - **自动剔除失效 id**：当 `Game.getObjectById(id)` 为空时，会从 `Set` 中删除该 id，避免长期积累脏数据。
+ * - **自动剔除失效 id**：当 `Game.getObjectById(id)` 为空时，会在 getter 中回写剔除该 id，避免长期积累脏数据。
  *
  * @example
  * ```ts
@@ -61,7 +61,7 @@
  * const energy = room[RESOURCE_ENERGY]
  *
  * // 通过 id 取对象（仅对 24 位 hex id 生效）
- * const obj = room['65e4c3d8b1b7a1a2b3c4d5e6']
+ * const obj = room.getById('65e4c3d8b1b7a1a2b3c4d5e6')
  * ```
  */
 
@@ -70,7 +70,7 @@
  *
  * @remarks
  * 这里的 key 都是 `STRUCTURE_*` 常量（字符串）。对这些类型：
- * - local 缓存中保存 `Set<Id>`；
+ * - local 缓存中保存 `id[]`；
  * - getter 返回 `Structure[]`（同 tick 缓存为 `room._<type>`）。
  */
 const multipleList = new Set([
@@ -112,7 +112,7 @@ const singleList = new Set([
  *
  * @remarks
  * - `LOOK_SOURCES` / `LOOK_DEPOSITS` / `LOOK_CONSTRUCTION_SITES`
- * - local 缓存中保存 `Set<Id>`；getter 返回对象数组（同 tick 缓存）。
+ * - local 缓存中保存 `id[]`；getter 返回对象数组（同 tick 缓存）。
  */
 const additionalList = new Set([
 	// room[LOOK_*]获取到数组
@@ -126,13 +126,63 @@ const additionalList = new Set([
  *
  * @remarks
  * 结构：
- * - `local[roomName][STRUCTURE_*] = id | Set<id>`
- * - `local[roomName][LOOK_*] = id | Set<id>`
- * - `local[roomName].mass_stores = Set<id>`
+ * - `local[roomName][STRUCTURE_*] = id | id[]`
+ * - `local[roomName][LOOK_*] = id | id[]`
+ * - `local[roomName].mass_stores = id[]`
  *
  * 该对象仅存在于运行进程内（不写入 Memory）。
  */
-const local = {};
+type LocalRoomCache = {
+	name: string;
+	mass_stores?: string[];
+	activeCache?: Record<string, boolean>;
+	[key: string]: any;
+};
+
+const local: Record<string, LocalRoomCache> = Object.create(null);
+
+function isActiveCached(roomName: string, id: string, object: any): boolean {
+	if (!object || typeof object.isActive !== 'function') return true;
+	const roomCache = local[roomName];
+	if (!roomCache) return object.isActive();
+	if (!roomCache.activeCache) roomCache.activeCache = Object.create(null);
+	const cache = roomCache.activeCache;
+	const v = cache[id];
+	if (v !== undefined) return v;
+	const active = object.isActive();
+	cache[id] = active;
+	return active;
+}
+
+function getObjectByIdCached(room: Room, id: string) {
+	const r = room as any;
+	if (r._idObjCacheTime !== Game.time) {
+		r._idObjCacheTime = Game.time;
+		r._idObjCache = Object.create(null);
+	}
+	const cache = r._idObjCache as Record<string, any>;
+	if (Object.prototype.hasOwnProperty.call(cache, id)) return cache[id];
+	const o = Game.getObjectById(id as any);
+	cache[id] = o;
+	return o;
+}
+
+// 资源总量统计的本 tick 预聚合缓存：避免同一 tick 内按不同资源反复遍历 mass_stores
+function getResourceTotalMapCached(room: Room): Record<string, number> {
+	const r = room as any;
+	if (r._resAllTime !== Game.time) {
+		r._resAllTime = Game.time;
+		const sumMap: Record<string, number> = Object.create(null);
+		for (const s of room.mass_stores) {
+			for (const key in s.store) {
+				const amount = (s.store as any)[key] || 0;
+				if (amount) sumMap[key] = (sumMap[key] || 0) + amount;
+			}
+		}
+		r._resAllMap = sumMap;
+	}
+	return (r._resAllMap as Record<string, number>) || Object.create(null);
+}
 
 /**
  * 清理 Room 对象上的“同 tick 缓存字段”，使得后续 getter 重新从 `local` 取数据。
@@ -145,19 +195,27 @@ const local = {};
  * @param type - 指定清理某一个类型；不传则清理所有已定义的缓存字段
  */
 function clearRoomTickCache(room: Room, type?: string) {
+	delete (room as any)._idObjCache;
+	delete (room as any)._idObjCacheTime;
 	if (!type) {
 		for (const t of singleList) delete room['_' + t];
 		for (const t of multipleList) delete room['_' + t];
 		for (const t of additionalList) delete room['_' + t];
 		delete room._mass_stores;
-		delete (room as any)._resAmountCache;
+		delete (room as any)._mass_stores_all;
+		delete (room as any)._resAllTime;
+		delete (room as any)._resAllMap;
+		for (const t of RESOURCES_ALL) delete room['_res_t_' + t];
 		delete room._structures;
 		delete room._structures_fetch_time;
 		return;
 	}
 	delete room['_' + type];
 	if (type === 'mass_stores') delete room._mass_stores;
-	if (type === 'mass_stores') delete (room as any)._resAmountCache;
+	if (type === 'mass_stores') delete (room as any)._mass_stores_all;
+	if (type === 'mass_stores') delete (room as any)._resAllTime;
+	if (type === 'mass_stores') delete (room as any)._resAllMap;
+	if (type === 'mass_stores') for (const t of RESOURCES_ALL) delete room['_res_t_' + t];
 	if (type === 'structures') {
 		delete room._structures;
 		delete room._structures_fetch_time;
@@ -172,20 +230,20 @@ function clearRoomTickCache(room: Room, type?: string) {
  *
  * @param room - 目标房间
  * @param type - `LOOK_SOURCES` / `LOOK_DEPOSITS` / `LOOK_CONSTRUCTION_SITES`
- * @returns 若存在对象则返回 `Set<id>`，否则返回 `undefined`
+ * @returns 若存在对象则返回 `id[]`，否则返回 `undefined`
  */
 function buildAdditionalCache(room: Room, type: string) {
 	if (type === LOOK_SOURCES) {
 		const sources = room.find(FIND_SOURCES);
-		return sources.length ? new Set(sources.map(s => s.id)) : undefined;
+		return sources.length ? sources.map(s => s.id) : undefined;
 	}
 	if (type === LOOK_DEPOSITS) {
 		const deposits = room.find(FIND_DEPOSITS);
-		return deposits.length ? new Set(deposits.map(d => d.id)) : undefined;
+		return deposits.length ? deposits.map(d => d.id) : undefined;
 	}
 	if (type === LOOK_CONSTRUCTION_SITES) {
 		const sites = room.find(FIND_CONSTRUCTION_SITES);
-		return sites.length ? new Set(sites.map(s => s.id)) : undefined;
+		return sites.length ? sites.map(s => s.id) : undefined;
 	}
 	return undefined;
 }
@@ -205,14 +263,15 @@ function buildAdditionalCache(room: Room, type: string) {
 function Hub(room: Room) {
 	this.name = room.name;
 
-	const structures = room.find(FIND_STRUCTURES);
+	const r = room as any;
+	const structures = r._structures_fetch_time === Game.time ? r._structures : room.find(FIND_STRUCTURES);
 	for (const s of structures) {
 		const type = s.structureType;
 		if (singleList.has(type)) {
 			if (!this[type]) this[type] = s.id;
 		} else if (multipleList.has(type)) {
-			if (!this[type]) this[type] = new Set();
-			this[type].add(s.id);
+			if (!this[type]) this[type] = [];
+			this[type].push(s.id);
 		}
 	}
 	for (const type of additionalList) {
@@ -224,42 +283,36 @@ function Hub(room: Room) {
 		this[LOOK_MINERALS] = minerals[0].id;
 	}
 
-	this.mass_stores = new Set();
+	this.mass_stores = [];
 	if (room.storage) {
-		this.mass_stores.add(room.storage.id);
+		this.mass_stores.push(room.storage.id);
 	}
 	if (room.terminal) {
-		this.mass_stores.add(room.terminal.id);
+		this.mass_stores.push(room.terminal.id);
 	}
 	if (this[STRUCTURE_FACTORY]) {
-		this.mass_stores.add(this[STRUCTURE_FACTORY]);
+		this.mass_stores.push(this[STRUCTURE_FACTORY]);
 	}
 	if (this[STRUCTURE_CONTAINER]) {
-		this[STRUCTURE_CONTAINER].forEach((id) => this.mass_stores.add(id));
+		for (let i = 0; i < this[STRUCTURE_CONTAINER].length; i++) this.mass_stores.push(this[STRUCTURE_CONTAINER][i]);
 	}
 
+	this.activeCache = Object.create(null);
 	local[room.name] = this;
 }
 
 /**
- * 允许通过 `room[id]` 快速获取对象（仅对 24 位 hex id 生效）。
+ * 允许通过 `room.getById(id)` 快速获取对象（仅对 24 位 hex id 生效）。
  *
  * @remarks
  * 这是一个“便利接口”，用来在 **已知 id** 时快速取对象，而不是为了替代正常属性访问。
- * 为了避免误触发（例如拼写错误/调试探测导致大量 `getObjectById`），这里限制：
- * - 只有当 key 是 24 位小写 hex 字符串时才调用 `Game.getObjectById`
- * - 其它 key 直接返回 undefined
+ * 为了避免误触发（例如拼写错误/调试探测导致大量 `getObjectById`），这里限制只接受 24 位小写 hex 字符串。
  */
-Room.prototype.__proto__ = new Proxy(
-	{},
-	{
-		get(cache, id) {
-			if (typeof id !== 'string') return undefined;
-			if (!/^[0-9a-f]{24}$/.test(id)) return undefined;
-			return Game.getObjectById(id);
-		}
-	}
-);
+Room.prototype.getById = function (id: string) {
+	if (typeof id !== 'string') return undefined;
+	if (!/^[0-9a-f]{24}$/.test(id)) return undefined;
+	return getObjectByIdCached(this, id);
+};
 
 /**
  * 为 `singleList` 中的类型定义 getter：返回单体结构/对象（或 undefined）。
@@ -277,8 +330,11 @@ singleList.forEach((type) => {
 			} else {
 				const cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
 				if (cache) {
-					//console.log(type);
-					return (this[bindstring] = Game.getObjectById(cache));
+					const o = getObjectByIdCached(this, cache);
+					if (o && (o as any).my && !isActiveCached(this.name, (o as any).id, o)) {
+						return (this[bindstring] = undefined);
+					}
+					return (this[bindstring] = o);
 				} else {
 					return (this[bindstring] = undefined);
 				}
@@ -295,8 +351,8 @@ singleList.forEach((type) => {
  *
  * @remarks
  * - 本 tick 缓存字段名：`room._<type>`
- * - 跨 tick 索引字段：`local[room.name][type] = Set<id>`
- * - 自动清理：若 `Game.getObjectById(id)` 返回空，会从 Set 中删除该 id
+ * - 跨 tick 索引字段：`local[room.name][type] = id[]`
+ * - 自动清理：若 `Game.getObjectById(id)` 返回空，会在 getter 中回写剔除该 id
  */
 multipleList.forEach((type) => {
 	const bindstring = '_' + type;
@@ -305,20 +361,26 @@ multipleList.forEach((type) => {
 			if (bindstring in this) {
 				return this[bindstring];
 			} else {
-				/**@type {Set<string>} */
 				const cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
-				this[bindstring] = [];
-				if (cache) {
-					for (const id of cache) {
-						const o = Game.getObjectById(id);
+				const result = [];
+				if (cache && cache.length) {
+					let dirty = false;
+					const newIds = [];
+					for (let i = 0; i < cache.length; i++) {
+						const id = cache[i];
+						const o = getObjectByIdCached(this, id);
 						if (o) {
-							this[bindstring].push(o);
+							if (!(o as any).my || isActiveCached(this.name, (o as any).id, o)) {
+								result.push(o);
+							}
+							newIds.push(id);
 						} else {
-							cache.delete(id);
+							dirty = true;
 						}
 					}
+					if (dirty) local[this.name][type] = newIds;
 				}
-				return this[bindstring];
+				return (this[bindstring] = result);
 			}
 		},
 		set() {},
@@ -332,8 +394,8 @@ multipleList.forEach((type) => {
  *
  * @remarks
  * - 本 tick 缓存字段名：`room._<type>`
- * - 跨 tick 索引字段：`local[room.name][type] = Set<id>`
- * - 自动清理：若 `Game.getObjectById(id)` 返回空，会从 Set 中删除该 id
+ * - 跨 tick 索引字段：`local[room.name][type] = id[]`
+ * - 自动清理：若 `Game.getObjectById(id)` 返回空，会在 getter 中回写剔除该 id
  */
 additionalList.forEach((type) => {
 	const bindstring = '_' + type;
@@ -344,19 +406,23 @@ additionalList.forEach((type) => {
 				return this[bindstring];
 			} else {
 				const cache = local[this.name] ? local[this.name][type] : new Hub(this)[type];
-				this[bindstring] = [];
-				if (cache) {
-					//console.log(type);
-					for (const id of cache) {
-						const o = Game.getObjectById(id);
+				const result = [];
+				if (cache && cache.length) {
+					let dirty = false;
+					const newIds = [];
+					for (let i = 0; i < cache.length; i++) {
+						const id = cache[i];
+						const o = getObjectByIdCached(this, id);
 						if (o) {
-							this[bindstring].push(o);
+							result.push(o);
+							newIds.push(id);
 						} else {
-							cache.delete(id);
+							dirty = true;
 						}
 					}
+					if (dirty) local[this.name][type] = newIds;
 				}
-				return this[bindstring];
+				return (this[bindstring] = result);
 			}
 		},
 		set() {},
@@ -380,51 +446,87 @@ Room.prototype.update = function (type: string) {
 		// 更新全部
 		new Hub(this);
 		clearRoomTickCache(this);
-	} else if (type) {
-		// 指定更新一种建筑
-		const cache = local[this.name];
-		if (additionalList.has(type)) {
-			cache[type] = buildAdditionalCache(this, type);
-			clearRoomTickCache(this, type);
-		} else if (type == 'mass_stores') {
-			this.update(STRUCTURE_CONTAINER);
-			this.update(STRUCTURE_FACTORY);
-			cache.mass_stores = new Set();
-			if (this.storage) {
-				cache.mass_stores.add(this.storage.id);
-			}
-			if (this.terminal) {
-				cache.mass_stores.add(this.terminal.id);
-			}
-			if (this[STRUCTURE_FACTORY]) {
-				cache.mass_stores.add(this[STRUCTURE_FACTORY].id);
-			}
-			if (this[STRUCTURE_CONTAINER].length) {
-				this[STRUCTURE_CONTAINER].forEach((cont) => {
-					cache.mass_stores.add(cont.id);
-				});
-			}
-			clearRoomTickCache(this, 'mass_stores');
-		} else {
-			const objects = this.find(FIND_STRUCTURES, {
-				filter: (s) => s.structureType == type
-			});
-			if (objects.length) {
-				if (singleList.has(type)) {
-					cache[type] = objects[0].id;
-				} else {
-					cache[type] = new Set(
-						objects.map((s) => {
-							return s.id;
-						})
-					);
-				}
-			} else {
-				cache[type] = undefined;
-			}
-			clearRoomTickCache(this, type);
-		}
 	}
+
+	// 指定更新一种类型索引
+	const cache = local[this.name];
+	if (!cache) return;
+	cache.activeCache = Object.create(null);
+
+	if (type === 'structures') {
+		// 仅刷新本 tick 的结构快照缓存（避免误走结构过滤分支）
+		clearRoomTickCache(this, 'structures');
+		return;
+	}
+
+	if (type === LOOK_MINERALS) {
+		// 修复：外矿采集会调用 room.update('mineral')，这里必须用 FIND_MINERALS 重建索引
+		const minerals = this.find(FIND_MINERALS);
+		cache[LOOK_MINERALS] = minerals.length ? minerals[0].id : undefined;
+		clearRoomTickCache(this, LOOK_MINERALS);
+		return;
+	}
+
+	if (additionalList.has(type)) {
+		cache[type] = buildAdditionalCache(this, type);
+		clearRoomTickCache(this, type);
+		return;
+	}
+
+	if (type == 'mass_stores') {
+		// 用本 tick 的结构快照一次性重建（避免多次 find/filter）
+		let storageId: string | undefined;
+		let terminalId: string | undefined;
+		let factoryId: string | undefined;
+		const containerIds: string[] = [];
+
+		for (const s of this.structures) {
+			if (s.structureType === STRUCTURE_STORAGE) {
+				if (!storageId) storageId = s.id;
+				continue;
+			}
+			if (s.structureType === STRUCTURE_TERMINAL) {
+				if (!terminalId) terminalId = s.id;
+				continue;
+			}
+			if (s.structureType === STRUCTURE_FACTORY) {
+				if (!factoryId) factoryId = s.id;
+				continue;
+			}
+			if (s.structureType === STRUCTURE_CONTAINER) {
+				containerIds.push(s.id);
+			}
+		}
+
+		cache[STRUCTURE_FACTORY] = factoryId;
+		cache[STRUCTURE_CONTAINER] = containerIds.length ? containerIds : undefined;
+
+		const next: string[] = [];
+		if (storageId) next.push(storageId);
+		if (terminalId) next.push(terminalId);
+		if (factoryId) next.push(factoryId);
+		if (containerIds.length) next.push(...containerIds);
+		cache.mass_stores = next;
+
+		clearRoomTickCache(this, 'mass_stores');
+		clearRoomTickCache(this, STRUCTURE_FACTORY);
+		clearRoomTickCache(this, STRUCTURE_CONTAINER);
+		return;
+	}
+
+	const objects = this.find(FIND_STRUCTURES, {
+		filter: (s) => s.structureType == type
+	});
+	if (objects.length) {
+		if (singleList.has(type)) {
+			cache[type] = objects[0].id;
+		} else {
+			cache[type] = objects.map((s) => s.id);
+		}
+	} else {
+		cache[type] = undefined;
+	}
+	clearRoomTickCache(this, type);
 };
 
 /**
@@ -459,17 +561,59 @@ Object.defineProperty(Room.prototype, 'mass_stores', {
 			return this._mass_stores;
 		} else {
 			const cache = local[this.name] ? local[this.name].mass_stores : new Hub(this).mass_stores;
-			this._mass_stores = [];
-			for (const id of cache) {
-				const o = Game.getObjectById(id);
+			const result = [];
+			if (cache && cache.length) {
+				let dirty = false;
+				const newIds = [];
+				for (let i = 0; i < cache.length; i++) {
+					const id = cache[i];
+					const o = getObjectByIdCached(this, id);
+					if (o) {
+						if (!(o as any).my || isActiveCached(this.name, (o as any).id, o)) {
+							result.push(o);
+						}
+						newIds.push(id);
+					} else {
+						dirty = true;
+					}
+				}
+				if (dirty) local[this.name].mass_stores = newIds;
+			}
+			return (this._mass_stores = result);
+		}
+	},
+	set() {},
+	enumerable: false,
+	configurable: true
+});
+
+/**
+ * `room.mass_stores_all`：mass_stores 的“全量口径”（不过滤己方 inactive 建筑）。
+ */
+Object.defineProperty(Room.prototype, 'mass_stores_all', {
+	get() {
+		const r = this as any;
+		if ('_mass_stores_all' in r) {
+			return r._mass_stores_all;
+		}
+		const cache = local[this.name] ? local[this.name].mass_stores : new Hub(this).mass_stores;
+		const result = [];
+		if (cache && cache.length) {
+			let dirty = false;
+			const newIds = [];
+			for (let i = 0; i < cache.length; i++) {
+				const id = cache[i];
+				const o = getObjectByIdCached(this, id);
 				if (o) {
-					this._mass_stores.push(o);
+					result.push(o);
+					newIds.push(id);
 				} else {
-					cache.delete(id);
+					dirty = true;
 				}
 			}
-			return this._mass_stores;
+			if (dirty) local[this.name].mass_stores = newIds;
 		}
+		return (r._mass_stores_all = result);
 	},
 	set() {},
 	enumerable: false,
@@ -510,20 +654,23 @@ Object.defineProperty(Room.prototype, 'level', {
 for (const type of RESOURCES_ALL) {
 	Object.defineProperty(Room.prototype, type, {
 		get() {
-			const cache = (this as any)._resAmountCache ?? ((this as any)._resAmountCache = {});
-			const entry = cache[type];
-			if (!entry || entry.time !== Game.time) {
-				const sum = this.mass_stores.reduce((temp_sum, s) => {
-					const used = s.store.getUsedCapacity(type) || 0;
-					return temp_sum + used;
-				}, 0);
-				cache[type] = { time: Game.time, value: sum };
+			const timeKey = '_res_t_' + type;
+			const cacheKey = '_res_' + type;
+			if ((this as any)[timeKey] !== Game.time) {
+				(this as any)[timeKey] = Game.time;
+				const sumMap = getResourceTotalMapCached(this);
+				(this as any)[cacheKey] = sumMap[type] || 0;
 			}
-			return cache[type].value;
+			return (this as any)[cacheKey];
 		},
 		set(amount) {
-			const cache = (this as any)._resAmountCache ?? ((this as any)._resAmountCache = {});
-			cache[type] = { time: Game.time, value: amount };
+			const timeKey = '_res_t_' + type;
+			const cacheKey = '_res_' + type;
+			(this as any)[cacheKey] = amount;
+			(this as any)[timeKey] = Game.time;
+			(this as any)._resAllTime = Game.time;
+			if (!(this as any)._resAllMap) (this as any)._resAllMap = Object.create(null);
+			(this as any)._resAllMap[type] = amount;
 		},
 		enumerable: false,
 		configurable: true

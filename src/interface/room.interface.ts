@@ -130,6 +130,11 @@ interface Room {
      * @example const totalEnergy = room.mass_stores.reduce((sum, s) => sum + s.store[RESOURCE_ENERGY], 0);
      */
     mass_stores: (StructureStorage | StructureTerminal | StructureFactory | StructureContainer)[];
+
+    /**
+     * mass_stores 的全量口径（不过滤己方 inactive 建筑）
+     */
+    mass_stores_all: (StructureStorage | StructureTerminal | StructureFactory | StructureContainer)[];
     
     /** 
      * 房间中的powerBank数组
@@ -187,6 +192,11 @@ interface Room {
      * @description 更新房间内建筑的缓存数据
      */
     update(type?: string): void;
+
+    /**
+     * 通过 id 获取对象（同 tick 缓存），仅对 24 位 hex id 生效
+     */
+    getById(id: string): any;
     
     /** 
      * 房间运行
