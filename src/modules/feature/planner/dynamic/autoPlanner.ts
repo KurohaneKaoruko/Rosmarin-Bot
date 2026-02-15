@@ -978,6 +978,10 @@ const ManagerPlanner = {
 		let finalPos = undefined;
 		let wallCnt = 1e9;
 		let innerPutAbleList = [];
+		// 兜底方案：记录不检查阈值的备选
+		let fallbackPos = undefined;
+		let fallbackWallCnt = 1e9;
+		let fallbackWalls = null;
 
 		let centerX = undefined;
 		let centerY = undefined;
@@ -1082,6 +1086,13 @@ const ManagerPlanner = {
 				}
 				currentWallCnt = walls.length;
 				currentWalls = walls;
+				// 阈值检查：墙体数量过少或比例过高时跳过造墙方案
+				const MIN_WALL_CNT = 12;
+				const MAX_WALL_RATIO = 0.3;
+				const wallRatio = currentWallCnt / currentPutAbleLen;
+				if (currentWallCnt < MIN_WALL_CNT || wallRatio > MAX_WALL_RATIO) {
+					currentWalls = null;
+				}
 			}
 			// {
 			//     let y = pos%50
@@ -1104,10 +1115,35 @@ const ManagerPlanner = {
 					centerY = sumY / currentPutAbleLen;
 				}
 			}
+			// 兜底方案：记录墙体最少的方案（不检查阈值）
+			if (minPlaneCnt < currentPutAbleLen && walls && fallbackWallCnt > walls.length) {
+				fallbackPos = posNum;
+				fallbackWallCnt = walls.length;
+				fallbackWalls = walls;
+			}
 
 			// allCacheMap[pos].forEach(t=>{
 			//     visual.circle(t.x, t.y, {fill: randomColor(pos), radius: 0.5 ,opacity : 0.15})
 			// })
+		}
+
+		// 兜底：如果没有满足阈值的方案，使用备选方案
+		if (!finalPos && fallbackPos) {
+			finalPos = fallbackPos;
+			wallCnt = fallbackWallCnt;
+			wallMap[finalPos] = fallbackWalls;
+			// 重新计算 innerPutAbleList
+			ManagerPlanner.getBlockPutAbleCnt(
+				roomWalkable,
+				visited,
+				queMin,
+				unionFind,
+				finalPos,
+				putAbleCacheMap,
+				allCacheMap,
+				rootMembers
+			);
+			innerPutAbleList = putAbleCacheMap[finalPos];
 		}
 
 		if (!finalPos || !putAbleCacheMap[finalPos]) return;
