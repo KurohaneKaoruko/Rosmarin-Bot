@@ -139,6 +139,9 @@ export const ResourceManage = {
             logRM(lines);
         }
 
+        const prodNeeds = Object.create(null) as Record<string, Record<string, number>>;
+        const prodNeedResSet = new Set<string>();
+
         if (RESOURCE_PRODUCTION.enabled) {
             const globalCache = Object.create(null) as Record<string, number>;
             const getGlobalAmount = (res: string) => {
@@ -180,8 +183,6 @@ export const ResourceManage = {
                 return best && bestDef > 0 ? best : null;
             };
 
-            const prodNeeds = Object.create(null) as Record<string, Record<string, number>>;
-            const prodNeedResSet = new Set<string>();
             const noteNeed = (roomName: string, res: string, minAmount: number) => {
                 if (!prodNeeds[roomName]) prodNeeds[roomName] = Object.create(null) as Record<string, number>;
                 prodNeeds[roomName][res] = Math.max(prodNeeds[roomName][res] || 0, minAmount);
@@ -660,6 +661,25 @@ export const ResourceManage = {
                 }
             }
 
+            // 增强：确保生产原料需求被正确加入 target 列表
+            // 当房间有生产需求时，即使该资源在全局平衡中不是 target，也要确保它能被调度
+            for (const [roomName, needs] of Object.entries(prodNeeds)) {
+                if (!Game.rooms[roomName]) continue;
+                const room = Game.rooms[roomName];
+                if (!room.terminal || !room.storage) continue;
+                
+                for (const [res, minAmount] of Object.entries(needs)) {
+                    const amount = getResAmountCached(room, res);
+                    // 如果原料不足目标量，主动将其加入 target
+                    if (amount < minAmount) {
+                        if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
+                        if (!ResManageMap[res].target.includes(roomName)) {
+                            ResManageMap[res].target.push(roomName);
+                        }
+                    }
+                }
+            }
+
             for (const k of Object.keys(ResManageMap)) delete ResManageMap[k];
             const allResources = new Set<string>();
             for (const roomName of Object.keys(ThresholdMap)) {
@@ -684,20 +704,22 @@ export const ResourceManage = {
             // 为什么：生产计划注入的原料需求（prodNeeds）如果仅靠“供应阈值(sourceThreshold)”筛选 source，
             // 可能出现“全局有量但没有任何房间超过供应阈值”从而永远不调度的情况。
             // 对这些原料，允许“超过房间保底(targetThreshold)的部分”作为可供给余量加入 source。
+            // 增强：对于有生产需求的资源，降低 source 筛选门槛，只要有原料即可作为供给源
             if (prodNeedResSet.size > 0) {
                 for (const room of eligibleRooms) {
                     if (!room.terminal || room.terminal.cooldown) continue;
-                    const roomThresholds = ThresholdMap[room.name];
-                    if (!roomThresholds) continue;
-                    for (const [res, [targetThreshold]] of Object.entries(roomThresholds)) {
-                        if (!prodNeedResSet.has(res)) continue;
-                        if (ResManageMap[res]?.target?.includes(room.name)) continue;
+                    
+                    // 检查该房间是否有可用于生产需求的原料
+                    for (const res of prodNeedResSet) {
                         const amount = getResAmountCached(room, res);
-                        const surplus = amount - targetThreshold;
-                        const minSendAmount = res === RESOURCE_ENERGY ? 5000 : (Goods.includes(res as any) ? 100 : 1000);
-                        if (surplus < minSendAmount) continue;
+                        // 生产需求：只要有原料就作为供给源
+                        const minSendAmount = res === RESOURCE_ENERGY ? 5000 : (Goods.includes(res as any) ? 50 : 500);
+                        if (amount < minSendAmount) continue;
+                        
                         if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
-                        if (!ResManageMap[res].source.includes(room.name)) ResManageMap[res].source.push(room.name);
+                        if (!ResManageMap[res].source.includes(room.name)) {
+                            ResManageMap[res].source.push(room.name);
+                        }
                     }
                 }
             }
@@ -766,14 +788,15 @@ export const ResourceManage = {
         }
 
         for (let res in ResManageMap) {
-            // Goods：终端单次发送最多 100；其它资源保持原先阈值约束
+            // Goods：终端单次发送最少 100（生产需求），最多 500；其它资源保持原先阈值约束
             const isGoods = Goods.includes(res as any);
-            const minSendAmount = isGoods ? 10 : (res == RESOURCE_ENERGY ? 5000 : 1000);
-            const maxSendAmount = isGoods ? 100 : Infinity;
-            // 调度上限：用于实现“一次性尽量下发完，但不至于某个富余房间排队爆炸”
-            const perPairCap = isGoods ? 100 : (res == RESOURCE_ENERGY ? 50000 : 10000);
-            const perSourceCap = isGoods ? 100 : (res == RESOURCE_ENERGY ? 100000 : 20000);
-            const perSourceMaxPairs = 3;
+            const minSendAmount = isGoods ? 100 : (res == RESOURCE_ENERGY ? 5000 : 1000);
+            const maxSendAmount = isGoods ? 500 : Infinity;
+            // 调度上限：用于实现"一次性尽量下发完，但不至于某个富余房间排队爆炸"
+            // Goods 类资源提高上限以支持生产需求
+            const perPairCap = isGoods ? 500 : (res == RESOURCE_ENERGY ? 50000 : 10000);
+            const perSourceCap = isGoods ? 1000 : (res == RESOURCE_ENERGY ? 100000 : 20000);
+            const perSourceMaxPairs = isGoods ? 5 : 3;
 
             const sourceRooms = ResManageMap[res].source
                 .map(roomName => Game.rooms[roomName])
@@ -798,7 +821,8 @@ export const ResourceManage = {
                 .filter(s => s.surplus > 0 && s.room.terminal && s.room.terminal.cooldown == 0)
                 .sort((a, b) => b.surplus - a.surplus);
 
-            // targets: 以“缺口 deficit”排序，优先补最缺的房间；同时受终端剩余容量与供给阈值上限限制
+            // targets: 以"缺口 deficit"排序，优先补最缺的房间；同时受终端剩余容量与供给阈值上限限制
+            // 增强：对于有生产需求的房间，优先满足生产原料需求
             const targets = targetRooms
                 .map(room => {
                     const baseAmount = getResAmountCached(room, res);
@@ -807,13 +831,25 @@ export const ResourceManage = {
                     const thresholds = ThresholdMap[room.name]?.[res];
                     const targetThreshold = thresholds ? thresholds[0] : 0;
                     const sourceThreshold = thresholds ? thresholds[1] : Infinity;
+                    
+                    // 考虑生产原料需求：优先满足生产缺口
+                    const prodNeedAmount = prodNeeds[room.name]?.[res] || 0;
+                    // 生产需求应该作为额外的目标，不受 sourceThreshold 限制
+                    const effectiveTargetThreshold = Math.max(targetThreshold, prodNeedAmount);
+                    
                     const terminalFree = room.terminal.store.getFreeCapacity();
                     const terminalFreeAfter = Math.max(0, terminalFree - pendingIn);
-                    const deficit = Math.min(targetThreshold - amount, sourceThreshold - amount, terminalFreeAfter);
-                    return { room, amount, deficit };
+                    const deficit = Math.min(effectiveTargetThreshold - amount, sourceThreshold - amount, terminalFreeAfter);
+                    const isProdDemand = prodNeedAmount > 0 && prodNeedAmount > targetThreshold;
+                    return { room, amount, deficit, isProdDemand };
                 })
                 .filter(t => t.deficit > 0)
-                .sort((a, b) => b.deficit - a.deficit);
+                // 优先调度有生产需求的房间
+                .sort((a, b) => {
+                    if (a.isProdDemand && !b.isProdDemand) return -1;
+                    if (!a.isProdDemand && b.isProdDemand) return 1;
+                    return b.deficit - a.deficit;
+                });
 
             if (sources.length == 0 || targets.length == 0) continue;
 

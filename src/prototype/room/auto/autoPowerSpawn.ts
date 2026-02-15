@@ -5,6 +5,9 @@ export default class AutoPower extends Room {
     autoPower() {
         if (Game.time % 50) return;
 
+        if (!this.powerSpawn) return;
+        if (this.level < 8) return;
+
         const BotMem = getAutoPowerData(this.name);
         if (!BotMem) return;
         
