@@ -3,6 +3,9 @@ import { getRoomData, getStructData } from '@/modules/utils/memory';
 
 export default class RoomExecute extends Room {
     exec() {
+        // 处理上一 tick 的 Observer 回调
+        this.ObserveCallbackTick();
+
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
         const lowMode = mode === 'low';
@@ -42,6 +45,9 @@ export default class RoomExecute extends Room {
         if (!lowMode) {
             this.showDefenseCostMatrix();
         }
+
+        // Observer 工作
+        this.ObserveWork();
     }
 
     // 房间初始化

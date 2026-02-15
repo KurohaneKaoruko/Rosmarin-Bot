@@ -495,11 +495,31 @@ interface Room {
      */
     FactoryWork(): void;
     
-    /** 
+    /**
      * PowerSpawn工作
      * @description 执行PowerSpawn的power处理逻辑
      */
     PowerSpawnWork(): void;
+
+    /**
+     * Observer 回调处理
+     * @description 在 tick 开始时处理上一 tick 的回调
+     */
+    ObserveCallbackTick(): void;
+
+    /**
+     * Observer 工作
+     * @description 在 tick 结束时执行观察任务
+     */
+    ObserveWork(): void;
+
+    /**
+     * 使用 Observer 观察指定房间
+     * @param targetRoomName 目标房间名
+     * @param callback 可选的回调函数，在 observe 成功的下一 tick 执行
+     * @returns 是否成功加入队列
+     */
+    observeRoom(targetRoomName: string, callback?: () => void): boolean;
 
 
     // ==================== Tower控制 ====================

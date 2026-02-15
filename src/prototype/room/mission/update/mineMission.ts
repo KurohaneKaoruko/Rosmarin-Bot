@@ -314,64 +314,70 @@ export default class MineMission extends Room {
      */
     UpdateHighwayScan() {
         const LOOK_INTERVAL = OUTMINE_CONFIG.LOOK_INTERVAL;
-        if (Game.time % LOOK_INTERVAL > 1) return;
+        // 只有在 LOOK_INTERVAL==0 时才执行观察任务
+        if (Game.time % LOOK_INTERVAL !== 0) return;
 
         if (this[RESOURCE_ENERGY] < 50000) return;
         const outminePower = getRoomData()[this.name]['outminePower'];
         const outmineDeposit = getRoomData()[this.name]['outmineDeposit'];
         if (!outminePower && !outmineDeposit) return;
-        
+
         let lookList = getOutMineData(this.name)?.['highway'] || [];
         if (lookList.length == 0) return;
-        
-        if (Game.time % LOOK_INTERVAL == 0) {
-            if (!this.observer) return;
-            let lookIndex = Math.floor(Game.time / LOOK_INTERVAL) % lookList.length;
-            const roomName = lookList[lookIndex];
-            if (!Game.rooms[roomName]) {
-                this.observer.observeRoom(roomName);
-            }
-            return;
+
+        // 轮询观察房间
+        let lookIndex = Math.floor(Game.time / LOOK_INTERVAL) % lookList.length;
+        const roomName = lookList[lookIndex];
+        if (!Game.rooms[roomName]) {
+            // 使用新的 observeRoom API 并注册回调
+            // 回调会在 observe 成功的下一 tick 自动执行
+            this.observeRoom(roomName, () => {
+                this.handleHighwayRoom(roomName, outminePower, outmineDeposit);
+            });
         }
-        
-        for(const roomName of lookList) {
-            if (/^[EW]\d*[1-9][NS]\d*[1-9]$/.test(roomName)) continue;
+    }
 
-            const targetRoom = Game.rooms[roomName];
-            if (!targetRoom) continue;
+    /**
+     * 处理观察到的过道房间
+     * @param roomName 房间名
+     * @param outminePower 是否开启 power 采集
+     * @param outmineDeposit 是否开启 deposit 采集
+     */
+    private handleHighwayRoom(roomName: string, outminePower: boolean, outmineDeposit: boolean) {
+        const targetRoom = Game.rooms[roomName];
+        if (!targetRoom) return;
 
-            if (outminePower) {
-                const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName } as any);
-                if (!existId) {
-                    let P_num = (PowerBankCheck as any)(targetRoom);
-                    if (P_num) {
-                        const power = targetRoom.find(FIND_STRUCTURES,{
-                            filter:(s)=>s.structureType===STRUCTURE_POWER_BANK
-                        })[0].power;
-                        let data = (PowerMineMissionData as any)(this, P_num, power) as PowerMineTask;
-                        data.targetRoom = roomName;
-                        
-                        this.addMissionToPool('mine', 'power', 1, data);
-                        console.log(`在 ${roomName} 发现 PowerBank (${power} power), 已加入开采队列。`);
-                        console.log(`将从 ${this.name} 派出 ${data.creep} 数量的T${data.boostLevel}采集队。Ranged数量:${data.prNum}。`);
-                    }
+        if (outminePower) {
+            const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName } as any);
+            if (!existId) {
+                let P_num = (PowerBankCheck as any)(targetRoom);
+                if (P_num) {
+                    const power = targetRoom.find(FIND_STRUCTURES, {
+                        filter: (s) => s.structureType === STRUCTURE_POWER_BANK
+                    })[0].power;
+                    let data = (PowerMineMissionData as any)(this, P_num, power) as PowerMineTask;
+                    data.targetRoom = roomName;
+
+                    this.addMissionToPool('mine', 'power', 1, data);
+                    console.log(`在 ${roomName} 发现 PowerBank (${power} power), 已加入开采队列。`);
+                    console.log(`将从 ${this.name} 派出 ${data.creep} 数量的T${data.boostLevel}采集队。Ranged数量:${data.prNum}。`);
                 }
             }
+        }
 
-            if (outmineDeposit) {
-                const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName } as any);
-                if (!existId) {
-                    let D_num = (DepositCheck as any)(targetRoom);
-                    if (D_num > 0) {
-                        const data: DepositMineTask = {
-                            targetRoom: roomName,
-                            num: D_num,
-                            active: true
-                        };
-                        this.addMissionToPool('mine', 'deposit', 1, data);
-                        console.log(`在 ${roomName} 发现 Deposit, 已加入开采队列。`);
-                        console.log(`将从 ${this.name} 派出总共 ${D_num} 数量的采集队。`);
-                    }
+        if (outmineDeposit) {
+            const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName } as any);
+            if (!existId) {
+                let D_num = (DepositCheck as any)(targetRoom);
+                if (D_num > 0) {
+                    const data: DepositMineTask = {
+                        targetRoom: roomName,
+                        num: D_num,
+                        active: true
+                    };
+                    this.addMissionToPool('mine', 'deposit', 1, data);
+                    console.log(`在 ${roomName} 发现 Deposit, 已加入开采队列。`);
+                    console.log(`将从 ${this.name} 派出总共 ${D_num} 数量的采集队。`);
                 }
             }
         }
