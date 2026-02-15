@@ -407,6 +407,53 @@ export const RESOURCE_PRODUCTION = {
 } as const;
 
 /**
+ * 智能优先级排序算法配置
+ * @description
+ * - 用于 Lab 和 Factory 排产逻辑的多维度权重计算
+ * - 权重系数控制各维度在最终优先级评分中的占比
+ */
+export const PRIORITY_CONFIG = {
+    /** tierRank 权重：T3=1.0, T2=0.8, T1=0.6 */
+    tierWeight: 0.35,
+    /** 缺口系数权重 */
+    deficitWeight: 0.30,
+    /** 原料充足度权重 */
+    resourceWeight: 0.20,
+    /** 时间等待权重 */
+    timeWeight: 0.15,
+    /** tierRank 映射值 */
+    tierRank: { T3: 1.0, T2: 0.8, T1: 0.6 },
+} as const;
+
+/**
+ * 动态阈值配置
+ * @description
+ * - 用于智能优先级算法中的动态调整参数
+ */
+export const DYNAMIC_THRESHOLD_CONFIG = {
+    /** 基准缺口量（用于计算缺口系数） */
+    baseDeficit: 5000,
+    /** 缺口系数上限 */
+    deficitCap: 2.0,
+    /** 原料充足度临界值（超过此值视为充足） */
+    resourceSufficient: 10000,
+    /** 原料充足度计算的最大值 */
+    resourceMax: 20000,
+    /** 时间等待因递增子上限 */
+    timeFactorMax: 1.5,
+    /** 时间等待递增因子下限 */
+    timeFactorMin: 1.0,
+    /** 等待时间阈值（超过此值开始计算时间系数） */
+    waitTimeThreshold: 50,
+    /** 阈值调整百分比 */
+    adjustPercent: 0.1,
+    /** 连续缺料周期数触发调整 */
+    adjustInterval: 3,
+    /** 阈值最低调整比例 */
+    minThresholdRatio: 0.5,
+} as const;
+
+/**
  * AutoLab 自动合成参数
  * @description
  * - 这些参数用于改善“lab 长期闲置/频繁清空任务”的问题。
@@ -510,4 +557,10 @@ export const PRODUCTION_MIN = {
         4: 50,
         5: 10,
     } as Record<number, number>,
+} as const;
+
+export const PRODUCTION_MONITOR_CONFIG = {
+    efficiencyThreshold: 0.5,
+    efficiencyCheckInterval: 10,
+    lowEfficiencyRecoveryTicks: 50,
 } as const;
