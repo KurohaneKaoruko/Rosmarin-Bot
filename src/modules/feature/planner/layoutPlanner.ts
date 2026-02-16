@@ -1,6 +1,6 @@
 import { log } from '@/utils';
 import { compress, compressBatch, decompress } from '@/modules/utils/compress';
-import LayoutVisual from '@/modules/feature/planner/layoutVisual';
+import LayoutVisual from '@/modules/feature/planner/utils/layoutVisual';
 import { autoPlanner } from '@/modules/feature/planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/feature/planner/dynamic/63Planner';
 import { scorpiorPlanner } from '@/modules/feature/planner/dynamic/ScorpiorPlanner';

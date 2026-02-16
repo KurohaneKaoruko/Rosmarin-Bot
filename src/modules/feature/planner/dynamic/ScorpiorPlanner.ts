@@ -23,19 +23,23 @@ type LayoutStructMap = { [structureType: string]: XY[] };
 * }} ExitGroups
  */
 
-/** */
+/** ScorpiorPlanner 配置 - 与 planner.js 保持一致 */
 const config = {
-    controllerWeight: 1,    // 到 controller 路程长度权重倍数
-    sourceWeight: 2,        // 到 source 路程长度权重倍数
-    mineralWeight: 3,       // 到 mineral 路程长度权重倍数
-    maxExtensionDistance: 10, // 允许摆extension的最远距离
-    acceptThreshold: 2, // 控制extension分布，在最终plan()函数中可以另外指定
-    reviewThreshold: 3, // 控制extension分布，在最终plan()函数中可以另外指定
-    fillUpThreshold: 3
+    controllerWeight: 3,    // 到 controller 路程长度权重倍数，数字越大则中心越靠近 controller
+    sourceWeight: 1,        // 到 source 路程长度权重倍数，数字越大则中心越靠近 source
+    mineralWeight: 2,       // 到 mineral 路程长度权重倍数，数字越大则中心越靠近 mineral
+    shareControllerLink: false, // true 则允许 controller 和中央建筑共用一个 link
+    labProposalNum: 10,     // 如果地形太狭窄导致没有摆 lab，则可以尝试把这个数字减小到 9 或 8
+    maxExtensionDistance: 15, // 动态规划摆 extension 的最远距离，如果该距离内摆不完则会沿路摆
+    acceptThreshold: 2, // 动态规划中控制 extension 分布
+    reviewThreshold: 3, // 动态规划中控制 extension 分布
+    fillUpThreshold: 3, // 动态规划中控制 extension 分布
 };
-const NUM_EXT_FOR_SPAWN = 2;
-/** 多摆的 2 个 ext 会被替换成 spawn */
-const MAX_EXTENSIONS = CONTROLLER_STRUCTURES.extension[8] + NUM_EXT_FOR_SPAWN;
+const NUM_EXT_FOR_SPAWN = 3;
+const NUM_LAB = 10;
+/** 多摆的 NUM_EXT_FOR_SPAWN 个 ext 会被替换成 spawn， NUM_LAB 个 ext 替换成 lab，额外2个供 ob、nuker 用 */
+const MAX_EXTENSIONS = CONTROLLER_STRUCTURES.extension[8] + NUM_EXT_FOR_SPAWN + NUM_LAB + 2;
+const NUM_EXT_FOR_GROUP = 6;
 /** 计算到资源点、出口的路径时移除 ext 的代价 */
 const EXTENSION_COST = 8;
 /** 路程踏入 exit 被敌方 range_attack 范围内的代价 */
@@ -954,6 +958,9 @@ function placeCentralStructure(bestAnchors) {
  * @returns {{x:number, y:number}[]} 用于计算 ext 时将这些路点右下正方形边长设 1、2
  */
 function paveRoadFromStorageToLab(room, layoutCost, layout, bestAnchor4x4) {
+    if (!bestAnchor4x4 || !room.name) {
+        return [];
+    }
     // lab 中心，这个位置足够了
     let goals = [{ pos: new RoomPosition(bestAnchor4x4.x - 1, bestAnchor4x4.y - 1, room.name), range: 1 }];
     let pfCostMat = new PathFinder.CostMatrix, start;
@@ -1453,6 +1460,9 @@ function removeGoal(pos, goals) {
  * @returns 
  */
 function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layoutCost, unplacedSpawn) {
+    if (!start || !start.roomName || !goals || goals.length === 0) {
+        return { removedPosList: [], goalNearestPos: {}, unplacedSpawn: 0 };
+    }
     let removedPosList = [], result, path, px, py;
     /**@type {{[posStr:string]:RoomPosition}} */
     let goalNearestPos = {}, removedGoals, nearestPos;
@@ -1465,8 +1475,17 @@ function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layo
         roomCallback: () => pfCostMat
     }
     while (goals.length) {
-        result = PathFinder.search(start, goals, pfOpts);
+        try {
+            result = PathFinder.search(start, goals, pfOpts);
+        } catch (e) {
+            console.log(`findAllGoals PathFinder.search error: ${e.message}, start=${JSON.stringify(start)}, goals.length=${goals.length}`);
+            break;
+        }
         if (result.incomplete) {
+            if (goals.length > 1) {
+                goals.shift();
+                continue;
+            }
             console.log(`Error: cannot find path to goals ${JSON.stringify(goals)}`);
             break;
         }
@@ -1525,6 +1544,9 @@ function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layo
  * @returns 
  */
 function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost, exitMaps) {
+    if (!start || !start.roomName || !goals || goals.length === 0) {
+        return { removedPosList: [], canReach: false, towerCandidatePosList: [] };
+    }
     /**@type {RoomPosition[]} */
     let removedPosList = [], result, path, px, py, canReach, towerCandidatePosList = [];
     /**@type {PathFinderOpts} */
@@ -1534,7 +1556,12 @@ function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost
         swampCost: 4,
         roomCallback: () => pfCostMat
     }
-    result = PathFinder.search(start, goals, pfOpts);
+    try {
+        result = PathFinder.search(start, goals, pfOpts);
+    } catch (e) {
+        console.log(`findRoadToRamp PathFinder.search error: ${e.message}, start=${JSON.stringify(start)}, goals=${JSON.stringify(goals)}`);
+        return { removedPosList: [], canReach: false, towerCandidatePosList: [] };
+    }
     if (result.incomplete) {
         canReach = false;
         return { removedPosList, canReach, towerCandidatePosList };
@@ -1600,6 +1627,9 @@ function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost
  * @param {CostMat} layoutCost 
  */
 function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roads, extensionPos, exitMaps, layout, layoutCost) {
+    if (!goalObjects || goalObjects.length === 0 || !goalNearestPos) {
+        return { removedPosList: [], sourceWorkPosList: [], controllerWorkPos: null, mineralWorkPos: null };
+    }
     /**@type {RoomPosition[]} */
     let removedPosList = [], terrain = (room.getTerrain() as any).getRawBuffer();
     let mineralWorkPos, controllerWorkPos, sourceWorkPosList = [];
@@ -1609,8 +1639,12 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
     layout[WORK_POS] = [];
     for (let goal of goalObjects) {
         let goalPos = goal.pos;
-        let nearestPos = goalNearestPos[`${goalPos.x}_${goalPos.y}`], y50;
+        let nearestPos = goalNearestPos[`${goalPos.x}_${goalPos.y}`];
+        if (!nearestPos || !nearestPos.roomName) {
+            continue;
+        }
         let nearestRange = Math.max(Math.abs(centralLinkPos.x - nearestPos.x), Math.abs(centralLinkPos.y - nearestPos.y));
+        let y50;
         //@ts-ignore
         if (goal.mineralType) {
             // it's a Mineral，不用 link 只找 pos
@@ -1929,7 +1963,7 @@ function placeTower(exitWidths, layout, layoutCost, roads, extensionPos) {
  * @param {ClaimableRoom} room 
  * @param {{x:number, y:number}[]} entryRoots
  */
-function placeRoadsAndLinkAndRampartAndTower(room, start, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps) {
+function placeRoadsAndLinkAndRampartAndTower(room, start, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, shareControllerLink = false) {
     let pfCostMat = new PathFinder.CostMatrix, roads = getEmptyMat(1, 48), rampPos = getEmptyMat(1, 48);
     let removedExt = getEmptyMat(2, 47), removedNum = 0;
     /**
@@ -2145,42 +2179,60 @@ function placeAlongRoad(storagePos, terrain, layout, layoutCost, roads, extensio
  */
 
 /**
- * 
- * @param {ClaimableRoom|string} room 
- * @param {boolean} showPlan 可选参数，显示结果
- * @param {number} acceptThreshold 可选参数，1~7，默认2，控制extension分布
- * @param {number} reviewThreshold 可选参数，1~7，默认3，控制extension分布
+ * ScorpiorPlanner 输入参数接口
  */
-function plan(room, acceptThreshold = config.acceptThreshold, reviewThreshold = config.reviewThreshold) {
-    if (typeof room == 'string') {
-        room = Game.rooms[room];
-    }
-    if (!(room instanceof Room) || !room.controller) {
-        return false;
-    }
-    room.source = room.source || room.find(FIND_SOURCES);   // 
-    room.mineral = room.mineral || room.find(FIND_MINERALS)[0];  // 
-    
-    let terrain = (room.getTerrain() as any).getRawBuffer();
-    // @ts-ignore
-    let costMats = getCostMats(room, terrain);      // 获取从每个矿点及 controller 出发的路程图列表
+export interface PlannerInput {
+    roomName: string;
+    controller: { x: number; y: number };
+    sources: Array<{ x: number; y: number }>;
+    mineral?: { x: number; y: number };
+    terrain: Uint8Array;
+    acceptThreshold?: number;
+    reviewThreshold?: number;
+}
 
-    /*     for (x in costMats[3]) {
-            for (y in costMats[3][x]) {
-                    opacity: 0.5
-                });
-            }
-        } */
+/**
+ * 通过 Room 对象或房间名进行规划
+ * @param room Room 对象或房间名
+ */
+export function plan(room: Room | string, acceptThreshold = config.acceptThreshold, reviewThreshold = config.reviewThreshold) {
+    const r = typeof room === 'string' ? Game.rooms[room] : room;
+    if (!r || !r.controller) {
+        return null;
+    }
 
+    const input: PlannerInput = {
+        roomName: r.name,
+        controller: { x: r.controller.pos.x, y: r.controller.pos.y },
+        sources: r.find(FIND_SOURCES).map(s => ({ x: s.pos.x, y: s.pos.y })),
+        mineral: r.find(FIND_MINERALS)[0] ? { x: r.find(FIND_MINERALS)[0].pos.x, y: r.find(FIND_MINERALS)[0].pos.y } : undefined,
+        terrain: (r.getTerrain() as any).getRawBuffer()
+    };
+
+    return planByInput(input, acceptThreshold, reviewThreshold);
+}
+
+function planByInput(input: PlannerInput, acceptThreshold = config.acceptThreshold, reviewThreshold = config.reviewThreshold) {
+    const { roomName, controller, sources, mineral, terrain } = input;
+
+    // 构建虚拟 room 对象用于兼容现有函数
+    const room = {
+        name: roomName,
+        controller: { pos: { x: controller.x, y: controller.y } },
+        source: sources.map((s, i) => ({ pos: { x: s.x, y: s.y }, id: `source${i}` })),
+        mineral: mineral ? { pos: { x: mineral.x, y: mineral.y } } : undefined,
+        getTerrain: () => ({ getRawBuffer: () => terrain })
+    } as any;
+
+    let costMats = getCostMats(room, terrain);
     let { exitGroups, exitMaps } = getExitGroups(terrain);
-    // return
 
-    // calSquare 会改变 terrain
     let { map, bestAnchors } = calSquare(room, terrain, exitGroups, costMats);
     if (bestAnchors.bestAnchor3x3 === undefined) {
         console.log('找不到能摆下中央建筑的位置');
-        return false;
+        return null;
     }
+
     let { layout, layoutCost } = placeCentralStructure(bestAnchors);
     let additionalRoads = paveRoadFromStorageToLab(room, layoutCost, layout, bestAnchors.bestAnchor4x4);
 
@@ -2190,14 +2242,12 @@ function plan(room, acceptThreshold = config.acceptThreshold, reviewThreshold = 
 
     let storage = layout[STRUCTURE_STORAGE][0];
     let startPos = { x: storage.x, y: storage.y, roomName: room.name };
-    let { removedNum, removedExt, roads, rampPos } = placeRoadsAndLinkAndRampartAndTower(room, startPos, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps);
+    let { removedNum, removedExt, roads, rampPos } = placeRoadsAndLinkAndRampartAndTower(room, startPos, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, config.shareControllerLink);
     console.log(`removed: ${removedNum}`);
 
     let { placedNum, obPos } = placeAlongRoad(startPos, terrain, layout, layoutCost, roads, extensionPos, roadPos, removedExt, entryRoots, MAX_EXTENSIONS - num + removedNum);
 
-    /**
-     * 在 roads 中而没有在 layout 中的点，加入 layout[STRUCTURE_ROAD]
-     */
+    // 合并道路
     for (let x in roads) {
         for (let y in roads[x]) {
             if (layout[STRUCTURE_ROAD].find(p => p.x === +x && p.y === +y)) {
@@ -2207,9 +2257,7 @@ function plan(room, acceptThreshold = config.acceptThreshold, reviewThreshold = 
         }
     }
 
-    /**
-     * ext 加入 layout[STRUCTURE_EXTENSION]
-     */
+    // 添加 extension
     layout[STRUCTURE_EXTENSION] = [];
     for (let x in extensionPos) {
         for (let y in extensionPos[x]) {
@@ -2218,14 +2266,10 @@ function plan(room, acceptThreshold = config.acceptThreshold, reviewThreshold = 
     }
     console.log(`placed ext: ${layout[STRUCTURE_EXTENSION].length}`);
 
-    /**
-     * obPos 加入 layout[STRUCTURE_OBSERVER]
-     */
+    // 添加 observer
     layout[STRUCTURE_OBSERVER] = [{ x: obPos.x, y: obPos.y }];
 
-    /**
-     * rampPos 加入 layout[STRUCTURE_RAMPART]
-     */
+    // 添加 rampart
     layout[STRUCTURE_RAMPART] = [];
     for (let x in rampPos) {
         for (let y in rampPos[x]) {

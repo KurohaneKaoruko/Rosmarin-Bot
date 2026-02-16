@@ -1,5 +1,5 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/modules/utils/compress';
-import LayoutVisual from '@/modules/feature/planner/layoutVisual';
+import LayoutVisual from '@/modules/feature/planner/utils/layoutVisual';
 import LayoutPlanner from '@/modules/feature/planner/layoutPlanner';
 import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 

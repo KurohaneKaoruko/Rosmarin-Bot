@@ -1,13 +1,13 @@
-import { PriorityQueue, NewNode, ReclaimNode } from '@/modules/utils/priorityQueue'
-import { UnionFind } from '@/modules/utils/unionFind'
-import { RoomArray } from '@/modules/utils/roomArray'
-import LayoutVisual from '@/modules/feature/planner/layoutVisual'
+import { PriorityQueue, NewNode, ReclaimNode } from '@/modules/feature/planner/utils/priorityQueue'
+import { UnionFind } from '@/modules/feature/planner/utils/unionFind'
+import { RoomArray } from '@/modules/feature/planner/utils/roomArray'
+import LayoutVisual from '@/modules/feature/planner/utils/layoutVisual'
 import {
 	computeBlockByWasm,
 	findLabAnchorByWasm,
 	getBlockPutAbleCountByWasm,
 	isComputeBlockWasmEnabled
-} from '@/modules/utils/plannerKernelWasm'
+} from '@/modules/feature/planner/utils/plannerKernelWasm'
 
 type PlannerPoint = { x: number; y: number; roomName: string }
 type XY = { x: number; y: number }
@@ -1043,6 +1043,7 @@ const ManagerPlanner = {
 
 			let currentWallCnt = 0;
 			let currentWalls = null;
+			const walls = [];
 			if (gt1Cnt > 30 || maxDist > 5) {
 				// 高频路径改为索引队列/数组标记，避免 PriorityQueue + callback 额外开销
 				fastStampToken += 1;
@@ -1052,13 +1053,12 @@ const ManagerPlanner = {
 					fastManorStamp.fill(0);
 				}
 				const stamp = fastStampToken;
-			const walkArr = roomWalkable.arr as number[];
+				const walkArr = roomWalkable.arr as number[];
 				for (let i = 0; i < allList.length; i++) {
 					const e = allList[i];
 					fastManorStamp[e.x * 50 + e.y] = stamp;
 				}
 				// 直接扫描 manor 边界，避免整图 flood-fill
-				const walls = [];
 				for (let i = 0; i < allList.length; i++) {
 					const e = allList[i];
 					const x = e.x;

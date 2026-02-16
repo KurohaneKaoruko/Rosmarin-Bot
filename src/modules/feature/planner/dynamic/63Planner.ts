@@ -1,8 +1,8 @@
 // @ts-nocheck
-import { PriorityQueue, NewNode } from '@/modules/utils/priorityQueue'
-import { UnionFind } from '@/modules/utils/unionFind'
-import { RoomArray } from '@/modules/utils/roomArray'
-import LayoutVisual from '@/modules/feature/planner/layoutVisual'
+import { PriorityQueue, NewNode } from '@/modules/feature/planner/utils/priorityQueue'
+import { UnionFind } from '@/modules/feature/planner/utils/unionFind'
+import { RoomArray } from '@/modules/feature/planner/utils/roomArray'
+import LayoutVisual from '@/modules/feature/planner/utils/layoutVisual'
 
 const minPlaneCnt = 140;
 
