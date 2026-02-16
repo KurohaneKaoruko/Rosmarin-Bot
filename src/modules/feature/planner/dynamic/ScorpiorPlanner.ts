@@ -2218,9 +2218,9 @@ function planByInput(input: PlannerInput, acceptThreshold = config.acceptThresho
     // 构建虚拟 room 对象用于兼容现有函数
     const room = {
         name: roomName,
-        controller: { pos: { x: controller.x, y: controller.y } },
-        source: sources.map((s, i) => ({ pos: { x: s.x, y: s.y }, id: `source${i}` })),
-        mineral: mineral ? { pos: { x: mineral.x, y: mineral.y } } : undefined,
+        controller: { pos: { x: controller.x, y: controller.y, roomName } },
+        source: sources.map((s, i) => ({ pos: { x: s.x, y: s.y, roomName }, id: `source${i}` })),
+        mineral: mineral ? { pos: { x: mineral.x, y: mineral.y, roomName } } : undefined,
         getTerrain: () => ({ getRawBuffer: () => terrain })
     } as any;
 

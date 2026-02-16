@@ -147,10 +147,10 @@ export default {
             }
             if (result == OK) {
                 cpu = Game.cpu.getUsed() - cpu;
-                console.log(`可视化完成，消耗CPU ${cpu.toFixed(2)}。`)
+                console.log(`构建并可视化完成，总消耗CPU ${cpu.toFixed(2)}。`)
                 return OK;
             } else {
-                console.log(`可视化失败，消耗CPU ${cpu.toFixed(2)}。`)
+                console.log(`构建或可视化失败，总消耗CPU ${cpu.toFixed(2)}。`)
                 return result;
             }
         },
