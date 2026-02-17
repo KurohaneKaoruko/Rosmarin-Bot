@@ -70,10 +70,10 @@ export default {
             return OK;
         },
         // 设置房间模式
-        mode(roomName: string, mode: 'main' | 'low' | 'stop' = 'main') {
+        mode(roomName: string, mode: 'main' | 'low' | 'high' | 'stop' = 'main') {
             if (!roomName) return Error('请输入房间名。');
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
-            if (!['main', 'stop', 'low'].includes(mode)) return Error('仅支持main、stop、low模式。');
+            if (!['main', 'stop', 'low', 'high'].includes(mode)) return Error('仅支持main、stop、low、high模式。');
 
             const room = Game.rooms[roomName];
             const BotMemRooms =  getRoomData();

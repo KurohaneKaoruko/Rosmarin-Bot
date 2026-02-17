@@ -59,9 +59,19 @@ const RoleSpawnCheck = {
     },
     'upgrader': (room: Room, current: number) => {
         const lv = room.level;
-        const num = RoleLevelData['upgrader'][lv]['num'];
+        const mode = (room.memory as any).mode;
+        const highMode = mode === 'high';
+        // high 模式下，upgrader 数量翻倍（最多8个）
+        const num = highMode ? Math.min(RoleLevelData['upgrader'][lv]['num'] * 2, 8) : RoleLevelData['upgrader'][lv]['num'];
         if (room.memory.defend) return false;
         const ttd = room.controller?.ticksToDowngrade || 0;
+        // high 模式下放宽升级条件，只要有足够能量就升级
+        if (highMode) {
+            // high 模式：只要有基础能量就开始升级
+            const minEnergy = lv >= 5 ? 30e3 : 10e3;
+            if (room[RESOURCE_ENERGY] < minEnergy) return false;
+            return current < num;
+        }
         // 能量不充裕时不常驻升级
         if (lv == 8 && ttd > 100000 && room[RESOURCE_ENERGY] < 300e3) return false;
         // 能量太低暂时不升级

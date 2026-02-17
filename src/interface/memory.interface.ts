@@ -181,9 +181,10 @@ interface RoomControlMemory {
      * @description 控制房间的运行状态
      * - 'main': 正常运行模式
      * - 'low': 低功耗模式，减少 CPU 消耗
+     * - 'high': 高功耗模式，最大化运行效率
      * - 'stop': 停止模式，暂停大部分功能
      */
-    mode: 'main' | 'low' | 'stop';
+    mode: 'main' | 'low' | 'high' | 'stop';
 
     /**
      * 布局类型

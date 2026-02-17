@@ -9,6 +9,7 @@ export default class RoomExecute extends Room {
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
         const lowMode = mode === 'low';
+        const highMode = mode === 'high';
         this.updateEnergyState(false);
         // 更新任务池
         this.MissionUpdate();

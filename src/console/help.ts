@@ -65,7 +65,7 @@ const helpTexts: Record<string, string> = {
         `- 手动布局：需保证 storage / terminal / factory / 1 个 link 集中放置，与这四个建筑均相邻的点位为中心（中央搬运工位置）`,
         `${cmd('room.remove(roomName)')}：从控制列表删除房间`,
         `${cmd('room.list()')}：查看控制列表`,
-        `${cmd('room.mode(roomName, mode)')}：设置房间运行模式（main / stop / low）`,
+        `${cmd('room.mode(roomName, mode)')}：设置房间运行模式（main / stop / low / high）`,
         `${cmd('room.setcenter(roomName, x, y)')}：设置房间布局中心`,
         `${cmd('room.defendmode(roomName, mode)')}：设置房间防御模式`,
         `${cmd('room.sign(roomName, text?)')}：设置房间签名`,
