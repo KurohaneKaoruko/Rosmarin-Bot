@@ -1565,7 +1565,7 @@ const ManagerPlanner = {
 			}
 		}
 
-		//#region 新的连接外矿方式
+		//#region 优化：批量寻路连接外矿
 		const costs = new PathFinder.CostMatrix();
 		const terrain = new Room.Terrain(roomName);
 		for (let i = 0; i < 50; i++) {
@@ -1587,6 +1587,8 @@ const ManagerPlanner = {
 			const e = structMap['road'][i];
 			costs.set(e[0], e[1], 1);
 		}
+
+		// 优化：按距离分批寻路，而不是逐个寻路
 		structMap['container'].sort((a, b) => {
 			const adx = a[0] - storageX;
 			const ady = a[1] - storageY;
@@ -1594,24 +1596,40 @@ const ManagerPlanner = {
 			const bdy = b[1] - storageY;
 			return adx * adx + ady * ady - (bdx * bdx + bdy * bdy);
 		});
+
 		const centerRoomPos = new RoomPosition(centerX, centerY, roomName);
-		for (let ci = 0; ci < structMap['container'].length; ci++) {
-			const e = structMap['container'][ci];
-			const path = PathFinder.search(
-				centerRoomPos,
-				{ pos: new RoomPosition(e[0], e[1], roomName), range: 1 },
-				{
-					roomCallback: () => {
-						return costs;
-					},
-					maxRooms: 1
-				}
-			).path;
-			for (let i = 0; i < path.length; i++) {
-				const pos = path[i];
-				if (costs.get(pos.x, pos.y) != 1) {
-					structMap['road'].push([pos.x, pos.y]);
-					costs.set(pos.x, pos.y, 1);
+		const pfOpts = {
+			roomCallback: () => costs,
+			maxRooms: 1,
+			plainCost: 2,
+			swampCost: 4
+		};
+
+		// 优化策略：分批寻路，每次传入多个 goals
+		const BATCH_SIZE = 5;
+		const containers = structMap['container'];
+
+		for (let batchStart = 0; batchStart < containers.length; batchStart += BATCH_SIZE) {
+			const batchEnd = Math.min(batchStart + BATCH_SIZE, containers.length);
+			const batchGoals: any[] = [];
+
+			for (let ci = batchStart; ci < batchEnd; ci++) {
+				const e = containers[ci];
+				batchGoals.push({ pos: new RoomPosition(e[0], e[1], roomName), range: 1 });
+			}
+
+			// 批量寻路
+			// @ts-ignore - 支持多个 goal 的批量寻路优化
+			const result = PathFinder.search(centerRoomPos, batchGoals, pfOpts) as any;
+
+			if (!result.incomplete) {
+				// 处理路径上的点
+				for (let i = 0; i < result.path.length; i++) {
+					const pos = result.path[i];
+					if (costs.get(pos.x, pos.y) != 1) {
+						structMap['road'].push([pos.x, pos.y]);
+						costs.set(pos.x, pos.y, 1);
+					}
 				}
 			}
 		}
