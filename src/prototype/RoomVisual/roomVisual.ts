@@ -1,7 +1,8 @@
 const colors = {
+    white: '#ffffff',
     gray: '#555555',
     light: '#AAAAAA',
-    road: '#fa6f6f',
+    road: '#666',
     energy: '#FFE87B',
     power: '#F53547',
     dark: '#181818',
@@ -319,7 +320,8 @@ export default class RoomVisualExtension extends RoomVisual {
                     opacity: opts.opacity
                 })
                 this.poly(inner, {
-                    fill: colors.gray,
+                    fill: colors.energy,
+                    stroke: false as any,
                     opacity: opts.opacity
                 })
                 break
@@ -357,6 +359,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 })
                 this.poly(inner, {
                     fill: colors.light,
+                    stroke: false as any,
                     opacity: opts.opacity
                 })
                 this.rect(x - 0.45, y - 0.45, 0.9, 0.9, {
@@ -377,7 +380,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 })
                 this.circle(x, y - 0.025, {
                     radius: 0.40,
-                    fill: colors.gray,
+                    fill: opts.isCore ? colors.white : colors.gray,
                     opacity: opts.opacity
                 })
                 this.rect(x - 0.45, y + 0.3, 0.9, 0.25, {
@@ -408,7 +411,7 @@ export default class RoomVisualExtension extends RoomVisual {
                     opacity: opts.opacity
                 })
                 this.rect(x - 0.4, y - 0.3, 0.8, 0.6, {
-                    fill: colors.gray,
+                    fill: colors.energy,
                     opacity: opts.opacity
                 })
                 this.rect(x - 0.2, y - 0.9, 0.4, 0.5, {
@@ -422,6 +425,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 this.circle(x, y, {
                     radius: 0.175,
                     fill: colors.road,
+                    stroke: false as any,
                     opacity: opts.opacity
                 })
                 const self = this as any
@@ -430,19 +434,17 @@ export default class RoomVisualExtension extends RoomVisual {
                 break
             }
             case STRUCTURE_RAMPART:
-                this.rect(x - 0.5, y - 0.5, 1, 1, {
+                this.circle(x, y, {
+                    radius: 0.65,
                     fill: '#434C43',
                     stroke: '#5D735F',
                     strokeWidth: 0.10,
-                    opacity: opts.opacity
+                    opacity: 0.6
                 })
                 break
             case STRUCTURE_WALL:
-                this.circle(x, y, {
-                    radius: 0.40,
+                this.rect(x - 0.5, y - 0.5, 1, 1, {
                     fill: colors.dark,
-                    stroke: colors.light,
-                    strokeWidth: 0.05,
                     opacity: opts.opacity
                 })
                 break
@@ -555,7 +557,7 @@ export default class RoomVisualExtension extends RoomVisual {
                 if (rd) {
                     this.line(r[0], r[1], c[0], c[1], {
                         color: color,
-                        width: 0.15,
+                        width: 0.35,
                         opacity: opts.opacity || 1
                     })
                 }
@@ -682,7 +684,7 @@ export default class RoomVisualExtension extends RoomVisual {
     }
 
     public _compound(type: ResourceConstant, x: number, y: number, size = 0.25) {
-        const label = type.replace("2", '₂')
+        const label = type.replace("2", "\u2082")
         this.text(label, x, y, {
             font: "bold " + (size * 1) + " arial",
             color: ResourceColors[type][1],
@@ -691,3 +693,4 @@ export default class RoomVisualExtension extends RoomVisual {
         })
     }
 }
+

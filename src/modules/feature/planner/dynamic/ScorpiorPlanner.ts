@@ -1,7 +1,164 @@
+import { minCut, getTowerCandidatePoses, getVisitedAndDist } from '../utils/minCut';
+
 type XY = [number, number];
 type LayoutStructMap = { [structureType: string]: XY[] };
+const max = (arr: number[]) => Math.max(...arr);
+const min = (arr: number[]) => Math.min(...arr);
+/**
+ *  作者：Scorpior
+ *  贡献者：A56，搞成了傻瓜版本
+ * 
+ *  版本: v2.1.0
+ *  v2.1 为最后一个开源版本，除了 bugfix 外不会新增 feature。
+ * 
+ *  changelog:
+ *  1.0.1: 修了parseLayout()的bug，未改plan()，换了2号layout。
+ *  1.0.2: 修了placeAlongRoad()中的几个bug。
+ *  2.0.0: 
+ *      1）中央布局大改，2x2 第一 spawn 和中央 link，3x3 storage & terminal & powerSpawn & factory，4x4 lab 集群，互相邻近且方向自动计算；
+ *      2）加入沿出口贴边 rampart 和均匀分布的 tower（受其他建筑阻挡时可能造不满 6 tower）；
+ *      3）自动计算 source 和 controller 的 link，mineral 的 container。
+ *  2.0.1: A56 封装成根据 flag 调用及存入 Memory 功能。
+ *  2.0.2: 往 rampart 铺路 bugfix，精简代码，添加注释。
+ *  2.1.0:
+ *      1）中央建筑进一步修改，spawn 和 lab 都不再视为中央建筑，3x3 改成4角是 road，2x2 去掉 spawn，这保证中央建筑肯定不堵路；
+ *      2）mincut 修 rampart；
+ *      3）按新 rampart 位置计算造 tower 候选位置，按伤害选择最终 tower 位置；
+ *      4）按新 rampart 位置计算 workPos 和 link 权重，给其中会被 rangeAttack 到的加 rampart；
+ *      5）完全自由形状 lab，得到的 layout[STRUCTURE_LAB] 数组末尾两个是原料 lab，利用 RoomVisual.js 可视化时为白色；
+ *      4）ext（extension）沿路摆优化，优先摆到通往 现有 ext 的路边（而不是同一方向无 ext 的路边）；
+ *      6）允许中央和 controller 共用 link，由 config 中的 shareControllerLink 控制。
+ *  2.1.0 已知问题（不会在开源版本中修复）：
+ *      1）核心选址可能落在被墙和 exit 隔开的小区域，导致建筑摆不完，若房间内其他区域有更大空地，可以修改 config 中不同资源点的 weight 来调整核心选址；
+ *      2）仅考虑了从 rampart 前 rangeAttack 区域，未考虑自然墙体薄时隔墙 rangeAttack 范围；
+ *      3）tower 有小概率在伤害次佳位置；
+ *    
+ * 
+ *  需要配合压缩包内的 RoomVisual.js 使用。
+ *
+ *  ==================== 基础使用 ====================
+ *  require('RoomVisual');
+ *  require('planner');
+ *  RP('W1N1');  // 原始方法（运行规划 + 可视化）
+ * 
+ *  ==================== 调整布局偏好 ====================
+ *  修改下方 const config 常量字典。
+ *  修改 initialMap 函数可以调整 controller、source 等附近不可建造范围。
+ *
+ *  ==================== 全局缓存系统 ====================
+ *  新增全局缓存功能，将规划和可视化分离：
+ *
+ *  1. 运行规划并保存到全局缓存（不显示可视化）
+ *     runPlan('W1N1')
+ *
+ *  2. 从缓存读取并可视化
+ *     visualizePlan('W1N1')
+ *
+ *  3. 保存到 Memory.roomPlanner[roomName]（会清除旧数据）
+ *     savePlanToMemory('W1N1')
+ *
+ *  4. 列出所有缓存
+ *     listPlanCache()
+ *
+ *  5. 清除指定房间缓存
+ *     clearRoomPlanCache('W1N1')
+ *
+ *  ==================== Flag 自动化使用（需手动取消下方注释）====================
+ *  在 main.js 的 loop 中调用 autoPlannerByFlag() 实现 flag 驱动：
+ *
+ *  - RP flag: 运行规划 -> 删除 RP -> 创建 VP
+ *  - VP flag: 从缓存可视化
+ *  - SP flag: 保存到 Memory -> 删除 SP
+ *
+ *  算法流程：
+ *  1.  getaccumulateCostMat() 中动态规划（dp）算4个资源（source、mineral、controller）的路程图，用于选建筑中心时选总路程短的。
+ *  2.  getExitGroups() 遍历四条边，将房间出口分组（被墙隔断的为不同组），计算每组距离出口（dist）为 0~5 的 pos，按距离、方向、分组存储下来。
+ *      dist 0 是出口本身，
+ *      dist 1 是出口旁边的空地，不可造除了路以外的建筑。
+ *      dist 2 是允许造 rampart 的最外围位置；
+ *      dist 3、4、5 可能被 rangeAttack（新 powerCreep 可以提升攻击距离打到 dist 5），不造建筑，除非是资源点工位；
+ *  3.  dist 0~5 视作墙，calSquare() 中 dp 按 terrain 算房间内空地，选能摆下核心区的总路程最小点作为 anchor。
+ *      核心区包括2块：
+ *      3x3 的正方形内摆storage、terminal、powerSpawn、factory；
+ *      2x2 的正方形内摆第央link，规则是与3x3的核心区块相邻，且会自动计算朝向让link与storage格子相邻；
+ *  4.  根据 anchor 和核心建筑位置设置 CostMatrix 和被占用的空地，dp 摆 extension，总数算上 lab、spawn 和 nuker，
+ *      每个 extension 都有一个 entry 点作为填 extension 的位置，entry 点按树状连接。
+ *  5.  将核心区和 extension 作为源（start），dist=0 房间出口作为汇（target），用 minCut 计算 rampart。
+ *  6.  按 rampart 位置计算各资源点工位和 link/container，往工位铺路，往 rampart 寻路保证可达，期间可能移除挡路 extension。
+ *  7.  按 rampart 位置铺 tower，选取伤害最大化位置，且倾向于让 tower 两者、三者成组以便填充。
+ *      往 tower 铺路，若有 tower 挡路则移除，从候选位置中选伤害最大的位置造 tower，直到无候选位置或造齐6个有路的 tower。
+ *      期间可能移除挡路或在 tower 位置的 extension。 
+ *  8.  沿路铺 extension，补齐被移除的数量。
+ *  9.  从 extension 位置中选取 10 个改为 lab，3个改为 spawn，1个改ob、1个改nuker。
+ * 
+ * 教程文章：
+ *  1. https://github.com/scorpior0/The-design-of-OverDom/blob/master/advanced%20guide/%E8%87%AA%E5%8A%A8%E8%A7%84%E5%88%92.md
+ *  2. https://github.com/scorpior0/The-design-of-OverDom/blob/master/advanced%20guide/%E8%87%AA%E5%8A%A8%E8%A7%84%E5%88%92%E8%BF%9B%E9%98%B6.md
+ * 
+ * 
+ *  TODO
+ *  2.2
+ *    1）calSquare() 中用 union-find 思路记录不同连通区，只在面积足够大的连通区中选 anchor；
+ *    2）往资源点的路 road[x][y] 设资源点编号，以便按资源点最外围 ext 改成 spawn，超出数量的 ext 若 road[x][y] 不为资源点则删 road；
+ *    3）spawn 分开：1个靠近核心，2个靠近不同方向的工位；
+ *    4）分割 ext，每 NUM_EXT_FOR_GROUP 个作为一个cluster；
+ *    5）1~8 级建筑图分开，低级时 tower 放在 spawn 旁；src 和 controller container； storage 和 terminal 考虑放在 controller 旁；
+ *    6）建筑需避开隔墙 range_attack 的区域；
+ *  2.3 
+ *    1）计算外矿路程，在选中心时考虑；
+ *    2）外矿铺路和 container；
+ *    3）自动按能量运输需求量造用于外矿或用于填 tower 的 link；
+ *    4）src 矿工身边 ext 甚至 spawn；
+ *    5）ob 和 nuker 放远点防核；
+ *    6）rampart 之中周围8格只有1个格可能存在敌人的改成 c.wall
+ * 
+ */
+// ==================== Flag 自动化代码（需取消注释）====================
+// 将下方代码复制到 main.js 的 loop 中，或者取消注释并在 main.js 中调用 autoPlannerByFlag()
+
+/*
+function autoPlannerByFlag() {
+    // RP flag: 运行规划 -> 删除 RP -> 创建 VP
+    if (Game.flags.RP) {
+        const flag = Game.flags.RP;
+        const roomName = flag.pos.roomName;
+        console.log(`[AutoPlanner] 检测到 RP flag，开始规划房间 ${roomName}`);
+
+        if (runPlan(roomName)) {
+            const flagPos = flag.pos;
+            flag.remove();
+            Game.rooms[roomName].createFlag(flagPos, 'VP');
+            console.log(`[AutoPlanner] 规划完成，已创建 VP flag`);
+        }
+    }
+
+    // VP flag: 从缓存可视化
+    if (Game.flags.VP) {
+        const roomName = Game.flags.VP.pos.roomName;
+        visualizePlan(roomName);
+    }
+
+    // SP flag: 保存到 Memory -> 删除 SP
+    if (Game.flags.SP) {
+        const flag = Game.flags.SP;
+        const roomName = flag.pos.roomName;
+        console.log(`[AutoPlanner] 检测到 SP flag，保存房间 ${roomName} 到 Memory`);
+
+        if (savePlanToMemory(roomName)) {
+            flag.remove();
+            console.log(`[AutoPlanner] 已保存到 Memory.roomPlanner['${roomName}']`);
+        }
+    }
+}
+
+// 在 main.js 的 loop 中调用:
+// autoPlannerByFlag();
+*/
+
+
 
 /**
+ * @typedef {{x:number, y:number}} Pos
  * @typedef {{[x:number]:{[y:number]:number}}} CostMat
  * @typedef {{[cost:number]: {x: number, y:number}[]}} CandidateAnchors
  * @typedef {{x:number, y:number, cost:number, noControllerCost:number}} Anchor
@@ -20,10 +177,11 @@ type LayoutStructMap = { [structureType: string]: XY[] };
  *   4: {[exitType:number]: Array<Array<{x:number, y:number}>>}, // 0~4 都不可造除了路、rampart、link、extractor 以外的建筑物
  *   5: {[exitType:number]: Array<Array<{x:number, y:number}>>}, // 5、6 摆 tower
  *   [key:number]: {[exitType:number]: Array<Array<{x:number, y:number}>>}  // 作类型提示用，实际只计算 0~6
-* }} ExitGroups
+ * }} ExitGroups
+ * @typedef {{x:number, y:number, potentialExtPos:Pos[], extPos:Pos[], hasPotential:boolean, parent:Pos, children:Pos[], accumExtPos:number}} RoadPos
  */
 
-/** ScorpiorPlanner 配置 - 与 planner.js 保持一致 */
+/************   修改这里面的参数可以微调布局，效果自己试试看   ************/
 const config = {
     controllerWeight: 3,    // 到 controller 路程长度权重倍数，数字越大则中心越靠近 controller
     sourceWeight: 1,        // 到 source 路程长度权重倍数，数字越大则中心越靠近 source
@@ -44,8 +202,8 @@ const NUM_EXT_FOR_GROUP = 6;
 const EXTENSION_COST = 8;
 /** 路程踏入 exit 被敌方 range_attack 范围内的代价 */
 const EXIT_PATHFINDER_COST = 9;
-const LAB_IDEAL_DISTANCE = 3.8;
-const WORK_POS = 'work_pos'
+const WORK_POS = 'work_pos';
+const TOWER_DAMAGE_DECLINE = (TOWER_POWER_ATTACK * TOWER_FALLOFF) / (TOWER_FALLOFF_RANGE - TOWER_OPTIMAL_RANGE);
 
 const CANDIDATE_2x2 = [
     { x: -1, y: -3 },
@@ -57,38 +215,6 @@ const CANDIDATE_2x2 = [
     { x: 2, y: -1 },
     { x: 2, y: 0 },
 ]
-const CANDIDATE_4x4 = [
-    { x_start: -3, y_start: -3, x_end: 3, y_end: -3 },
-    { x_start: 4, y_start: -3, x_end: 4, y_end: 3 },
-    { x_start: -2, y_start: 4, x_end: 4, y_end: 4 },
-    { x_start: -3, y_start: -2, x_end: -3, y_end: 4 },
-]
-const LAB_LAYOUT = {
-    1: [
-        { x: -3, y: -3 },
-        { x: -2, y: -2 },
-        { x: -1, y: -1 },
-        { x: 0, y: 0 },
-        { x: -1, y: -3 },
-        { x: 0, y: -3 },
-        { x: 0, y: -2 },
-        { x: -3, y: -1 },
-        { x: -3, y: 0 },
-        { x: -2, y: 0 },
-    ],
-    2: [
-        { x: -3, y: 0 },
-        { x: -2, y: -1 },
-        { x: -1, y: -2 },
-        { x: 0, y: -3 },
-        { x: 0, y: 0 },
-        { x: 0, y: -1 },
-        { x: -1, y: 0 },
-        { x: -3, y: -3 },
-        { x: -2, y: -3 },
-        { x: -3, y: -2 },
-    ]
-}
 
 /**
  * 获得一个 [start:end] = {} 的二维空数组
@@ -105,6 +231,13 @@ function getEmptyMat(start, end) {
     return mat;
 }
 
+let circleStyle = [
+    { radius: 0.4, opacity: 0.6, fill: '#9acd32' },
+    { radius: 0.8, opacity: 0.4, fill: '#90ee90' },
+    { radius: 0.4, opacity: 0.9, fill: '#ffd700' },
+    { radius: 0.3, opacity: 0.75, fill: '#8b4513' },
+    { radius: 0.4, opacity: 0.7, fill: '#ff69b4' }
+]
 
 /**
  * @param {number} x1 
@@ -117,8 +250,8 @@ function isNear(x1, y1, x2, y2) {
 }
 
 /**
- * 初始化 costMat，把所有墙、出口视为 255（不可通过）。   
- * 若传入 layoutCost，代表已摆下的建筑图，其中不可穿过的建筑也是 255。    
+ * 初始化 costMat，把 pos 的 range 范围内的所有墙、出口视为 255（不可通过）。   
+ * 若传入 layoutCost，代表已摆下的建筑图，其中 pos 的 range 范围内的不可穿过的建筑也是 255。    
  * 
  * @param {RoomPosition} pos 
  * @param {number} range 
@@ -162,8 +295,9 @@ function initialCost(pos, range, terrain, layoutCost = undefined, extensionPos =
  * @param {number} range 
  * @param {Uint8Array} terrain 
  * @param {number} weight 
+ * @param {CostMat} accumulateCostMat 
  */
-function calCostMat(pos, range, terrain, weight) {
+function calCostMat(pos, range, terrain, weight, accumulateCostMat) {
     let { costMat, edgeSet } = initialCost(pos, range, terrain);
     let j50, px, py;
     for (let pos of edgeSet) {
@@ -183,6 +317,7 @@ function calCostMat(pos, range, terrain, weight) {
                     y: j
                 });
                 costMat[i][j] = costMat[px][py] + weight;
+                accumulateCostMat[i][j] = accumulateCostMat[i][j] ? accumulateCostMat[i][j] + costMat[i][j] : costMat[i][j];
             }
         }
     }
@@ -195,31 +330,32 @@ function calCostMat(pos, range, terrain, weight) {
  * 
  * @param {ClaimableRoom} room 
  * @param {Uint8Array} terrain 
- * @returns {CostMat[]}
+ * @returns {CostMat}
  */
-function getCostMats(room, terrain) {
-    let costMats = [calCostMat(room.controller.pos, 2, terrain, config.controllerWeight)];
+function getaccumulateCostMat(room, terrain) {
+    let accumulateCostMat = getEmptyMat(0, 49);
+    calCostMat(room.controller.pos, 2, terrain, config.controllerWeight, accumulateCostMat);
     for (let source of room.source) {
-        costMats.push(calCostMat(source.pos, 1, terrain, config.sourceWeight));
+        calCostMat(source.pos, 1, terrain, config.sourceWeight, accumulateCostMat);
     }
     if (room.mineral) {
-        costMats.push(calCostMat(room.mineral.pos, 1, terrain, config.mineralWeight));
+        calCostMat(room.mineral.pos, 1, terrain, config.mineralWeight, accumulateCostMat);
     }
-    return costMats;
+    return accumulateCostMat;
 }
 
 /**
  * 获取每个出口周围不同距离的空地格子。
  * 对于每一待检查的 eixtGroup，用线段起止点表示，对于检查后的，用 {x:number, y:number} 数组
  * dist == 0 为出口格，dist == 1 也不能建造
- * dist == 2 造 ramp
+ * dist == 2 可以造 ramp
  * dist == 3、4 为敌方可攻击区，设置为不能建造除矿点 container、link 以外建筑
- * dist == 5、6 为 tower 位置
  * 
  * @param {Uint8Array} terrain 
- * @returns {ExitGroups} dist 0~2 相连的才算一个 group，dist 3 以上各方向只算作同一个 group
+ * @param {RoomVisual} rv 
+ * @returns {{exitGroup:ExitGroups, exitMaps:{[dist:number]:CostMat}}} dist 0~2 相连的才算一个 group，dist 3 以上各方向只算作同一个 group
  */
-function getExitGroups(terrain) {
+function getExitGroups(terrain, rv) {
     /**@type {ExitGroups} */
     let exitGroups = { 0: {}, 1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {} };    // 用于存储算法结果，每一级代表与出口不同距离的空地
     let exitMaps = {
@@ -261,6 +397,7 @@ function getExitGroups(terrain) {
             if (terrain[terrainIdx] & TERRAIN_MASK_WALL) {
                 if (currentGroup.length > 0) {
                     for (let exitPos of currentGroup) {
+                        // rv.text('0', exitPos.x, exitPos.y);
                         exitMaps[0][exitPos.x][exitPos.y] = 1;
                     }
                     // console.log(`group from`, JSON.stringify(pStart), ' to ', JSON.stringify(pEnd));
@@ -356,6 +493,7 @@ function getExitGroups(terrain) {
                                         posGroup.push({ x: irv, y: j });
                                         exitCost[irv][j] = dist;    // 标记 exitCost 此处距离出口最近距离
                                         exitMaps[dist][irv][j] = 1;
+                                        // rv.text('' + dist, irv, j, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
 
                                 } else {
@@ -363,6 +501,7 @@ function getExitGroups(terrain) {
                                         posGroup.push({ x: i, y: irv });
                                         exitCost[i][irv] = dist;
                                         exitMaps[dist][i][irv] = 1;
+                                        // rv.text('' + dist, i, irv, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
                                 }
                             }
@@ -374,6 +513,7 @@ function getExitGroups(terrain) {
                                         exitCost[xVert][yVert] = dist;
                                         posGroup.push({ x: xVert, y: yVert });
                                         exitMaps[dist][xVert][yVert] = 1;
+                                        // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
                                 }
                                 for (let xVert = idx - 1, yVert = j - yDeltaNext; 0 < yVert && yVert < 49; yVert -= yDeltaNext) {
@@ -381,6 +521,7 @@ function getExitGroups(terrain) {
                                         exitCost[xVert][yVert] = dist;
                                         posGroup.push({ x: xVert, y: yVert });
                                         exitMaps[dist][xVert][yVert] = 1;
+                                        // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
                                 }
                             } else {
@@ -389,6 +530,7 @@ function getExitGroups(terrain) {
                                         exitCost[xVert][yVert] = dist;
                                         posGroup.push({ x: xVert, y: yVert });
                                         exitMaps[dist][xVert][yVert] = 1;
+                                        // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
                                 }
                                 for (let xVert = i - xDeltaNext, yVert = idx - 1; 0 < xVert && xVert < 49; xVert -= xDeltaNext) {
@@ -396,6 +538,7 @@ function getExitGroups(terrain) {
                                         exitCost[xVert][yVert] = dist;
                                         posGroup.push({ x: xVert, y: yVert });
                                         exitMaps[dist][xVert][yVert] = 1;
+                                        // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                                     }
                                 }
                             }
@@ -444,6 +587,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     for (let xVert = group[group.length - 1].x + dist - 1, yVert = j - yDeltaNext; 0 < yVert && yVert < 49; yVert -= yDeltaNext) {
@@ -453,6 +597,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                 } else {
@@ -463,6 +608,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     for (let xVert = i - xDeltaNext, yVert = group[group.length - 1].y + dist - 1; 0 < xVert && xVert < 49; xVert -= xDeltaNext) {
@@ -472,6 +618,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                 }
@@ -489,7 +636,7 @@ function getExitGroups(terrain) {
     // 3、4 dist 为敌方可攻击区域，只需考虑与 dist 0、dist 1 空地的 range，即 max(x1-x2, y1-y2) <= 3
     // 5、6 dist 为造 tower 的优先区域，也只考虑 range
     // 以下算法假定 dist1 的 group 必定不短于对应的 dist0 group
-    for (let dist = 3; dist <= 6; dist++) {
+    for (let dist = 3; dist <= 5; dist++) {
         for (let conf of exitConfig) {
             let [exitType, xDeltaCur, yDeltaCur, xDeltaNext, yDeltaNext] = conf
 
@@ -511,11 +658,11 @@ function getExitGroups(terrain) {
             // 由于 dist1 的 group 必定不短于对应的 dist0 group，所以只需要考虑 dist1 的 group
             for (let group of exitGroups[1][exitType]) {
                 if (exitType == FIND_EXIT_TOP || exitType == FIND_EXIT_BOTTOM) {
-                    iMin = Math.max(2, group[0].x - dist + 1);
-                    iMax = Math.min(47, group[group.length - 1].x + dist - 1);
+                    iMin = max([2, group[0].x - dist + 1]);
+                    iMax = min([47, group[group.length - 1].x + dist - 1]);
                 } else {
-                    jMin = Math.max(2, group[0].y - dist + 1);
-                    jMax = Math.min(47, group[group.length - 1].y + dist - 1);
+                    jMin = max([2, group[0].y - dist + 1]);
+                    jMax = min([47, group[group.length - 1].y + dist - 1]);
                 }
 
                 // 先处理两端垂直于 exit 的格子
@@ -529,6 +676,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     for (let xVert = iMax, yVert = j; 0 < yVert && yVert < 49; yVert -= yDeltaNext) {
@@ -538,6 +686,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     // 然后处理平行于 exit 的格子
@@ -547,6 +696,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[idx][j] && !(terrain[terrainIdx] & TERRAIN_MASK_WALL)) {
                             exitCost[idx][j] = dist;
                             posGroup.push({ x: idx, y: j });
+                            // rv.text('' + dist, idx, j, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                 } else {
@@ -558,6 +708,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     for (let xVert = i, yVert = jMax; 0 < xVert && xVert < 49; xVert -= xDeltaNext) {
@@ -567,6 +718,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[xVert][yVert] && !(terrain[xVert + yVert * 50] & TERRAIN_MASK_WALL)) {
                             exitCost[xVert][yVert] = dist;
                             posGroup.push({ x: xVert, y: yVert });
+                            // rv.text('' + dist, xVert, yVert, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                     // 然后处理平行于 exit 的格子
@@ -576,6 +728,7 @@ function getExitGroups(terrain) {
                         if (!exitCost[i][idx] && !(terrain[terrainIdx] & TERRAIN_MASK_WALL)) {
                             exitCost[i][idx] = dist;
                             posGroup.push({ x: i, y: idx });
+                            // rv.text('' + dist, i, idx, { color: global.colours.暗青, opacity: 1, font: 0.6 });
                         }
                     }
                 }
@@ -627,14 +780,14 @@ function setAsWall(pos, range, terrain) {
 function initialMap(room, terrain, exitGroups) {
     /**@type {CostMat} */
     let map = {};
-    setAsWall(room.controller.pos, 2, terrain);     // controller 周围 range 2 内设为墙，视为不可建造
+    setAsWall(room.controller.pos, 1, terrain);     // controller 周围 range 1 内设为墙，视为不可建造
     if (room.mineral) {
         setAsWall(room.mineral.pos, 1, terrain);    // mineral 周围 range 1 内视为不可建造
     }
     for (let src of room.source) {
         setAsWall(src.pos, 1, terrain);             // source 周围 range 1 内视为不可建造
     }
-    for (let dist of [0, 1, 2, 3, 4]) {                // exit 周围 range 4 内视为不可建造
+    for (let dist = 0; dist <= 5; dist++) {                // exit 周围 range 3 内视为不可建造
         for (let exitType in exitGroups[dist]) {
             for (let group of exitGroups[dist][exitType]) {
                 for (let pos of group) {
@@ -656,171 +809,131 @@ function initialMap(room, terrain, exitGroups) {
     return map;
 }
 
-/**
- * 
- * @param {{x:number, y:number}} anchor2x2 绝对坐标
- * @param {{x:number, y:number}[]} validCandidate4x4 
- */
-function findBestAnchor4x4(anchor2x2, validCandidate4x4) {
-    let bestAnchor4x4, minRange = 999, anchor2x2_x = anchor2x2.x, anchor2x2_y = anchor2x2.y, x, y;
-    for (let pos of validCandidate4x4) {
-        x = pos.x, y = pos.y
-        let range4x4to2x2 = Math.max(Math.abs(x - 1 - anchor2x2_x), Math.abs(y - 1 - anchor2x2_y));
-        if (2 < range4x4to2x2 && Math.abs(range4x4to2x2 - LAB_IDEAL_DISTANCE) < minRange) {
-            bestAnchor4x4 = { x: x, y: y };
-            minRange = Math.abs(range4x4to2x2 - LAB_IDEAL_DISTANCE);
-        } // TODO: 研究一下 W12S13 lab 为什么没挨着中央 link
+function getRange(x1, y1, x2, y2) {
+    let diffX = x1 - x2, diffY = y1 - y2;
+    if (diffX < 0) {
+        diffX = -diffX;
     }
-    return bestAnchor4x4;
+    if (diffY < 0) {
+        diffY = -diffY;
+    }
+    return diffX > diffY ? diffX : diffY;
 }
 
 /**
  * 
+ * @param {Anchor} bestAnchor2x2 
+ * @param {Anchor} bestAnchor3x3 
+ * @param {RoomVisual} rv 
+ * @returns {{layout: {[type:string]:{x:number, y:number}[]}, layoutCost:CostMat}}
+ */
+function placeCentralStructure(bestAnchor2x2, bestAnchor3x3, rv) {
+    /**@type {{[type: string]: {x:number, y:number}[]}} */
+    let layout = {}, layoutCost = getEmptyMat(1, 48);
+
+    let center3x3 = { x: bestAnchor3x3.x - 1, y: bestAnchor3x3.y - 1 };
+
+    // link in 2x2
+    let link = { x: bestAnchor2x2.x + ((bestAnchor2x2.x == bestAnchor3x3.x) || (bestAnchor2x2.x == bestAnchor3x3.x - 3) ? 0 : -1), y: bestAnchor2x2.y + ((bestAnchor2x2.y == bestAnchor3x3.y) || (bestAnchor2x2.y == bestAnchor3x3.y-3) ? 0 : -1) };
+    layoutCost[link.x][link.y] = 255;
+    layout[STRUCTURE_LINK] = [{ x: link.x, y: link.y }];
+
+    // storage in 3x3
+    let storage = { x: center3x3.x + ((link.x < center3x3.x - 1) ? -1 : (link.x > center3x3.x + 1) ? 1 : 0), y: center3x3.y + ((link.y < center3x3.y - 1) ? -1 : (link.y > center3x3.y + 1) ? 1 : 0) };
+    layoutCost[storage.x][storage.y] = 255;
+    layout[STRUCTURE_STORAGE] = [{ x: storage.x, y: storage.y }];
+    // powerSpawn in 3x3
+    let powerSpawn = { x: 2 * storage.x - link.x, y: 2 * storage.y - link.y };
+    layoutCost[powerSpawn.x][powerSpawn.y] = 255;
+    layout[STRUCTURE_POWER_SPAWN] = [{ x: powerSpawn.x, y: powerSpawn.y }];
+    // terminal in 3x3
+    let terminal = { x: 2 * center3x3.x - powerSpawn.x, y: 2 * center3x3.y - powerSpawn.y };
+    layoutCost[terminal.x][terminal.y] = 255;
+    layout[STRUCTURE_TERMINAL] = [{ x: terminal.x, y: terminal.y }];
+    // factory in 3x3
+    let factory = { x: 2 * center3x3.x - storage.x, y: 2 * center3x3.y - storage.y };
+    layoutCost[factory.x][factory.y] = 255;
+    layout[STRUCTURE_FACTORY] = [{ x: factory.x, y: factory.y }];
+
+    // central roads
+    layout[STRUCTURE_ROAD] = [];
+    layout[STRUCTURE_ROAD].push({x: storage.x - 1, y: storage.y});
+    layoutCost[storage.x - 1][storage.y] = 1;
+    layout[STRUCTURE_ROAD].push({x: storage.x + 1, y: storage.y});
+    layoutCost[storage.x + 1][storage.y] = 1;
+    layout[STRUCTURE_ROAD].push({x: storage.x, y: storage.y - 1});
+    layoutCost[storage.x][storage.y - 1] = 1;
+    layout[STRUCTURE_ROAD].push({x: storage.x, y: storage.y + 1});
+    layoutCost[storage.x][storage.y + 1] = 1;
+
+
+    return { layout, layoutCost };
+}
+
+/**
+ * 选 link 方向：如果能在 controller range 3内则选此方向以便共用，否则按与其他几处 link 的距离
+ * TODO：考虑外矿，考虑 PC 对 src 产量的影响
+ * 
+ * @param {ClaimableRoom} room 
  * @param {CandidateAnchors} candidate3x3 
  * @param {CostMat} map 
- * @param {CostMat[]} costMats 
- * @returns {{bestAnchor3x3: {x:number, y:number} | undefined, bestAnchor2x2: {x:number, y:number} | undefined, bestAnchor4x4: {x:number, y:number} | undefined}}
+ * @param {CostMat} accumulateCostMat 
+ * @returns {{bestAnchor3x3: {x:number, y:number} | undefined, bestAnchor2x2: {x:number, y:number} | undefined, bestAnchor4x4: {x:number, y:number} | undefined,
+ *      layout: {[structureType: string]: {x:number, y:number}[]} | undefined, layoutCost: CostMat | undefined}}
  */
-function getBestAnchor(candidate3x3, map, costMats) {
-    let bestAnchor3x3, bestAnchor2x2, bestAnchor4x4;
+function getBestAnchor(room, candidate3x3, map, accumulateCostMat, rv) {
     for (let cost in candidate3x3) {
         for (let anchor3x3 of candidate3x3[cost]) {
             // 绝对坐标
             /**@type {CandidateAnchors} */
-            let validCandidate2x2 = {}, validCandidate4x4 = [];
+            let bestAnchor2x2 = null, minCost = 9999, curCost, linkPos, src, controllerRange;
             for (let anchor2x2 of CANDIDATE_2x2) {
                 // CANDIDATE_2x2 存储的是相对坐标，需加上 anchor3x3 的绝对坐标 
                 let x = anchor3x3.x + anchor2x2.x, y = anchor3x3.y + anchor2x2.y;
                 // >= 2 是足够的空地，按照 cost 加入 validCandidate2x2 以待进一步检查 
                 if (map[x][y] >= 2) {
-                    let cost2 = 0;
-                    for (let costMat of costMats) {
-                        cost2 += costMat[x][y];
+                    linkPos = { x: x + ((anchor2x2.x === 0) || (anchor2x2.x === -3) ? 0 : -1), y: y + ((anchor2x2.y === 0) || (anchor2x2.y === -3) ? 0 : -1) };
+                    curCost = 0;
+                    for (src of room.source) {
+                        curCost = Math.max(curCost, getRange(src.pos.x, src.pos.y, linkPos.x, linkPos.y));
                     }
-                    if (validCandidate2x2[cost2]) {
-                        validCandidate2x2[cost2].push({ x: x, y: y })
-                    } else {
-                        validCandidate2x2[cost2] = [{ x: x, y: y }]
+                    controllerRange = getRange(room.controller.pos.x, room.controller.pos.y, linkPos.x, linkPos.y);
+                    if (controllerRange <= 3) {
+                        curCost -= 100;
+                    } 
+                    // else {
+                    //     curCost += controllerRange;
+                    // }
+                    if (curCost < minCost) {
+                        minCost = curCost;
+                        bestAnchor2x2 = {x, y};
                     }
                 } // if (map[x][y] >=2)
             } // for (let anchor2x2 of CANDIDATE_2x2)
-
-            let anchor3x3_x = anchor3x3.x, anchor3x3_y = anchor3x3.y;
-            for (let data4x4 of CANDIDATE_4x4) {
-                let { x_start, y_start, x_end, y_end } = data4x4;
-                if (x_end > x_start) {
-                    x_end += anchor3x3_x;
-                    for (let x = x_start + anchor3x3_x, y = y_start + anchor3x3_y; x <= x_end; x++) {
-                        if (map[x][y] >= 4) {
-                            /** 
-                             * 处理可能会被墙封死 storage 和 lab 之间通路的情况
-                             * 遍历 x 的情况，y 只会是 -3 或 4
-                             */
-                            if (y == anchor3x3_y - 3) {
-                                if (x == anchor3x3_x - 3) {
-                                    if (map[x][y + 1] == 0 && map[x + 1][y] == 0) {
-                                        continue;
-                                    }
-                                } else if (x == anchor3x3_x - 2) {
-                                    if (map[x - 1][y + 1] == 0 && map[x + 1][y] == 0) {
-                                        continue;
-                                    }
-                                } else if (x == anchor3x3_x + 3) {
-                                    if (map[x - 4][y] == 0 && map[x - 2][y + 1] == 0) {
-                                        continue;
-                                    }
-                                }
-                            } else {    // y == anchor3x3_y+4
-                                if (x == anchor3x3_x - 2) {
-                                    if (map[x - 1][y - 4] == 0 && map[x + 1][y - 3] == 0) {
-                                        continue;
-                                    }
-                                } else if (x == anchor3x3_x + 3) {
-                                    if (map[x - 2][y - 4] == 0 && map[x - 4][y - 3] == 0) {
-                                        continue;
-                                    }
-                                } else if (x == anchor3x3_x + 4) {
-                                    if (map[anchor3x3_x][anchor3x3_y + 1] == 0 && map[anchor3x3_x + 1][anchor3x3_y] == 0) {
-                                        continue;
-                                    }
-                                }
-                            }
-                            validCandidate4x4.push({ x, y });
-                        }
-                    }
-                } else {
-                    y_end += anchor3x3_y;
-                    for (let x = x_start + anchor3x3_x, y = y_start + anchor3x3_y; y <= y_end; y++) {
-                        if (map[x][y] >= 4) {
-                            /** 
-                             * 处理可能会被墙封死 storage 和 lab 之间通路的情况
-                             * 遍历 y 的情况，x 只会是 -3 或 4
-                             */
-                            if (x == anchor3x3_x - 3) {
-                                if (y == anchor3x3_y - 2) {
-                                    if (map[x][y + 1] == 0 && map[x + 1][y - 1] == 0) {
-                                        continue;
-                                    }
-                                } else if (y == anchor3x3_y + 3) {
-                                    if (map[x][y - 4] == 0 && map[x + 1][y - 2] == 0) {
-                                        continue;
-                                    }
-                                } else if (y == anchor3x3_y + 4) {
-                                    if (map[x][y - 4] == 0 && map[x + 1][y - 3] == 0) {
-                                        continue;
-                                    }
-                                }
-                            } else {    // x == anchor3x3_x+4
-                                if (y == anchor3x3_y - 3) {
-                                    if (map[x - 4][y] == 0 && map[x - 3][y + 1] == 0) {
-                                        continue;
-                                    }
-                                } else if (y == anchor3x3_y - 2) {
-                                    if (map[x - 4][y - 1] == 0 && map[x - 3][y + 1] == 0) {
-                                        continue;
-                                    }
-                                } else if (y == anchor3x3_y + 3) {
-                                    if (map[x - 4][y - 2] == 0 && map[x - 3][y - 4] == 0) {
-                                        continue;
-                                    }
-                                }
-                            }
-                            validCandidate4x4.push({ x, y });
-                        }
-                    }
-                }
+            if (bestAnchor2x2 !== null) {
+                let { layout, layoutCost } = placeCentralStructure(bestAnchor2x2, anchor3x3, rv);
+                return {
+                    bestAnchor3x3: anchor3x3, bestAnchor2x2, layout: layout, layoutCost: layoutCost,
+                };
             }
-
-            if (validCandidate4x4.length == 0) {
-                continue;
-            }
-            for (let cost2 in validCandidate2x2) {
-                for (let anchor2x2 of validCandidate2x2[cost2]) {
-                    bestAnchor4x4 = findBestAnchor4x4(anchor2x2, validCandidate4x4);
-                    if (bestAnchor4x4 !== undefined) {
-                        bestAnchor2x2 = anchor2x2;
-                        bestAnchor3x3 = anchor3x3;
-                        return { bestAnchor3x3, bestAnchor2x2, bestAnchor4x4 };
-                    }
-                } // for anchor2x2
-            } // for cost2 in validCandidate2x2
         }
     }
-    return { bestAnchor3x3, bestAnchor2x2, bestAnchor4x4 };
+    return {};
 }
 
 /**
- *  计算地图正方形面积同时把总路程最短的作为中心，路程相同选离controller最远的（5级先建link到controller）
- *  经过此函数后，terrain 中会将矿点、出口半径2范围内都视为墙
+ *  计算地图正方形面积同时把总路程最短的作为中心
+ *  经过此函数后，terrain 中会将矿点、出口 dist 0~4 范围内都视为墙
  * 
  * 
- * @param {Room} room 
+ * @param {ClaimableRoom} room 
  * @param {Uint8Array} terrain 
  * @param {ExitGroups} exitGroups 
- * @param {CostMat[]} costMats
- * @returns {{map: CostMat, bestAnchors: ReturnType<typeof getBestAnchor>}} map: 二维数组，每一个值代表以此为右下角的最大空地正方形边长，bestAnchor: 满足边长的正方形中总路程最短的右下角
+ * @param {CostMat} accumulateCostMat
+ * @param {RoomVisual} rv 
+ * @returns {{map: CostMat, bestAnchors: {bestAnchor3x3: Anchor, bestAnchor2x2: Anchor, bestAnchor4x4: Anchor, layout: {[structureType: string]: {x:number, y:number}[]} | undefined, layoutCost: CostMat | undefined}} map: 二维数组，每一个值代表以此为右下角的最大空地正方形边长，bestAnchor: 满足边长的正方形中总路程最短的右下角
  */
-function calSquare(room, terrain, exitGroups, costMats) {
+function calSquare(room, terrain, exitGroups, accumulateCostMat, rv) {
     // @ts-ignore
     let map = initialMap(room, terrain, exitGroups);    // 二维数组，每一个值代表以此为右下角的最大空地正方形边长
     /**@type {CandidateAnchors} */
@@ -845,10 +958,7 @@ function calSquare(room, terrain, exitGroups, costMats) {
                 // 先找 3x3 放 storage，terminal，powerSpawn, factory
                 if (current >= 3) {
                     //showAnchor(rv, x, y, (diameter - 1) / 2, 0);
-                    cost = 0;
-                    for (let costMat of costMats) {
-                        cost += costMat[x - radius3x3][y - radius3x3];
-                    }
+                    cost = accumulateCostMat[x - radius3x3][y - radius3x3];
                     if (candidate3x3[cost]) {
                         candidate3x3[cost].push({ x: x, y: y })
                     } else {
@@ -856,142 +966,15 @@ function calSquare(room, terrain, exitGroups, costMats) {
                     }
                 }
             }
+            //rv.text(map[x][y], x, y, { opacity: 0.3 });
         }
     }
-    let { bestAnchor3x3, bestAnchor2x2, bestAnchor4x4 } = getBestAnchor(candidate3x3, map, costMats);
-    return { map, bestAnchors: { bestAnchor3x3, bestAnchor2x2, bestAnchor4x4 } };
-}
-
-/**
- * 
- * @param {{bestAnchor2x2: Anchor, bestAnchor3x3: Anchor, bestAnchor4x4: Anchor}} bestAnchors 
- * @returns {{layout: {[type:string]:{x:number, y:number}[]}, layoutCost:CostMat}}
- */
-function placeCentralStructure(bestAnchors) {
-    let { bestAnchor2x2, bestAnchor3x3, bestAnchor4x4 } = bestAnchors;
-    /**@type {{[type: string]: {x:number, y:number}[]}} */
-    let layout = {}, layoutCost = getEmptyMat(1, 48);
-
-    let center2x2 = { x: bestAnchor2x2.x - 0.5, y: bestAnchor2x2.y - 0.5 };
-    let center3x3 = { x: bestAnchor3x3.x - 1, y: bestAnchor3x3.y - 1 };
-    let center4x4 = { x: bestAnchor4x4.x - 1.5, y: bestAnchor4x4.y - 1.5 };
-
-    // link in 2x2
-    let link = { x: bestAnchor2x2.x + ((center2x2.x < center3x3.x) ? 0 : -1), y: bestAnchor2x2.y + ((center2x2.y < center3x3.y) ? 0 : -1) };
-    layoutCost[link.x][link.y] = 255;
-    layout[STRUCTURE_LINK] = [{ x: link.x, y: link.y }];
-    // spawn in 2x2
-    let spawn = { x: center2x2.x * 2 - link.x, y: center2x2.y * 2 - link.y };
-    layoutCost[spawn.x][spawn.y] = 255;
-    layout[STRUCTURE_SPAWN] = [{ x: spawn.x, y: spawn.y }];
-    // roads in 2x2
-    layout[STRUCTURE_ROAD] = [];
-    for (let x = bestAnchor2x2.x - 1; x <= bestAnchor2x2.x; x++) {
-        for (let y = bestAnchor2x2.y - 1; y <= bestAnchor2x2.y; y++) {
-            if (!layoutCost[x][y]) {
-                layoutCost[x][y] = 1;
-                layout[STRUCTURE_ROAD].push({ x: x, y: y });
-            }
-        }
-    }
-
-    // storage in 3x3
-    let storage = { x: center3x3.x + ((center3x3.x < center2x2.x) ? 1 : -1), y: center3x3.y + ((center3x3.y < center2x2.y) ? 1 : -1) };
-    layoutCost[storage.x][storage.y] = 255;
-    layout[STRUCTURE_STORAGE] = [{ x: storage.x, y: storage.y }];
-    // terminal in 3x3
-    let betweenLinkAnd3x3 = { x: (link.x + center3x3.x) / 2, y: (link.y + center3x3.y) / 2 };
-    let terminal = { x: betweenLinkAnd3x3.x * 2 - storage.x, y: betweenLinkAnd3x3.y * 2 - storage.y };
-    layoutCost[terminal.x][terminal.y] = 255;
-    layout[STRUCTURE_TERMINAL] = [{ x: terminal.x, y: terminal.y }];
-    // powerSpawn in 3x3
-    let powerSpawn = { x: center3x3.x, y: center3x3.y };
-    layoutCost[powerSpawn.x][powerSpawn.y] = 255;
-    layout[STRUCTURE_POWER_SPAWN] = [{ x: powerSpawn.x, y: powerSpawn.y }];
-    // factory in 3x3
-    let factory = { x: center3x3.x * 2 - betweenLinkAnd3x3.x, y: center3x3.y * 2 - betweenLinkAnd3x3.y };
-    layoutCost[factory.x][factory.y] = 255;
-    layout[STRUCTURE_FACTORY] = [{ x: factory.x, y: factory.y }];
-    // roads in 3x3
-    for (let x = bestAnchor3x3.x - 2; x <= bestAnchor3x3.x; x++) {
-        for (let y = bestAnchor3x3.y - 2; y <= bestAnchor3x3.y; y++) {
-            if (!layoutCost[x][y]) {
-                layoutCost[x][y] = 1;
-                layout[STRUCTURE_ROAD].push({ x: x, y: y });
-            }
-        }
-    }
-
-    // head lab in 4x4
-    let headLab = { x: (center4x4.x < storage.x) ? 0 : -3, y: (center4x4.y < storage.y) ? 0 : -3 }, labLayout;
-    if (headLab.x == 0) {
-        labLayout = headLab.y == 0 ? LAB_LAYOUT[1] : LAB_LAYOUT[2];
+    let result = getBestAnchor(room, candidate3x3, map, accumulateCostMat, rv);
+    if (result.bestAnchor3x3 === undefined) {
+        return { map, bestAnchors: result, layout: undefined, layoutCost: undefined };
     } else {
-        labLayout = headLab.y == 0 ? LAB_LAYOUT[2] : LAB_LAYOUT[1];
+        return { map, bestAnchors: result, layout: result.layout, layoutCost: result.layoutCost };
     }
-    // all labs in 4x4
-    layout[STRUCTURE_LAB] = [];
-    for (let lab of labLayout) {
-        layoutCost[lab.x + bestAnchor4x4.x][lab.y + bestAnchor4x4.y] = 255;
-        layout[STRUCTURE_LAB].push({ x: lab.x + bestAnchor4x4.x, y: lab.y + bestAnchor4x4.y });
-    }
-    // roads in 4x4
-    for (let x = bestAnchor4x4.x - 3; x <= bestAnchor4x4.x; x++) {
-        for (let y = bestAnchor4x4.y - 3; y <= bestAnchor4x4.y; y++) {
-            if (!layoutCost[x][y]) {
-                layoutCost[x][y] = 1;
-                layout[STRUCTURE_ROAD].push({ x: x, y: y });
-            }
-        }
-    }
-
-    return { layout, layoutCost };
-}
-
-/**
- * 在计算任何 ext 之前，确保 storage 到 lab 集群中心有路
- * 
- * @param {ClaimableRoom} room 
- * @param {CostMat} layoutCost 
- * @param {{[type: string]: {x:number, y:number}[]}} layout 
- * @param {Anchor} bestAnchor4x4 
- * @returns {{x:number, y:number}[]} 用于计算 ext 时将这些路点右下正方形边长设 1、2
- */
-function paveRoadFromStorageToLab(room, layoutCost, layout, bestAnchor4x4) {
-    if (!bestAnchor4x4 || !room.name) {
-        return [];
-    }
-    // lab 中心，这个位置足够了
-    let goals = [{ pos: new RoomPosition(bestAnchor4x4.x - 1, bestAnchor4x4.y - 1, room.name), range: 1 }];
-    let pfCostMat = new PathFinder.CostMatrix, start;
-    /**@type {{x:number, y:number}[]} */
-    let additionalRoads = [];
-
-    for (let x in layoutCost) {
-        for (let y in layoutCost[x]) {
-            pfCostMat.set(+x, +y, layoutCost[x][y]);
-        }
-    }
-    let pfOpts = {
-        maxRooms: 1,
-        plainCost: 2,
-        swampCost: 4,
-        roomCallback: () => pfCostMat
-    }
-    start = new RoomPosition(layout[STRUCTURE_STORAGE][0].x, layout[STRUCTURE_STORAGE][0].y, room.name);
-    let result = PathFinder.search(start, goals, pfOpts);
-    let path = result.path, px, py;
-    for (let idx = 0; idx < path.length; idx++) {
-        let pos = path[idx];
-        px = pos.x;
-        py = pos.y;
-        if (!(py in layoutCost[px])) {
-            layoutCost[px][py] = 1;
-            additionalRoads.push({ x: px, y: py })
-            layout[STRUCTURE_ROAD].push({ x: px, y: py });
-        }
-    }
-    return additionalRoads;
 }
 
 
@@ -999,15 +982,13 @@ function paveRoadFromStorageToLab(room, layoutCost, layout, bestAnchor4x4) {
  * 
  * @param {CostMat} map 
  * @param {{bestAnchor2x2:Anchor, bestAnchor3x3:Anchor, bestAnchor4x4:Anchor}} bestAnchors 
- * @param {{x:number, y:number}[]} additionalRoads 
  */
-function updateMap(map, bestAnchors, additionalRoads) {
-    let squares = additionalRoads.map(pos => ({ x: pos.x, y: pos.y, diameter: 1 }));
-    let { bestAnchor2x2, bestAnchor3x3, bestAnchor4x4 } = bestAnchors;
+function updateMap(map, bestAnchors) {
+    let squares = [];
+    let { bestAnchor2x2, bestAnchor3x3 } = bestAnchors;
     squares.push(
         { x: bestAnchor2x2.x, y: bestAnchor2x2.y, diameter: 2 },
-        { x: bestAnchor3x3.x, y: bestAnchor3x3.y, diameter: 3 },
-        { x: bestAnchor4x4.x, y: bestAnchor4x4.y, diameter: 4 },
+        { x: bestAnchor3x3.x, y: bestAnchor3x3.y, diameter: 3 }
     );
 
     // 暂存被修改的位置的数据
@@ -1232,7 +1213,7 @@ function addSquare(pos, square33, square32, map, costMat, layoutCost, planedExte
     let px = pos.x, py = pos.y;
     if (map[px + 1][py + 1] >= 3) { // map[2~49], px=1~48
         square33[testSquare(px, py, costMat, planedExtensions, planedEntries).num].push(pos);
-    } else if ((map[px][py] >= 2 ? 1 : 0) + (map[px + 1][py] >= 2 ? 1 : 0) + (map[px][py + 1] >= 2 ? 1 : 0) + (map[px + 1][py + 1] >= 2 ? 1 : 0) == 3) {
+    } else if (Number(map[px][py] >= 2) + Number(map[px + 1][py] >= 2) + Number(map[px][py + 1] >= 2) + Number(map[px + 1][py + 1] >= 2) == 3) {
         if (map[px][py] < 2) {  // 左上角被挡
             pos.blockX = px - 1;
             pos.blockY = py - 1;
@@ -1250,7 +1231,11 @@ function addSquare(pos, square33, square32, map, costMat, layoutCost, planedExte
             pos.blockY = pos.y + 1;
             pos.blockCost = layoutCost[px + 1][py + 1] || 255;
         }
-        square32[testSquare(px, py, costMat, planedExtensions, planedEntries, pos.blockX, pos.blockY, pos.blockCost).num].push(pos);
+        try {
+            square32[testSquare(px, py, costMat, planedExtensions, planedEntries, pos.blockX, pos.blockY, pos.blockCost).num].push(pos); 
+        } catch (error) {
+            console.log('❌', error, testSquare(px, py, costMat, planedExtensions, planedEntries, pos.blockX, pos.blockY, pos.blockCost).num);
+        }
     }
 }
 
@@ -1276,6 +1261,7 @@ function calExtensionPos(storagePos, map, terrain, layoutCost, acceptThreshold, 
         px = pos.x;
         py = pos.y;
         cost = costMat[px][py];
+        //rv.text(cost, px, py);
         if (cost != prevCost) {
             //console.log('prevCost:', prevCost, 'square33:', JSON.stringify(square33));
             result = placeSquares(square33, square32, costMat, planedExtensions, planedEntries, MAX_EXTENSIONS - planedExtNum, acceptThreshold, reviewThreshold);
@@ -1326,17 +1312,16 @@ function calExtensionPos(storagePos, map, terrain, layoutCost, acceptThreshold, 
  * @param {CostMat} map
  * @param {{[type: string]: {x:number, y:number}[]}} layout 
  * @param {CostMat} layoutCost 
- * @param {{x:number, y:number}[]} additionalRoads 
  * @param {number} acceptThreshold 
  * @param {number} reviewThreshold 
  */
-function getExtentions(bestAnchors, terrain, map, layout, layoutCost, additionalRoads, acceptThreshold, reviewThreshold) {
+function getExtentions(bestAnchors, terrain, map, layout, layoutCost, acceptThreshold, reviewThreshold) {
     //for (idx = 3; idx == idx; idx++) {
-    updateMap(map, bestAnchors, additionalRoads);
+    updateMap(map, bestAnchors);
     let storagePos = { x: layout[STRUCTURE_STORAGE][0].x, y: layout[STRUCTURE_STORAGE][0].y };
     let result = calExtensionPos(storagePos, map, terrain, layoutCost, acceptThreshold, reviewThreshold);
     //console.log(JSON.stringify(extensionPos));
-    console.log(`finally cost:${result.totalCost}, num: ${result.num}`);
+    console.log(`extension 总数 num: ${result.num}，总路程 cost:${result.totalCost}`);
     return {
         extensionPos: result.extensionPos,
         roadPos: result.roadPos,
@@ -1349,8 +1334,8 @@ function getExtentions(bestAnchors, terrain, map, layout, layoutCost, additional
 /**
  * 1. src 和 mineral 相邻空地、controller range2 空地设为与 swamp 相同代价;  
  * 2. 核心区不可穿过建筑设 255，路 1；
- * 3. 已经摆下的 ext 的路设 1，已经摆下的 ext 本身设为 8（swamp 2倍）；
- * 4. exitGroups 中 1、2、3、4 的格子在上述基础上加 4。
+ * 3. 已经摆下的 ext 的路设 1，已经摆下的 ext 本身设为 EXTENSION_COST（默认值为 swamp 2倍）；
+ * 4. exitGroups 中 1、2、3、4 的格子在上述基础上加 EXIT_PATHFINDER_COST。
  * 
  * @param {CostMat} layoutCost 
  * @param {CostMat} roadPos 
@@ -1361,7 +1346,7 @@ function getExtentions(bestAnchors, terrain, map, layout, layoutCost, additional
  * @returns 
  */
 function initPfCostMat(layoutCost, roadPos, extensionPos, exitGroups, roads, room) {
-    let pfCostMat = new PathFinder.CostMatrix, terrain = (room.getTerrain() as any).getRawBuffer();
+    let pfCostMat = new PathFinder.CostMatrix, terrain = room.getTerrain().getRawBuffer();
 
     // controller 周围 range 2 内空地设为 4，与 swamp 相同代价
     let px, py;
@@ -1429,6 +1414,26 @@ function initPfCostMat(layoutCost, roadPos, extensionPos, exitGroups, roads, roo
 }
 
 /**
+ * 对于 mincut rampart 后可以被 rangeAttack 的地方，增加寻路开销
+ * 
+ * @param {CostMatrix} pfCostMat 
+ * @param {Uint8Array} vertexDist 
+ */
+function updatePfCostMat(pfCostMat, vertexDist) {
+    let px, py, y50, idx, cost;
+    for (py = 1; py < 49; py++) {
+        y50 = py*50;
+        for (px = 1; px < 49; px++) {
+            idx = px + y50;
+            if (vertexDist[idx] > 0 && vertexDist[idx] <= 3) {
+                cost = pfCostMat.get(px, py);
+                if (cost < EXIT_PATHFINDER_COST) pfCostMat.set(px, py, cost + EXIT_PATHFINDER_COST);
+            }
+        }
+    }
+}
+
+/**
  * 
  * @param {RoomPosition} pos 
  * @param {any[]} goals 
@@ -1446,24 +1451,19 @@ function removeGoal(pos, goals) {
 }
 
 /**
- * 会铺路，把头 NUM_EXT_FOR_SPAWN 个 goals 路附近的 ext 改 spawn
+ * 会铺路
  * 
  * @param {*} start 
  * @param {*} goals 
  * @param {CostMatrix} pfCostMat 
  * @param {CostMat} roads 
  * @param {CostMat} extensionPos 
- * @param {*} layout
- * @param {CostMat} layoutCost 
- * @param {number} unplacedSpawn 
  * @param {*} rv 
+ * @param {CostMat} towerPos 
  * @returns 
  */
-function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layoutCost, unplacedSpawn) {
-    if (!start || !start.roomName || !goals || goals.length === 0) {
-        return { removedPosList: [], goalNearestPos: {}, unplacedSpawn: 0 };
-    }
-    let removedPosList = [], result, path, px, py;
+function findAllGoals(start, goals, pfCostMat, roads, extensionPos, rv, towerPos = undefined) {
+    let removedPosList = [], removedTowers = [], result, path, px, py;
     /**@type {{[posStr:string]:RoomPosition}} */
     let goalNearestPos = {}, removedGoals, nearestPos;
 
@@ -1475,59 +1475,36 @@ function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layo
         roomCallback: () => pfCostMat
     }
     while (goals.length) {
-        try {
-            result = PathFinder.search(start, goals, pfOpts);
-        } catch (e) {
-            console.log(`findAllGoals PathFinder.search error: ${e.message}, start=${JSON.stringify(start)}, goals.length=${goals.length}`);
-            break;
-        }
+        result = PathFinder.search(start, goals, pfOpts);
         if (result.incomplete) {
-            if (goals.length > 1) {
-                goals.shift();
-                continue;
-            }
             console.log(`Error: cannot find path to goals ${JSON.stringify(goals)}`);
             break;
         }
         path = result.path;
-        nearestPos = path.length ? path.pop() : start;
+        nearestPos = path.length ? (towerPos ? path[path.length - 1] : path.pop()) : start;
         removedGoals = removeGoal(nearestPos, goals);
         if (removedGoals.length) {
             for (let goal of removedGoals) {
+                // rv.circle(nearestPos.x, nearestPos.y, circleStyle[1]);
                 goalNearestPos[`${goal.pos.x}_${goal.pos.y}`] = nearestPos;
             }
         }
-        // 每找到一个，就铺路，最近的一个 ext 改 spawn
-        let placed = false;
+        // 每找到一个，就铺路
         for (let pos of path) {
             px = pos.x;
             py = pos.y;
             roads[px][py] = 1;      // 铺路
             pfCostMat.set(px, py, 1);   // 铺了路以后的地方，移动开销为 1
             if (py in extensionPos[px]) {
+                rv.circle(px, py, circleStyle[4]);
                 delete extensionPos[px][py];
-                pfCostMat.set(px, py, 1);
                 removedPosList.push(pos);
-            }
-            // 尝试找最近的一个，改成 spawn
-            if (unplacedSpawn) {
-                for (let i = -1; i <= 1; i++) {
-                    for (let j = -1; j <= 1; j++) {
-                        if (py + j in extensionPos[px + i]) {
-                            delete extensionPos[px + i][py + j];
-                            layout[STRUCTURE_SPAWN].push({ x: px + i, y: py + j });
-                            layoutCost[px + i][py + j] = 255;
-                            placed = true;
-                            unplacedSpawn--;
-                            break;
-                        }
-                    }
-                    if (placed) break;
-                }
+            } else if (towerPos && px in towerPos && py in towerPos[px]) {
+                removedTowers.push(pos);
             }
         }
     }
-    return { removedPosList, goalNearestPos, unplacedSpawn };
+    return { removedPosList, goalNearestPos, removedTowers };
 }
 
 /**
@@ -1537,18 +1514,14 @@ function findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layo
  * @param {*} pfCostMat 
  * @param {*} roads 
  * @param {*} extensionPos 
- * @param {*} layoutCost 
- * @param {*} exitMaps 
  * @param {CostMat} towerCandidateMat 
  * @param {*} rv 
  * @returns 
  */
-function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost, exitMaps) {
-    if (!start || !start.roomName || !goals || goals.length === 0) {
-        return { removedPosList: [], canReach: false, towerCandidatePosList: [] };
-    }
+function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, rv) {
     /**@type {RoomPosition[]} */
-    let removedPosList = [], result, path, px, py, canReach, towerCandidatePosList = [];
+    let removedPosList = [], result, path, px, py, canReach;
+    let fakeRoads = getEmptyMat(1, 49);
     /**@type {PathFinderOpts} */
     let pfOpts = {
         maxRooms: 1,
@@ -1556,59 +1529,39 @@ function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost
         swampCost: 4,
         roomCallback: () => pfCostMat
     }
-    try {
-        result = PathFinder.search(start, goals, pfOpts);
-    } catch (e) {
-        console.log(`findRoadToRamp PathFinder.search error: ${e.message}, start=${JSON.stringify(start)}, goals=${JSON.stringify(goals)}`);
-        return { removedPosList: [], canReach: false, towerCandidatePosList: [] };
-    }
+    result = PathFinder.search(start, goals, pfOpts);
     if (result.incomplete) {
         canReach = false;
-        return { removedPosList, canReach, towerCandidatePosList };
+        return { removedPosList, canReach };
     }
     path = result.path;
     for (let idx = 0; idx < path.length; idx++) {
         let pos = path[idx];
         px = pos.x;
         py = pos.y;
-        pfCostMat.set(px, py, 1);   // 铺了路以后的地方，移动开销为 1
+        // pfCostMat.set(px, py, 1);   // 铺了路以后的地方，移动开销为 1
         if (pos.y in extensionPos[pos.x]) {     // 这里越界会报undefined
+            rv.circle(px, py, circleStyle[4]);
             delete extensionPos[px][py];
             pfCostMat.set(px, py, 1);
             removedPosList.push(pos);
         }
-        if (!(py in exitMaps[3][px] || py in exitMaps[4][px] || py in exitMaps[2][px])) {
-            roads[px][py] = 1;
-            if (py in exitMaps[5][px] || py in exitMaps[6][px]) {
-                let curCandidate = [];
-                for (let x = px - 1; x <= px + 1; x++) {
-                    for (let y = py - 1; y <= py + 1; y++) {
-                        if (y in exitMaps[5][x]) {
-                            curCandidate.push({ x, y, dist: 5 });
-                        } else if (y in exitMaps[6][x]) {
-                            curCandidate.push({ x, y, dist: 6 });
-                        }
-                    }
-                }
-                curCandidate.sort((a, b) => a.dist - b.dist);
-                towerCandidatePosList.push(...curCandidate);
-            }
+        if (idx < path.length - 3) {
+            // roads[px][py] = 1;
+            fakeRoads[px][py] = 1;
         }
     }
     canReach = true;
-    return { removedPosList, canReach, towerCandidatePosList };
+    return { removedPosList, canReach, fakeRoads };
 }
 
 /**
- * TODO: 
- * 遍历 src 和 mineral 周围 range 1 的空地，找代价最小的作为工位；
- * 遍历 controller 周围 range 2 的空地，找代价最小的作为工位；
  * 
  * pos 代价考虑因素：
  * 1. pos 上已建了路，代价大（会频繁被 swap）；
- * 1. pos 上已有 ramp (dist==2)，代价略小；
+ * 1. pos 上已有 ramp，代价略小；
  * 2. pos 离对应的 goalNearestPos 越远，代价越大；
- * 3. pos 本身在 exitGroups dist 1、3、4内，可能被攻击，代价大；
+ * 3. pos 本身在 vertexDist 1\2\3 内，可能被攻击，代价大；
  * 2. src、controller 需要 link（exitGroups dist 1 无法建造）：
  *   2.1. pos 周围没有不建路的空地，有 ext，代价大，必要时可以 remove ext；
  *   2.2. pos 周围没有不建路的空地，也没有 ext，代价很大；
@@ -1619,32 +1572,35 @@ function findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost
  * @param {ClaimableRoom} room 
  * @param {(Source|StructureController|Mineral<MineralConstant>)[]} goalObjects
  * @param {{[posStr:string]:RoomPosition}} goalNearestPos 是离 storage 路程最短的候选工位
- * @param {CostMatrix} pfCostMat 是 pf 计算的代价矩阵
+ * @param {CostMatrix} pfCostMat 是用于 PathFinder 计算的代价矩阵
  * @param {CostMat} extensionPos 是所有 extension 的位置
  * @param {CostMat} roads 是所有 road 的位置
  * @param {{[dist:number]:CostMat}} exitMaps 
  * @param {{[type:string]:{x:number, y:number}[]}} layout 
  * @param {CostMat} layoutCost 
+ * @param {RoomVisual} rv
  */
-function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roads, extensionPos, exitMaps, layout, layoutCost) {
-    if (!goalObjects || goalObjects.length === 0 || !goalNearestPos) {
-        return { removedPosList: [], sourceWorkPosList: [], controllerWorkPos: null, mineralWorkPos: null };
-    }
+function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roads, fakeRoads, extensionPos, exitMaps, layout, layoutCost, vertexVisited, vertexDist, shareControllerLink, rv) {
     /**@type {RoomPosition[]} */
-    let removedPosList = [], terrain = (room.getTerrain() as any).getRawBuffer();
-    let mineralWorkPos, controllerWorkPos, sourceWorkPosList = [];
+    let removedPosList = [], terrain = room.getTerrain().getRawBuffer();
+    let mineralWorkPos, controllerWorkPos, sourceWorkPosList = [], u, v, linkX, linkY, linkY50;
     let centralLinkPos = layout[STRUCTURE_LINK][0];
+
+    // 寻路到 nearestPos 代价
+    let pfOpts = {
+        maxRooms: 1,
+        plainCost: 2,
+        swampCost: 4,
+        maxOps: 100,
+        roomCallback: () => pfCostMat
+    }
     layout[STRUCTURE_CONTAINER] = layout[STRUCTURE_CONTAINER] || [];
     layout[STRUCTURE_RAMPART] = layout[STRUCTURE_RAMPART] || [];
     layout[WORK_POS] = [];
     for (let goal of goalObjects) {
         let goalPos = goal.pos;
-        let nearestPos = goalNearestPos[`${goalPos.x}_${goalPos.y}`];
-        if (!nearestPos || !nearestPos.roomName) {
-            continue;
-        }
-        let nearestRange = Math.max(Math.abs(centralLinkPos.x - nearestPos.x), Math.abs(centralLinkPos.y - nearestPos.y));
-        let y50;
+        let nearestPos = goalNearestPos[`${goalPos.x}_${goalPos.y}`] || goalPos, y50;
+        let nearestRange = getRange(centralLinkPos.x, centralLinkPos.y, nearestPos.x, nearestPos.y);
         //@ts-ignore
         if (goal.mineralType) {
             // it's a Mineral，不用 link 只找 pos
@@ -1653,8 +1609,9 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                 y50 = y * 50;
                 for (let x = goalPos.x - 1; x <= goalPos.x + 1; x++) {
                     curCost = 500;
+                    u = x + y50;
                     // 是墙，不可用
-                    if (terrain[x + y50] & TERRAIN_MASK_WALL) {
+                    if (terrain[u] & TERRAIN_MASK_WALL) {
                         continue;
                     }
 
@@ -1666,14 +1623,7 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                         continue;
                     }
 
-                    // 寻路到 nearestPos 代价
-                    let pfOpts = {
-                        maxRooms: 1,
-                        plainCost: 2,
-                        swampCost: 4,
-                        roomCallback: () => pfCostMat
-                    }
-                    let result = PathFinder.search(new RoomPosition(x, y, room.name), nearestPos, pfOpts);
+                    let result = PathFinder.search(new RoomPosition(x, y, room.name), { pos: nearestPos, range: nearestPos == goalPos ? 1 : 0 }, pfOpts);
                     if (result.incomplete) {    //  到不了的位置，不考虑
                         curCost = 999;
                         continue;
@@ -1682,23 +1632,22 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                     }
 
                     // 有路
-                    if (layoutCost[x][y] == 1 || y in roads[x]) {
+                    if (layoutCost[x][y] == 1 || y in roads[x] || y in fakeRoads[x]) {
                         curCost += 8;  // 即使有 ramp 也比造在 ext 上差
                     }
 
                     // 有 ramp
-                    if (y in exitMaps[2][x]) {
+                    if (vertexVisited[u] === 4) {
                         curCost -= 2;
-                        // 其他可被攻击的无 ramp 位置
-                    } else if (y in exitMaps[3][x] || y in exitMaps[4][x]) {
-                        curCost += 5;   // 比 ext 大一点
-                        // 可被攻击且无法造 ramp，位置巨差
-                    } else if (y in exitMaps[1][x]) {
+                        
+                    } // else if 在 ram 保护内，可能被 rangeAttack
+                    else if (vertexVisited[u] !== 0 && 1 <= vertexDist[u] && vertexDist[u] <= 3) {
+                        curCost += 5 + 3 - vertexDist[u];   // 比 ext 大一点，宁愿拆 ext 也不要被 rangeAttack
+                        
+                    } // else if 可被攻击且无法造 ramp，位置巨差
+                    else if (vertexVisited[u] === 0) {
                         curCost += 12;
-                        // 离门口近，代价略微高，因为以后有 pc Commander 了会被攻击
-                    } else if (y in exitMaps[5][x]) {
-                        curCost += 3;
-                    }
+                    } 
 
                     if (curCost < bestCost) {
                         bestPos = { x, y };
@@ -1710,8 +1659,11 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                 layout[STRUCTURE_CONTAINER].push(bestPos);
                 mineralWorkPos = bestPos;
                 layout[WORK_POS].push(bestPos);
+                pfCostMat.set(bestPos.x, bestPos.y, pfCostMat.get(bestPos.x, bestPos.y) + EXTENSION_COST);
                 layoutCost[bestPos.x][bestPos.y] = 255;     // 用 255 表示已用
-                if (bestPos.y in exitMaps[3][bestPos.x] || bestPos.y in exitMaps[4][bestPos.x]) {
+                u = bestPos.x + bestPos.y * 50;
+                // 在 ram 保护内，可能被 rangeAttack
+                if (vertexVisited[u] !== 0 && 1 <= vertexDist[u] && vertexDist[u] <= 3) {
                     layout[STRUCTURE_RAMPART].push(bestPos);
                 }
                 if (bestPos.y in extensionPos[bestPos.x]) {
@@ -1724,14 +1676,15 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
         } else {
             // it's a Controller or Source
             // 这是 Controller，周围 range 2 以内都可以作为工位
-            let range = goal.progressTotal ? 2 : 1;
+            let range = goal.progressTotal !== undefined ? 2 : 1;
             let curCost, bestPos, bestLinkPos, bestCost = 999;
             for (let y = goalPos.y - range; y <= goalPos.y + range; y++) {
                 y50 = y * 50;
                 for (let x = goalPos.x - range; x <= goalPos.x + range; x++) {
                     curCost = 500;
+                    u = x + y50;
                     // 是墙，不可用
-                    if (terrain[x + y50] & TERRAIN_MASK_WALL) {
+                    if (terrain[u] & TERRAIN_MASK_WALL) {
                         continue;
                     }
 
@@ -1743,13 +1696,6 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                         continue;
                     }
 
-                    // 寻路到 nearestPos 代价
-                    let pfOpts = {
-                        maxRooms: 1,
-                        plainCost: 2,
-                        swampCost: 4,
-                        roomCallback: () => pfCostMat
-                    }
                     let result = PathFinder.search(new RoomPosition(x, y, room.name), nearestPos, pfOpts);
                     if (result.incomplete) {    //  到不了的位置，不考虑
                         curCost = 999;
@@ -1759,44 +1705,47 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                     }
 
                     // 有路
-                    if (layoutCost[x][y] == 1 || y in roads[x]) {
+                    if (layoutCost[x][y] == 1 || y in roads[x] || y in fakeRoads[x]) {
                         curCost += 8;  // 即使有 ramp 也比造在 ext 上差
                     }
 
                     // 有 ramp
-                    if (y in exitMaps[2][x]) {
+                    if (vertexVisited[u] === 4) {
                         curCost -= 2;
-                        // 其他可被攻击的无 ramp 位置
-                    } else if (y in exitMaps[3][x] || y in exitMaps[4][x]) {
-                        curCost += 5;   // 比 ext 大一点
-                        // 可被攻击且无法造 ramp，位置巨差
-                    } else if (y in exitMaps[1][x]) {
+                    } // else if 在 ram 保护内，可能被 rangeAttack
+                    else if (vertexVisited[u] !== 0 && 1 <= vertexDist[u] && vertexDist[u] <= 3) {
+                        curCost += 5 + 3 - vertexDist[u];   // 比 ext 大一点，宁愿拆 ext 也不要被 rangeAttack
+
+                    } // else if 可被攻击且无法造 ramp，位置巨差
+                    else if (vertexVisited[u] === 0) {
                         curCost += 12;
-                        // 离门口近，代价略微高，因为以后有 pc Commander 了会被攻击
-                    } else if (y in exitMaps[5][x]) {
-                        curCost += 3;
-                    }
+                    } 
 
                     // 找 link 位置
-                    let linkPos = undefined, curLinkCost, bestLinkCost = nearestRange + 15, linkY50;
-                    for (let linkY = y - 1; linkY <= y + 1; linkY++) {
+                    let linkPos = undefined, curLinkCost, bestLinkCost = nearestRange + 15;
+                    for (linkY = y - 1; linkY <= y + 1; linkY++) {
                         linkY50 = linkY * 50;
-                        for (let linkX = x - 1; linkX <= x + 1; linkX++) {
+                        for (linkX = x - 1; linkX <= x + 1; linkX++) {
                             curLinkCost = 0;
+                            v = linkX + linkY50;
                             // 有墙，不能建 link
-                            if (terrain[linkX + linkY50] & TERRAIN_MASK_WALL) {
+                            if (terrain[v] & TERRAIN_MASK_WALL) {
                                 continue;
                             }
                             // 工位 pos 不能建 link
                             if (linkX == x && linkY == y) {
                                 continue;
                             }
-                            // 有路，不能建 link
-                            if (layoutCost[linkX][linkY] == 1 || linkY in roads[linkX]) {
+                            // 寻路路径上的 pos 不能建 link
+                            if (linkX == nearestPos.x && linkY == nearestPos.y) {
                                 continue;
                             }
-                            // 有 link，共用
-                            if (layout[STRUCTURE_LINK].some(p => p.x == linkX && p.y == linkY)) {
+                            // 有路，不能建 link
+                            if (layoutCost[linkX][linkY] == 1 || linkY in roads[linkX] || linkY in fakeRoads[linkX]) {
+                                continue;
+                            }
+                            // controller 可以和中央共用 link 
+                            if (centralLinkPos.x == linkX && centralLinkPos.y == linkY && goal.progressTotal !== undefined && shareControllerLink ) {
                                 curLinkCost = -6;
                                 linkPos = { x: linkX, y: linkY };
                                 bestLinkCost = curLinkCost;
@@ -1816,19 +1765,21 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                             if (linkY in exitMaps[1][linkX]) {
                                 // 无法造
                                 continue;
-                                // 离门口近，代价略微高，因为以后有 pc Commander 了会被攻击
-                            } else if (linkY in exitMaps[2][linkX]) {
-                                // 有 ramp
+                                
+                            } // 有 ramp，代价低
+                            else if (vertexVisited[v] === 4) {
                                 curLinkCost -= 2;
-                            } else if (linkY in exitMaps[3][linkX] || linkY in exitMaps[4][linkX]) {
-                                // 其他可被攻击的无 ramp 位置
-                                curLinkCost += 5;   // 比 ext 大一点
-                            } else if (linkY in exitMaps[5][linkX]) {
-                                curLinkCost += 3;
-                            }
-
+                            } // else if 在 ram 保护内，可能被 rangeAttack
+                            else if (vertexVisited[v] !== 0 && 1 <= vertexDist[v] && vertexDist[v] <= 3) {
+                                curLinkCost += 5 + 3 - vertexDist[v];   // 比 ext 大一点，宁愿拆 ext 也不要被 rangeAttack
+                            } // else if 可被攻击且无法造 ramp，位置巨差
+                            else if (vertexVisited[v] === 0) {
+                                curLinkCost += 12;
+                            } 
+                            
                             // 与中央距离的影响
-                            curLinkCost += Math.max(Math.abs(linkX - centralLinkPos.x), Math.abs(linkY - centralLinkPos.y));
+                            curLinkCost += getRange(linkX, linkY, centralLinkPos.x, centralLinkPos.y);
+                            // rv.text(curLinkCost, linkX, linkY, { color: global.colours.暗青, font: 0.9 });
 
                             if (curLinkCost < bestLinkCost) {
                                 linkPos = { x: linkX, y: linkY };
@@ -1847,10 +1798,18 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
             }
             if (bestPos) {
                 if (bestLinkPos) {
-                    layout[STRUCTURE_LINK].push(bestLinkPos);
-                    layoutCost[bestLinkPos.x][bestLinkPos.y] = 255;     // 用 255 表示已用
+                    linkX = bestLinkPos.x;
+                    linkY = bestLinkPos.y;
+                    if (layoutCost[linkX][linkY] !== 255) {
+                        layout[STRUCTURE_LINK].push(bestLinkPos);
+                        layoutCost[linkX][linkY] = 255;     // 用 255 表示已用
+                        pfCostMat.set(linkX, linkY, 255);     // 用 255 表示已用
+                    }
+                    v = linkX + linkY * 50;
+                    pfCostMat.set(linkX, linkY, 255);     // 用 255 表示已用
 
-                    if (bestLinkPos.y in exitMaps[3][bestLinkPos.x] || bestLinkPos.y in exitMaps[4][bestLinkPos.x]) {
+                    // 在 ram 保护内，可能被 rangeAttack
+                    if (vertexVisited[v] !== 0 && 1 <= vertexDist[v] && vertexDist[v] <= 3) {
                         layout[STRUCTURE_RAMPART].push(bestLinkPos);
                     }
                     if (bestLinkPos.y in extensionPos[bestLinkPos.x]) {
@@ -1862,95 +1821,259 @@ function placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roa
                 }
 
                 layout[WORK_POS].push(bestPos);
-                if (bestPos.y in exitMaps[3][bestPos.x] || bestPos.y in exitMaps[4][bestPos.x]) {
+                pfCostMat.set(bestPos.x, bestPos.y, pfCostMat.get(bestPos.x, bestPos.y) + EXTENSION_COST);
+                u = bestPos.x + bestPos.y * 50;
+                // 在 ram 保护内，可能被 rangeAttack
+                if (vertexVisited[u] !== 0 && 1 <= vertexDist[u] && vertexDist[u] <= 3) {
                     layout[STRUCTURE_RAMPART].push(bestPos);
                 }
                 if (bestPos.y in extensionPos[bestPos.x]) {
                     delete extensionPos[bestPos.x][bestPos.y];
                     removedPosList.push(bestPos);
                 }
-                goal.progressTotal ? controllerWorkPos = bestPos : sourceWorkPosList.push(bestPos);
+                goal.progressTotal !== undefined ? controllerWorkPos = bestPos : sourceWorkPosList.push(bestPos);
                 layoutCost[bestPos.x][bestPos.y] = 255;     // 用 255 表示已用
+                layoutCost[nearestPos.x][nearestPos.y] = 255;    
             }
         }
     }
     return { removedPosList, sourceWorkPosList, controllerWorkPos, mineralWorkPos };
 }
 
+function getTowerDmg(towerX, towerY, enemyPos) {
+    let range = getRange(towerX, towerY, enemyPos.x, enemyPos.y);
+    if (range <= 4) {
+        return 0;
+    } else if (range >= TOWER_FALLOFF_RANGE) {
+        return 150;
+    } else if (range > TOWER_OPTIMAL_RANGE) {
+        return TOWER_POWER_ATTACK - TOWER_DAMAGE_DECLINE * (range - TOWER_OPTIMAL_RANGE);
+    } else {
+        return TOWER_POWER_ATTACK;
+    }
+}
+
+function removeAdjTowers(towerPos, validTowerPoses) {
+    let x = towerPos.x, y = towerPos.y, px, py, removedPoses = [];
+    for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+            px = +x + i;
+            py = +y + j;
+            if (px in validTowerPoses && py in validTowerPoses[px]) {
+                if (i || j) {
+                    removedPoses.push({ x: px, y: py, total: validTowerPoses[px][py].total});
+                }
+                validTowerPoses[px][py] = false;
+            }
+        }
+    }
+    // console.log(`removeAdjTowers 移除: ${JSON.stringify(removedPoses)}`);
+    return removedPoses;
+}
+
 /**
- * 根据 exit 宽度摆塔。
+ * 根据 敌人可能站位的伤害 摆塔。
+ * 逻辑：
+ * 1. 计算每个候选位置 towerCandidatePoses 对所有敌人 enermyPoses 的伤害之和。
+ * 2. 循环选择第 i+1 个塔：对于该 towerPos，其伤害 >500 覆盖的点中，有当前累计伤害为 150*i 的点，且该 towerPos 总伤最大
  * 
- * 根据 exitWidths 计算每个 exitGroup 需造的塔数，总共 6 塔按 exitWidths 比例分配,
- * 先按各方向的总宽度 total 尽量均匀分配，再按 widthList 在此方向的 group 中分配。
  * 
- * @param {{[type:string]: {total:number, nTowers:number, widthList:{width: number, nTowers:number, towerCandidatePosList:{x:number, y:number}[]}[]}}} exitWidths 
- * @param {*} layout 
  * @param {CostMat} layoutCost 
  * @param {CostMat} roads 
- * @param {CostMat} extensionPos 
  */
-function placeTower(exitWidths, layout, layoutCost, roads, extensionPos) {
-    // exitWidths 当作一个 list 按 total 从大到小排序
-    let exitWidthsList = [], removedPosList = [];
-    for (let exitType in exitWidths) {
-        exitWidthsList.push(exitWidths[exitType]);
-    }
-    exitWidthsList.sort((a, b) => b.widthList.length - a.widthList.length);
-    // 计算每个 exitGroup 需造的塔数，总共 6 塔按 exitWidths 比例分配
-    let towerNum = 6;
-    while (towerNum) {
-        for (let exitWidths of exitWidthsList) {
-            exitWidths.nTowers += 1;
-            towerNum -= 1;
-            if (!towerNum) break;
-        }
-    }
-    layout[STRUCTURE_TOWER] = [];   // 准备造塔
-    for (let exitWidths of exitWidthsList) {
-        if (exitWidths.nTowers) {
-            let widthList = exitWidths.widthList.sort((a, b) => b.width - a.width), nTowers = exitWidths.nTowers;
-            while (nTowers) {
-                for (let group of widthList) {
-                    group.nTowers += 1;
-                    nTowers -= 1;
-                    if (!nTowers) break;
-                }
+function placeTower(towerCandidatePoses, enermyPoses, layoutCost, roads, fakeRoads) {
+    /**@type {{[x:number]:{[y:number]: {total:number, perPos:number[]}}}} */
+    let validTowerPoses = {}, removedPoses = [], accumulateDamage, damageData, perDmg;
+    /**@type {{x:number, y:number}[]} */
+    let selectedTowerPos = [], minPossibleDmg, dmg, maxDmg, minDmg, minTowerDamageFactor, maxRange;
+    let x, y, px, py, i, j, validNum, pos, bestTowerPos = null, hasAdjTower, nearMinEnemy, removedNum = 0;
+    // 1. 先统计伤害并根据伤害确定第一个 tower 位置
+    validNum = 0, maxDmg = 0;
+    for (x in towerCandidatePoses) {
+        for (y in towerCandidatePoses[x]) {
+            if (y in roads[x] || y in layoutCost[x] || y in fakeRoads[x]) {
+                continue;
             }
-
-            // 
-            for (let group of widthList) {
-                nTowers = group.nTowers;
-                if (!nTowers) {
+            // 有效位置
+            damageData = {total:0, perPos:[]};
+            for (i = 0; i < enermyPoses.length; i++) {
+                pos = enermyPoses[i];
+                dmg = getTowerDmg(+x, +y, pos);
+                // 如果 tower 离敌人的距离是可以被 rangeAttack 的距离，视为 invalid
+                if (dmg === 0) {
+                    damageData = null;
                     break;
                 }
-                let candidatePosOnExt = [], x, y;
-                for (let pos of group.towerCandidatePosList.reverse()) {
-                    x = pos.x, y = pos.y;
-                    if (pos.y in extensionPos[pos.x]) {
-                        candidatePosOnExt.push(pos);
-                    } else if (pos.y in layoutCost[pos.x] || y in roads[x]) {
-                        continue;
-                    } else {    // 空地可以直接摆塔
-                        layout[STRUCTURE_TOWER].push(pos);
-                        layoutCost[x][y] = 255;
-                        nTowers--;
+                damageData.total += dmg;
+                damageData.perPos.push(dmg);
+            }
+            // 如果 tower 离敌人的距离是可以被 rangeAttack 的距离，视为 invalid
+            if (damageData === null) {
+                continue;
+            }
+
+            if (!(x in validTowerPoses)) {
+                validTowerPoses[x] = {};
+            }
+            validTowerPoses[x][y] = damageData;
+            validNum++;
+
+            if (damageData.total > maxDmg) {
+                // 如果周围有其他 towerCandidatePoses 才能做第一个 tower
+                hasAdjTower = false;
+                for (let i = -1; i <= 1; i++) {
+                    for (let j = -1; j <= 1; j++) {
+                        if (i || j) {
+                            px = +x + i;
+                            py = +y + j;
+                            if (px in validTowerPoses && py in validTowerPoses[px]) {
+                                hasAdjTower = true;
+                                break;
+                            }
+                        }
                     }
-                    if (!nTowers) break;
                 }
-                if (nTowers && candidatePosOnExt.length) {
-                    for (let pos of candidatePosOnExt) {
-                        removedPosList.push(pos);
-                        layout[STRUCTURE_TOWER].push(pos);
-                        layoutCost[pos.x][pos.y] = 255;
-                        nTowers--;
-                        delete extensionPos[pos.x][pos.y];
-                        if (!nTowers) break;
+                maxDmg = damageData.total;
+                bestTowerPos = {x: +x, y: +y};
+            }
+        }
+    }
+    // 1.1 如果候选位置不超过 6 个，直接返回所有候选位置
+    if (validNum <= 6) {
+        for (x in validTowerPoses) {
+            for (y in validTowerPoses[x]) {
+                selectedTowerPos.push({x: +x, y: +y});
+            }
+        }
+        return selectedTowerPos;
+    }
+    selectedTowerPos.push(bestTowerPos);
+    accumulateDamage = validTowerPoses[bestTowerPos.x][bestTowerPos.y].perPos;
+    removedPoses.push(removeAdjTowers(bestTowerPos, validTowerPoses));
+    removedNum += removedPoses[removedPoses.length - 1].length;
+
+    // 根据 bestTowerPos 与最远的 enermyPos 的距离，确定 minTowerDamageFactor
+    maxRange = 0;
+    for (i = 0; i < enermyPoses.length; i++) {
+        pos = enermyPoses[i];
+        let range = getRange(bestTowerPos.x, bestTowerPos.y, pos.x, pos.y);
+        if (range > maxRange) {
+            maxRange = range;
+        }
+    }
+    if (maxRange > 20) {
+        minTowerDamageFactor = 160;
+    } else if (maxRange > 16) {
+        minTowerDamageFactor = 600 - TOWER_DAMAGE_DECLINE * (maxRange - TOWER_OPTIMAL_RANGE) + 60;
+    } else {
+        minTowerDamageFactor = 330;
+    }
+    
+    // 2. 循环找第 i+1 个塔，使得不存在有累计伤害为 150*i 的点
+    minPossibleDmg = minTowerDamageFactor * selectedTowerPos.length;
+    minDmg = Math.min(...accumulateDamage);
+    while (selectedTowerPos.length < 6 && minDmg < minPossibleDmg) {
+        maxDmg = 0;
+        bestTowerPos = null;
+        for (x in validTowerPoses) {
+            for (y in validTowerPoses[x]) {
+                if (validTowerPoses[x][y]) {
+                    dmg = validTowerPoses[x][y].total;
+                    // 寻找 伤害最大 且 能覆盖到当前受伤最小的敌人 的塔
+                    if (dmg > maxDmg) {
+                        perDmg = validTowerPoses[x][y].perPos;
+                        nearMinEnemy = false;
+                        for (i = 0; i < enermyPoses.length; i++) {
+                            if (perDmg[i] > 550 && accumulateDamage[i] === minDmg) {
+                                nearMinEnemy = true;
+                                break;
+                            }
+                        }
+                        if (nearMinEnemy) {
+                            maxDmg = dmg;
+                            bestTowerPos = { x: +x, y: +y };
+                        }
                     }
                 }
             }
         }
+        if (!bestTowerPos) {
+            console.log('Error: no best tower pos');
+            break;
+        }
+        selectedTowerPos.push(bestTowerPos);
+        perDmg = validTowerPoses[bestTowerPos.x][bestTowerPos.y].perPos;
+        for (i = 0; i < enermyPoses.length; i++) {
+            accumulateDamage[i] += perDmg[i];
+        }
+        removedPoses.push(removeAdjTowers(bestTowerPos, validTowerPoses));
+        removedNum += removedPoses[removedPoses.length - 1].length;
+        minPossibleDmg = minTowerDamageFactor * selectedTowerPos.length;
+        minDmg = Math.min(...accumulateDamage);
     }
-    return removedPosList;
+    console.log(`placeTower 主循环找到: ${JSON.stringify(selectedTowerPos)}, removedNum: ${removedNum}\n${JSON.stringify(removedPoses)}`);
+
+    // 3. 退出 while 循环后，有两种情况：
+    // 1. 找到 6 个塔
+    // 2. 所有敌人都被覆盖
+    // 3.1 找到 6 个塔
+    if (selectedTowerPos.length === 6) {
+        return selectedTowerPos;
+    } 
+    // 3.2 所有敌人都被覆盖
+    else {
+        // 意外情况，在之前选好的 tower 附近相邻位置不够多
+        if (removedNum + selectedTowerPos.length <= 6) {
+            for (i = 0; i < removedPoses.length; i++) {
+                selectedTowerPos.push(...removedPoses[i]);
+                removedPoses[i].length = 0;
+            }
+        } 
+        // 正常情况，在之前选好的 tower 附近相邻位置造塔
+        else {
+            let hasAdjPos = true;
+            while (selectedTowerPos.length < 6 && hasAdjPos) {
+                hasAdjPos = false;
+                for (i = 0; i < removedPoses.length && selectedTowerPos.length < 6; i++) {
+                    pos = removedPoses[i].pop();
+                    if (pos) {
+                        hasAdjPos = true;
+                        selectedTowerPos.push(pos);
+                    }
+                }
+            }
+        }
+        if (selectedTowerPos.length >= 6) {
+            for (i = 0; i < removedPoses.length; i++) {
+                for (pos of removedPoses[i]) {
+                    validTowerPoses[pos.x][pos.y] = { total: pos.total, perPos: []};
+                }
+            }
+        }
+
+        while (selectedTowerPos.length < 6) {
+            maxDmg = 0;
+            bestTowerPos = null;
+            for (x in validTowerPoses) {
+                for (y in validTowerPoses[x]) {
+                    if (validTowerPoses[x][y]) {
+                        dmg = validTowerPoses[x][y].total;
+                        if (dmg > maxDmg) {
+                            maxDmg = dmg;
+                            bestTowerPos = { x: +x, y: +y };
+                        }
+                    }
+                }
+            }
+            if (bestTowerPos) {
+                selectedTowerPos.push(bestTowerPos);
+                validTowerPoses[bestTowerPos.x][bestTowerPos.y] = false;
+            } else {
+                break;
+            }
+        }
+    }
+    return { selectedTowerPos, validTowerPoses };
 }
 
 /**
@@ -1962,323 +2085,576 @@ function placeTower(exitWidths, layout, layoutCost, roads, extensionPos) {
  * 
  * @param {ClaimableRoom} room 
  * @param {{x:number, y:number}[]} entryRoots
+ * @param {RoomVisual} rv 
  */
-function placeRoadsAndLinkAndRampartAndTower(room, start, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, shareControllerLink = false) {
-    let pfCostMat = new PathFinder.CostMatrix, roads = getEmptyMat(1, 48), rampPos = getEmptyMat(1, 48);
+function placeRoadsAndLinkAndRampartAndTower(room, start, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, shareControllerLink, rv) {
+    /** @type {CostMatrix} */
+    let pfCostMat, roads = getEmptyMat(1, 48), px, py, x, y;
     let removedExt = getEmptyMat(2, 47), removedNum = 0;
     /**
      * src 和 mineral 相邻空地、controller range2 空地设为与 swamp 相同代价
      */
     pfCostMat = initPfCostMat(layoutCost, roadPos, extensionPos, exitGroups, roads, room);
-
+    
     // 首先考虑所有 ext 圈，必须都能进入
-    let goals = entryRoots.map(root => ({ pos: new RoomPosition(root.x, root.y, room.name), range: 0 }));
+    let goals = entryRoots.map(root => ({ pos: { x: root.x, y: root.y, roomName: room.name }, range: 0 }));
     //console.log('start:', JSON.stringify(start));
-    var { removedPosList } = findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layoutCost, 0);
+    var { removedPosList } = findAllGoals(start, goals, pfCostMat, roads, extensionPos, rv);
     removedNum += removedPosList.length;
     for (let pos of removedPosList) {
-        removedExt[pos.x][pos.y] = 1
+        removedExt[pos.x][pos.y] = 1;
     }
 
     // 然后考虑所有 src、controller、mineral，必须都能抵达
-    let goalObjects = room.source;
-    goalObjects.push(room.controller);
+    let goalObjects = [];
+    goalObjects.push(room.controller, ...room.source.map(source => source));
     if (room.mineral) {
         goalObjects.push(room.mineral);
     }
     goals = goalObjects.map(o => ({ pos: o.pos, range: 1 }));
     // console.log('find road to 资源点');
-    var { removedPosList, goalNearestPos, unplacedSpawn } = findAllGoals(start, goals, pfCostMat, roads, extensionPos, layout, layoutCost, NUM_EXT_FOR_SPAWN);
+    var { removedPosList, goalNearestPos } = findAllGoals(start, goals, pfCostMat, roads, extensionPos, rv);
     removedNum += removedPosList.length;
     for (let pos of removedPosList) {
-        removedExt[pos.x][pos.y] = 1
+        removedExt[pos.x][pos.y] = 1;
     }
 
-    // 如果 unplacedSpawn>0，找近的 ext 设为 spawn。此处兜底保障 spawn 造够3个
-    while (unplacedSpawn > 0) {
-        let placed = false;
-        for (let root of entryRoots) {
-            for (let x = root.x - 1; x <= root.x + 1; x++) {
-                for (let y = root.y - 1; y <= root.y + 1; y++) {
-                    if (y in extensionPos[x]) {
-                        delete extensionPos[x][y];
-                        layout[STRUCTURE_SPAWN].push({ x: x, y: y });
-                        layoutCost[x][y] = 255;
-                        placed = true;
-                        unplacedSpawn--;
-                        break;
-                    }
-                }
-                if (placed) break;
+    // 摆完 ext 后摆 ram
+    let startPoses = [];
+    for (let x in layoutCost) {
+        for (let y in layoutCost[x]) {
+            if (layoutCost[x][y] === 255) startPoses.push({ x: +x, y: +y });
+        }
+    }
+    for (let x in extensionPos) {
+        for (let y in extensionPos[x]) {
+            startPoses.push({ x: +x, y: +y });
+        }
+    }
+    let targetPoses = []
+    for (let x in exitMaps[1]) {
+        for (let y in exitMaps[1][x]) {
+            targetPoses.push({ x: +x, y: +y });
+        }
+    }
+    let startMinCutCPU = Game.cpu.getUsed();
+    let ramparts = minCut(room.getTerrain().getRawBuffer(), startPoses, targetPoses, rv);
+    console.log(`minCut cpu: ${Game.cpu.getUsed() - startMinCutCPU}`);
+    layout[STRUCTURE_RAMPART] = ramparts;
+    let { towerCandidatePoses, enermyPoses, rampartGroups } = getTowerCandidatePoses(ramparts);
+    let { vertexVisited, vertexDist } = getVisitedAndDist();
+
+    updatePfCostMat(pfCostMat, vertexDist);
+
+
+    // 确保 ram 可达，移除 ext 并铺路
+    for (let group of rampartGroups) {
+        goals = group.map(pos => ({ pos: { x: pos.x, y: pos.y, roomName: room.name }, range: 1 }));
+        var { removedPosList, canReach, fakeRoads } = findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, rv);
+        removedNum += removedPosList.length;
+        for (let pos of removedPosList) {
+            removedExt[pos.x][pos.y] = 1;
+        }
+        for (let x in fakeRoads) {
+            for (let y in fakeRoads[x]) {
+                removedExt[x][y] = 1;
             }
         }
     }
-
-    /**@type {{[type:string]: {total:number, nTowers:number, widthList:{width: number, nTowers:number, towerCandidatePosList:{x:number, y:number}[]}[]}}} */
-    let exitWidths = {};
-    // 设置 exitGroups dist==1 的格子，如果没有为 src、mineral、controller 铺过路则为墙
-    for (let exitType in exitGroups[1]) {
-        for (let group of exitGroups[1][exitType]) {
-            for (let pos of group) {
-                // 如果铺过路，cost 会被更改为 1，不再是 EXIT_PATHFINDER_COST
-                if (pfCostMat.get(pos.x, pos.y) >= EXIT_PATHFINDER_COST) {
-                    pfCostMat.set(pos.x, pos.y, 255);
-                }
-            }
-        }
-    }
-    // 最后考虑所有 dist == 2 的 exitGroup，必须都能抵达，除非必须经过没铺路的 dist ==1
-    for (let exitType in exitGroups[2]) {
-        exitWidths[exitType] = { total: 0, nTowers: 0, widthList: [] };
-        for (let group of exitGroups[2][exitType]) {
-            if (group.length) {
-                let exitPos = group[Math.floor(group.length / 2)]
-                goals = [{ pos: new RoomPosition(exitPos.x, exitPos.y, room.name), range: 0 }];
-                // 对于每个 exitGroup，只需要抵达其中任意一格即可
-                let { removedPosList, canReach, towerCandidatePosList } = findRoadToRamp(start, goals, pfCostMat, roads, extensionPos, layoutCost, exitMaps);
-                if (canReach) {
-                    exitWidths[exitType].total += group.length;
-                    exitWidths[exitType].widthList.push({ width: group.length, nTowers: 0, towerCandidatePosList: towerCandidatePosList });
-                    for (let pos of group) {
-                        rampPos[pos.x][pos.y] = 1;
-                    }
-                    removedNum += removedPosList.length;
-                    for (let pos of removedPosList) {
-                        removedExt[pos.x][pos.y] = 1
-                    }
-                }
-            }
-        }
-    }
-
-    // 铺完所有路后，优先摆 link，最后再考虑塔
-    var { removedPosList, sourceWorkPosList, controllerWorkPos, mineralWorkPos } = placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roads, extensionPos, exitMaps, layout, layoutCost);
+    
+    // 在 ram 的路也确定后，铺 link 或 container
+    var { removedPosList, sourceWorkPosList, controllerWorkPos, mineralWorkPos } = placeLinkAndContainer(room, goalObjects, goalNearestPos, pfCostMat, roads, fakeRoads, extensionPos, exitMaps, layout, layoutCost, vertexVisited, vertexDist, shareControllerLink, rv);
     removedNum += removedPosList.length;
     for (let pos of removedPosList) {
-        removedExt[pos.x][pos.y] = 1
+        px = pos.x;
+        py = pos.y;
+        removedExt[px][py] = 1;
+        delete extensionPos[px][py];
     }
 
-    // 铺塔
-    removedPosList = placeTower(exitWidths, layout, layoutCost, roads, extensionPos);
-    removedNum += removedPosList.length;
-    for (let pos of removedPosList) {
-        removedExt[pos.x][pos.y] = 1
+    // 铺 tower，此时肯定不会挡住 workPos 或者 link 或者 roads
+    let { selectedTowerPos, validTowerPoses } = placeTower(towerCandidatePoses, enermyPoses, layoutCost, roads, fakeRoads) as any;
+    // 确保 tower 可达，往 tower 铺路
+    goals = [];
+    let towerPos = {};
+    for (let pos of selectedTowerPos) {
+        px = pos.x, py = pos.y;
+        goals.push({ pos: { x: +px, y: +py, roomName: room.name }, range: 1 });
+        pfCostMat.set(px, py, EXTENSION_COST + 4);
+        if (py in extensionPos[px]) {
+            removedNum++;
+            // console.log(`remove ext for tower at (${px}, ${py})`);
+            delete extensionPos[px][py];
+        }
+
+        if (!(px in towerPos)) {
+            towerPos[px] = {};
+        }
+        towerPos[px][py] = 1;
+        validTowerPoses[px][py] = false;
     }
-
-    return { removedNum, removedExt, roads, rampPos };
-}
-
-function placeAround(canPlacePos, extensionPos, num) {
-    let placedNum = 0;
-    for (let i = canPlacePos.length - 1; i >= 0; i--) {
-        let { x, y } = canPlacePos.pop();
-        extensionPos[x][y] = 1;
-        placedNum++;
-        if (placedNum >= num) {
+    while (true) {
+        var { removedPosList, removedTowers } = findAllGoals(start, goals, pfCostMat, roads, extensionPos, rv, towerPos);
+        removedNum += removedPosList.length;
+        for (let pos of removedPosList) {
+            removedExt[pos.x][pos.y] = 1;
+        }
+        if (removedTowers.length > 0) {
+            for (let pos of removedTowers) {
+                towerPos[pos.x][pos.y] = 0;
+            }
+            goals = [];
+            while (goals.length < removedTowers.length) {
+                let maxDmg = 0, dmg, bestTowerPos = null;
+                for (x in validTowerPoses) {
+                    for (y in validTowerPoses[x]) {
+                        if (validTowerPoses[x][y] && !(y in roads[x]) && !(y in layoutCost[x])) {
+                            dmg = validTowerPoses[x][y].total;
+                            if (dmg > maxDmg) {
+                                maxDmg = dmg;
+                                bestTowerPos = { x: +x, y: +y, roomName: room.name };
+                            }
+                        }
+                    }
+                }
+                if (bestTowerPos) {
+                    x = bestTowerPos.x, y = bestTowerPos.y;
+                    console.log(`additional tower at (${x}, ${y})`);
+                    goals.push({ pos: bestTowerPos, range: 1 });
+                    validTowerPoses[x][y] = false;
+                    if (!(x in towerPos)) {
+                        towerPos[x] = {};
+                    }
+                    towerPos[x][y] = 1;
+                    if (y in extensionPos[x]) delete extensionPos[x][y];
+                } else {
+                    break;
+                }
+            }
+            if (goals.length === 0) break;
+        } else {
             break;
         }
     }
-    return placedNum;
+    layout[STRUCTURE_TOWER] = [];
+    for (let x in towerPos) {
+        for (let y in towerPos[x]) {
+            if (towerPos[x][y] === 1) {
+                layout[STRUCTURE_TOWER].push({ x: +x, y: +y });
+                // 将 tower 位置设为 255，防止后续沿路摆 ext 时错误使用这些位置
+                layoutCost[x][y] = 255;     
+            }
+        }
+    }
+
+    return { removedNum, removedExt, roads, vertexVisited, vertexDist };
 }
 
 /**
- * 铺 nuker、被移除的 ext、ob。
- * 会修改 layout(加入 nuker)、extensionPos（加入新 ext）
+ * 铺 lab，先选 accumExtPos>=10 的点，在其附近选10个 lab
+ * 原料 lab 位于 layout[STRUCTURE_LAB] 末尾两个
  * 
- * @param {*} storagePos 
- * @param {*} terrain 
+ * @param {RoadPos[]} roadPosQueue 
+ * @param {*} layout 
+ * @param {CostMat} layoutCost 
+ * @param {CostMat} extensionPos 
+ * @param {CostMat} costMat 
+ * @param {RoomVisual} rv 
+ */
+function placeLab(roadPosQueue, layout, layoutCost, extensionPos, costMat, rv) {
+    let labPos = [], pos;
+    let potentialLabPos, validRoadPos, xMin, xMax, yMin, yMax, px, py;
+    let i, j, k, labA, labAX, labAY, labB, labBX, labBY, labK, labPosNearA, labPosNearAB;
+    layout[STRUCTURE_LAB] = [];
+
+    for (let roadPos of roadPosQueue) {
+        // rv.text(`${roadPos.accumExtPos}`, roadPos.x - 0.5, roadPos.y - 0.5, { color: global.colours.暗青, font: 0.6});
+        // 先选 accumExtPos >= labProposalNum 的点，在其所有2级孩子的 ext 中选 lab
+        if (roadPos.accumExtPos >= config.labProposalNum) {
+            potentialLabPos = [];
+            xMin = 0, xMax = 49, yMin = 0, yMax = 49;
+            validRoadPos = [roadPos];
+            for (let child of roadPos.children) {
+                validRoadPos.push(child);
+                validRoadPos.push(...child.children);
+            }
+            for (let roadPos of validRoadPos) {
+                for (let extPos of roadPos.extPos) {
+                    potentialLabPos.push({ x: extPos.x, y: extPos.y });
+                    if (extPos.x < xMin) xMin = extPos.x;
+                    if (extPos.x > xMax) xMax = extPos.x;
+                    if (extPos.y < yMin) yMin = extPos.y;
+                    if (extPos.y > yMax) yMax = extPos.y;
+                }
+            }
+            // console.log(`test (${roadPos.x}, ${roadPos.y}) with potential ${potentialLabPos.length}`);
+            for (i=0; i<potentialLabPos.length-1 && !labPos.length; i++) {
+                labA = potentialLabPos[i];
+                labAX = labA.x;
+                labAY = labA.y;
+                if (labAX <= xMin || labAX >= xMax || labAY <= yMin || labAY >= yMax) continue;
+                labPosNearA = [];
+                for (px = labAX-2; px <= labAX+2; px++) {
+                    for (py = labAY-2; py <= labAY+2; py++) {
+                        if (py in extensionPos[px] && (px != labAX || py != labAY)) {
+                            labPosNearA.push({ x: px, y: py });
+                        }
+                    }
+                }
+                if (labPosNearA.length < 9) continue;
+                labPosNearA.sort((a, b) => costMat[a.x][a.y] - costMat[b.x][b.y]);
+                for (j=i+1; j<potentialLabPos.length; j++) {
+                    labB = potentialLabPos[j];
+                    labBX = labB.x;
+                    labBY = labB.y;
+                    if (labBX <= xMin || labBX >= xMax || labBY <= yMin || labBY >= yMax) continue;
+                    labPosNearAB = [];
+                    for (labK of labPosNearA) {
+                        if (labK.x == labBX && labK.y == labBY) continue;
+                        if (Math.abs(labK.x - labBX) <= 2 && Math.abs(labK.y - labBY) <= 2) {
+                            labPosNearAB.push(labK);
+                        }
+                    }
+                    if (labPosNearAB.length >= 8) {
+                        xMin = xMax = labA.x, yMin = yMax = labA.y;
+                        labPos.push(labA);
+                        labPos.push(labB);
+                        for (j=0; j<8; j++) {
+                            pos = labPosNearAB[j];
+                            if (pos.x < xMin) xMin = pos.x;
+                            else if (pos.x > xMax) xMax = pos.x;
+                            if (pos.y < yMin) yMin = pos.y;
+                            else if (pos.y > yMax) yMax = pos.y;
+                            labPos.push(pos)
+                        }
+                        break;
+                    }
+                }
+            }
+            if (labPos.length) {
+                // 重新整理，找最近的合适 lab 作为原料 lab，原料 lab 位于 layout[STRUCTURE_LAB] 末尾两个
+                let coreLabs = [], minDist = 50;
+                for (let pos of labPos) {
+                    px = pos.x, py = pos.y;
+                    layoutCost[px][py] = 255;
+                    if (px - xMin <= 2 && xMax - px <= 2 && py - yMin <= 2 && yMax - py <= 2) {
+                        coreLabs.push(pos);
+                    } else {
+                        layout[STRUCTURE_LAB].push(pos);
+                    }
+                    // delete extensionPos[pos.x][pos.y];
+                }
+                if (coreLabs.length > 2) {
+                    coreLabs.sort((a, b) => costMat[b.x][b.y] - costMat[a.x][a.y]);
+                }
+                layout[STRUCTURE_LAB].push(...coreLabs);
+                break;
+            }
+        }
+    }
+    return labPos;
+}
+
+/**
+ * 铺 lab、spawn、nuker、被移除的 ext、ob。
+ * 会修改 layout(加入 nuker)、extensionPos（加入新 ext）。
+ * 
+ * 算法步骤：
+ * 1. 先从 storage 开始沿 roads bfs，作用：
+ *   1.1. 确定所有 ext 最短路程;
+ *   1.2. 确定 ext 属于哪个 road 格子，记录每个 road 格子关联的 ext 数量;
+ *   1.3. 确定 road 格子的父子关系;
+ *   1.4. 将内部路边空地铺上 ext;
+ * 2. 
+ * 
+ * @param {{x:number, y:number}} storagePos 
+ * @param {Uint8Array} terrain 
  * @param {*} layout
- * @param {*} layoutCost 
- * @param {*} roads 
- * @param {*} extensionPos 
- * @param {*} entryPos 
- * @param {*} removedExt 
+ * @param {CostMat} layoutCost 
+ * @param {CostMat} roads 
+ * @param {CostMat} extensionPos 
+ * @param {CostMat} removedExt 
  * @param {*} entryRoots 
  * @param {*} num 
- * @returns 
+ * @param {RoomVisual} rv 
  */
-function placeAlongRoad(storagePos, terrain, layout, layoutCost, roads, extensionPos, entryPos, removedExt, entryRoots, num) {
+function placeAlongRoad(storagePos, terrain, layout, layoutCost, roads, extensionPos, removedExt, vertexVisited, vertexDist, rv) {
     let { costMat, edgeSet } = initialCost(storagePos, 1, terrain, layoutCost, extensionPos);
-    let px, py, placedNum = 0, cost, parent, canPlacePos = [], obPos, needNuker = true;
+    let px, py, y50, u, cost, canPlacePos = [], obPos, newRoadPos, curPos, potNum;
 
-    /* for (let x in entryPos) {
-        for (let y in entryPos[x]) {
-            console.log(JSON.stringify(entryPos[x][y]));
-        }
-    } */
-
+    // potentialExtPos: 每格道路可能摆的 extensions
+    // extPos: 每格道路实际关联的 extensions
+    // hasPotential: 此格及其所有前序节点是否有 potentialExtPos
+    // parent: 每格道路的父 road 格子，往 parent 回溯2步统计 ext 用于 lab
+    // children: 每格道路的孩子 road 格子，用于最后 dfs 分组
+    // accumExtPos: 此格及其最近两级前序节点的 ext 节点总数，用于选 accumExtPos>=10 的点铺 lab
+    /**@type {RoadPos[]} */
+    let bfsQueue = [];
     for (let pos of edgeSet) {
-        px = pos.x, py = pos.y;
-        cost = costMat[px][py];
-        parent = false;
-        canPlacePos.length = 0;
-        for (let x = px - 1; x <= px + 1; x++) {
-            for (let y = py - 1; y <= py + 1; y++) {
-                if (y in roads[x] || (y in layoutCost[x] && layoutCost[x][y] == 1)) {
+        newRoadPos = { x: pos.x, y: pos.y, potentialExtPos: [], extPos: [], hasPotential: false, parent: undefined, children: [], accumExtPos: 0 };
+        bfsQueue.push(newRoadPos);
+        costMat[pos.x][pos.y] = 0;
+    }
+
+    // 这里是一个 bfs
+    let totalExt = 0, curCost, totalPotentialExt = 0;
+    for (let roadPos of bfsQueue) {
+        px = roadPos.x, py = roadPos.y;
+        curCost = costMat[px][py];
+        // rv.text(`${curCost}`, px - 0.5, py - 0.5, { color: global.colours.宝蓝 });
+        for (let y = py - 1; y <= py + 1; y++) {
+            if (y <= 0 || y >= 49) continue;
+            y50 = y * 50;
+            for (let x = px - 1; x <= px + 1; x++) {
+                if (x <= 0 || x >= 49) continue;
+                if (y in roads[x]) {
                     if (!(y in costMat[x])) {
-                        costMat[x][y] = cost + 1;
-                        edgeSet.push({ x, y });
+                        newRoadPos = { x, y, potentialExtPos: [], extPos: [], hasPotential: false, parent: roadPos, children: [], accumExtPos: 0 };
+                        roadPos.children.push(newRoadPos);
+                        bfsQueue.push(newRoadPos);
+                        costMat[x][y] = curCost + 1;
                     }
-                    if (y in entryPos[x]) {
-                        if (costMat[x][y] < cost) {
-                            parent = entryPos[x][y];
-                        }
+                } else if (y in extensionPos[x]) {
+                    if (!(y in costMat[x])) {
+                        totalExt++;
+                        roadPos.extPos.push({ x, y });
+                        roadPos.accumExtPos++;
+                        costMat[x][y] = curCost;
                     }
                 } else if (!(terrain[y * 50 + x] & TERRAIN_MASK_WALL) &&
-                    !(y in extensionPos[x]) &&
                     !(y in layoutCost[x]) &&
-                    !(y in removedExt[x])) {
-                    canPlacePos.push({ x, y });
-                }
-            }
-        }
-        // 优先摆 nuker
-        if (canPlacePos.length && needNuker) {
-            let nukerPos = canPlacePos.pop();
-            layout[STRUCTURE_NUKER] = [nukerPos];
-            layoutCost[nukerPos.x][nukerPos.y] = 255;
-            needNuker = false;
-        }
-        if (canPlacePos.length) {
-            if (placedNum < num) {
-                if (py in entryPos[px] || parent) {
-                    if (!(py in entryPos[px])) {
-                        let newEntry = { x: px, y: py, parentEntryX: parent.x, parentEntryY: parent.y, cost, children: [] };
-                        //console.log(`parent ${JSON.stringify(parent)}`);
-                        if (parent.children === undefined) {
-                            console.log(`no children parent ${JSON.stringify(parent)}`);
-                            parent.children = [];
+                    !(y in removedExt[x]) &&
+                    !(y in costMat[x])) {
+                        // 如果在 ram 外或会被 rangeAttack 的区域，不造额外补充的 ext
+                        u = y50 + x;
+                        if (vertexVisited[u] === 0 || (vertexDist[u] > 0 && vertexDist[u] <= 3)) {
+                            continue;
                         }
-                        parent.children.push(newEntry);
-                        entryPos[px][py] = newEntry;
+                        else if (curCost === 0) {
+                            totalExt++;
+                            roadPos.extPos.push({ x, y });
+                            roadPos.accumExtPos++;
+                            costMat[x][y] = curCost;
+                            extensionPos[x][y] = 1;
+                        } else {
+                            roadPos.potentialExtPos.push({ x, y });
+                            costMat[x][y] = curCost;
+                            roadPos.hasPotential = true; // 代表自己及上游有 potential
+                        }
+                }
+            }
+        }
+        // 如果此格有 ext，所有上游 potential 变现
+        if (roadPos.extPos.length) {
+            roadPos.parent && (roadPos.parent.accumExtPos += roadPos.accumExtPos) && roadPos.parent.parent && (roadPos.parent.parent.accumExtPos += roadPos.accumExtPos);
+            curPos = roadPos;
+            while (curPos && curPos.hasPotential) {
+                potNum = curPos.potentialExtPos.length;
+                if (potNum) {
+                    totalExt += potNum;
+                    for (let pos of curPos.potentialExtPos) {
+                        extensionPos[pos.x][pos.y] = 1;
                     }
-                    placedNum += placeAround(canPlacePos, extensionPos, num - placedNum);
-                } else if (canPlacePos.length >= 2 || num - placedNum <= canPlacePos.length) {
-                    entryPos[px][py] = { x: px, y: py, isHead: true, cost, children: [] };
-                    entryRoots.push(entryPos[px][py]);
-                    placedNum += placeAround(canPlacePos, extensionPos, num - placedNum);
+                    curPos.extPos.push(...curPos.potentialExtPos);
+                    totalPotentialExt -= potNum;
+                    curPos.potentialExtPos.length = 0;
+                    curPos.accumExtPos += potNum;
+                    curPos.parent && (curPos.parent.accumExtPos += potNum) && curPos.parent.parent && (curPos.parent.parent.accumExtPos += potNum);
                 }
-                if (obPos && obPos.y in extensionPos[obPos.x]) {    // 新摆的ext把之前ob占了
-                    obPos = false;
-                }
+                curPos.hasPotential = false;
+                curPos = curPos.parent;
             }
-            if (canPlacePos.length && !obPos) {
-                obPos = canPlacePos[0];
+        } else {
+            totalPotentialExt += roadPos.potentialExtPos.length;
+            for (let pos of roadPos.children) {
+                pos.hasPotential = roadPos.hasPotential;    // 代表上游有 potential
             }
-            if (placedNum >= num && obPos) {
-                return { placedNum, obPos };
-            }
+        }
+        if (totalExt >= MAX_EXTENSIONS) {
+            console.log(`✅✅不外扩情况下满足 totalExt=${totalExt}`);
+            break;
+        } else if (totalExt + totalPotentialExt >= MAX_EXTENSIONS) {
+            console.log(`✅外扩情况下满足 totalExt=${totalExt}, totalPotentialExt=${totalPotentialExt}`);
+            break;
         }
     }
-    return { placedNum, obPos };
-    throw new Error(`cannot place all extension and ob: ${placedNum}, ${JSON.stringify(obPos)}`);
+
+    placeLab(bfsQueue, layout, layoutCost, extensionPos, costMat, rv);
+    let placedNum = 0, labNum = layout[STRUCTURE_LAB].length;   
+    let lackNum = MAX_EXTENSIONS - NUM_LAB - totalExt + labNum;     // 更鲁棒，适应能摆下的 lab 不足10个或根本没摆 lab
+    let numToPlace = MAX_EXTENSIONS - NUM_LAB + labNum;     // 更鲁棒，适应能摆下的 lab 不足10个或根本没摆 lab
+    layout[STRUCTURE_EXTENSION] = [];
+    for (let roadPos of bfsQueue) {
+        while (roadPos.extPos.length && placedNum < numToPlace) {
+            curPos = roadPos.extPos.pop();
+            if (!(curPos.y in layoutCost[curPos.x])) {
+                // layoutCost[curPos.x][curPos.y] = 255;
+                layout[STRUCTURE_EXTENSION].push(curPos);
+            }
+            placedNum++;
+        }
+        while (roadPos.potentialExtPos.length && lackNum > 0 && placedNum < numToPlace) {
+            layout[STRUCTURE_EXTENSION].push(roadPos.potentialExtPos.pop());
+            placedNum++;
+            lackNum--;
+        }
+        if (placedNum >= numToPlace) break;
+    }
+    layout[STRUCTURE_SPAWN] = layout[STRUCTURE_EXTENSION].slice(0, 3);
+    layout[STRUCTURE_EXTENSION] = layout[STRUCTURE_EXTENSION].slice(3);
+    if (layout[STRUCTURE_EXTENSION].length) {
+        layout[STRUCTURE_OBSERVER] = [layout[STRUCTURE_EXTENSION].pop()];
+    } else {
+        layout[STRUCTURE_OBSERVER] = [];
+    }
+    if (layout[STRUCTURE_EXTENSION].length) {
+        layout[STRUCTURE_NUKER] = [layout[STRUCTURE_EXTENSION].pop()];
+    } else {
+        layout[STRUCTURE_NUKER] = [];
+    }
+    
+    // dfs 的起始点只包括 edgeArray
+    // let placedNum = 0, lackNum = MAX_EXTENSIONS - totalExt;   
+    // let dfsArray = bfsQueue.slice(0, edgeSet.length);
+    // let hasCentralSpawn = false, numOuterSpawn = 0;
+    // layout[STRUCTURE_EXTENSION] = [];
+    // layout[STRUCTURE_SPAWN] = [];
+    // while (dfsArray.length && placedNum < MAX_EXTENSIONS) {
+    //     curPos = dfsArray[dfsArray.length - 1];
+    //     if (curPos.extPos.length && placedNum < MAX_EXTENSIONS) {
+    //         for (let pos of curPos.extPos) {
+    //             placedNum++;
+    //             // 如果没有被 lab 占用，
+    //             if (!(pos.y in layoutCost[pos.x])) {
+    //                 layoutCost[pos.x][pos.y] = 255;
+    //                 layout[STRUCTURE_EXTENSION].push(pos);
+    //             }
+    //             if (placedNum >= MAX_EXTENSIONS) break;
+    //         }
+    //         curPos.extPos.length = 0;
+    //     }
+    //     while (curPos.potentialExtPos.length && lackNum > 0) {
+    //         let pos = curPos.potentialExtPos.pop();
+    //         layoutCost[pos.x][pos.y] = 255;
+    //         layout[STRUCTURE_EXTENSION].push(pos);
+    //         placedNum++;
+    //         lackNum--;
+    //     }
+    //     if (placedNum >= MAX_EXTENSIONS) break;
+    //     if (curPos.children.length) {
+    //         dfsArray.push(curPos.children.pop());
+    //     } else {
+    //         dfsArray.pop();
+    //     } 
+    // }
+    // throw new Error(`cannot place all extension and ob: ${placedNum}, ${JSON.stringify(obPos)}`);
 }
 
 /**
  * 
+ * @param {RoomVisual} rv 
  */
+function showBetter(layout, rv) {
 
-/**
- * ScorpiorPlanner 输入参数接口
- */
-export interface PlannerInput {
-    roomName: string;
-    controller: { x: number; y: number };
-    sources: Array<{ x: number; y: number }>;
-    mineral?: { x: number; y: number };
-    terrain: Uint8Array;
-    acceptThreshold?: number;
-    reviewThreshold?: number;
-}
-
-/**
- * 通过 Room 对象或房间名进行规划
- * @param room Room 对象或房间名
- */
-export function plan(room: Room | string, acceptThreshold = config.acceptThreshold, reviewThreshold = config.reviewThreshold) {
-    const r = typeof room === 'string' ? Game.rooms[room] : room;
-    if (!r || !r.controller) {
-        return null;
+    for (let s of layout[STRUCTURE_ROAD]) {
+        rv.structure(s.x, s.y, STRUCTURE_ROAD);
     }
-
-    const input: PlannerInput = {
-        roomName: r.name,
-        controller: { x: r.controller.pos.x, y: r.controller.pos.y },
-        sources: r.find(FIND_SOURCES).map(s => ({ x: s.pos.x, y: s.pos.y })),
-        mineral: r.find(FIND_MINERALS)[0] ? { x: r.find(FIND_MINERALS)[0].pos.x, y: r.find(FIND_MINERALS)[0].pos.y } : undefined,
-        terrain: (r.getTerrain() as any).getRawBuffer()
-    };
-
-    return planByInput(input, acceptThreshold, reviewThreshold);
+    rv.connectRoads();
+    for (let type in layout) {
+        if (type == STRUCTURE_EXTENSION && layout[type].length) {
+            let num = 1;
+            for (let s of layout[type]) {
+                rv.structure(s.x, s.y, type);
+                rv.text(num, +s.x, +s.y, { color: '#ffd700', opacity: 1, font: 0.6 });
+                num++;
+            }
+        } else if (type == STRUCTURE_LAB && layout[type].length) {
+            for (let i = 0; i < layout[type].length - 2; i++) {
+                rv.structure(layout[type][i].x, layout[type][i].y, type);
+            }
+            for (let i = layout[type].length - 2; i < layout[type].length; i++) {
+                rv.structure(layout[type][i].x, layout[type][i].y, type, { isCore: true });
+            }
+        } else if (type != STRUCTURE_ROAD && layout[type].length) {
+            for (let s of layout[type]) {
+                rv.structure(s.x, s.y, type);
+            }
+        } 
+    }
 }
 
-function planByInput(input: PlannerInput, acceptThreshold = config.acceptThreshold, reviewThreshold = config.reviewThreshold) {
-    const { roomName, controller, sources, mineral, terrain } = input;
+/**
+ * 
+ * @param {ClaimableRoom|string} room 
+ * @param {boolean} showPlan 可选参数，显示结果
+ * @param {number} acceptThreshold 可选参数，1~7，默认2，控制extension分布
+ * @param {number} reviewThreshold 可选参数，1~7，默认3，控制extension分布
+ */
+export function plan(room: Room | string, showPlan = false) {
+    let startPlanCPU = Game.cpu.getUsed();
+    if (typeof room == 'string') {
+        room = Game.rooms[room];
+    }
+    if (!(room instanceof Room) || !room.controller) {
+        return false;
+    }
+    room.source = room.source || room.find(FIND_SOURCES);   // 
+    room.mineral = room.mineral || room.find(FIND_MINERALS)[0];  // 
+    // showPlan = showPlan === undefined || showPlan;  // 取消此行注释可以将默认值设true
+    let terrain = (room.getTerrain() as any).getRawBuffer();
+    // @ts-ignore
+    let accumulateCostMat = getaccumulateCostMat(room, terrain);      // 获取从每个矿点及 controller 出发的路程图列表
 
-    // 构建虚拟 room 对象用于兼容现有函数
-    const room = {
-        name: roomName,
-        controller: { pos: { x: controller.x, y: controller.y, roomName } },
-        source: sources.map((s, i) => ({ pos: { x: s.x, y: s.y, roomName }, id: `source${i}` })),
-        mineral: mineral ? { pos: { x: mineral.x, y: mineral.y, roomName } } : undefined,
-        getTerrain: () => ({ getRawBuffer: () => terrain })
-    } as any;
+    let rv = new RoomVisual(room.name);
 
-    let costMats = getCostMats(room, terrain);
-    let { exitGroups, exitMaps } = getExitGroups(terrain);
+    let { exitGroups, exitMaps } = getExitGroups(terrain, rv);
+    // return
 
-    let { map, bestAnchors } = calSquare(room, terrain, exitGroups, costMats);
+    // calSquare 会改变 terrain，会摆下中央建筑
+    let { map, bestAnchors, layout, layoutCost } = calSquare(room, terrain, exitGroups, accumulateCostMat, rv);
     if (bestAnchors.bestAnchor3x3 === undefined) {
         console.log('找不到能摆下中央建筑的位置');
-        return null;
+        return false;
     }
 
-    let { layout, layoutCost } = placeCentralStructure(bestAnchors);
-    let additionalRoads = paveRoadFromStorageToLab(room, layoutCost, layout, bestAnchors.bestAnchor4x4);
+    // getExtentions 不会改变 layout、layoutCost
+    let { extensionPos, entryRoots, roadPos, num } = getExtentions(bestAnchors, terrain, map, layout, layoutCost,
+        config.acceptThreshold, config.reviewThreshold);
+    // console.log(`best layout num: ${num}`);
 
-    let { extensionPos, entryRoots, roadPos, num } = getExtentions(bestAnchors, terrain, map, layout, layoutCost, additionalRoads,
-        acceptThreshold || config.acceptThreshold, reviewThreshold || config.reviewThreshold);
-    console.log(`best layout num: ${num}`);
-
+    // 先把通往资源点的路留出来
     let storage = layout[STRUCTURE_STORAGE][0];
     let startPos = { x: storage.x, y: storage.y, roomName: room.name };
-    let { removedNum, removedExt, roads, rampPos } = placeRoadsAndLinkAndRampartAndTower(room, startPos, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, config.shareControllerLink);
-    console.log(`removed: ${removedNum}`);
+    let { removedNum, removedExt, roads, vertexVisited, vertexDist } = placeRoadsAndLinkAndRampartAndTower(room, startPos, layout, layoutCost, extensionPos, roadPos, entryRoots, exitGroups, exitMaps, config.shareControllerLink, rv);
+    console.log(`为连通道路移除 extension num: ${removedNum}`);
 
-    let { placedNum, obPos } = placeAlongRoad(startPos, terrain, layout, layoutCost, roads, extensionPos, roadPos, removedExt, entryRoots, MAX_EXTENSIONS - num + removedNum);
+    placeAlongRoad(startPos, terrain, layout, layoutCost, roads, extensionPos, removedExt, vertexVisited, vertexDist, rv);
+    console.log(`最终建造 extension num: ${layout[STRUCTURE_EXTENSION].length}`);
+    
 
-    // 合并道路
+    /**
+     * roads 中是所有路点，之前的 layout[STRUCTURE_ROAD] 只包含中央路点
+     */
+    layout[STRUCTURE_ROAD] = [];
     for (let x in roads) {
         for (let y in roads[x]) {
-            if (layout[STRUCTURE_ROAD].find(p => p.x === +x && p.y === +y)) {
-                continue;
-            }
             layout[STRUCTURE_ROAD].push({ x: +x, y: +y });
         }
     }
-
-    // 添加 extension
-    layout[STRUCTURE_EXTENSION] = [];
-    for (let x in extensionPos) {
-        for (let y in extensionPos[x]) {
-            layout[STRUCTURE_EXTENSION].push({ x: +x, y: +y });
-        }
-    }
-    console.log(`placed ext: ${layout[STRUCTURE_EXTENSION].length}`);
-
-    // 添加 observer
-    layout[STRUCTURE_OBSERVER] = [{ x: obPos.x, y: obPos.y }];
-
-    // 添加 rampart
-    layout[STRUCTURE_RAMPART] = [];
-    for (let x in rampPos) {
-        for (let y in rampPos[x]) {
-            layout[STRUCTURE_RAMPART].push({ x: +x, y: +y });
+    console.log(`找到 ${layout[STRUCTURE_LAB].length} 个 lab`);
+    console.log(`自动规划总 CPU（含 minCut 不含可视化）: ${Game.cpu.getUsed() - startPlanCPU}`);
+    if (showPlan) {
+        if (rv.structure) {
+            showBetter(layout, rv);
+        } else {
+            console.log('快去群里下载先进作图工具（RoomVisual.js）');
+            throw new Error('需要导入 RoomVisual.js');
         }
     }
 
     return layout;
 }
+
 const toStructMap = (layout: Record<string, Array<{ x: number; y: number }>>): LayoutStructMap => {
     const map: LayoutStructMap = {};
     for (const [type, list] of Object.entries(layout || {})) {
@@ -2302,7 +2678,7 @@ export const scorpiorPlanner = {
         computeManor(roomName: string) {
             const layout = plan(roomName);
             if (!layout) return null;
-            const structMap = toStructMap(layout);
+            const structMap = toStructMap(layout as Record<string, Array<{ x: number; y: number }>>);
             const centerPos = pickCenter(structMap);
             return {
                 roomName,
@@ -2312,4 +2688,3 @@ export const scorpiorPlanner = {
         }
     }
 };
-
