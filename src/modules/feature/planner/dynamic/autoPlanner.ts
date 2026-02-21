@@ -1,7 +1,6 @@
 import { PriorityQueue, NewNode, ReclaimNode } from '@/modules/feature/planner/utils/priorityQueue'
 import { UnionFind } from '@/modules/feature/planner/utils/unionFind'
 import { RoomArray } from '@/modules/feature/planner/utils/roomArray'
-import LayoutVisual from '@/modules/feature/planner/utils/layoutVisual'
 import {
 	computeBlockByWasm,
 	findLabAnchorByWasm,
@@ -22,10 +21,6 @@ const numAt = (arr: number[] | string[], idx: number): number => {
 declare const Game: {
 	flags?: Record<string, { pos: { x: number; y: number; roomName: string } }>
 }
-declare const RoomVisual: new (roomName: string) => {
-	circle: (x: number, y: number, style: Record<string, number | string>) => void
-	text?: (text: string | number, x: number, y: number, style?: Record<string, number | string>) => void
-}
 declare const Room: {
 	Terrain: new (roomName: string) => { get: (x: number, y: number) => number }
 }
@@ -33,9 +28,9 @@ declare const RoomPosition: new (x: number, y: number, roomName: string) => XY &
 declare const PathFinder: {
 	search: (
 		origin: XY & { roomName?: string },
-		goal: { pos: XY & { roomName?: string }; range: number },
-		opts: { roomCallback: () => any; maxRooms: number }
-	) => { path: XY[] }
+		goal: { pos: XY & { roomName?: string }; range: number } | Array<{ pos: XY & { roomName?: string }; range: number }>,
+		opts: { roomCallback: () => any; maxRooms: number; plainCost?: number; swampCost?: number }
+	) => { path: XY[]; incomplete?: boolean }
 	CostMatrix: new () => { set: (x: number, y: number, cost: number) => void; get: (x: number, y: number) => number }
 }
 declare const CONTROLLER_STRUCTURES: Record<string, number[]>
@@ -94,6 +89,22 @@ const DIR4 = [
 	[0, 1],
 	[0, -1]
 ];
+
+const removeReachedGoals = (
+	pos: XY,
+	goals: Array<{ pos: XY & { roomName?: string }; range: number }>
+): number => {
+	let removed = 0;
+	for (let i = goals.length - 1; i >= 0; i--) {
+		const goal = goals[i];
+		const range = goal.range ?? 0;
+		if (Math.abs(pos.x - goal.pos.x) <= range && Math.abs(pos.y - goal.pos.y) <= range) {
+			goals.splice(i, 1);
+			removed += 1;
+		}
+	}
+	return removed;
+};
 
 const ManagerPlanner = {
 	/**
@@ -179,7 +190,6 @@ const ManagerPlanner = {
 		rootMembers?: Record<number, number[]>
 	) {
 		if (putAbleCacheMap[tarRoot]) return [putAbleCacheMap[tarRoot], AllCacheMap[tarRoot]];
-		// let t = Game.cpu.getUsed() //这很吃性能，但是是必须的
 		const roomManor = routeDistance;
 		if (!roomManor) return;
 		roomManor.init();
@@ -321,12 +331,9 @@ const ManagerPlanner = {
 				if (!roomManorArr[idx]) {
 					const val = walkArr[idx];
 					queMin.push(NewNode(val ? -4 : -1, x, y));
-					// visited.set(x,y,1) 这里不能设置visited 因为 -4 和-1 优先级不同 如果 -4距离和-1比较，-1会抢走-4 导致 rangeAttack打得到
 				}
 			}
 		}
-
-		// let t = Game.cpu.getUsed() //这很吃性能，真的优化不动了
 
 		queMin.whileNoEmpty((nd) => {
 			visited.set(nd.x, nd.y, 1);
@@ -345,7 +352,6 @@ const ManagerPlanner = {
 						if (roomManorArr[idx]) {
 							if (nd.k + 1 >= 0 && val) {
 								innerPutAbleList.push(item);
-								// visual.text(nd.k+2, x,y+0.25, {color: 'red',opacity:0.99,font: 7})
 							}
 							if (val) AllCacheList.push(item);
 						}
@@ -366,7 +372,6 @@ const ManagerPlanner = {
 							if (roomManorArr[idx]) {
 								if (nd.k + 1 >= 0 && val) {
 									innerPutAbleList.push(item);
-									// visual.text(nd.k+2, x,y+0.25, {color: 'red',opacity:0.99,font: 7})
 								}
 								if (val) AllCacheList.push(item);
 							}
@@ -375,8 +380,6 @@ const ManagerPlanner = {
 				}
 			}
 		});
-
-		// console.log(Game.cpu.getUsed()-t)
 
 		putAbleCacheMap[tarRoot] = innerPutAbleList;
 		AllCacheMap[tarRoot] = AllCacheList;
@@ -430,7 +433,6 @@ const ManagerPlanner = {
 		blocked?: RoomArray
 	): [UnionFind, Record<number, number>, RoomArray, RoomArray, Record<number, any[]>, Record<number, any[]>] {
 		ManagerPlanner.createObjects();
-		const visual = new RoomVisual(roomName);
 
 		roomWalkable.initRoomTerrainWalkAble(roomName);
 		const walkArr = roomWalkable.arr as number[];
@@ -668,19 +670,6 @@ const ManagerPlanner = {
 				for (let i = 0; i < 2500; i++) {
 					if (wasmResult.size[i] > 0) sizeMap[i] = wasmResult.size[i];
 				}
-				for (let idx = 0; idx < 2500; idx++) {
-					const val = walkArr[idx];
-					if (typeof val !== 'number' || val <= 0) continue;
-					const x = (idx / 50) | 0;
-					const y = idx % 50;
-					const root = unionFind.find(idx);
-					if (sizeMap[root] > 0)
-						visual.circle(x, y, {
-							fill: LayoutVisual.randomColor(root.toString()),
-							radius: 0.5,
-							opacity: 0.15
-						});
-				}
 				return [unionFind, sizeMap, roomWalkable, nearWall, putAbleCacheMap, allCacheMap];
 			}
 		}
@@ -912,24 +901,6 @@ const ManagerPlanner = {
 				queMin.push(NewNode(nd.k, nd.x, nd.y, nd.v));
 			}
 		});
-		// 打印结果
-
-		for (let idx = 0; idx < 2500; idx++) {
-			const val = walkArr[idx];
-			if (typeof val !== 'number' || val <= 0) continue;
-			const x = (idx / 50) | 0;
-			const y = idx % 50;
-			const root = unionFind.find(idx);
-			if (sizeMap[root] > 0) {
-				visual.circle(x, y, {
-					fill: LayoutVisual.randomColor(root.toString()),
-					radius: 0.5,
-					opacity: 0.15
-				});
-			}
-		}
-
-		// 打印中间变量
 		return [unionFind, sizeMap, roomWalkable, nearWall, putAbleCacheMap, allCacheMap];
 	},
 	/**
@@ -944,7 +915,6 @@ const ManagerPlanner = {
 		for (const p of points) {
 			if (p && p.roomName == roomName) objects.push(p);
 		}
-		// const visual = new RoomVisual(roomName);
 		const blockArray = ManagerPlanner.computeBlock(roomName, blocked);
 		const unionFind = blockArray[0];
 		const sizeMap = blockArray[1];
@@ -1094,13 +1064,6 @@ const ManagerPlanner = {
 					currentWalls = null;
 				}
 			}
-			// {
-			//     let y = pos%50
-			//     let x = ((pos-y)/50)//Math.round
-			//     visual.text(parseInt((allList.length)*10)/10, x,y, {color: "yellow",opacity:0.99,font: 7})
-			//     visual.text(parseInt((currentPutAbleList.length)*10)/10, x,y+0.5, {color: "red",opacity:0.99,font: 7})
-			//     visual.text(parseInt((currentInnerPutAbleList.length)*10)/10, x,y+1, {color: "red",opacity:0.99,font: 7})
-			// }
 			if (minPlaneCnt < currentPutAbleLen && wallCnt > currentWallCnt && currentWalls) {
 				// putAbleList = currentPutAbleList;
 				innerPutAbleList = currentInnerPutAbleList;
@@ -1122,9 +1085,6 @@ const ManagerPlanner = {
 				fallbackWalls = walls;
 			}
 
-			// allCacheMap[pos].forEach(t=>{
-			//     visual.circle(t.x, t.y, {fill: randomColor(pos), radius: 0.5 ,opacity : 0.15})
-			// })
 		}
 
 		// 兜底：如果没有满足阈值的方案，使用备选方案
@@ -1161,14 +1121,11 @@ const ManagerPlanner = {
 			roomManor.set(e.x, e.y, e.k);
 		}
 
-		// visited.init()
-		// roomWalkable.forEach((x: number, y: number, val: number | string)=>{if(!roomManor.get(x,y)){queMin.push(NewNode(val?-3:-1,x,y));visited.set(x,y,1)}})
 
 		let storageX = 0;
 		let storageY = 0;
 		let storageDistance = 100;
 
-		// innerPutAbleList.forEach(e=>visual.text(e.k, e.x,e.y+0.25, {color: 'red',opacity:0.99,font: 7}))
 		for (let i = 0; i < innerPutAbleList.length; i++) {
 			const e = innerPutAbleList[i];
 			if (e.k <= 2) continue;
@@ -1192,19 +1149,6 @@ const ManagerPlanner = {
 		let labX = 0;
 		let labY = 0;
 		let labDistance = 1e5;
-		// innerPutAbleList.filter(e=>e.k>4).forEach(e=>{
-		//     let x =e.x
-		//     let y =e.y
-		//     let detX= centerX-x
-		//     let detY= centerY-y
-		//     let distance = Math.sqrt(detX*detX+detY*detY)
-		//
-		//     if(labDistance>distance&&Math.abs(x-storageX)+Math.abs(y-storageY)>5){
-		//         labDistance = distance
-		//         labX = x
-		//         labY = y
-		//     }
-		// })
 
 		let wasmLabDone = false;
 		const manorArr = roomManor.arr as (number | string)[];
@@ -1225,10 +1169,7 @@ const ManagerPlanner = {
 			for (let x = 0; x < 50; x++) {
 				for (let y = 0; y < 50; y++) {
 					const val = manorArr[x * 50 + y];
-					// LayoutVisual.showText(roomName,val,{x:x,y:y},"cyan",0.75)
 					if (typeof val !== 'number' || val < 2) continue;
-					// if(roomManor.get(x,y)>0&&Math.abs(x-storageX)+Math.abs(y-storageY)>2)
-					// visual.text(val, x,y+0.25, {color: 'cyan',opacity:0.99,font: 7})
 					const detX = storageX - x - 1.5;
 					const detY = storageY - y - 1.5;
 					const distance = Math.sqrt(detX * detX + detY * detY);
@@ -1250,7 +1191,6 @@ const ManagerPlanner = {
 						}
 					}
 					if (checkCnt == 16) {
-						// LayoutVisual.showText(roomName,parseInt(distance*10),{x:x+1.5,y:y+1.5},"cyan",0.75)
 						labDistance = distance;
 						labX = x;
 						labY = y;
@@ -1267,6 +1207,15 @@ const ManagerPlanner = {
 		 */
 		const structMap: StructMap = {};
 		for (const e in CONTROLLER_STRUCTURES) structMap[e] = [];
+		if (!structMap['road']) structMap['road'] = [];
+		const roadSet = new Uint8Array(2500);
+		const pushRoad = (x: number, y: number) => {
+			if (x < 0 || x > 49 || y < 0 || y > 49) return;
+			const idx = x * 50 + y;
+			if (roadSet[idx]) return;
+			roadSet[idx] = 1;
+			structMap['road'].push([x, y]);
+		};
 
 		// 资源点布局
 		structMap['link'] = roomObjectCache.link;
@@ -1279,7 +1228,7 @@ const ManagerPlanner = {
 		structMap['link'].push([storageX, storageY - 1]);
 		for (let i = -1; i <= 1; i++) {
 			for (let j = -1; j <= 1; j++) {
-				structMap['road'].push([storageX + i + j, storageY + i - j]); //仿射变换 [sin,cos,cos,-sin]
+				pushRoad(storageX + i + j, storageY + i - j); //仿射变换 [sin,cos,cos,-sin]
 			}
 		}
 		// 这里修改lab布局
@@ -1296,7 +1245,7 @@ const ManagerPlanner = {
 				const jj = labChangeDirection ? j : 1 - j;
 				const structs = labs[i + 1].charAt(j + 1);
 				if (structs == '☢') structMap['lab'].push([labX + i, labY + jj]);
-				else structMap['road'].push([labX + i, labY + jj]);
+				else pushRoad(labX + i, labY + jj);
 			}
 		}
 
@@ -1306,7 +1255,7 @@ const ManagerPlanner = {
 				const jj = labChangeDirection ? j : 1 - j;
 				const structs = labs[i + 1].charAt(j + 1);
 				if (structs == '☢') structMap['lab'].push([labX + i, labY + jj]);
-				else structMap['road'].push([labX + i, labY + jj]);
+				else pushRoad(labX + i, labY + jj);
 			}
 		}
 
@@ -1398,7 +1347,6 @@ const ManagerPlanner = {
 				}
 			}
 			costRoadArrForPath[nd.x * 50 + nd.y] = nd.k;
-			// visual.text(nd.k,nd.x,nd.y+0.25, {color: "pink",opacity:0.99,font: 7})
 		});
 
 		for (let i = 0; i < structMap['road'].length; i++) {
@@ -1462,7 +1410,6 @@ const ManagerPlanner = {
 					spawnPos.push([x, y, dist]);
 				} else {
 					extensionPos.push([x, y, dist]);
-					// visual.text(dist,x, y+0.25, {color: "pink",opacity:0.99,font: 7})
 				}
 			}
 		}
@@ -1559,7 +1506,7 @@ const ManagerPlanner = {
 					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
 					if (costArr[nx * 50 + ny] === minVal) {
 						// 找到建筑最近的那个road
-						if (!visited.exec(nx, ny, 1)) structMap['road'].push([nx, ny]);
+						if (!visited.exec(nx, ny, 1)) pushRoad(nx, ny);
 					}
 				}
 			}
@@ -1567,10 +1514,16 @@ const ManagerPlanner = {
 
 		//#region 优化：批量寻路连接外矿
 		const costs = new PathFinder.CostMatrix();
-		const terrain = new Room.Terrain(roomName);
+		const roomObj = (globalThis as any).Game?.rooms?.[roomName];
+		const roomTerrain = roomObj && roomObj.getTerrain ? roomObj.getTerrain() : undefined;
+		const rawTerrain =
+			roomTerrain && typeof roomTerrain.getRawBuffer === 'function'
+				? (roomTerrain.getRawBuffer() as number[])
+				: undefined;
+		const terrain = rawTerrain ? undefined : new Room.Terrain(roomName);
 		for (let i = 0; i < 50; i++) {
 			for (let j = 0; j < 50; j++) {
-				const te = terrain.get(i, j);
+				const te = rawTerrain ? rawTerrain[i * 50 + j] : terrain.get(i, j);
 				costs.set(i, j, te == TERRAIN_MASK_WALL ? 255 : te == TERRAIN_MASK_SWAMP ? 4 : 2);
 			}
 		}
@@ -1588,7 +1541,6 @@ const ManagerPlanner = {
 			costs.set(e[0], e[1], 1);
 		}
 
-		// 优化：按距离分批寻路，而不是逐个寻路
 		structMap['container'].sort((a, b) => {
 			const adx = a[0] - storageX;
 			const ady = a[1] - storageY;
@@ -1605,33 +1557,21 @@ const ManagerPlanner = {
 			swampCost: 4
 		};
 
-		// 优化策略：分批寻路，每次传入多个 goals
-		const BATCH_SIZE = 5;
-		const containers = structMap['container'];
-
-		for (let batchStart = 0; batchStart < containers.length; batchStart += BATCH_SIZE) {
-			const batchEnd = Math.min(batchStart + BATCH_SIZE, containers.length);
-			const batchGoals: any[] = [];
-
-			for (let ci = batchStart; ci < batchEnd; ci++) {
-				const e = containers[ci];
-				batchGoals.push({ pos: new RoomPosition(e[0], e[1], roomName), range: 1 });
-			}
-
-			// 批量寻路
-			// @ts-ignore - 支持多个 goal 的批量寻路优化
-			const result = PathFinder.search(centerRoomPos, batchGoals, pfOpts) as any;
-
-			if (!result.incomplete) {
-				// 处理路径上的点
-				for (let i = 0; i < result.path.length; i++) {
-					const pos = result.path[i];
-					if (costs.get(pos.x, pos.y) != 1) {
-						structMap['road'].push([pos.x, pos.y]);
-						costs.set(pos.x, pos.y, 1);
-					}
+		const goals = structMap['container'].map((e) => ({ pos: new RoomPosition(e[0], e[1], roomName), range: 1 }));
+		while (goals.length) {
+			const result = PathFinder.search(centerRoomPos, goals, pfOpts);
+			if (result.incomplete) break;
+			const path = result.path || [];
+			const nearestPos = path.length ? path[path.length - 1] : centerRoomPos;
+			const removed = removeReachedGoals(nearestPos, goals);
+			for (let i = 0; i < path.length; i++) {
+				const pos = path[i];
+				if (costs.get(pos.x, pos.y) != 1) {
+					pushRoad(pos.x, pos.y);
+					costs.set(pos.x, pos.y, 1);
 				}
 			}
+			if (!removed) break;
 		}
 		ManagerPlanner.dismiss();
 
@@ -1643,7 +1583,6 @@ const ManagerPlanner = {
 		};
 	}
 };
-
 
 export const autoPlanner = {
 	name: 'auto',
