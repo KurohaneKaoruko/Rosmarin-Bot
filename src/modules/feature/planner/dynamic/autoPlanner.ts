@@ -1,12 +1,6 @@
 import { PriorityQueue, NewNode, ReclaimNode } from '@/modules/feature/planner/utils/priorityQueue'
 import { UnionFind } from '@/modules/feature/planner/utils/unionFind'
 import { RoomArray } from '@/modules/feature/planner/utils/roomArray'
-import {
-	computeBlockByWasm,
-	findLabAnchorByWasm,
-	getBlockPutAbleCountByWasm,
-	isComputeBlockWasmEnabled
-} from '@/modules/feature/planner/utils/plannerKernelWasm'
 
 type PlannerPoint = { x: number; y: number; roomName: string }
 type XY = { x: number; y: number }
@@ -60,23 +54,6 @@ let unionFind = new UnionFind(50 * 50);
  */
 let objects: PlannerPoint[] = [];
 
-const wasmProfile = {
-	// 收益相对稳定，保留
-	computeBlock: true,
-	// 该路径调用频率高，跨边界+拷贝成本可能反超，默认关闭
-	putAbleCount: false,
-	// 单次扫描规模较小，默认关闭
-	labAnchor: false
-};
-
-const wasmBuf = {
-	walkable: new Uint8Array(2500),
-	score: new Float32Array(2500),
-	route: new Int16Array(2500),
-	blocked: new Uint8Array(2500),
-	parent: new Int32Array(2500),
-	manor: new Int16Array(2500)
-};
 
 let fastVisitStamp = new Uint16Array(2500);
 let fastManorStamp = new Uint16Array(2500);
@@ -104,6 +81,394 @@ const removeReachedGoals = (
 		}
 	}
 	return removed;
+};
+
+const squareDistance = (x1: number, y1: number, x2: number, y2: number): number => {
+	const dx = x1 - x2;
+	const dy = y1 - y2;
+	return dx * dx + dy * dy;
+};
+
+const findLabAnchorByTs = (manorArr: (number | string)[], storageX: number, storageY: number): XY => {
+	let bestX = 0;
+	let bestY = 0;
+	let bestDistance = Number.POSITIVE_INFINITY;
+
+	for (let x = 0; x < 50; x++) {
+		for (let y = 0; y < 50; y++) {
+			const val = manorArr[x * 50 + y];
+			if (typeof val !== 'number' || val < 2) continue;
+			const distance = squareDistance(storageX - 1.5, storageY - 1.5, x, y);
+			if (bestDistance <= distance) continue;
+			let checkCnt = 0;
+			let valid = true;
+			for (let i = 0; i < 4 && valid; i++) {
+				for (let j = 0; j < 4; j++) {
+					const tx = x + i;
+					const ty = y + j;
+					const manorVal = tx >= 0 && tx < 50 && ty >= 0 && ty < 50 ? manorArr[tx * 50 + ty] : 0;
+					if (typeof manorVal === 'number' && manorVal > 0 && Math.abs(tx - storageX) + Math.abs(ty - storageY) > 2) {
+						checkCnt += 1;
+					} else {
+						valid = false;
+						break;
+					}
+				}
+			}
+			if (checkCnt == 16) {
+				bestDistance = distance;
+				bestX = x;
+				bestY = y;
+			}
+		}
+	}
+
+	return { x: bestX + 1, y: bestY + 1 };
+};
+
+type KernelResult = {
+	parent: Int32Array
+	size: Int16Array
+}
+
+const BORDER_INDEXES = (() => {
+	const out: number[] = [];
+	for (let y = 0; y < 50; y++) {
+		out.push(y);
+		out.push(49 * 50 + y);
+	}
+	for (let x = 1; x < 49; x++) {
+		out.push(x * 50);
+		out.push(x * 50 + 49);
+	}
+	return out;
+})();
+
+const kernelFind = (parent: Int32Array, x: number): number => {
+	let root = x;
+	while (parent[root] !== root) root = parent[root];
+	let cur = x;
+	while (parent[cur] !== cur) {
+		const next = parent[cur];
+		parent[cur] = root;
+		cur = next;
+	}
+	return root;
+};
+
+const kernelUnion = (parent: Int32Array, a: number, b: number): number => {
+	const ra = kernelFind(parent, a);
+	const rb = kernelFind(parent, b);
+	if (ra === rb) return ra;
+	if (ra > rb) {
+		parent[ra] = rb;
+		return rb;
+	}
+	parent[rb] = ra;
+	return ra;
+};
+
+const forEach4Index = (idx: number, fn: (nidx: number) => void) => {
+	const x = (idx / 50) | 0;
+	const y = idx % 50;
+	for (let i = 0; i < 4; i++) {
+		const nx = x + DIR4[i][0];
+		const ny = y + DIR4[i][1];
+		if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+		fn(nx * 50 + ny);
+	}
+};
+
+const forEach8Index = (idx: number, fn: (nidx: number) => void) => {
+	const x = (idx / 50) | 0;
+	const y = idx % 50;
+	for (let dx = -1; dx <= 1; dx++) {
+		for (let dy = -1; dy <= 1; dy++) {
+			if (!dx && !dy) continue;
+			const nx = x + dx;
+			const ny = y + dy;
+			if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+			fn(nx * 50 + ny);
+		}
+	}
+};
+
+const blockPutAbleCountKernel = (
+	parent: Int32Array,
+	root: number,
+	walkable: Uint8Array,
+	cache: Int16Array
+): number => {
+	const rootId = kernelFind(parent, root);
+	if (cache[rootId] >= 0) return cache[rootId];
+
+	const roomManor = new Uint8Array(2500);
+	for (let i = 0; i < 2500; i++) {
+		roomManor[i] = kernelFind(parent, i) === rootId ? 1 : 0;
+	}
+
+	for (let i = 0; i < 2500; i++) {
+		if (!roomManor[i]) continue;
+		let manorCnt = 0;
+		let wallCnt = 0;
+		forEach4Index(i, (n) => {
+			if (roomManor[n]) manorCnt += 1;
+			if (!walkable[n]) wallCnt += 1;
+		});
+		if (manorCnt === 1 && wallCnt === 0) roomManor[i] = 0;
+	}
+
+	const stack = new Int16Array(2500);
+	for (let start = 0; start < 2500; start++) {
+		let top = 0;
+		stack[top++] = start;
+		while (top > 0) {
+			const idx = stack[--top];
+			if (roomManor[idx] || !walkable[idx]) continue;
+			let manorCnt = 0;
+			let wallCnt = 0;
+			forEach4Index(idx, (n) => {
+				if (roomManor[n]) manorCnt += 1;
+				if (!walkable[n]) wallCnt += 1;
+			});
+			if (manorCnt >= 2 || (manorCnt === 1 && wallCnt >= 2)) {
+				roomManor[idx] = 1;
+				forEach4Index(idx, (n) => {
+					stack[top++] = n;
+				});
+			}
+		}
+	}
+
+	for (let i = 0; i < BORDER_INDEXES.length; i++) {
+		const b = BORDER_INDEXES[i];
+		if (!walkable[b]) continue;
+		roomManor[b] = 0;
+		forEach8Index(b, (n) => {
+			roomManor[n] = 0;
+		});
+	}
+
+	const visited = new Uint8Array(2500);
+	const queue = new PriorityQueue(true);
+	for (let i = 0; i < 2500; i++) {
+		if (!roomManor[i]) queue.push(NewNode(walkable[i] ? -4 : -1, 0, 0, i));
+	}
+
+	let innerCnt = 0;
+	while (!queue.isEmpty()) {
+		const nd = queue.pop() as { k: number; v: number } | undefined;
+		if (!nd) break;
+		const k = nd.k;
+		const idx = nd.v;
+		visited[idx] = 1;
+		if (k >= -1) {
+			forEach4Index(idx, (n) => {
+				if (visited[n]) return;
+				visited[n] = 1;
+				queue.push(NewNode(k + 1, 0, 0, n));
+				if (roomManor[n] && walkable[n] && k + 1 >= 0) innerCnt += 1;
+			});
+		} else {
+			forEach8Index(idx, (n) => {
+				if (visited[n]) return;
+				visited[n] = 1;
+				queue.push(NewNode(k + 1, 0, 0, n));
+				if (roomManor[n] && walkable[n] && k + 1 >= 0) innerCnt += 1;
+			});
+		}
+		ReclaimNode(nd);
+	}
+
+	cache[rootId] = innerCnt;
+	return innerCnt;
+};
+
+const computeBlockKernel = (
+	walkable: Uint8Array,
+	score: Float32Array,
+	routeDist: Int16Array,
+	blocked?: Uint8Array
+): KernelResult => {
+	const parent = new Int32Array(2500);
+	for (let i = 0; i < 2500; i++) parent[i] = i;
+	const sizeMap = new Int16Array(2500);
+	const visited = new Uint8Array(2500);
+	const posSeqMap: number[][] = Array.from({ length: 2500 }, () => []);
+
+	const startPoints: number[] = [];
+	for (let i = 0; i < 2500; i++) {
+		if (walkable[i] && routeDist[i] > 0) startPoints.push(i);
+	}
+	startPoints.sort((a, b) => routeDist[b] - routeDist[a]);
+
+	for (let si = 0; si < startPoints.length; si++) {
+		const currentPos = startPoints[si];
+		if (blocked && blocked[currentPos]) {
+			kernelUnion(parent, currentPos, 0);
+			continue;
+		}
+		if (visited[currentPos]) continue;
+
+		let cnt = 0;
+		const posSeq: number[] = [];
+		const stack: number[] = [currentPos, 0, 0];
+
+		while (stack.length) {
+			const mode = stack.pop() as number;
+			const phase = stack.pop() as number;
+			const idx = stack.pop() as number;
+			if (phase === 0) {
+				if (visited[idx]) continue;
+				visited[idx] = 1;
+				stack.push(idx, 1, mode);
+				const currentValue = score[idx];
+				if (mode === 0) {
+					forEach8Index(idx, (n) => {
+						const v = score[n];
+						if (v > currentValue && currentValue < 6) stack.push(n, 0, 0);
+						else if (v > 0 && v < currentValue) stack.push(n, 0, 1);
+					});
+				} else {
+					forEach4Index(idx, (n) => {
+						const v = score[n];
+						if (v > 0 && v < currentValue) stack.push(n, 0, 1);
+					});
+				}
+				continue;
+			}
+
+			const blockedHere = blocked ? !!blocked[idx] : false;
+			const fi = kernelFind(parent, idx);
+			const fc = kernelFind(parent, currentPos);
+			if (fi !== 0 && fc !== 0 && !blockedHere) {
+				kernelUnion(parent, currentPos, idx);
+				posSeq.push(idx);
+				cnt += 1;
+			} else if (blocked) {
+				kernelUnion(parent, idx, 0);
+			}
+		}
+
+		if (cnt > 0) {
+			const root = kernelFind(parent, currentPos);
+			sizeMap[root] = cnt;
+			posSeqMap[root] = posSeq;
+		}
+	}
+
+	for (let i = 0; i < BORDER_INDEXES.length; i++) {
+		const b = BORDER_INDEXES[i];
+		if (!walkable[b]) continue;
+		const p = kernelFind(parent, b);
+		sizeMap[p] = 0;
+		forEach8Index(b, (n) => {
+			if (!walkable[n]) return;
+			const pn = kernelFind(parent, n);
+			sizeMap[pn] = 0;
+		});
+	}
+	sizeMap[0] = 0;
+
+	const queue = new PriorityQueue(true);
+	for (let p = 0; p < 2500; p++) {
+		if (sizeMap[p] > 0) queue.push(NewNode(sizeMap[p], 0, 0, p));
+	}
+	const putAbleCache = new Int16Array(2500);
+	putAbleCache.fill(-1);
+
+	while (!queue.isEmpty()) {
+		const nd = queue.pop() as { k: number; v: number } | undefined;
+		if (!nd) break;
+		const k = nd.k;
+		const pos = nd.v;
+		if (sizeMap[pos] !== k) {
+			ReclaimNode(nd);
+			continue;
+		}
+
+		const seq = posSeqMap[pos];
+		if (!seq || seq.length === 0) {
+			ReclaimNode(nd);
+			continue;
+		}
+
+		const visited2 = new Uint8Array(2500);
+		const nearCntMap = new Int16Array(2500);
+		for (let i = 0; i < seq.length; i++) {
+			const e = seq[i];
+			forEach8Index(e, (n) => {
+				if (!walkable[n] || visited2[n]) return;
+				visited2[n] = 1;
+				const cp = kernelFind(parent, n);
+				if (cp === pos) return;
+				const cs = sizeMap[cp];
+				if (cs > 0 && cs < 300) nearCntMap[cp] += 1;
+			});
+		}
+
+		let targetPos = -1;
+		let nearCnt = 0;
+		let maxRatio = 0;
+		for (let currentPos = 0; currentPos < 2500; currentPos++) {
+			const near = nearCntMap[currentPos];
+			if (near <= 0) continue;
+			const currentSize = sizeMap[currentPos];
+			if (currentSize <= 0) continue;
+			const ratio = near / Math.sqrt(Math.min(currentSize, k));
+			const better = ratio === maxRatio ? targetPos < 0 || currentSize < sizeMap[targetPos] : ratio > maxRatio;
+			if (better) {
+				targetPos = currentPos;
+				maxRatio = ratio;
+				nearCnt = near;
+			}
+		}
+		for (let currentPos = 0; currentPos < 2500; currentPos++) {
+			const near = nearCntMap[currentPos];
+			if (near > nearCnt) {
+				targetPos = currentPos;
+				nearCnt = near;
+			}
+		}
+		if (targetPos < 0) {
+			ReclaimNode(nd);
+			continue;
+		}
+
+		const minSize = sizeMap[targetPos];
+		if (minSize <= 0) {
+			ReclaimNode(nd);
+			continue;
+		}
+
+		const targetPutAble = minSize > 140 ? blockPutAbleCountKernel(parent, targetPos, walkable, putAbleCache) : 0;
+		const posPutAble = k > 140 ? blockPutAbleCountKernel(parent, pos, walkable, putAbleCache) : 0;
+		if (Math.max(targetPutAble, posPutAble) < 140) {
+			const mergedRoot = kernelUnion(parent, pos, targetPos);
+			const cnt = (k + minSize) | 0;
+			if (pos !== mergedRoot) sizeMap[pos] = 0;
+			else sizeMap[targetPos] = 0;
+			sizeMap[mergedRoot] = cnt;
+			const merged = new Array(posSeqMap[targetPos].length + posSeqMap[pos].length);
+			let mergedIdx = 0;
+			for (let i = 0; i < posSeqMap[targetPos].length; i++) merged[mergedIdx++] = posSeqMap[targetPos][i];
+			for (let i = 0; i < posSeqMap[pos].length; i++) merged[mergedIdx++] = posSeqMap[pos][i];
+			posSeqMap[mergedRoot] = merged;
+			if (pos !== mergedRoot) posSeqMap[pos] = [];
+			else posSeqMap[targetPos] = [];
+			putAbleCache[mergedRoot] = -1;
+			putAbleCache[targetPos] = -1;
+			putAbleCache[pos] = -1;
+			queue.push(NewNode(cnt, 0, 0, mergedRoot));
+		}
+
+		ReclaimNode(nd);
+	}
+
+	for (let i = 0; i < 2500; i++) {
+		parent[i] = kernelFind(parent, i);
+	}
+	return { parent, size: sizeMap };
 };
 
 const ManagerPlanner = {
@@ -248,29 +613,29 @@ const ManagerPlanner = {
 		}
 		// 迭代扩张 manor，减少递归与重复扫描
 		fastStampToken += 1;
-		if (fastStampToken >= 65530) {
-			fastStampToken = 1;
-			fastVisitStamp.fill(0);
-			fastManorStamp.fill(0);
-		}
-		const stamp = fastStampToken;
-		let qHead = 0;
-		const manorQueue = [];
-		for (let x = 0; x < 50; x++) {
-			for (let y = 0; y < 50; y++) {
-				const idx = x * 50 + y;
-				if (!roomManorArr[idx] && walkArr[idx]) {
-					fastVisitStamp[idx] = stamp;
-					manorQueue.push(idx);
+			if (fastStampToken >= 65530) {
+				fastStampToken = 1;
+				fastVisitStamp.fill(0);
+				fastManorStamp.fill(0);
+			}
+			const stamp = fastStampToken;
+			let qHead = 0;
+			let qTail = 0;
+			for (let x = 0; x < 50; x++) {
+				for (let y = 0; y < 50; y++) {
+					const idx = x * 50 + y;
+					if (!roomManorArr[idx] && walkArr[idx]) {
+						fastVisitStamp[idx] = stamp;
+						fastQueue[qTail++] = idx;
+					}
 				}
 			}
-		}
-		while (qHead < manorQueue.length) {
-			const idx = manorQueue[qHead++];
-			fastVisitStamp[idx] = 0;
-			if (roomManorArr[idx] || !walkArr[idx]) continue;
-			const x = (idx / 50) | 0;
-			const y = idx % 50;
+			while (qHead < qTail) {
+				const idx = fastQueue[qHead++];
+				fastVisitStamp[idx] = 0;
+				if (roomManorArr[idx] || !walkArr[idx]) continue;
+				const x = (idx / 50) | 0;
+				const y = idx % 50;
 			let manorCnt = 0;
 			let wallCnt = 0;
 			for (let i = 0; i < 4; i++) {
@@ -294,7 +659,7 @@ const ManagerPlanner = {
 					const nidx = nx * 50 + ny;
 					if (!roomManorArr[nidx] && walkArr[nidx] && fastVisitStamp[nidx] !== stamp) {
 						fastVisitStamp[nidx] = stamp;
-						manorQueue.push(nidx);
+						fastQueue[qTail++] = nidx;
 					}
 				}
 			}
@@ -396,21 +761,6 @@ const ManagerPlanner = {
 	) {
 		const root = Number(tarRoot);
 		if (putAbleCntCacheMap[root] != null) return putAbleCntCacheMap[root];
-		if (wasmProfile.putAbleCount && isComputeBlockWasmEnabled()) {
-			const walkableU8 = wasmBuf.walkable;
-			const parentI32 = wasmBuf.parent;
-			const walkArr = roomWalkable.arr;
-			const parentArr = unionFind.parent;
-			for (let i = 0; i < 2500; i++) {
-				walkableU8[i] = walkArr[i] ? 1 : 0;
-				parentI32[i] = parentArr[i];
-			}
-			const wasmCount = getBlockPutAbleCountByWasm(walkableU8, parentI32, root);
-			if (wasmCount >= 0) {
-				putAbleCntCacheMap[root] = wasmCount;
-				return wasmCount;
-			}
-		}
 		const cnt = ManagerPlanner.getBlockPutAbleCnt(
 			roomWalkable,
 			visited,
@@ -646,35 +996,30 @@ const ManagerPlanner = {
 			}
 		}
 
-		const putAbleCacheMap = {};
-		const allCacheMap = {};
-		const putAbleCntCacheMap = {};
-		const sizeMap = {};
-		if (wasmProfile.computeBlock && isComputeBlockWasmEnabled()) {
-			const walkableU8 = wasmBuf.walkable;
-			const scoreF32 = wasmBuf.score;
-			const routeI16 = wasmBuf.route;
-			const blockedU8 = blockedArr ? wasmBuf.blocked : undefined;
-			const walkArr = roomWalkable.arr as number[];
+			const putAbleCacheMap = {};
+			const allCacheMap = {};
+			const putAbleCntCacheMap = {};
+			const sizeMap = {};
+			const walkableU8 = new Uint8Array(2500);
+			const scoreF32 = new Float32Array(2500);
+			const routeI16 = new Int16Array(2500);
+			const blockedU8 = blockedArr ? new Uint8Array(2500) : undefined;
 			const scoreArr = nearWallWithInterpolation.arr;
-			const routeArr = routeDistance.arr;
 			for (let i = 0; i < 2500; i++) {
 				walkableU8[i] = walkArr[i] ? 1 : 0;
 				scoreF32[i] = numAt(scoreArr, i);
 				routeI16[i] = numAt(routeArr, i);
-				if (blockedU8) blockedU8[i] = blockedArr ? (numAt(blockedArr, i) ? 1 : 0) : 0;
+				if (blockedU8) blockedU8[i] = blockedArr && numAt(blockedArr, i) ? 1 : 0;
 			}
-			const wasmResult = computeBlockByWasm(walkableU8, scoreF32, routeI16, blockedU8);
-			if (wasmResult) {
-				unionFind.parent = Array.from(wasmResult.parent);
+			const kernelResult = computeBlockKernel(walkableU8, scoreF32, routeI16, blockedU8);
+			if (kernelResult) {
+				unionFind.parent = Array.from(kernelResult.parent);
 				for (let i = 0; i < 2500; i++) {
-					if (wasmResult.size[i] > 0) sizeMap[i] = wasmResult.size[i];
+					if (kernelResult.size[i] > 0) sizeMap[i] = kernelResult.size[i];
 				}
 				return [unionFind, sizeMap, roomWalkable, nearWall, putAbleCacheMap, allCacheMap];
 			}
-		}
-
-		// 对距离的格子插入到队列 ，作为分开的顺序
+			// 对距离的格子插入到队列 ，作为分开的顺序
 		for (let idx = 0; idx < 2500; idx++) {
 			if (!walkArr[idx]) continue;
 			const nVal = numAt(routeArr, idx);
@@ -965,11 +1310,11 @@ const ManagerPlanner = {
 			const posNum = Number(pos);
 			// if(sizeMap[pos]<150)return
 
-			ManagerPlanner.getBlockPutAbleCnt(
-				roomWalkable,
-				visited,
-				queMin,
-				unionFind,
+				ManagerPlanner.getBlockPutAbleCnt(
+					roomWalkable,
+					visited,
+					queMin,
+					unionFind,
 				posNum,
 				putAbleCacheMap,
 				allCacheMap,
@@ -1003,7 +1348,7 @@ const ManagerPlanner = {
 			if (gt2List.length < 30) {
 				for (let i = 0; i < gt2List.length; i++) {
 					const a = gt2List[i];
-					for (let j = 0; j < gt2List.length; j++) {
+					for (let j = i + 1; j < gt2List.length; j++) {
 						const b = gt2List[j];
 						const dist = Math.abs(a.x - b.x) + Math.abs(a.y - b.y);
 						if (dist > maxDist) maxDist = dist;
@@ -1101,10 +1446,24 @@ const ManagerPlanner = {
 				finalPos,
 				putAbleCacheMap,
 				allCacheMap,
-				rootMembers
-			);
-			innerPutAbleList = putAbleCacheMap[finalPos];
-		}
+					rootMembers
+				);
+				innerPutAbleList = putAbleCacheMap[finalPos];
+				if (centerPos) {
+					centerX = centerPos.x;
+					centerY = centerPos.y;
+				} else if (innerPutAbleList && innerPutAbleList.length) {
+					let sumX = 0;
+					let sumY = 0;
+					for (let i = 0; i < innerPutAbleList.length; i++) {
+						const e = innerPutAbleList[i];
+						sumX += e.x;
+						sumY += e.y;
+					}
+					centerX = sumX / innerPutAbleList.length;
+					centerY = sumY / innerPutAbleList.length;
+				}
+			}
 
 		if (!finalPos || !putAbleCacheMap[finalPos]) return;
 
@@ -1124,16 +1483,14 @@ const ManagerPlanner = {
 
 		let storageX = 0;
 		let storageY = 0;
-		let storageDistance = 100;
+		let storageDistance = Number.POSITIVE_INFINITY;
 
 		for (let i = 0; i < innerPutAbleList.length; i++) {
 			const e = innerPutAbleList[i];
 			if (e.k <= 2) continue;
 			const x = e.x;
 			const y = e.y;
-			const detX = centerX - x;
-			const detY = centerY - y;
-			const distance = Math.sqrt(detX * detX + detY * detY);
+			const distance = squareDistance(centerX, centerY, x, y);
 			if (storageDistance > distance) {
 				storageDistance = distance;
 				storageX = x;
@@ -1146,60 +1503,10 @@ const ManagerPlanner = {
 			storageY = centerPos.y;
 		}
 
-		let labX = 0;
-		let labY = 0;
-		let labDistance = 1e5;
-
-		let wasmLabDone = false;
 		const manorArr = roomManor.arr as (number | string)[];
-		if (wasmProfile.labAnchor && isComputeBlockWasmEnabled()) {
-			const manorI16 = wasmBuf.manor;
-			for (let i = 0; i < 2500; i++) {
-				const v = manorArr[i];
-				manorI16[i] = typeof v === 'number' ? v : 0;
-			}
-			const labAnchor = findLabAnchorByWasm(manorI16, storageX, storageY);
-			if (labAnchor) {
-				labX = labAnchor.x;
-				labY = labAnchor.y;
-				wasmLabDone = true;
-			}
-		}
-		if (!wasmLabDone) {
-			for (let x = 0; x < 50; x++) {
-				for (let y = 0; y < 50; y++) {
-					const val = manorArr[x * 50 + y];
-					if (typeof val !== 'number' || val < 2) continue;
-					const detX = storageX - x - 1.5;
-					const detY = storageY - y - 1.5;
-					const distance = Math.sqrt(detX * detX + detY * detY);
-					if (labDistance <= distance) continue;
-					let checkCnt = 0;
-					let valid = true;
-					for (let i = 0; i < 4 && valid; i++) {
-						for (let j = 0; j < 4; j++) {
-							const tx = x + i;
-							const ty = y + j;
-							const manorVal =
-								tx >= 0 && tx < 50 && ty >= 0 && ty < 50 ? manorArr[tx * 50 + ty] : 0;
-							if (typeof manorVal === 'number' && manorVal > 0 && Math.abs(tx - storageX) + Math.abs(ty - storageY) > 2) {
-								checkCnt += 1;
-							} else {
-								valid = false;
-								break;
-							}
-						}
-					}
-					if (checkCnt == 16) {
-						labDistance = distance;
-						labX = x;
-						labY = y;
-					}
-				}
-			}
-		}
-		labX += 1;
-		labY += 1;
+		const labAnchor = findLabAnchorByTs(manorArr, storageX, storageY);
+		const labX = labAnchor.x;
+		const labY = labAnchor.y;
 
 		/**
 		 * 这里开始计算布局！
@@ -1588,3 +1895,10 @@ export const autoPlanner = {
 	name: 'auto',
 	ManagerPlanner
 };
+
+
+
+
+
+
+
