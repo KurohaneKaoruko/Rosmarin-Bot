@@ -3,6 +3,7 @@
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
 import { isTickAligned } from '@/modules/infra/qos';
+import { getRoomData } from '@/modules/utils/memory';
 
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
@@ -21,9 +22,14 @@ export default class Mission extends Room {
      * @description 按 interval/offset 分帧调度各子模块更新，降低单 tick CPU 峰值
      */
     MissionUpdate() {
+        const mode = (getRoomData(this.name) as any)?.mode || (this.memory as any).mode;
+        const highMode = mode === 'high';
+        const spawnInterval = highMode ? 5 : 10;
+        const transportInterval = highMode ? 10 : 20;
+
         const schedule: Array<{ interval: number; offset: number; run: (offset: number) => void }> = [
-            { interval: 10, offset: 0, run: (offset) => this.UpdateSpawnMission(offset) },
-            { interval: 20, offset: 1, run: (offset) => this.UpdateTransportMission(offset) },
+            { interval: spawnInterval, offset: 0, run: (offset) => this.UpdateSpawnMission(offset) },
+            { interval: transportInterval, offset: 1, run: (offset) => this.UpdateTransportMission(offset) },
             { interval: 20, offset: 2, run: (offset) => this.UpdateBoostMission(offset) },
             { interval: 30, offset: 3, run: (offset) => this.UpdateManageMission(offset) },
             { interval: 50, offset: 4, run: (offset) => this.UpdateBuildRepairMission(offset) },

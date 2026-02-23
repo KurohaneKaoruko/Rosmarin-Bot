@@ -1,6 +1,7 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
 import { decompressBodyConfig } from "@/modules/utils/compress";
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { getRoomData } from '@/modules/utils/memory';
 
 // 孵化相关
 const SPAWN_MIN_ENERGY = THRESHOLDS.SPAWN.EMERGENCY_ENERGY_THRESHOLD * 50;
@@ -18,6 +19,22 @@ const getEnergyState = (room: Room) => {
 
 const getTotalEnergy = (room: Room) => {
     return (room as any).getEnergyProfile?.().totalEnergy ?? (room as any)[RESOURCE_ENERGY] ?? 0;
+}
+
+const getStoredEnergy = (room: Room) => {
+    return (room.storage?.store[RESOURCE_ENERGY] || 0) +
+        (room.terminal?.store[RESOURCE_ENERGY] || 0);
+}
+
+const getRoomMode = (room: Room) => {
+    return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+}
+
+const hasControllerEnergyBuffer = (room: Room) => {
+    if (!room.controller) return false;
+    const hasLink = room.link?.some(link => link.pos.inRangeTo(room.controller!.pos, 2));
+    if (hasLink) return true;
+    return !!room.container?.some(container => container.pos.inRangeTo(room.controller!.pos, 3));
 }
 
 const hasMyConstructionSitesCached = (room: Room) => {
@@ -55,39 +72,74 @@ const getDowngradedLogisticsCountByHomeRoom = (() => {
 const RoleSpawnCheck = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
-        return current < room.source.length;
+        let num = room.source.length;
+        if (num <= 0) return false;
+        if (getRoomMode(room) === 'high') {
+            // high mode: pre-spawn one replacement to reduce source idle time.
+            const harvesters = room.find(FIND_MY_CREEPS, {
+                filter: (creep: Creep) =>
+                    creep.memory.role === 'harvester' &&
+                    (creep.memory.home || creep.memory.homeRoom || creep.room.name) === room.name
+            }) as Creep[];
+            const shouldPreSpawn = harvesters.some(
+                (creep) => (creep.ticksToLive || 0) <= creep.body.length * 4 + 10
+            );
+            if (shouldPreSpawn) num += 1;
+        }
+        return current < num;
     },
     'upgrader': (room: Room, current: number) => {
         const lv = room.level;
-        const mode = (room.memory as any).mode;
+        const mode = getRoomMode(room);
         const highMode = mode === 'high';
-        // high 模式下，upgrader 数量翻倍（最多8个）
-        const num = highMode ? Math.min(RoleLevelData['upgrader'][lv]['num'] * 2, 8) : RoleLevelData['upgrader'][lv]['num'];
+        const baseNum = RoleLevelData['upgrader'][lv]['num'];
+        let num = highMode ? Math.min(baseNum * 2, 8) : baseNum;
         if (room.memory.defend) return false;
         const ttd = room.controller?.ticksToDowngrade || 0;
-        // high 模式下放宽升级条件，只要有足够能量就升级
         if (highMode) {
-            // high 模式：只要有基础能量就开始升级
-            const minEnergy = lv >= 5 ? 30e3 : 10e3;
-            if (room[RESOURCE_ENERGY] < minEnergy) return false;
+            const state = getEnergyState(room);
+            if (state === 'CRITICAL') return false;
+            if (state === 'LOW' && ttd > 10000 && current >= 1) return false;
+
+            const minEnergy = lv >= 8 ? 120e3 : lv >= 6 ? 60e3 : lv >= 5 ? 30e3 : 10e3;
+            if (getTotalEnergy(room) < minEnergy) return false;
+
+            if (!hasControllerEnergyBuffer(room) && lv >= 6) {
+                num = Math.min(num, baseNum + 1);
+            }
+
+            const creepNum = room.getCreepNum() || {};
+            const spawnMissionNum = room.getSpawnMissionNum() || {};
+            const logisticsNum =
+                (creepNum['transport'] || 0) +
+                (creepNum['manager'] || 0) +
+                (spawnMissionNum['transport'] || 0) +
+                (spawnMissionNum['manager'] || 0);
+            if (logisticsNum === 0 && lv >= 5) {
+                num = Math.min(num, baseNum + 1);
+            }
+
             return current < num;
         }
-        // 能量不充裕时不常驻升级
         if (lv == 8 && ttd > 100000 && room[RESOURCE_ENERGY] < 300e3) return false;
-        // 能量太低暂时不升级
         if (lv >= 5 && ttd > 10000 && room[RESOURCE_ENERGY] < 50e3) return false;
         return current < num;
     },
     'transport': (room: Room, current: number) => {
-        const num = RoleLevelData['transport'][room.level]['num'];
-        if (current >= num) return false;
+        const highMode = getRoomMode(room) === 'high';
         const state = getEnergyState(room);
+        const storedEnergy = getStoredEnergy(room);
+        let num = RoleLevelData['transport'][room.level]['num'];
+        if (highMode && state !== 'LOW' && state !== 'CRITICAL') {
+            if (storedEnergy >= TRANSPORT_HIGH) num += 1;
+            if (storedEnergy >= TRANSPORT_HIGH * 3 && hasControllerEnergyBuffer(room)) num += 1;
+            num = Math.min(num, 3);
+        }
+        if (current >= num) return false;
         if (state === 'LOW' || state === 'CRITICAL') {
             return !!(room.storage || room.terminal || (room.container && room.container.length > 0));
         }
-        let energy = (room.storage?.store[RESOURCE_ENERGY] || 0) +
-                        (room.terminal?.store[RESOURCE_ENERGY] || 0);
-        if (energy < TRANSPORT_MIN) return false;
+        if (storedEnergy < TRANSPORT_MIN) return false;
         return !!(room.storage || room.terminal);
     },
     'manager': (room: Room, current: number) => {
