@@ -67,22 +67,6 @@ const DIR4 = [
 	[0, -1]
 ];
 
-const removeReachedGoals = (
-	pos: XY,
-	goals: Array<{ pos: XY & { roomName?: string }; range: number }>
-): number => {
-	let removed = 0;
-	for (let i = goals.length - 1; i >= 0; i--) {
-		const goal = goals[i];
-		const range = goal.range ?? 0;
-		if (Math.abs(pos.x - goal.pos.x) <= range && Math.abs(pos.y - goal.pos.y) <= range) {
-			goals.splice(i, 1);
-			removed += 1;
-		}
-	}
-	return removed;
-};
-
 const squareDistance = (x1: number, y1: number, x2: number, y2: number): number => {
 	const dx = x1 - x2;
 	const dy = y1 - y2;
@@ -877,50 +861,70 @@ const ManagerPlanner = {
 			clearPutAbleNearBorder(x, 49);
 		}
 		// 计算 控制器，矿物的位置
-		const getObjectPos = function (x, y, struct) {
-			let put = false;
-			let finalX = 0;
-			let finalY = 0;
-			for (let i = 0; i < 4; i++) {
-				const dx = DIR4[i][0];
-				const dy = DIR4[i][1];
-				const nx = x + dx;
-				const ny = y + dy;
-				if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-				if (roomPutAbleArr[nx * 50 + ny] && !put && !roomObjectCache.get(nx, ny)) {
+			const getObjectPos = function (x, y, struct): XYTuple | null {
+				let finalX = 0;
+				let finalY = 0;
+				let put = false;
+				const tryPick = (nx: number, ny: number, requirePutAble: boolean): boolean => {
+					if (put) return true;
+					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) return false;
+					const idx = nx * 50 + ny;
+					if (!walkArr[idx]) return false;
+					if (requirePutAble && !roomPutAbleArr[idx]) return false;
+					if (roomObjectCache.get(nx, ny)) return false;
 					finalX = nx;
 					finalY = ny;
 					put = true;
+					return true;
+				};
+
+				for (let i = 0; i < 4 && !put; i++) {
+					const dx = DIR4[i][0];
+					const dy = DIR4[i][1];
+					tryPick(x + dx, y + dy, true);
 				}
-			}
-			for (let dx = -1; dx <= 1; dx++) {
-				for (let dy = -1; dy <= 1; dy++) {
-					if (!dx && !dy) continue;
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					if (roomPutAbleArr[nx * 50 + ny] && !put && !roomObjectCache.get(nx, ny)) {
-						finalX = nx;
-						finalY = ny;
-						put = true;
+				for (let dx = -1; dx <= 1 && !put; dx++) {
+					for (let dy = -1; dy <= 1 && !put; dy++) {
+						if (!dx && !dy) continue;
+						tryPick(x + dx, y + dy, true);
 					}
 				}
-			}
-			roomObjectCache.set(finalX, finalY, struct);
-			return [finalX, finalY];
-		};
-		for (let i = 0; i < objects.length; i++) {
-			const pos = objects[i];
-			//container 位置
-			const p = getObjectPos(pos.x, pos.y, 'container');
 
-			// link 位置
-			if (i != 1) {
-				const linkPos = getObjectPos(p[0], p[1], 'link');
-				roomObjectCache.link = roomObjectCache.link || [];
-				roomObjectCache.link.push(linkPos); // link controller 然后是  source
-			} else {
-				roomObjectCache.extractor = [[pos.x, pos.y]];
+				// border/地形极端场景兜底：允许使用可行走但不在 putAble 集合内的位置，避免回落到 (0,0)
+				for (let dx = -1; dx <= 1 && !put; dx++) {
+					for (let dy = -1; dy <= 1 && !put; dy++) {
+						if (!dx && !dy) continue;
+						tryPick(x + dx, y + dy, false);
+					}
+				}
+				for (let radius = 2; radius <= 4 && !put; radius++) {
+					for (let dx = -radius; dx <= radius && !put; dx++) {
+						for (let dy = -radius; dy <= radius && !put; dy++) {
+							if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue;
+							tryPick(x + dx, y + dy, false);
+						}
+					}
+				}
+
+				if (!put) return null;
+				roomObjectCache.set(finalX, finalY, struct);
+				return [finalX, finalY];
+			};
+			for (let i = 0; i < objects.length; i++) {
+				const pos = objects[i];
+				//container 位置
+				const p = getObjectPos(pos.x, pos.y, 'container');
+				if (!p) continue;
+
+				// link 位置
+				if (i != 1) {
+					const linkPos = getObjectPos(p[0], p[1], 'link');
+					if (linkPos) {
+						roomObjectCache.link = roomObjectCache.link || [];
+						roomObjectCache.link.push(linkPos);
+					} // link controller 然后是  source
+				} else {
+					roomObjectCache.extractor = [[pos.x, pos.y]];
 			}
 			roomObjectCache.container = roomObjectCache.container || [];
 			if (i != 1) roomObjectCache.container.unshift(p); //如果是 mineral 最后一个
@@ -1512,17 +1516,19 @@ const ManagerPlanner = {
 		 * 这里开始计算布局！
 		 * @type {{}}
 		 */
-		const structMap: StructMap = {};
-		for (const e in CONTROLLER_STRUCTURES) structMap[e] = [];
-		if (!structMap['road']) structMap['road'] = [];
-		const roadSet = new Uint8Array(2500);
-		const pushRoad = (x: number, y: number) => {
-			if (x < 0 || x > 49 || y < 0 || y > 49) return;
-			const idx = x * 50 + y;
-			if (roadSet[idx]) return;
-			roadSet[idx] = 1;
-			structMap['road'].push([x, y]);
-		};
+			const structMap: StructMap = {};
+			for (const e in CONTROLLER_STRUCTURES) structMap[e] = [];
+			if (!structMap['road']) structMap['road'] = [];
+			const walkableArr = roomWalkable.arr as number[];
+			const roadSet = new Uint8Array(2500);
+			const pushRoad = (x: number, y: number) => {
+				if (x < 0 || x > 49 || y < 0 || y > 49) return;
+				const idx = x * 50 + y;
+				if (!walkableArr[idx]) return;
+				if (roadSet[idx]) return;
+				roadSet[idx] = 1;
+				structMap['road'].push([x, y]);
+			};
 
 		// 资源点布局
 		structMap['link'] = roomObjectCache.link;
@@ -1752,135 +1758,112 @@ const ManagerPlanner = {
 
 		// 更新roads
 		roomStructs.init();
-		for (const struct in CONTROLLER_STRUCTURES) {
-			const arr = structMap[struct];
-			for (let i = 0; i < arr.length; i++) {
-				const e = arr[i];
-				roomStructs.set(e[0], e[1], struct);
-			}
-		}
-		visited.init();
-		const roadArr = structMap['road'];
-		for (let i = 0; i < roadArr.length; i++) {
-			const e = roadArr[i];
-			visited.set(e[0], e[1], 1);
-		}
-		// 只遍历实际结构位置，避免全图扫描
-		const roadConnectList = [];
-		for (const struct in structMap) {
-			if (struct === 'link' || struct === 'container') continue;
-			const arr = structMap[struct];
-			for (let i = 0; i < arr.length; i++) {
-				roadConnectList.push(arr[i]);
-			}
-		}
-		/**
-		 * 更新最近的roads 但是可能有残缺
-		 */
-		for (let pi = 0; pi < putList.length; pi++) {
-			const e = putList[pi];
-			const x = e[0];
-			const y = e[1];
-			const minVal = getNearMinCost(x, y, x * 50 + y);
-			if (!minVal) continue;
-			for (let dx = -1; dx <= 1; dx++) {
-				for (let dy = -1; dy <= 1; dy++) {
-					if (!dx && !dy) continue;
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					if (costArr[nx * 50 + ny] === minVal) {
-						roomStructArr[nx * 50 + ny] = 'road';
-					}
-				}
-			}
-		}
-		/**
-		 * 再roads的基础上，对roads进行补全，将残缺的连起来
-		 */
-		for (let i = 0; i < roadConnectList.length; i++) {
-			const e = roadConnectList[i];
-			const x = e[0];
-			const y = e[1];
-			const idx = x * 50 + y;
-			const minVal = getNearMinCost(x, y, idx);
-			if (!minVal) continue;
-			for (let dx = -1; dx <= 1; dx++) {
-				for (let dy = -1; dy <= 1; dy++) {
-					if (!dx && !dy) continue;
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					if (costArr[nx * 50 + ny] === minVal) {
-						// 找到建筑最近的那个road
-						if (!visited.exec(nx, ny, 1)) pushRoad(nx, ny);
-					}
-				}
-			}
-		}
-
-		//#region 优化：批量寻路连接外矿
-		const costs = new PathFinder.CostMatrix();
-		const roomObj = (globalThis as any).Game?.rooms?.[roomName];
-		const roomTerrain = roomObj && roomObj.getTerrain ? roomObj.getTerrain() : undefined;
-		const rawTerrain =
-			roomTerrain && typeof roomTerrain.getRawBuffer === 'function'
-				? (roomTerrain.getRawBuffer() as number[])
-				: undefined;
-		const terrain = rawTerrain ? undefined : new Room.Terrain(roomName);
-		for (let i = 0; i < 50; i++) {
-			for (let j = 0; j < 50; j++) {
-				const te = rawTerrain ? rawTerrain[i * 50 + j] : terrain.get(i, j);
-				costs.set(i, j, te == TERRAIN_MASK_WALL ? 255 : te == TERRAIN_MASK_SWAMP ? 4 : 2);
-			}
-		}
-		for (const struct of OBSTACLE_OBJECT_TYPES) {
-			if (structMap[struct]) {
+			for (const struct in CONTROLLER_STRUCTURES) {
 				const arr = structMap[struct];
 				for (let i = 0; i < arr.length; i++) {
 					const e = arr[i];
-					costs.set(e[0], e[1], 255);
+					roomStructs.set(e[0], e[1], struct);
 				}
 			}
-		}
-		for (let i = 0; i < structMap['road'].length; i++) {
-			const e = structMap['road'][i];
-			costs.set(e[0], e[1], 1);
-		}
+			visited.init();
+			for (let i = 0; i < structMap['road'].length; i++) {
+				const e = structMap['road'][i];
+				visited.set(e[0], e[1], 1);
+			}
+			for (let i = 0; i < putList.length; i++) {
+				const e = putList[i];
+				const x = e[0];
+				const y = e[1];
+				let minVal = 50;
+				costRoad.forNear(
+					(x1, y1, val) => {
+						if (minVal > val && val > 0) minVal = val;
+					},
+					x,
+					y
+				);
+				costRoad.forNear(
+					(x1, y1, val) => {
+						if (minVal == val && val > 0) {
+							roomStructs.set(x1, y1, 'road');
+						}
+					},
+					x,
+					y
+				);
+			}
+			roomStructs.forEach((x, y, val) => {
+				if (val == 'link' || val == 'container') return;
+				if (typeof val === 'number' && val > -1) return;
+				let minVal = 50;
+				costRoad.forNear(
+					(x1, y1, nVal) => {
+						if (minVal > nVal && nVal > 0) {
+							minVal = nVal;
+						}
+					},
+					x,
+					y
+				);
+				costRoad.forNear(
+					(x1, y1, nVal) => {
+						if (minVal == nVal && nVal > 0) {
+							if (!visited.exec(x1, y1, 1)) pushRoad(x1, y1);
+						}
+					},
+					x,
+					y
+				);
+			});
 
-		structMap['container'].sort((a, b) => {
-			const adx = a[0] - storageX;
-			const ady = a[1] - storageY;
-			const bdx = b[0] - storageX;
-			const bdy = b[1] - storageY;
-			return adx * adx + ady * ady - (bdx * bdx + bdy * bdy);
-		});
-
-		const centerRoomPos = new RoomPosition(centerX, centerY, roomName);
-		const pfOpts = {
-			roomCallback: () => costs,
-			maxRooms: 1,
-			plainCost: 2,
-			swampCost: 4
-		};
-
-		const goals = structMap['container'].map((e) => ({ pos: new RoomPosition(e[0], e[1], roomName), range: 1 }));
-		while (goals.length) {
-			const result = PathFinder.search(centerRoomPos, goals, pfOpts);
-			if (result.incomplete) break;
-			const path = result.path || [];
-			const nearestPos = path.length ? path[path.length - 1] : centerRoomPos;
-			const removed = removeReachedGoals(nearestPos, goals);
-			for (let i = 0; i < path.length; i++) {
-				const pos = path[i];
-				if (costs.get(pos.x, pos.y) != 1) {
-					pushRoad(pos.x, pos.y);
-					costs.set(pos.x, pos.y, 1);
+			const costs = new PathFinder.CostMatrix();
+			const terrain = new Room.Terrain(roomName);
+			for (let i = 0; i < 50; i++) {
+				for (let j = 0; j < 50; j++) {
+					const te = terrain.get(i, j);
+					costs.set(i, j, te == TERRAIN_MASK_WALL ? 255 : te == TERRAIN_MASK_SWAMP ? 4 : 2);
 				}
 			}
-			if (!removed) break;
-		}
-		ManagerPlanner.dismiss();
+			for (const struct of OBSTACLE_OBJECT_TYPES) {
+				if (structMap[struct]) {
+					const arr = structMap[struct];
+					for (let i = 0; i < arr.length; i++) {
+						const e = arr[i];
+						costs.set(e[0], e[1], 255);
+					}
+				}
+			}
+			for (let i = 0; i < structMap['road'].length; i++) {
+				const e = structMap['road'][i];
+				costs.set(e[0], e[1], 1);
+			}
+			structMap['container'].sort((a, b) => {
+				const adx = a[0] - storageX;
+				const ady = a[1] - storageY;
+				const bdx = b[0] - storageX;
+				const bdy = b[1] - storageY;
+				return adx * adx + ady * ady - (bdx * bdx + bdy * bdy);
+			});
+			for (let i = 0; i < structMap['container'].length; i++) {
+				const e = structMap['container'][i];
+				const result = PathFinder.search(
+					new RoomPosition(centerX, centerY, roomName),
+					{ pos: new RoomPosition(e[0], e[1], roomName), range: 1 },
+					{
+						roomCallback: () => costs,
+						maxRooms: 1
+					}
+				);
+				const path = result.path || [];
+				for (let j = 0; j < path.length; j++) {
+					const pos = path[j];
+					if (costs.get(pos.x, pos.y) != 1) {
+						pushRoad(pos.x, pos.y);
+						costs.set(pos.x, pos.y, 1);
+					}
+				}
+			}
+			ManagerPlanner.dismiss();
 
 		return {
 			roomName: roomName,
@@ -1895,6 +1878,9 @@ export const autoPlanner = {
 	name: 'auto',
 	ManagerPlanner
 };
+
+
+
 
 
 

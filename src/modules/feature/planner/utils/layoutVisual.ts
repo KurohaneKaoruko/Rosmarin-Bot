@@ -87,7 +87,18 @@ const LayoutVisual = {
 
         // 先把所有 road 点喂给 structure(STRUCTURE_ROAD)，RoomVisual 扩展会在内部缓存 roads，
         // 方便后面 connectRoads() 一次性做连线。
-        structMap['road'].forEach((e) => visual.structure(e[0], e[1], STRUCTURE_ROAD, { opacity: roadOpacity }));
+        const terrain = new Room.Terrain(roomName);
+        const roadSet = new Set<string>();
+        const roadList = structMap['road'] || [];
+        for (let i = 0; i < roadList.length; i++) {
+            const e = roadList[i];
+            const x = e[0];
+            const y = e[1];
+            if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+            roadSet.add(`${x}:${y}`);
+            visual.structure(x, y, STRUCTURE_ROAD, { opacity: roadOpacity });
+        }
 
         _.keys(CONTROLLER_STRUCTURES).forEach((struct) => {
             if (struct == 'road') return;
@@ -115,7 +126,26 @@ const LayoutVisual = {
         });
 
         // 自动连通道路：替代原先 RoomArray 的邻域判断连线逻辑。
-        visual.connectRoads({ opacity: roadOpacity });
+        const lineDirs: Array<[number, number]> = [[1, 0], [0, 1], [1, 1], [1, -1]];
+        const lineStyle = { color: '#666', width: 0.35, opacity: roadOpacity };
+        roadSet.forEach((key) => {
+            const [xs, ys] = key.split(':');
+            const x = Number(xs);
+            const y = Number(ys);
+            for (let i = 0; i < lineDirs.length; i++) {
+                const dx = lineDirs[i][0];
+                const dy = lineDirs[i][1];
+                const nx = x + dx;
+                const ny = y + dy;
+                if (!roadSet.has(`${nx}:${ny}`)) continue;
+                if (dx !== 0 && dy !== 0) {
+                    const sideWallA = terrain.get(x + dx, y) === TERRAIN_MASK_WALL;
+                    const sideWallB = terrain.get(x, y + dy) === TERRAIN_MASK_WALL;
+                    if (sideWallA && sideWallB) continue;
+                }
+                visual.line(x, y, nx, ny, lineStyle);
+            }
+        });
     }
 };
 
