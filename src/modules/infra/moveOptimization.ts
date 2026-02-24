@@ -21,7 +21,18 @@ let config = {
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
     enableBypassCostMatReuse: true,  // 【待测试】是否启用绕过房间的costMatrix缓存
     enableSameRoomDetourCooldown: true, // 同房目标发生“绕房又回房”后短暂收敛到 maxRooms=1，避免反复进出房间
-    sameRoomDetourCooldownTTL: 15 // 冷却 tick 数（只影响未显式传 maxRooms 的调用）
+    sameRoomDetourCooldownTTL: 15, // 冷却 tick 数（只影响未显式传 maxRooms 的调用）
+    enableRoomBounceGuardV2: true, // 跨房 A->B->A 抖动抑制
+    roomBounceWindow: 20, // 识别 bounce 的时间窗口
+    roomBounceTTL: 100, // 识别到 bounce 后封禁该跨房方向的时长
+    enableSameRoomDetourCooldownV2: true, // 同房目标绕出再回时，临时收敛 maxRooms
+    sameRoomDetourBounceWindow: 20, // 识别“绕出再回”的时间窗口
+    enableTemporalBypassRefine: true, // 堵路临时绕路的策略优化
+    temporalAvoidExitCheckTTL: 1, // 临时出口可达性检测缓存时长（tick）
+    temporalBypassRetryMinTicks: 2, // 临时绕路失败后的最小重试间隔
+    temporalBypassRetryMaxTicks: 6, // 临时绕路失败后的最大重试间隔（线性退避上限）
+    enableObserverQueueRefine: true, // Observer 任务队列优化
+    observerTaskTTL: 12 // Observer 任务过期时长（tick）
 }
 // 运行时参数 
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
@@ -41,9 +52,19 @@ let avoidExitsVersion = 0;
 function markAvoidExitsChanged() {
     avoidExitsVersion = (avoidExitsVersion + 1) | 0;
 }
-/** @type {{id:string, roomName:string, taskQueue:{path:MyPath, idx:number, roomName:string}[]}[]} */
+/** @type {{id:string, roomName:string, taskQueue:{path:MyPath, idx:number, roomName:string, createdTick?:number, expireTick?:number, pathVersion?:number}[], taskHead?:number, lastIssuedTick?:number}[]} */
 let observers = [];  // 如果想用ob寻路，把ob的id放这里
 let autoDiscoverObserverTick = -1;
+
+let pathVersionCounter = 0;
+function ensurePathVersion(path) {
+    if (!path || typeof path !== 'object') return 0;
+    const current = path._bmVersion | 0;
+    if (current > 0) return current;
+    pathVersionCounter = ((pathVersionCounter + 1) | 0) || 1;
+    path._bmVersion = pathVersionCounter;
+    return path._bmVersion;
+}
 
 // ============================================================================
 // 2) Portal 注册表与跨 shard 入口选择
@@ -268,7 +289,7 @@ function ensureAvoidRoomsUpToDate() {
  * 自动发现并注册所有拥有的Observer结构
  */
 export function autoDiscoverObservers(): void {
-    const newObservers: { id: string; roomName: string; taskQueue: any[] }[] = [];
+    const newObservers: { id: string; roomName: string; taskQueue: any[]; taskHead?: number }[] = [];
 
     for (const id in Game.structures) {
         const structure = Game.structures[id];
@@ -277,10 +298,13 @@ export function autoDiscoverObservers(): void {
             // Check if this observer is already registered
             const existing = observers.find(ob => ob.id === id);
             if (existing) {
+                if (typeof existing.taskHead !== 'number') {
+                    existing.taskHead = 0;
+                }
                 newObservers.push(existing);
             } else {
                 // Add new observer
-                newObservers.push({ id, roomName: observer.room.name, taskQueue: [] });
+                newObservers.push({ id, roomName: observer.room.name, taskQueue: [], taskHead: 0 });
             }
         }
     }
@@ -304,7 +328,7 @@ function ensureObserversUpToDate() {
 // 4) 全局缓存与运行时状态
 // ============================================================================
 // 4.1 Observer 异步任务结果缓存
-/** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string}[] }} */
+/** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string, pathVersion?:number, expireTick?:number}[] }} */
 let obTimer = Object.create(null);   // 【未启用】用于登记ob调用，在相应的tick查看房间对象
 let obTick = Game.time;
 
@@ -725,6 +749,86 @@ function isObstacleStructure(room, pos, ignoreStructures) {
  * @param {MyPath} path
  * @param {number} idx
  */
+function getObserverTaskTTL() {
+    const ttl = config.observerTaskTTL | 0;
+    return ttl > 0 ? ttl : 12;
+}
+
+function createObserverTask(path, idx, roomName) {
+    const task = { path, idx, roomName };
+    if (config.enableObserverQueueRefine) {
+        task.createdTick = Game.time;
+        task.expireTick = Game.time + getObserverTaskTTL();
+        task.pathVersion = ensurePathVersion(path);
+    }
+    return task;
+}
+
+function isObserverTaskExpired(task) {
+    return !!(task && task.expireTick && Game.time > task.expireTick);
+}
+
+function isObserverTaskStale(task) {
+    if (!task || !task.path || !task.path.posArray || !task.path.posArray.length || typeof task.path.posArray[0] !== 'object') {
+        return true;
+    }
+    if (task.pathVersion && task.path._bmVersion && task.pathVersion !== task.path._bmVersion) {
+        return true;
+    }
+    return false;
+}
+
+// 6.1 Observer 队列操作（FIFO + head 指针，避免 shift 的 O(n) 搬移）
+function getObserverQueueSize(obData) {
+    const queue = obData.taskQueue || [];
+    if (!config.enableObserverQueueRefine) {
+        return queue.length;
+    }
+    const head = obData.taskHead | 0;
+    const size = queue.length - head;
+    return size > 0 ? size : 0;
+}
+
+function peekObserverTask(obData) {
+    const queue = obData.taskQueue;
+    if (!queue || !queue.length) return undefined;
+    if (!config.enableObserverQueueRefine) {
+        return queue[queue.length - 1];
+    }
+    const head = obData.taskHead | 0;
+    return queue[head];
+}
+
+function compactObserverQueue(obData) {
+    if (!config.enableObserverQueueRefine) return;
+    const queue = obData.taskQueue;
+    const head = obData.taskHead | 0;
+    if (!queue || !head) return;
+    if (head >= 64 || head * 2 >= queue.length) {
+        queue.splice(0, head);
+        obData.taskHead = 0;
+    }
+}
+
+function dropObserverTask(obData) {
+    const queue = obData.taskQueue;
+    if (!queue || !queue.length) return;
+    if (config.enableObserverQueueRefine) {
+        obData.taskHead = (obData.taskHead | 0) + 1;
+        compactObserverQueue(obData);
+        return;
+    }
+    queue.pop();
+}
+
+function estimateObserverReadyTick(obData) {
+    const queueLen = getObserverQueueSize(obData);
+    if (!config.enableObserverQueueRefine) return queueLen;
+    const lastIssuedTick = obData.lastIssuedTick | 0;
+    const nextTick = lastIssuedTick >= Game.time ? (lastIssuedTick + 1) : Game.time;
+    return nextTick + queueLen;
+}
+
 function addObTask(path, idx) {
     if (!path || !path.posArray || !(idx in path.posArray)) return;
     ensureObserversUpToDate();
@@ -738,21 +842,25 @@ function addObTask(path, idx) {
     const last = obDedup[idx];
     if (last && Game.time - last < 5) return;
     obDedup[idx] = Game.time;
+    const task = createObserverTask(path, idx, roomName);
     let best = null;
     let bestDist = Infinity;
+    let bestReadyTick = Infinity;
     let bestQueueLen = Infinity;
     for (let obData of observers) {
         const dist = Game.map.getRoomLinearDistance(obData.roomName, roomName);
         if (dist > 10) continue;
-        const qlen = obData.taskQueue ? obData.taskQueue.length : 0;
-        if (dist < bestDist || (dist === bestDist && qlen < bestQueueLen)) {
+        const readyTick = estimateObserverReadyTick(obData);
+        const qlen = getObserverQueueSize(obData);
+        if (dist < bestDist || (dist === bestDist && (readyTick < bestReadyTick || (readyTick === bestReadyTick && qlen < bestQueueLen)))) {
             best = obData;
             bestDist = dist;
+            bestReadyTick = readyTick;
             bestQueueLen = qlen;
         }
     }
     if (best) {
-        best.taskQueue.push({ path: path, idx: idx, roomName: roomName });
+        best.taskQueue.push(task);
     }
 }
 
@@ -760,14 +868,18 @@ function addObTask(path, idx) {
  *  尝试用ob检查路径
  */
 function doObTask() {
-    for (let obData of observers) { // 遍历所有ob
-        let queue = obData.taskQueue;
-        while (queue.length) {  // 没有task就pass
-            let task = queue[queue.length - 1];
-            let roomName = task.roomName;
-            if (!task.path || !task.path.posArray || !task.path.posArray.length || typeof task.path.posArray[0] !== 'object') {
-                // 路径已被失效/删除（posArray 会被置为无效值），丢弃该任务避免浪费 ob/CPU
-                queue.pop();
+    for (let i = observers.length - 1; i >= 0; i--) { // 遍历所有ob（倒序便于安全删除）
+        const obData = observers[i];
+        while (getObserverQueueSize(obData) > 0) {  // 没有task就pass
+            const task = peekObserverTask(obData);
+            if (!task) {
+                dropObserverTask(obData);
+                continue;
+            }
+            const roomName = task.roomName;
+            if (isObserverTaskExpired(task) || isObserverTaskStale(task)) {
+                // 任务过期或路径版本已失效，丢弃该任务避免浪费 ob/CPU
+                dropObserverTask(obData);
                 continue;
             }
             if (roomName in Game.rooms) { // 已有视野则无需 observeRoom，直接校验并补齐 direction
@@ -776,7 +888,7 @@ function doObTask() {
                     // OB 已确认堵路，立即失效该缓存路径，避免 creep 走到才重算
                     deletePath(task.path);
                 }
-                queue.pop();
+                dropObserverTask(obData);
                 continue;
             }
             if (roomName in costMatrixCache) {  // 有过视野不用再ob
@@ -788,26 +900,34 @@ function doObTask() {
                         deletePath(task.path);
                     }
                 }
-                queue.pop();
+                dropObserverTask(obData);
                 continue;
             }
             /** @type {StructureObserver} */
-            let ob = Game.getObjectById(obData.id);
-            if (ob) {
-                //console.log('ob ' + roomName);
-                const code = ob.observeRoom(roomName);
-                if (code !== OK) {
-                    // observeRoom 失败（通常是参数/距离问题），丢弃该任务避免队列卡死
-                    queue.pop();
-                    continue;
-                }
-                if (!(Game.time + 1 in obTimer)) {
-                    obTimer[Game.time + 1] = [];
-                }
-                obTimer[Game.time + 1].push({ path: task.path, idx: task.idx, roomName: roomName });    // idx位置无direction
-            } else {
-                observers.splice(observers.indexOf(obData), 1);
+            const ob = Game.getObjectById(obData.id);
+            if (!ob) {
+                observers.splice(i, 1);
+                break;
             }
+            //console.log('ob ' + roomName);
+            const code = ob.observeRoom(roomName);
+            if (code !== OK) {
+                // observeRoom 失败（通常是参数/距离问题），丢弃该任务避免队列卡死
+                dropObserverTask(obData);
+                continue;
+            }
+            obData.lastIssuedTick = Game.time;
+            if (!(Game.time + 1 in obTimer)) {
+                obTimer[Game.time + 1] = [];
+            }
+            obTimer[Game.time + 1].push({
+                path: task.path,
+                idx: task.idx,
+                roomName: roomName,
+                pathVersion: task.pathVersion,
+                expireTick: task.expireTick
+            });    // idx位置无direction
+            dropObserverTask(obData);
             break;
         }
     }
@@ -832,11 +952,11 @@ function checkObResult() {
             return;
         }
         for (let result of obTimer[tickKey]) {
+            if (isObserverTaskExpired(result) || isObserverTaskStale(result)) {
+                continue;
+            }
             if (result.roomName in Game.rooms) {
                 //console.log('ob得到 ' + result.roomName);
-                if (!result.path || !result.path.posArray || !result.path.posArray.length || typeof result.path.posArray[0] !== 'object') {
-                    continue;
-                }
                 const ok = checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
                 if (!ok) {
                     // OB 已确认堵路，立即失效该缓存路径，避免 creep 走到才重算
@@ -1093,8 +1213,20 @@ function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT
 // ----------------------------------------------------------------------------
 let temporalAvoidFrom, temporalAvoidTo;
 let bounceAvoidFrom, bounceAvoidTo, bounceAvoidUntil;
+let temporalAvoidExitCacheTick = -1;
+let temporalAvoidExitCache = Object.create(null);
+
+function getPositiveConfigNumber(value, fallback) {
+    const n = value | 0;
+    return n > 0 ? n : fallback;
+}
 
 function registerRoomBounceGuard(creep, targetRoomName) {
+    if (!config.enableRoomBounceGuardV2) {
+        bounceAvoidFrom = bounceAvoidTo = '';
+        bounceAvoidUntil = 0;
+        return;
+    }
     if (!creep || !creep.memory) return;
 
     if (!bounceAvoidUntil || Game.time > bounceAvoidUntil) {
@@ -1116,6 +1248,15 @@ function registerRoomBounceGuard(creep, targetRoomName) {
         };
     }
 
+    const bounceWindow = getPositiveConfigNumber(config.roomBounceWindow, 20);
+    const bounceTTL = getPositiveConfigNumber(config.roomBounceTTL, 100);
+
+    if (mem.blockFrom && mem.blockTo && mem.blockUntil && mem.blockUntil >= Game.time) {
+        bounceAvoidFrom = mem.blockFrom;
+        bounceAvoidTo = mem.blockTo;
+        bounceAvoidUntil = mem.blockUntil;
+    }
+
     const current = creep.pos.roomName;
     if (mem.lastRoom !== current) {
         mem.prev2Room = mem.prevRoom;
@@ -1124,15 +1265,48 @@ function registerRoomBounceGuard(creep, targetRoomName) {
         mem.prevSwitch = mem.lastSwitch || Game.time;
         mem.lastSwitch = Game.time;
 
-        const bounced = mem.prev2Room && mem.prev2Room === current && (Game.time - mem.prevSwitch) <= 20;
+        const bounced = mem.prev2Room && mem.prev2Room === current && (Game.time - mem.prevSwitch) <= bounceWindow;
         if (bounced && targetRoomName && targetRoomName !== mem.prevRoom) {
             mem.blockFrom = current;
             mem.blockTo = mem.prevRoom;
-            mem.blockUntil = Game.time + 100;
+            mem.blockUntil = Game.time + bounceTTL;
             bounceAvoidFrom = mem.blockFrom;
             bounceAvoidTo = mem.blockTo;
             bounceAvoidUntil = mem.blockUntil;
         }
+    }
+}
+
+function applySameRoomDetourCooldown(creep, toPos, ops) {
+    if (!config.enableSameRoomDetourCooldown || !config.enableSameRoomDetourCooldownV2) {
+        return;
+    }
+
+    const bounceWindow = getPositiveConfigNumber(config.sameRoomDetourBounceWindow, 20);
+    const cooldownTTL = getPositiveConfigNumber(config.sameRoomDetourCooldownTTL, 15);
+
+    let detour = creep.memory._bmSameRoomDetour;
+    if (!detour) {
+        detour = creep.memory._bmSameRoomDetour = { lastRoom: creep.pos.roomName, lastTick: Game.time, leftTick: 0, targetRoom: toPos.roomName };
+    } else if (detour.targetRoom !== toPos.roomName) {
+        // 目标房变化后重置“绕出再回”检测，避免跨目标串扰
+        detour.leftTick = 0;
+        detour.targetRoom = toPos.roomName;
+    }
+
+    if (detour.lastRoom !== creep.pos.roomName) {
+        if (detour.lastRoom === toPos.roomName && creep.pos.roomName !== toPos.roomName) {
+            detour.leftTick = Game.time;
+        }
+        if (creep.pos.roomName === toPos.roomName && detour.lastRoom !== toPos.roomName && detour.leftTick && (Game.time - detour.leftTick) <= bounceWindow) {
+            creep.memory._bmDetourCooldownUntil = Game.time + cooldownTTL;
+        }
+        detour.lastRoom = creep.pos.roomName;
+        detour.lastTick = Game.time;
+    }
+
+    if (toPos.roomName === creep.pos.roomName && ops.maxRooms === undefined && creep.memory._bmDetourCooldownUntil && Game.time < creep.memory._bmDetourCooldownUntil) {
+        ops.maxRooms = 1;
     }
 }
 
@@ -1196,22 +1370,70 @@ function findRoute(fromRoomName, toRoomName, bypass) {  // TODO 以后跨shard�
  * @param {RoomPosition} pos
  * @param {Room} room
  * @param {CostMatrix} costMat
+ * @param {string | undefined} targetRoomName
  */
-function checkTemporalAvoidExit(pos, room, costMat) {    // 用于记录因creep堵路导致的房间出口临时封闭
-    let neighbors = Game.map.describeExits(room.name);
+function checkTemporalAvoidExit(pos, room, costMat, targetRoomName) {    // 用于记录因creep堵路导致的房间出口临时封闭
     temporalAvoidFrom = temporalAvoidTo = '';   // 清空旧数据
+
+    const cacheTTL = getPositiveConfigNumber(config.temporalAvoidExitCheckTTL, 1);
+    if (temporalAvoidExitCacheTick === -1 || (Game.time - temporalAvoidExitCacheTick) >= cacheTTL) {
+        temporalAvoidExitCacheTick = Game.time;
+        temporalAvoidExitCache = Object.create(null);
+    }
+
+    const cacheKey = `${room.name}|${pos.x}|${pos.y}|${targetRoomName || ''}`;
+    if (cacheKey in temporalAvoidExitCache) {
+        const cached = temporalAvoidExitCache[cacheKey];
+        if (cached) {
+            temporalAvoidFrom = room.name;
+            temporalAvoidTo = cached;
+        }
+        return;
+    }
+
+    const neighbors = Game.map.describeExits(room.name);
+    const refine = !!config.enableTemporalBypassRefine;
+
+    if (!refine) {
+        for (let direction in neighbors) {
+            const nextRoom = neighbors[direction];
+            if (nextRoom in avoidRooms) continue;
+            const exits = room.find(+direction);
+            if (PathFinder.search(pos, exits, {
+                maxRooms: 1,
+                roomCallback: () => costMat
+            }).incomplete) {    // 此路不通
+                temporalAvoidFrom = room.name;
+                temporalAvoidTo = nextRoom;
+            }
+        }
+        temporalAvoidExitCache[cacheKey] = temporalAvoidTo || '';
+        return;
+    }
+
+    const exitCandidates = [];
     for (let direction in neighbors) {
         const nextRoom = neighbors[direction];
-        if (nextRoom in avoidRooms) continue;
-        let exits = room.find(+direction);
+        if (!nextRoom || nextRoom in avoidRooms) continue;
+        const score = targetRoomName ? Game.map.getRoomLinearDistance(nextRoom, targetRoomName, true) : 0;
+        exitCandidates.push({ direction: +direction, nextRoom, score });
+    }
+    exitCandidates.sort((a, b) => a.score - b.score);
+
+    for (let i = 0; i < exitCandidates.length; i++) {
+        const candidate = exitCandidates[i];
+        const exits = room.find(candidate.direction);
         if (PathFinder.search(pos, exits, {
             maxRooms: 1,
             roomCallback: () => costMat
         }).incomplete) {    // 此路不通
             temporalAvoidFrom = room.name;
-            temporalAvoidTo = nextRoom;
+            temporalAvoidTo = candidate.nextRoom;
+            break;
         }
     }
+
+    temporalAvoidExitCache[cacheKey] = temporalAvoidTo || '';
 }
 function routeReduce(temp, item) {
     temp[item.room] = 1;
@@ -1377,7 +1599,7 @@ function findTemporalPath(creep, toPos, ops) {
 
     try {
         if (creep.pos.roomName != toPos.roomName) { // findRoute会导致非最优path的问题
-            checkTemporalAvoidExit(creep.pos, creep.room, bypassCostMat);   // 因为creep挡路导致的无法通行的出口
+            checkTemporalAvoidExit(creep.pos, creep.room, bypassCostMat, toPos.roomName);   // 因为creep挡路导致的无法通行的出口
             route = findRoute(creep.pos.roomName, toPos.roomName, true);
             if (route == ERR_NO_PATH) {
                 return false;
@@ -1399,6 +1621,7 @@ function findTemporalPath(creep, toPos, ops) {
                 posArray: result,
                 ignoreStructures: !!ops.ignoreDestructibleStructures
             }
+            ensurePathVersion(creepCache.path);
             generateDirectionArray(creepCache.path);
             return true;
         }
@@ -1510,6 +1733,7 @@ function findPath(fromPos, toPos, ops) {
  * @param {MyPath} newPath
  */
 function addPathIntoCache(newPath) {
+    ensurePathVersion(newPath);
     // combinedX: 起点坐标打包 (x << 16 | y)，作为一级索引 Key，唯一对应世界坐标的一个点
     const combinedX = (newPath.start.x << 16) | (newPath.start.y & 0xFFFF);
     // combinedY: 终点坐标的曼哈顿和 (x + y)，作为二级索引 Key，用于范围搜索
@@ -1668,6 +1892,7 @@ function deletePath(path) {
                 globalPathCacheBucketCount--;
             }
         }
+        path._bmDeletedTick = Game.time;
         path.posArray = path.posArray.map(invalidate);
     }
 }
@@ -2149,6 +2374,7 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
             ignoreStructures: !!ops.ignoreDestructibleStructures,
             ignoreSwamps: !!ops.ignoreSwamps
         }
+        ensurePathVersion(newPath);
         generateDirectionArray(newPath);
         addPathIntoCache(newPath);
         //console.log(creep, creep.pos, 'miss');
@@ -2170,6 +2396,85 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
     found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
 
     return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+}
+
+// 14.1 临时绕路重试节流：同一堵点签名下按退避间隔触发 PathFinder
+function getTemporalBypassRetryMinTicks() {
+    return getPositiveConfigNumber(config.temporalBypassRetryMinTicks, 2);
+}
+
+function getTemporalBypassRetryMaxTicks() {
+    const minTicks = getTemporalBypassRetryMinTicks();
+    return Math.max(minTicks, getPositiveConfigNumber(config.temporalBypassRetryMaxTicks, 6));
+}
+
+function packRoomPos(pos) {
+    if (!pos || typeof pos.x !== 'number' || typeof pos.y !== 'number') return -1;
+    return ((pos.x & 63) << 6) | (pos.y & 63);
+}
+
+function buildTemporalBypassSignature(path, idx, curStep, toPos, ops) {
+    const pathVersion = ensurePathVersion(path);
+    const curPack = packRoomPos(curStep);
+    const targetPack = packRoomPos(toPos);
+    const range = typeof ops.range === 'number' ? ops.range : 1;
+    const bypassRange = typeof ops.bypassRange === 'number' ? ops.bypassRange : 5;
+    return `${pathVersion}|${idx}|${curStep.roomName}|${curPack}|${toPos.roomName}|${targetPack}|${range}|${bypassRange}|${ops.ignoreDestructibleStructures ? 1 : 0}`;
+}
+
+function shouldAttemptTemporalBypass(creepCache, signature) {
+    if (!config.enableTemporalBypassRefine) {
+        return true;
+    }
+    let state = creepCache._bmTemporalBypass;
+    if (!state || state.signature !== signature) {
+        creepCache._bmTemporalBypass = {
+            signature,
+            lastAttemptTick: -1,
+            nextRetryTick: Game.time,
+            failCount: 0
+        };
+        return true;
+    }
+    if (state.lastAttemptTick === Game.time) {
+        return false;
+    }
+    return Game.time >= (state.nextRetryTick | 0);
+}
+
+function recordTemporalBypassResult(creepCache, signature, success) {
+    if (!config.enableTemporalBypassRefine) {
+        return;
+    }
+    let state = creepCache._bmTemporalBypass;
+    if (!state || state.signature !== signature) {
+        state = creepCache._bmTemporalBypass = {
+            signature,
+            lastAttemptTick: Game.time,
+            nextRetryTick: Game.time + 1,
+            failCount: 0
+        };
+    }
+    state.lastAttemptTick = Game.time;
+    if (success) {
+        state.failCount = 0;
+        state.nextRetryTick = Game.time + 1;
+        return;
+    }
+    const nextFailCount = (state.failCount | 0) + 1;
+    state.failCount = nextFailCount;
+    const minTicks = getTemporalBypassRetryMinTicks();
+    const maxTicks = getTemporalBypassRetryMaxTicks();
+    const backoff = Math.min(maxTicks, minTicks + nextFailCount - 1);
+    state.nextRetryTick = Game.time + backoff;
+}
+
+function moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx) {
+    if (ops.visualizePathStyle) {
+        showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
+    }
+    creepMoveCache[creep.name] = Game.time;
+    return originMove.call(creep, getDirection(creep.pos, curStep));
 }
 
 /**
@@ -2232,12 +2537,18 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
             if (typeof ops.bypassRange != "number" || typeof ops.range != 'number') {
                 return ERR_INVALID_ARGS;
             }
-            if (findTemporalPath(creep, toPos, ops)) { // 有路，creepCache的内容会被这个函数更新
-                //creep.say('开始绕路');
-                return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+            const bypassSignature = buildTemporalBypassSignature(path, idx, curStep, toPos, ops);
+            const canAttemptBypass = shouldAttemptTemporalBypass(creepCache, bypassSignature);
+            if (canAttemptBypass) {
+                const bypassOk = findTemporalPath(creep, toPos, ops);
+                recordTemporalBypassResult(creepCache, bypassSignature, bypassOk);
+                if (bypassOk) { // 有路，creepCache的内容会被这个函数更新
+                    //creep.say('开始绕路');
+                    return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+                }
             }
-            //creep.say('没路啦');
-            return ERR_NO_PATH;
+            // 绕路冷却窗口内直接沿旧路径尝试推进，避免空转并等待前方creep让路
+            return moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx);
         }
 
         if (code == ERR_NOT_FOUND && isObstacleStructure(creep.room, curStep, ops.ignoreDestructibleStructures)) {   // 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
@@ -2249,11 +2560,7 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
         }
         // else 上tick移动失败但也不是建筑物和creep/pc挡路。有2个情况：1.下一格路本来是穿墙路并碰巧消失了；2.下一格是房间出口，有另一个creep抢路了然后它被传送到隔壁了。不处理第1个情况，按第2个情况对待。
         //creep.say('对穿' + getDirection(creep.pos, posArray[idx]) + '-' + originMove.call(creep, getDirection(creep.pos, posArray[idx])));
-        if (ops.visualizePathStyle) {
-            showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
-        }
-        creepMoveCache[creep.name] = Game.time;
-        return originMove.call(creep, getDirection(creep.pos, curStep));  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
+        return moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx);  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
     }
 
     if (idx - 1 >= 0 && isNear(creep.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
@@ -2399,36 +2706,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
 
     registerRoomBounceGuard(this, toPos.roomName);
+    applySameRoomDetourCooldown(this, toPos, ops);
 
     if (config.autoVisual && !ops.visualizePathStyle) {
         // 自动绘制路径：调用方未传 visualizePathStyle 时注入默认样式
         ops.visualizePathStyle = {};
-    }
-
-    if (config.enableSameRoomDetourCooldown) {
-        // 同房目标的“绕房承诺/冷却”：
-        // - 允许出现 A->B->A 这种绕房更快的路线；
-        // - 但当检测到“从目标房绕出后又回到目标房”时，短时间内把 maxRooms 收敛为 1（仅当调用方未显式传 maxRooms），
-        //   用于稳定推进房内阶段，减少下一 tick 又立刻重新绕出去导致的反复进出。
-        let detour = this.memory._bmSameRoomDetour;
-        if (!detour) {
-            // lastRoom: 上一次所在房间；leftTick: 最近一次从目标房离开的 tick
-            detour = this.memory._bmSameRoomDetour = { lastRoom: this.pos.roomName, lastTick: Game.time, leftTick: 0 };
-        }
-        // 检测“从目标房绕出后又回到目标房”
-        if (detour.lastRoom !== this.pos.roomName) {
-            if (detour.lastRoom === toPos.roomName && this.pos.roomName !== toPos.roomName) {
-                detour.leftTick = Game.time;
-            }
-            if (this.pos.roomName === toPos.roomName && detour.lastRoom !== toPos.roomName && detour.leftTick && (Game.time - detour.leftTick) <= 20) {
-                this.memory._bmDetourCooldownUntil = Game.time + (config.sameRoomDetourCooldownTTL | 0);
-            }
-            detour.lastRoom = this.pos.roomName;
-            detour.lastTick = Game.time;
-        }
-        if (toPos.roomName === this.pos.roomName && ops.maxRooms === undefined && this.memory._bmDetourCooldownUntil && Game.time < this.memory._bmDetourCooldownUntil) {
-            ops.maxRooms = 1;
-        }
     }
 
     const moveToRange = ops.range === undefined ? 1 : ops.range;
