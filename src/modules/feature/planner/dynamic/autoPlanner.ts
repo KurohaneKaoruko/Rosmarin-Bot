@@ -241,7 +241,7 @@ const blockPutAbleCountKernel = (
 
 	let innerCnt = 0;
 	while (!queue.isEmpty()) {
-		const nd = queue.pop() as { k: number; v: number } | undefined;
+			const nd = (queue.pop() as unknown) as { k: number; v: number } | undefined;
 		if (!nd) break;
 		const k = nd.k;
 		const idx = nd.v;
@@ -362,7 +362,7 @@ const computeBlockKernel = (
 	putAbleCache.fill(-1);
 
 	while (!queue.isEmpty()) {
-		const nd = queue.pop() as { k: number; v: number } | undefined;
+		const nd = (queue.pop() as unknown) as { k: number; v: number } | undefined;
 		if (!nd) break;
 		const k = nd.k;
 		const pos = nd.v;

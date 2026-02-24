@@ -52,14 +52,14 @@ function getEnergyAvgPrice(): number {
     return cachedEnergyAvgPrice;
 }
 
-function findMyOrder(roomName: string, resourceType: ResourceConstant, type: ORDER_BUY | ORDER_SELL): Order | null {
+function findMyOrder(roomName: string, resourceType: ResourceConstant, type: ORDER_BUY | ORDER_SELL): (Order & { resourceType: ResourceConstant }) | null {
     if (!hasMarketOrderApi()) return null;
     for (const order of Object.values(Game.market.orders)) {
         if (order.roomName === roomName &&
             order.resourceType === resourceType &&
             order.type === type &&
             order.remainingAmount > 0
-        ) return order;
+        ) return order as Order & { resourceType: ResourceConstant };
     }
     return null;
 }
@@ -656,6 +656,5 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
 
     return result;
 }
-
 
 

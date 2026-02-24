@@ -15,6 +15,7 @@ let config = {
     changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
     changeFindClostestByPath: true,     // 轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
     autoVisual: false,  // 自动绘制路径
+    enableCpuStats: false, // enable internal CPU statistics
     enableFlee: true,   // 是否启用 flee
     enableSquadPath: true, // 是否启用 findSquadPathTo
     enableRouteCache: true, // 是否启用寻路缓存
@@ -331,11 +332,13 @@ function ensureObserversUpToDate() {
 // 4.1 Observer 异步任务结果缓存
 /** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string, pathVersion?:number, expireTick?:number}[] }} */
 let obTimer = Object.create(null);   // observer async results keyed by due tick
+let obTimerDueQueue = createDueTickQueue();
 let obTick = Game.time;
 
 // 4.2 路径缓存与反向索引
 /** @type {Paths} */
 let globalPathCache = Object.create(null);     // 缓存path
+let globalPathCacheByVariant = Object.create(null); // startKey -> variantKey -> combinedY -> path[]
 let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
 let globalPathCachePathCount = 0; // 当前缓存路径总数，空时可快速退出清理逻辑
 let roomStartKeyRefs = Object.create(null); // roomName -> { startKey: refCount }，同房路径的起点引用计数
@@ -345,6 +348,7 @@ let roomEndKeyRefs = Object.create(null); // roomName -> { endKey: refCount }，
 let roomEndKeyCount = Object.create(null); // roomName -> endKey 数量，用于评估 endKey 索引遍历成本
 /** @type {MoveTimer} */
 let pathCacheTimer = Object.create(null); // 用于记录path被使用的时间，清理长期未被使用的path
+let pathCacheTimerDueQueue = createDueTickQueue();
 /** @type {CreepPaths} */
 let creepPathCache = Object.create(null);    // 缓存每个creep使用path的情况
 let creepMoveCache = Object.create(null);    // 缓存每个creep最后一次移动的tick
@@ -354,10 +358,12 @@ let costMatrixCache = Object.create(null);    // true存ignoreDestructibleStruct
 let costMatrixRevision = Object.create(null);
 /** @type {{ [time: number]:{roomName:string, avoids:string[]}[] }} */
 let costMatrixCacheTimer = Object.create(null); // 用于记录costMatrix的创建时间，清理过期costMatrix
+let costMatrixCacheTimerDueQueue = createDueTickQueue();
 let autoClearTick = Game.time;  // 用于避免重复清理缓存
 
 const cache = {
     globalPathCache,
+    globalPathCacheByVariant,
     pathCacheTimer,
     creepPathCache,
     creepMoveCache,
@@ -698,6 +704,30 @@ function isSameOps(path, ops) {
         path.ignoreStructures == !!ops.ignoreDestructibleStructures;
 }
 
+function getPathOpsSignature(ignoreRoads, ignoreSwamps, ignoreStructures) {
+    let bits = 0;
+    if (ignoreRoads) bits |= 1;
+    if (ignoreSwamps) bits |= 2;
+    if (ignoreStructures) bits |= 4;
+    return bits;
+}
+
+function buildPathVariantKey(ignoreRoads, ignoreSwamps, ignoreStructures, endRoomName) {
+    const opsSig = getPathOpsSignature(!!ignoreRoads, !!ignoreSwamps, !!ignoreStructures);
+    return `${opsSig}|${endRoomName || ""}`;
+}
+
+function buildPathVariantKeyFromPath(path) {
+    if (!path || !path.posArray || !path.posArray.length) return null;
+    const endRoomName = path.posArray[path.posArray.length - 1].roomName || "";
+    return buildPathVariantKey(path.ignoreRoads, path.ignoreSwamps, path.ignoreStructures, endRoomName);
+}
+
+function buildPathVariantKeyFromQuery(ops, toRoomName) {
+    return buildPathVariantKey(ops.ignoreRoads, ops.ignoreSwamps, ops.ignoreDestructibleStructures, toRoomName);
+}
+
+
 function hasActiveBodypart(body, type) {
     if (!body) {
         return true;
@@ -920,10 +950,12 @@ function doObTask() {
                 continue;
             }
             obData.lastIssuedTick = Game.time;
-            if (!(Game.time + 1 in obTimer)) {
-                obTimer[Game.time + 1] = [];
+            const obDueTick = Game.time + 1;
+            if (!(obDueTick in obTimer)) {
+                obTimer[obDueTick] = [];
+                enqueueDueTick(obTimerDueQueue, obDueTick);
             }
-            obTimer[Game.time + 1].push({
+            obTimer[obDueTick].push({
                 path: task.path,
                 idx: task.idx,
                 roomName: roomName,
@@ -936,40 +968,33 @@ function doObTask() {
     }
 }
 
-function forEachDueNumericKey(obj, now, visit) {
-    for (let key in obj) {
-        if (+key <= now) {
-            visit(key);
-        }
-    }
-}
-
 /**
  *  查看ob得到的房间
  */
 function checkObResult() {
-    forEachDueNumericKey(obTimer, Game.time, (tickKey) => {
-        const tick = +tickKey;
+    drainDueTickQueue(obTimerDueQueue, Game.time, (tick) => {
         if (tick < Game.time) {
-            delete obTimer[tickKey];
+            delete obTimer[tick];
             return;
         }
-        const results = obTimer[tickKey];
+        const results = obTimer[tick];
+        if (!results || !results.length) {
+            delete obTimer[tick];
+            return;
+        }
         for (let i = results.length; i--;) {
             const result = results[i];
             if (isObserverTaskExpired(result) || isObserverTaskStale(result)) {
                 continue;
             }
             if (result.roomName in Game.rooms) {
-                //console.log('ob得到 ' + result.roomName);
-                const ok = checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);    // checkRoom要传有direction的idx
+                const ok = checkRoom(Game.rooms[result.roomName], result.path, result.idx - 1);
                 if (!ok) {
-                    // OB 已确认堵路，立即失效该缓存路径，避免 creep 走到才重算
                     deletePath(result.path);
                 }
             }
         }
-        delete obTimer[tickKey];
+        delete obTimer[tick];
     });
 }
 
@@ -1076,10 +1101,12 @@ function generateCostMatrix(room, pos) {
     let avoids = [];
     let avoidChanged = false;
     if (room.controller && room.controller.owner && !room.controller.my && hostileCostMatrixClearDelay) {  // 他人房间，删除costMat才能更新被拆的建筑位置
-        if (!(Game.time + hostileCostMatrixClearDelay in costMatrixCacheTimer)) {
-            costMatrixCacheTimer[Game.time + hostileCostMatrixClearDelay] = [];
+        const hostileDueTick = Game.time + hostileCostMatrixClearDelay;
+        if (!(hostileDueTick in costMatrixCacheTimer)) {
+            costMatrixCacheTimer[hostileDueTick] = [];
+            enqueueDueTick(costMatrixCacheTimerDueQueue, hostileDueTick);
         }
-        costMatrixCacheTimer[Game.time + hostileCostMatrixClearDelay].push({
+        costMatrixCacheTimer[hostileDueTick].push({
             roomName: roomName,
             avoids: avoids
         });   // 记录清理时间
@@ -1112,10 +1139,12 @@ function generateCostMatrix(room, pos) {
             }
         }
         //console.log(roomName + ' costMat 设置清理 ' + clearDelay);
-        if (!(Game.time + clearDelay in costMatrixCacheTimer)) {
-            costMatrixCacheTimer[Game.time + clearDelay] = [];
+        const clearDueTick = Game.time + clearDelay;
+        if (!(clearDueTick in costMatrixCacheTimer)) {
+            costMatrixCacheTimer[clearDueTick] = [];
+            enqueueDueTick(costMatrixCacheTimerDueQueue, clearDueTick);
         }
-        costMatrixCacheTimer[Game.time + clearDelay].push({
+        costMatrixCacheTimer[clearDueTick].push({
             roomName: roomName,
             avoids: avoids  // 因新手墙导致的avoidRooms需要更新
         });   // 记录清理时间
@@ -1208,7 +1237,7 @@ function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT
                 return ERR_INVALID_TARGET;
             }
         }
-        testTrySwap++;
+        if (isCpuStatsEnabled()) testTrySwap++;
         return OK;    // 或者全部操作成功
     }
     return ERR_NOT_FOUND // 没有creep
@@ -1226,6 +1255,71 @@ function getPositiveConfigNumber(value, fallback) {
     const n = value | 0;
     return n > 0 ? n : fallback;
 }
+
+function isCpuStatsEnabled() {
+    return !!config.enableCpuStats;
+}
+
+function createDueTickQueue() {
+    return { heap: [], marks: Object.create(null) };
+}
+
+function pushMinHeap(heap, value) {
+    heap.push(value);
+    let idx = heap.length - 1;
+    while (idx > 0) {
+        const parent = (idx - 1) >> 1;
+        if (heap[parent] <= value) break;
+        heap[idx] = heap[parent];
+        idx = parent;
+    }
+    heap[idx] = value;
+}
+
+function popMinHeap(heap) {
+    const last = heap.pop();
+    if (last === undefined) return undefined;
+    if (!heap.length) return last;
+    const min = heap[0];
+    let idx = 0;
+    while (true) {
+        const left = idx * 2 + 1;
+        if (left >= heap.length) break;
+        const right = left + 1;
+        let child = left;
+        if (right < heap.length && heap[right] < heap[left]) child = right;
+        if (heap[child] >= last) break;
+        heap[idx] = heap[child];
+        idx = child;
+    }
+    heap[idx] = last;
+    return min;
+}
+
+function enqueueDueTick(queue, tick) {
+    const dueTick = tick | 0;
+    if (dueTick < 0 || queue.marks[dueTick]) return;
+    queue.marks[dueTick] = 1;
+    pushMinHeap(queue.heap, dueTick);
+}
+
+function drainDueTickQueue(queue, now, visit) {
+    const dueLimit = now | 0;
+    while (queue.heap.length) {
+        const next = queue.heap[0];
+        if (next > dueLimit) break;
+        const tick = popMinHeap(queue.heap);
+        if (tick === undefined) break;
+        delete queue.marks[tick];
+        visit(tick);
+    }
+}
+
+function clearDueTickQueue(queue) {
+    queue.heap.length = 0;
+    queue.marks = Object.create(null);
+}
+
 
 function registerRoomBounceGuard(creep, targetRoomName) {
     if (!config.enableRoomBounceGuardV2) {
@@ -1319,10 +1413,12 @@ function applySameRoomDetourCooldown(creep, toPos, ops) {
 let routeCache = Object.create(null);
 let routeCacheGcTick = -1;
 let bypassRouteCacheKeysByTick = Object.create(null);
+let bypassRouteCacheDueQueue = createDueTickQueue();
 
 function trackBypassRouteCacheKey(key) {
     if (!(Game.time in bypassRouteCacheKeysByTick)) {
         bypassRouteCacheKeysByTick[Game.time] = [];
+        enqueueDueTick(bypassRouteCacheDueQueue, Game.time);
     }
     bypassRouteCacheKeysByTick[Game.time].push(key);
 }
@@ -1330,14 +1426,14 @@ function trackBypassRouteCacheKey(key) {
 function clearExpiredBypassRouteCache() {
     const due = Game.time - 1;
     if (due < 0) return;
-    forEachDueNumericKey(bypassRouteCacheKeysByTick, due, (tickKey) => {
-        const keys = bypassRouteCacheKeysByTick[tickKey];
+    drainDueTickQueue(bypassRouteCacheDueQueue, due, (tick) => {
+        const keys = bypassRouteCacheKeysByTick[tick];
         if (keys && keys.length) {
             for (let i = keys.length; i--;) {
                 delete routeCache[keys[i]];
             }
         }
-        delete bypassRouteCacheKeysByTick[tickKey];
+        delete bypassRouteCacheKeysByTick[tick];
     });
 }
 
@@ -1350,9 +1446,8 @@ function clearExpiredRouteCache(force) {
         for (let key in routeCache) {
             delete routeCache[key];
         }
-        for (let tick in bypassRouteCacheKeysByTick) {
-            delete bypassRouteCacheKeysByTick[tick];
-        }
+        clearObjectKeys(bypassRouteCacheKeysByTick);
+        clearDueTickQueue(bypassRouteCacheDueQueue);
         return;
     }
 
@@ -1827,6 +1922,22 @@ function addPathIntoCache(newPath) {
     globalPathCache[combinedX][combinedY].push(newPath);
     globalPathCachePathCount++;
 
+    const pathEndRoomName = newPath.posArray && newPath.posArray.length ? (newPath.posArray[newPath.posArray.length - 1].roomName || "") : "";
+    const variantKey = buildPathVariantKey(newPath.ignoreRoads, newPath.ignoreSwamps, newPath.ignoreStructures, pathEndRoomName);
+    newPath._bmVariantKey = variantKey;
+    let variantBuckets = globalPathCacheByVariant[combinedX];
+    if (!variantBuckets) {
+        variantBuckets = globalPathCacheByVariant[combinedX] = Object.create(null);
+    }
+    let variantYBuckets = variantBuckets[variantKey];
+    if (!variantYBuckets) {
+        variantYBuckets = variantBuckets[variantKey] = Object.create(null);
+    }
+    if (!(combinedY in variantYBuckets)) {
+        variantYBuckets[combinedY] = [];
+    }
+    variantYBuckets[combinedY].push(newPath);
+
     // 维护全局 endKey -> startKey 反向索引，用于 bmDeletePathInRoom 的 useEndIndex 策略
     // 该索引包含所有房间的路径，因此在查询时需要配合 startKey 范围检查进行过滤
     let endRefs = endKeyStartKeyRefs[combinedY];
@@ -1874,9 +1985,6 @@ function addPathIntoCache(newPath) {
     }
 }
 
-function invalidate() {
-    return 0;
-}
 /**
  * @param {MyPath} path
  */
@@ -1898,6 +2006,32 @@ function deletePath(path) {
         }
         pathArray.splice(idx, 1);
         globalPathCachePathCount--;
+
+        const variantKey = path._bmVariantKey || buildPathVariantKeyFromPath(path);
+        const variantBuckets = globalPathCacheByVariant[startKey];
+        if (variantBuckets && variantKey && variantBuckets[variantKey]) {
+            const variantYBuckets = variantBuckets[variantKey];
+            const variantPathArray = variantYBuckets[endKey];
+            if (variantPathArray) {
+                const variantIdx = variantPathArray.indexOf(path);
+                if (variantIdx !== -1) {
+                    variantPathArray.splice(variantIdx, 1);
+                }
+                if (!variantPathArray.length) {
+                    delete variantYBuckets[endKey];
+                    let hasVariantY = false;
+                    for (let k in variantYBuckets) { hasVariantY = true; break; }
+                    if (!hasVariantY) {
+                        delete variantBuckets[variantKey];
+                        let hasVariant = false;
+                        for (let k in variantBuckets) { hasVariant = true; break; }
+                        if (!hasVariant) {
+                            delete globalPathCacheByVariant[startKey];
+                        }
+                    }
+                }
+            }
+        }
 
         let endRefs = endKeyStartKeyRefs[endKey];
         if (endRefs && endRefs[startKey]) {
@@ -1971,7 +2105,7 @@ function deletePath(path) {
             }
         }
         path._bmDeletedTick = Game.time;
-        path.posArray = path.posArray.map(invalidate);
+        path.posArray.length = 0;
     }
 }
 
@@ -1984,18 +2118,21 @@ function deletePath(path) {
  * @param {MoveToOpts} ops
  * @param {boolean} requireSecondStepCheck
  */
-function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, requireSecondStepCheck) {
-    startCacheSearch = Game.cpu.getUsed();
-    
-    // EndSum 搜索范围
+function findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops, requireSecondStepCheck) {
+    const statsEnabled = isCpuStatsEnabled();
+    if (statsEnabled) {
+        startCacheSearch = Game.cpu.getUsed();
+    }
+
     const minY = formalToPos.x + formalToPos.y - 1 - ops.range;
     const maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
+    const variantKey = buildPathVariantKeyFromQuery(ops, toRoomName);
 
-    const visit = (pathArray) => {
+    const visit = (pathArray, skipOpsCheck) => {
         for (let i = pathArray.length; i--;) {
             let path = pathArray[i];
-            pathCounter++;
-            if (!isSameOps(path, ops)) {
+            if (statsEnabled) pathCounter++;
+            if (!skipOpsCheck && !isSameOps(path, ops)) {
                 continue;
             }
             if (!isNear(path.start, formalFromPos)) {
@@ -2013,18 +2150,26 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
         return false;
     };
 
-    // 遍历起点周围 3x3 区域 (包括自身)
     for (let dx = -1; dx <= 1; dx++) {
         for (let dy = -1; dy <= 1; dy++) {
             const startKey = ((formalFromPos.x + dx) << 16) | ((formalFromPos.y + dy) & 0xFFFF);
+            const variantBuckets = globalPathCacheByVariant[startKey];
+            const variantYBuckets = variantBuckets && variantBuckets[variantKey];
+            if (variantYBuckets) {
+                for (let combinedYKey in variantYBuckets) {
+                    let combinedY = +combinedYKey;
+                    if (combinedY < minY || combinedY > maxY) continue;
+                    if (visit(variantYBuckets[combinedY], true)) return true;
+                }
+                continue;
+            }
+
             const xBucket = globalPathCache[startKey];
             if (!xBucket) continue;
-
-            // 遍历 bucket 内已有的 key，而不是做数值区间扫描，避免在 range 较大时 O(n) 扫描抖动
             for (let combinedYKey in xBucket) {
                 let combinedY = +combinedYKey;
                 if (combinedY < minY || combinedY > maxY) continue;
-                if (visit(xBucket[combinedY])) return true;
+                if (visit(xBucket[combinedY], false)) return true;
             }
         }
     }
@@ -2039,8 +2184,8 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, r
  * @param {CreepPaths} creepCache
  * @param {MoveToOpts} ops
  */
-function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    return findPathInCache(formalFromPos, formalToPos, fromPos, creepCache, ops, true);
+function findShortPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops) {
+    return findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops, true);
 }
 
 /**
@@ -2050,8 +2195,8 @@ function findShortPathInCache(formalFromPos, formalToPos, fromPos, creepCache, o
  * @param {CreepPaths} creepCache
  * @param {MoveToOpts} ops
  */
-function findLongPathInCache(formalFromPos, formalToPos, creepCache, ops) {     // ops.range设置越大找的越慢
-    return findPathInCache(formalFromPos, formalToPos, undefined, creepCache, ops, false);
+function findLongPathInCache(formalFromPos, formalToPos, toRoomName, creepCache, ops) {
+    return findPathInCache(formalFromPos, formalToPos, undefined, toRoomName, creepCache, ops, false);
 }
 
 /**
@@ -2064,10 +2209,12 @@ function setPathTimer(creepCache) {
         const startRoomName = posArray[0].roomName;
         const endRoomName = posArray[posArray.length - 1].roomName;
         if (startRoomName != endRoomName || (startRoomName in Game.rooms && Game.rooms[startRoomName].controller && !Game.rooms[startRoomName].controller.my)) {    // 跨房路或者敌方房间路
-            if (!(Game.time + pathClearDelay in pathCacheTimer)) {
-                pathCacheTimer[Game.time + pathClearDelay] = [];
+            const pathDueTick = Game.time + pathClearDelay;
+            if (!(pathDueTick in pathCacheTimer)) {
+                pathCacheTimer[pathDueTick] = [];
+                enqueueDueTick(pathCacheTimerDueQueue, pathDueTick);
             }
-            pathCacheTimer[Game.time + pathClearDelay].push(creepCache.path);
+            pathCacheTimer[pathDueTick].push(creepCache.path);
             creepCache.path.lastTime = Game.time;
         }
     }
@@ -2117,12 +2264,14 @@ function moveOneStep(creep, visualStyle, toPos) {
     }
     creepCache.idx++;
     creepMoveCache[creep.name] = Game.time;
-    testNormal++;
-    let t = Game.cpu.getUsed() - startTime;
-    if (t > 0.2) {  // 对穿导致的另一个creep的0.2不计在内
-        normalLogicalCost += t - 0.2;
-    } else {
-        normalLogicalCost += t;
+    if (isCpuStatsEnabled()) {
+        testNormal++;
+        let t = Game.cpu.getUsed() - startTime;
+        if (t > 0.2) {
+            normalLogicalCost += t - 0.2;
+        } else {
+            normalLogicalCost += t;
+        }
     }
     //creep.room.visual.circle(creepCache.path.posArray[creepCache.idx]);
     return originMove.call(creep, creepCache.path.directionArray[creepCache.idx]);
@@ -2254,14 +2403,19 @@ function wrapFn(fn, name) {
                 if (key && last.key === key) return last.ret;
             }
         }
-        startTime = Game.cpu.getUsed();     // 0.0015cpu
+        const statsEnabled = isCpuStatsEnabled();
+        if (statsEnabled) {
+            startTime = Game.cpu.getUsed();
+        }
         runMoveOptTickMaintenance();
         let code = fn.apply(this, arguments);
-        endTime = Game.cpu.getUsed();
-        if (endTime - startTime >= 0.2) {
-            const bucket = analyzeCPU[name] || (analyzeCPU[name] = { sum: 0, calls: 0 });
-            bucket.sum += endTime - startTime;
-            bucket.calls++;
+        if (statsEnabled) {
+            endTime = Game.cpu.getUsed();
+            if (endTime - startTime >= 0.2) {
+                const bucket = analyzeCPU[name] || (analyzeCPU[name] = { sum: 0, calls: 0 });
+                bucket.sum += endTime - startTime;
+                bucket.calls++;
+            }
         }
         if (name === 'moveTo') {
             const key = buildMoveToDedupKey(this, arguments);
@@ -2291,25 +2445,30 @@ function clearDeadCreepPathCache() {
 }
 
 function clearExpiredPaths() {
-    forEachDueNumericKey(pathCacheTimer, Game.time, (timeKey) => {
-        const time = +timeKey;
-        //console.log('clear path');
-        const paths = pathCacheTimer[timeKey];
+    drainDueTickQueue(pathCacheTimerDueQueue, Game.time, (time) => {
+        const paths = pathCacheTimer[time];
+        if (!paths || !paths.length) {
+            delete pathCacheTimer[time];
+            return;
+        }
         for (let i = paths.length; i--;) {
             const path = paths[i];
             if (path.lastTime == time - pathClearDelay) {
                 deletePath(path);
             }
         }
-        delete pathCacheTimer[timeKey];
+        delete pathCacheTimer[time];
     });
 }
 
 function clearExpiredCostMatrix() {
-    forEachDueNumericKey(costMatrixCacheTimer, Game.time, (timeKey) => {
-        //console.log('clear costMat');
+    drainDueTickQueue(costMatrixCacheTimerDueQueue, Game.time, (time) => {
         let avoidChanged = false;
-        const dataList = costMatrixCacheTimer[timeKey];
+        const dataList = costMatrixCacheTimer[time];
+        if (!dataList || !dataList.length) {
+            delete costMatrixCacheTimer[time];
+            return;
+        }
         for (let i = dataList.length; i--;) {
             const data = dataList[i];
             delete costMatrixCache[data.roomName];
@@ -2326,7 +2485,7 @@ function clearExpiredCostMatrix() {
         if (avoidChanged) {
             markAvoidRoomsChanged();
         }
-        delete costMatrixCacheTimer[timeKey];
+        delete costMatrixCacheTimer[time];
     });
 }
 
@@ -2434,14 +2593,14 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
     const fromFormalPos = formalize(creep.pos);
     const toFormalPos = formalize(toPos);
     const found = creep.pos.roomName == toPos.roomName ?
-        findShortPathInCache(fromFormalPos, toFormalPos, creep.pos, creepCache, ops) :
-        findLongPathInCache(fromFormalPos, toFormalPos, creepCache, ops);
+        findShortPathInCache(fromFormalPos, toFormalPos, creep.pos, toPos.roomName, creepCache, ops) :
+        findLongPathInCache(fromFormalPos, toFormalPos, toPos.roomName, creepCache, ops);
     if (found) {
         //creep.say('cached');
         //console.log(creep, creep.pos, 'hit');
-        testCacheHits++;
+        if (isCpuStatsEnabled()) testCacheHits++;
     } else {  // 没找到缓存路
-        testCacheMiss++;
+        if (isCpuStatsEnabled()) testCacheMiss++;
 
         if (autoClearTick < Game.time) {  // 自动清理
             autoClearTick = Game.time;
@@ -2484,7 +2643,9 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
     creepCache.dst = toPos;
     setPathTimer(creepCache);
 
-    found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
+    if (isCpuStatsEnabled()) {
+        found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
+    }
 
     return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
 }
@@ -2595,9 +2756,9 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
 
     if (isEqual(creep.pos, curStep)) {    // 正常
         if ('storage' in creep.room && inRange(creep.room.storage.pos, creep.pos, coreLayoutRange) && ops.ignoreCreeps) {
-            testNearStorageCheck++;
+            if (isCpuStatsEnabled()) testNearStorageCheck++;
             if (trySwap(creep, nextStep, false, true) == OK) {
-                testNearStorageSwap++;
+                if (isCpuStatsEnabled()) testNearStorageSwap++;
             }
         }
         //creep.say('正常');
@@ -2623,7 +2784,7 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
     if (isNear(creep.pos, curStep)) {  // 堵路了
         const code = trySwap(creep, curStep, ops.bypassHostileCreeps, ops.ignoreCreeps);  // 检查挡路creep
         if (code == ERR_INVALID_TARGET) {   // 是被设置了不可对穿的creep或者敌对creep挡路，临时绕路
-            testBypass++;
+            if (isCpuStatsEnabled()) testBypass++;
             ops.bypassRange = ops.bypassRange || 5; // 默认值
             if (typeof ops.bypassRange != "number" || typeof ops.range != 'number') {
                 return ERR_INVALID_ARGS;
@@ -2816,9 +2977,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
             trySwap(this, toPos, false, true);
         }
         creepMoveCache[this.name] = Game.time;      // 用于防止自己移动后被误对穿
-        testNormal++;
-        let t = Game.cpu.getUsed() - startTime;
-        normalLogicalCost += t > 0.2 ? t - 0.2 : t;
+        if (isCpuStatsEnabled()) {
+            testNormal++;
+            let t = Game.cpu.getUsed() - startTime;
+            normalLogicalCost += t > 0.2 ? t - 0.2 : t;
+        }
         return originMove.call(this, getDirection(this.pos, toPos));
     }
     if (ops.range === undefined) ops.range = 1;
@@ -3227,17 +3390,28 @@ function bmSetChangeMoveTo(bool) {
 }
 
 function bmPrint() {
+    if (!isCpuStatsEnabled()) {
+        return '\n[BetterMove] cpu stats disabled (set config.enableCpuStats=true to enable)';
+    }
+
+    const safeDiv = (num, den) => den ? (num / den) : 0;
     let text = '\navarageTime\tcalls\tFunctionName';
     for (let fn in analyzeCPU) {
-        text += `\n${(analyzeCPU[fn].sum / analyzeCPU[fn].calls).toFixed(5)}\t\t${analyzeCPU[fn].calls}\t\t${fn}`;
+        const calls = analyzeCPU[fn].calls;
+        text += '\n' + safeDiv(analyzeCPU[fn].sum, calls).toFixed(5) + '\t\t' + calls + '\t\t' + fn;
     }
-    let hitCost = cacheHitCost / testCacheHits;
-    let missCost = cacheMissCost / testCacheMiss;
-    let missRate = testCacheMiss / (testCacheMiss + testCacheHits);
-    text += `\nnormal logical cost: ${(normalLogicalCost / testNormal).toFixed(5)}, total cross rate: ${(testTrySwap / analyzeCPU.moveTo.calls).toFixed(4)}, total bypass rate:  ${(testBypass / analyzeCPU.moveTo.calls).toFixed(4)}`
-    text += `\nnear storage check rate: ${(testNearStorageCheck / analyzeCPU.moveTo.calls).toFixed(4)}, near storage cross rate: ${(testNearStorageSwap / testNearStorageCheck).toFixed(4)}`
-    text += `\ncache search rate: ${((testCacheMiss + testCacheHits) / analyzeCPU.moveTo.calls).toFixed(4)}, total hit rate: ${(1 - missRate).toFixed(4)}, avg check paths: ${(pathCounter / (testCacheMiss + testCacheHits)).toFixed(3)}`;
-    text += `\ncache hit avg cost: ${(hitCost).toFixed(5)}, cache miss avg cost: ${(missCost).toFixed(5)}, total avg cost: ${(hitCost * (1 - missRate) + missCost * missRate).toFixed(5)}`;
+
+    const hitCost = safeDiv(cacheHitCost, testCacheHits);
+    const missCost = safeDiv(cacheMissCost, testCacheMiss);
+    const searchCount = testCacheHits + testCacheMiss;
+    const missRate = safeDiv(testCacheMiss, searchCount);
+    const hitRate = searchCount ? (1 - missRate) : 0;
+    const moveToCalls = analyzeCPU.moveTo.calls || 0;
+
+    text += '\nnormal logical cost: ' + safeDiv(normalLogicalCost, testNormal).toFixed(5) + ', total cross rate: ' + safeDiv(testTrySwap, moveToCalls).toFixed(4) + ', total bypass rate:  ' + safeDiv(testBypass, moveToCalls).toFixed(4);
+    text += '\nnear storage check rate: ' + safeDiv(testNearStorageCheck, moveToCalls).toFixed(4) + ', near storage cross rate: ' + safeDiv(testNearStorageSwap, testNearStorageCheck).toFixed(4);
+    text += '\ncache search rate: ' + safeDiv(searchCount, moveToCalls).toFixed(4) + ', total hit rate: ' + hitRate.toFixed(4) + ', avg check paths: ' + safeDiv(pathCounter, searchCount).toFixed(3);
+    text += '\ncache hit avg cost: ' + hitCost.toFixed(5) + ', cache miss avg cost: ' + missCost.toFixed(5) + ', total avg cost: ' + (hitCost * hitRate + missCost * missRate).toFixed(5);
     return text;
 }
 
@@ -3429,6 +3603,7 @@ function bmClear(opts) {
     const resetStats = options.resetStats !== false;
 
     clearObjectKeys(globalPathCache);
+    clearObjectKeys(globalPathCacheByVariant);
     globalPathCacheBucketCount = 0;
     globalPathCachePathCount = 0;
     clearObjectKeys(roomStartKeyRefs);
@@ -3437,13 +3612,16 @@ function bmClear(opts) {
     clearObjectKeys(roomEndKeyRefs);
     clearObjectKeys(roomEndKeyCount);
     clearObjectKeys(pathCacheTimer);
+    clearDueTickQueue(pathCacheTimerDueQueue);
     clearObjectKeys(creepPathCache);
     clearObjectKeys(creepMoveCache);
     clearObjectKeys(costMatrixCache);
     clearObjectKeys(costMatrixRevision);
     clearObjectKeys(costMatrixCacheTimer);
+    clearDueTickQueue(costMatrixCacheTimerDueQueue);
     clearObjectKeys(routeCache);
     clearObjectKeys(bypassRouteCacheKeysByTick);
+    clearDueTickQueue(bypassRouteCacheDueQueue);
     routeCacheGcTick = -1;
     clearObjectKeys(bypassCostMatReuseCache);
     clearObjectKeys(temporalAvoidExitCache);
@@ -3457,6 +3635,7 @@ function bmClear(opts) {
 
     observers.length = 0;
     clearObjectKeys(obTimer);
+    clearDueTickQueue(obTimerDueQueue);
     autoDiscoverObserverTick = -1;
     obTick = Game.time;
     if (rediscoverObservers) {
@@ -3685,3 +3864,4 @@ wrapActionSetDontPullMeTrue('attack');
 
 // wrapActionSetDontPullMeTrue('move');
 // wrapActionSetDontPullMeTrue('withdraw');
+
