@@ -18,7 +18,6 @@ import { InterShardModule } from '@/modules/runtime/InterShardModule';
 
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
-import '@/modules/infra/roomResource'; // 资源统计
 
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展

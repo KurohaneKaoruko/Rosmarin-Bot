@@ -2,6 +2,7 @@ import { showRoomInfo } from "@/modules/utils/showRoomInfo";
 import { showFactoryInfo, showLabInfo } from "@/modules/utils/showProductionInfo";
 import { showCraftableInfo } from "@/modules/utils/showCraftableInfo";
 import { getRoomData } from "@/modules/utils/memory";
+import { showAllRes, showRoomRes } from "@/modules/utils/roomResource";
 
 export default {
     info: {
@@ -34,11 +35,11 @@ export default {
         },
         // 查看所有资源储量
         res() {
-            return global.HelperRoomResource.showAllRes();
+            return showAllRes();
         },
         // 查看房间资源占用空间
         roomres() {
-            return global.HelperRoomResource.showRoomRes();
+            return showRoomRes();
         },
         craft(filter?: string | number) {
             return showCraftableInfo(filter);
