@@ -11,15 +11,16 @@ reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
 // ============================================================================
 // 初始化参数
 let config = {
-    changeMove: true,   // 【待测试】为creep.move增加对穿能力
+    changeMove: true,   // 为creep.move增加对穿能力
     changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
-    changeFindClostestByPath: true,     // 【待测试】轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
-    autoVisual: false,  // 【未启用】
-    enableFlee: true,   // 【待测试】是否启用 flee
-    enableSquadPath: true, // 【待测试】是否启用 findSquadPathTo
-    enableRouteCache: true, // 【待测试】是否启用寻路缓存
+    changeFindClostestByPath: true,     // 轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
+    autoVisual: false,  // 自动绘制路径
+    enableFlee: true,   // 是否启用 flee
+    enableSquadPath: true, // 是否启用 findSquadPathTo
+    enableRouteCache: true, // 是否启用寻路缓存
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
-    enableBypassCostMatReuse: true,  // 【待测试】是否启用绕过房间的costMatrix缓存
+    routeCacheGCInterval: 20, // route cache 过期回收扫描间隔（tick）
+    enableBypassCostMatReuse: true,  // 是否启用绕过房间的costMatrix缓存
     enableSameRoomDetourCooldown: true, // 同房目标发生“绕房又回房”后短暂收敛到 maxRooms=1，避免反复进出房间
     sameRoomDetourCooldownTTL: 15, // 冷却 tick 数（只影响未显式传 maxRooms 的调用）
     enableRoomBounceGuardV2: true, // 跨房 A->B->A 抖动抑制
@@ -47,7 +48,7 @@ let avoidRoomsMemoryInitialized = false;
 function markAvoidRoomsChanged() {
     avoidRoomsVersion = (avoidRoomsVersion + 1) | 0;
 }
-let avoidExits = Object.create(null);   // 【未启用】单向屏蔽房间的一些出口，永不从fromRoom踏入toRoom
+let avoidExits = Object.create(null);   // directional room-exit bans: never step from fromRoom to toRoom
 let avoidExitsVersion = 0;
 function markAvoidExitsChanged() {
     avoidExitsVersion = (avoidExitsVersion + 1) | 0;
@@ -329,7 +330,7 @@ function ensureObserversUpToDate() {
 // ============================================================================
 // 4.1 Observer 异步任务结果缓存
 /** @type {{ [time: number]:{path:MyPath, idx:number, roomName:string, pathVersion?:number, expireTick?:number}[] }} */
-let obTimer = Object.create(null);   // 【未启用】用于登记ob调用，在相应的tick查看房间对象
+let obTimer = Object.create(null);   // observer async results keyed by due tick
 let obTick = Game.time;
 
 // 4.2 路径缓存与反向索引
@@ -728,7 +729,9 @@ function isObstacleStructure(room, pos, ignoreStructures) {
     if (0 in consSite && consSite[0].my && obstacles[consSite[0].structureType]) {  // 工地会挡路
         return true;
     }
-    for (let s of room.lookForAt(LOOK_STRUCTURES, pos)) {
+    const structures = room.lookForAt(LOOK_STRUCTURES, pos);
+    for (let i = structures.length; i--;) {
+        const s = structures[i];
         if (!s.hits || s.ticksToDeploy) {     // 是新手墙或者无敌中的invaderCore
             return true;
         } else if (!ignoreStructures && (obstacles[s.structureType] || isClosedRampart(s))) {
@@ -951,7 +954,9 @@ function checkObResult() {
             delete obTimer[tickKey];
             return;
         }
-        for (let result of obTimer[tickKey]) {
+        const results = obTimer[tickKey];
+        for (let i = results.length; i--;) {
+            const result = results[i];
             if (isObserverTaskExpired(result) || isObserverTaskStale(result)) {
                 continue;
             }
@@ -1189,7 +1194,8 @@ function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT
         if (!ignoreCreeps) {
             return ERR_INVALID_TARGET;
         }
-        for (let c of obstacleCreeps) {
+        for (let i = obstacleCreeps.length; i--;) {
+            const c = obstacleCreeps[i];
             if (c.my) {
                 if (c.memory.dontPullMe) {    // 第1种不可穿情况：挡路的creep设置了不对穿
                     return ERR_INVALID_TARGET;
@@ -1311,6 +1317,62 @@ function applySameRoomDetourCooldown(creep, toPos, ops) {
 }
 
 let routeCache = Object.create(null);
+let routeCacheGcTick = -1;
+let bypassRouteCacheKeysByTick = Object.create(null);
+
+function trackBypassRouteCacheKey(key) {
+    if (!(Game.time in bypassRouteCacheKeysByTick)) {
+        bypassRouteCacheKeysByTick[Game.time] = [];
+    }
+    bypassRouteCacheKeysByTick[Game.time].push(key);
+}
+
+function clearExpiredBypassRouteCache() {
+    const due = Game.time - 1;
+    if (due < 0) return;
+    forEachDueNumericKey(bypassRouteCacheKeysByTick, due, (tickKey) => {
+        const keys = bypassRouteCacheKeysByTick[tickKey];
+        if (keys && keys.length) {
+            for (let i = keys.length; i--;) {
+                delete routeCache[keys[i]];
+            }
+        }
+        delete bypassRouteCacheKeysByTick[tickKey];
+    });
+}
+
+function clearExpiredRouteCache(force) {
+    clearExpiredBypassRouteCache();
+
+    if (!config.enableRouteCache) {
+        if (!force && routeCacheGcTick === Game.time) return;
+        routeCacheGcTick = Game.time;
+        for (let key in routeCache) {
+            delete routeCache[key];
+        }
+        for (let tick in bypassRouteCacheKeysByTick) {
+            delete bypassRouteCacheKeysByTick[tick];
+        }
+        return;
+    }
+
+    const ttl = config.routeCacheTTL | 0;
+    if (ttl <= 0) return;
+
+    const gcInterval = getPositiveConfigNumber(config.routeCacheGCInterval, 20);
+    if (!force && routeCacheGcTick !== -1 && (Game.time - routeCacheGcTick) < gcInterval) {
+        return;
+    }
+    routeCacheGcTick = Game.time;
+
+    for (let key in routeCache) {
+        const entry = routeCache[key];
+        if (!entry || entry.bypass) continue;
+        if ((Game.time - (entry.tick | 0)) > ttl) {
+            delete routeCache[key];
+        }
+    }
+}
 
 function getRouteCacheKey(fromRoomName, toRoomName, bypass) {
     if (!bypass) {
@@ -1345,19 +1407,33 @@ function bypassRouteCallback(nextRoomName, fromRoomName) {
  * @param {string} toRoomName
  * @param {boolean} bypass
  */
-function findRoute(fromRoomName, toRoomName, bypass) {  // TODO 以后跨shard寻路也放在这个函数里
+function findRoute(fromRoomName, toRoomName, bypass) {  // supports shard-prefixed room names; cross-shard returns ERR_NO_PATH
     //console.log('findRoute', fromRoomName, toRoomName, bypass);
+    const currentShard = Game.shard?.name;
+    const parsedFrom = parseShardRoomName(fromRoomName);
+    const parsedTo = parseShardRoomName(toRoomName);
+    if ((parsedFrom.shard && parsedFrom.shard !== currentShard) || (parsedTo.shard && parsedTo.shard !== currentShard)) {
+        return ERR_NO_PATH;
+    }
+    fromRoomName = parsedFrom.room;
+    toRoomName = parsedTo.room;
+
     ensureAvoidRoomsUpToDate();
+    clearExpiredRouteCache(false);
     if (config.enableRouteCache) {
         const key = getRouteCacheKey(fromRoomName, toRoomName, bypass);
         const cached = routeCache[key];
-        if (cached && (bypass || (Game.time - cached.tick) <= (config.routeCacheTTL | 0))) {
+        const ttl = config.routeCacheTTL | 0;
+        if (cached && (bypass || ttl <= 0 || (Game.time - cached.tick) <= ttl)) {
             return cached.route;
         }
         const result = bypass
             ? Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypassRouteCallback })
             : Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: routeCallback });
-        routeCache[key] = { tick: Game.time, route: result };
+        routeCache[key] = { tick: Game.time, route: result, bypass: bypass ? 1 : 0 };
+        if (bypass) {
+            trackBypassRouteCacheKey(key);
+        }
         return result;
     }
     if (bypass) {
@@ -1476,7 +1552,8 @@ function getReusableBypassCostMatrix(roomName, ignoreCondition) {
 
 function applyTemporaryCreepBlocks(mat, creeps, changedKeys, oldCosts) {
     const seen = Object.create(null);
-    for (let c of creeps) {
+    for (let i = creeps.length; i--;) {
+        const c = creeps[i];
         const x = c.pos.x;
         const y = c.pos.y;
         const k = x * 50 + y;
@@ -1506,7 +1583,7 @@ function createPathFinderBaseOpts(ops) {
 }
 
 function applyMoveToTerrainCosts(PathFinderOpts, ops) {
-    if (ops.ignoreSwamps) {   // HELP 这里有没有什么不增加计算量的简短写法
+    if (ops.ignoreSwamps) {
         PathFinderOpts.plainCost = ops.plainCost;
         PathFinderOpts.swampCost = ops.swampCost || 1;
     } else if (ops.ignoreRoads) {
@@ -1586,7 +1663,8 @@ function findTemporalPath(creep, toPos, ops) {
         applyTemporaryCreepBlocks(bypassCostMat, nearbyCreeps, reuseEntry.changedKeys, reuseEntry.oldCosts);
     } else {
         bypassCostMat = costMatrixCache[creep.room.name][bypassIgnoreCondition].clone();
-        for (let c of nearbyCreeps) {
+        for (let i = nearbyCreeps.length; i--;) {
+            const c = nearbyCreeps[i];
             bypassCostMat.set(c.pos.x, c.pos.y, unWalkableCCost);
         }
     }
@@ -2154,6 +2232,7 @@ function buildMoveToDedupKey(creep, args) {
 function runMoveOptTickMaintenance() {
     if (obTick < Game.time) {
         obTick = Game.time;
+        clearExpiredRouteCache(false);
         checkObResult();
         doObTask();
         scanPortals(false);
@@ -2195,6 +2274,12 @@ function wrapFn(fn, name) {
 // ----------------------------------------------------------------------------
 // 13) 缓存清理：过期路径 / 过期 costMatrix / 临时避让回收
 // ----------------------------------------------------------------------------
+function clearObjectKeys(obj) {
+    for (let key in obj) {
+        delete obj[key];
+    }
+}
+
 function clearDeadCreepPathCache() {
     if (Game.time % pathClearDelay == 0) { // 随机清一次已死亡creep
         for (let name in creepPathCache) {
@@ -2209,7 +2294,9 @@ function clearExpiredPaths() {
     forEachDueNumericKey(pathCacheTimer, Game.time, (timeKey) => {
         const time = +timeKey;
         //console.log('clear path');
-        for (let path of pathCacheTimer[timeKey]) {
+        const paths = pathCacheTimer[timeKey];
+        for (let i = paths.length; i--;) {
+            const path = paths[i];
             if (path.lastTime == time - pathClearDelay) {
                 deletePath(path);
             }
@@ -2222,10 +2309,14 @@ function clearExpiredCostMatrix() {
     forEachDueNumericKey(costMatrixCacheTimer, Game.time, (timeKey) => {
         //console.log('clear costMat');
         let avoidChanged = false;
-        for (let data of costMatrixCacheTimer[timeKey]) {
+        const dataList = costMatrixCacheTimer[timeKey];
+        for (let i = dataList.length; i--;) {
+            const data = dataList[i];
             delete costMatrixCache[data.roomName];
             delete costMatrixRevision[data.roomName];
-            for (let avoidRoomName of data.avoids) {
+            const avoids = data.avoids;
+            for (let j = avoids.length; j--;) {
+                const avoidRoomName = avoids[j];
                 if (avoidRoomName in avoidRooms) {
                     delete avoidRooms[avoidRoomName];
                     avoidChanged = true;
@@ -2849,7 +2940,8 @@ function findSquadPathTo(toPos, opts) {
         for (let y = 0; y < 50; y++) {
             for (let x = 0; x < 50; x++) {
                 let blocked = false;
-                for (let rel of memberPos) {
+                for (let i = memberPos.length; i--;) {
+                    const rel = memberPos[i];
                     const rx = x + rel.x;
                     const ry = y + rel.y;
                     if (rx < 0 || ry < 0 || rx > 49 || ry > 49 || base.get(rx, ry) == unWalkableCCost) {
@@ -2890,7 +2982,8 @@ function flee(targets, opts) {
         return ERR_INVALID_ARGS;
     }
     const goals = [];
-    for (let t of targets) {
+    for (let i = targets.length; i--;) {
+        const t = targets[i];
         if (!t) continue;
         if (t.pos && typeof t.pos.x == 'number') {
             goals.push({ pos: t.pos, range: typeof t.range == 'number' ? t.range : range });
@@ -2939,19 +3032,6 @@ function flee(targets, opts) {
  * @param {PolyStyle} visualStyle
  * @param {RoomPosition} toPos
  */
-function moveOneStepReverse(creep, visualStyle, toPos) {    // deprecated
-    let creepCache = creepPathCache[creep.name];
-    if (visualStyle) {
-        showVisual(creep, toPos, creepCache.path.posArray, creepCache.idx, -1, visualStyle);
-    }
-    if (creep.fatigue) {
-        return ERR_TIRED;
-    }
-    creepMoveCache[creep.name] = Game.time;
-    //creep.room.visual.circle(creepCache.path.posArray[creepCache.idx]);
-    return originMove.call(creep, (creepCache.path.directionArray[creepCache.idx--] + 3) % 8 + 1);
-}
-
 // ============================================================================
 // 15) 初始化与对外 API（global.BetterMove）
 // ============================================================================
@@ -3224,6 +3304,10 @@ function bmGetAvoidRoomsMap() {
     return avoidRooms;
 }
 
+function bmGetAvoidExitsMap() {
+    return avoidExits;
+}
+
 function bmAddAvoidRooms(roomName) {
     if (parseRoomName(roomName)) {
         if (!(roomName in avoidRooms)) {
@@ -3244,6 +3328,30 @@ function bmDeleteAvoidRooms(roomName) {
     } else {
         return ERR_INVALID_ARGS;
     }
+}
+
+function bmClearAvoidExits(fromRoomName) {
+    if (fromRoomName === undefined) {
+        let changed = false;
+        for (let key in avoidExits) {
+            delete avoidExits[key];
+            changed = true;
+        }
+        if (changed) {
+            markAvoidExitsChanged();
+        }
+        return OK;
+    }
+
+    if (!parseRoomName(fromRoomName)) {
+        return ERR_INVALID_ARGS;
+    }
+    if (!(fromRoomName in avoidExits)) {
+        return ERR_NOT_FOUND;
+    }
+    delete avoidExits[fromRoomName];
+    markAvoidExitsChanged();
+    return OK;
 }
 
 function bmSetEnableSquadPath(bool) {
@@ -3288,6 +3396,97 @@ function bmSetConfig(partial) {
     }
     Object.assign(config, partial);
     applyConfig();
+    return OK;
+}
+
+function resetMoveOptStats() {
+    for (let fn in analyzeCPU) {
+        analyzeCPU[fn] = { sum: 0, calls: 0 };
+    }
+    pathCounter = 0;
+    testCacheHits = 0;
+    testCacheMiss = 0;
+    testNormal = 0;
+    testNearStorageCheck = 0;
+    testNearStorageSwap = 0;
+    testTrySwap = 0;
+    testBypass = 0;
+    normalLogicalCost = 0;
+    cacheHitCost = 0;
+    cacheMissCost = 0;
+}
+
+/**
+ * clear runtime caches/state for hot-reload recovery
+ * @param {{ clearAvoidRooms?: boolean, clearAvoidExits?: boolean, clearPortals?: boolean, rediscoverObservers?: boolean, resetStats?: boolean }} opts
+ */
+function bmClear(opts) {
+    const options = (opts && typeof opts === 'object') ? opts : {};
+    const clearAvoidRooms = !!options.clearAvoidRooms;
+    const clearAvoidExitsFlag = !!options.clearAvoidExits;
+    const clearPortals = !!options.clearPortals;
+    const rediscoverObservers = options.rediscoverObservers !== false;
+    const resetStats = options.resetStats !== false;
+
+    clearObjectKeys(globalPathCache);
+    globalPathCacheBucketCount = 0;
+    globalPathCachePathCount = 0;
+    clearObjectKeys(roomStartKeyRefs);
+    clearObjectKeys(roomStartKeyCount);
+    clearObjectKeys(endKeyStartKeyRefs);
+    clearObjectKeys(roomEndKeyRefs);
+    clearObjectKeys(roomEndKeyCount);
+    clearObjectKeys(pathCacheTimer);
+    clearObjectKeys(creepPathCache);
+    clearObjectKeys(creepMoveCache);
+    clearObjectKeys(costMatrixCache);
+    clearObjectKeys(costMatrixRevision);
+    clearObjectKeys(costMatrixCacheTimer);
+    clearObjectKeys(routeCache);
+    clearObjectKeys(bypassRouteCacheKeysByTick);
+    routeCacheGcTick = -1;
+    clearObjectKeys(bypassCostMatReuseCache);
+    clearObjectKeys(temporalAvoidExitCache);
+    temporalAvoidExitCacheTick = -1;
+    temporalAvoidFrom = temporalAvoidTo = '';
+    bounceAvoidFrom = bounceAvoidTo = '';
+    bounceAvoidUntil = 0;
+    clearObjectKeys(roomNameParseCache);
+    squadDerivedMatCacheTick = -1;
+    clearObjectKeys(squadDerivedMatCache);
+
+    observers.length = 0;
+    clearObjectKeys(obTimer);
+    autoDiscoverObserverTick = -1;
+    obTick = Game.time;
+    if (rediscoverObservers) {
+        ensureObserversUpToDate();
+    }
+
+    if (clearAvoidRooms) {
+        clearObjectKeys(avoidRooms);
+        clearObjectKeys(syncedBypassRooms);
+        avoidRoomsMemoryInitialized = false;
+        avoidRoomsMemorySignature = '';
+        avoidRoomsSyncTick = -1;
+        markAvoidRoomsChanged();
+    }
+
+    if (clearAvoidExitsFlag) {
+        clearObjectKeys(avoidExits);
+        markAvoidExitsChanged();
+    }
+
+    if (clearPortals) {
+        global._bmPortals = { v: 1, list: [], updated: Game.time };
+        portalScanTick = -1;
+        portalPruneTick = -1;
+    }
+
+    if (resetStats) {
+        resetMoveOptStats();
+    }
+
     return OK;
 }
 
@@ -3363,15 +3562,17 @@ global.BetterMove = {
     deleteCostMatrix: bmDeleteCostMatrix,
     deltePath: bmDeltePath,
     getAvoidRoomsMap: bmGetAvoidRoomsMap,
+    getAvoidExitsMap: bmGetAvoidExitsMap,
     addAvoidRooms: bmAddAvoidRooms,
     deleteAvoidRooms: bmDeleteAvoidRooms,
+    clearAvoidExits: bmClearAvoidExits,
     getClosestExitPos: getClosestExitPos,
     setEnableSquadPath: bmSetEnableSquadPath,
     setEnableFlee: bmSetEnableFlee,
     getConfig: bmGetConfig,
     setConfig: bmSetConfig,
     deletePathInRoom: bmDeletePathInRoom,
-    addAvoidExits (fromRoomName, toRoomName) {    // 【未启用】
+    addAvoidExits (fromRoomName, toRoomName) {
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             avoidExits[fromRoomName] ? avoidExits[fromRoomName][toRoomName] = 1 : avoidExits[fromRoomName] = { [toRoomName]: 1 };
             markAvoidExitsChanged();
@@ -3380,7 +3581,7 @@ global.BetterMove = {
             return ERR_INVALID_ARGS;
         }
     },
-    deleteAvoidExits (fromRoomName, toRoomName) { // 【未启用】
+    deleteAvoidExits (fromRoomName, toRoomName) {
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
             if (fromRoomName in avoidExits && toRoomName in avoidExits[fromRoomName]) {
                 delete avoidExits[fromRoomName][toRoomName];
@@ -3412,8 +3613,7 @@ global.BetterMove = {
         return filtered;
     },
     print: bmPrint,
-    clear: () => { }
-    // clear: clearUnused
+    clear: bmClear
 }
 
 

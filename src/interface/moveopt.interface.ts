@@ -53,14 +53,30 @@ interface BetterMoveAPI {
   setPathClearDelay(number?: number): ScreepsReturnCode;
   setHostileCostMatrixClearDelay(number?: number): ScreepsReturnCode;
   deleteCostMatrix(roomName: string): ScreepsReturnCode;
+  deltePath(fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts): ScreepsReturnCode;
   getAvoidRoomsMap(): Record<string, 1>;
+  getAvoidExitsMap(): Record<string, Record<string, 1>>;
   addAvoidRooms(roomName: string): ScreepsReturnCode;
   deleteAvoidRooms(roomName: string): ScreepsReturnCode;
+  clearAvoidExits(fromRoomName?: string): ScreepsReturnCode;
+  getClosestExitPos(fromPos: RoomPosition, toRoomName: string): RoomPosition | null;
+  setEnableSquadPath(bool: boolean): ScreepsReturnCode;
+  setEnableFlee(bool: boolean): ScreepsReturnCode;
+  getConfig(): Record<string, unknown>;
+  setConfig(partial: Record<string, unknown>): ScreepsReturnCode;
   deletePathInRoom(roomName: string): ScreepsReturnCode;
   addAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
   deleteAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
+  syncPortals(): { v: number; list: unknown[]; updated: number };
+  printPortals(targetShard?: string): unknown[];
   print(): string;
-  clear: () => void;
+  clear(options?: {
+    clearAvoidRooms?: boolean;
+    clearAvoidExits?: boolean;
+    clearPortals?: boolean;
+    rediscoverObservers?: boolean;
+    resetStats?: boolean;
+  }): ScreepsReturnCode;
 }
 
 /**
