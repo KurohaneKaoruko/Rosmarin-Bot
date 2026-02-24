@@ -9,7 +9,6 @@ import { EventModule } from '@/modules/runtime/event';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
 import { GeneratePixel } from '@/modules/runtime/Pixel';
 import { Statistics } from '@/modules/runtime/Statistics';
-import { MoveOptModule } from '@/modules/runtime/MoveOptModule';
 import { ResourceManage } from '@/modules/runtime/ResourceManage';
 import { TeamModule } from '@/modules/runtime/TeamModule';
 import { DDModule } from '@/modules/runtime/DD_Module';
@@ -34,7 +33,6 @@ App.set('flag', flagRunner);             // flag运行
 App.on(EventModule);    // 事件模块
 App.on(TeamModule);     // 小队模块
 App.on(ResourceManage); // 资源调度管理
-App.on(MoveOptModule);  // 移动优化相关
 App.on(InterShardModule); // InterShardMemory 缓存与清理
 App.on(ExpandModule);   // 跨 shard 扩张
 App.on(NukeModule);     // 核弹打击
