@@ -16,11 +16,14 @@ let config = {
     changeFindClostestByPath: true,     // 轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
     autoVisual: false,  // 自动绘制路径
     enableCpuStats: false, // enable internal CPU statistics
+    enableCacheStats: false, // enable route/path cache runtime statistics
     enableFlee: true,   // 是否启用 flee
     enableSquadPath: true, // 是否启用 findSquadPathTo
     enableRouteCache: true, // 是否启用寻路缓存
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
-    routeCacheGCInterval: 20, // route cache 过期回收扫描间隔（tick）
+    routeCacheGCInterval: 20, // legacy compatibility option (no-op after due-queue GC)
+    routeCacheMaxEntries: 4000, // 非 bypass route cache 的最大条目数，超过后不再写入新键
+    routeCacheMaxNewPerTick: 200, // 每 tick 最多写入多少个新的非 bypass route cache 键
     enableBypassCostMatReuse: true,  // 是否启用绕过房间的costMatrix缓存
     enableSameRoomDetourCooldown: true, // 同房目标发生“绕房又回房”后短暂收敛到 maxRooms=1，避免反复进出房间
     sameRoomDetourCooldownTTL: 15, // 冷却 tick 数（只影响未显式传 maxRooms 的调用）
@@ -33,6 +36,8 @@ let config = {
     temporalAvoidExitCheckTTL: 1, // 临时出口可达性检测缓存时长（tick）
     temporalBypassRetryMinTicks: 2, // 临时绕路失败后的最小重试间隔
     temporalBypassRetryMaxTicks: 6, // 临时绕路失败后的最大重试间隔（线性退避上限）
+    pathCacheMaxEntries: 12000, // 全局路径缓存上限，超过后按插入顺序增量淘汰
+    pathCacheTrimBatch: 64, // 单次写入后最多淘汰多少条，避免抖动
     enableObserverQueueRefine: true, // Observer 任务队列优化
     observerTaskTTL: 12 // Observer 任务过期时长（tick）
 }
@@ -40,6 +45,7 @@ let config = {
 let pathClearDelay = 3000;  // 清理相应时间内都未被再次使用的路径，同时清理死亡creep的缓存，设为undefined表示不清除缓存
 let hostileCostMatrixClearDelay = 500; // 自动清理相应时间前创建的其他玩家房间的costMatrix
 let coreLayoutRange = 3; // 核心布局半径，在离storage这个范围内频繁检查对穿（减少堵路的等待
+let cacheStatsEnabled = false;
 let avoidRooms: Record<string, 1> = {}; // 永不踏入这些房间
 let syncedBypassRooms: Record<string, 1> = Object.create(null);
 let avoidRoomsVersion = 0;
@@ -341,6 +347,10 @@ let globalPathCache = Object.create(null);     // 缓存path
 let globalPathCacheByVariant = Object.create(null); // startKey -> variantKey -> combinedY -> path[]
 let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
 let globalPathCachePathCount = 0; // 当前缓存路径总数，空时可快速退出清理逻辑
+let pathCacheInsertQueue = [];
+let pathCacheInsertHead = 0;
+let roomSameRoomPathRefs = Object.create(null); // roomName -> { pathVersion: path }，仅记录同房路径
+let roomSameRoomPathCount = Object.create(null); // roomName -> 同房路径条数
 let roomStartKeyRefs = Object.create(null); // roomName -> { startKey: refCount }，同房路径的起点引用计数
 let roomStartKeyCount = Object.create(null); // roomName -> startKey 数量，用于比较“按房间索引遍历”与“全表遍历”成本
 let endKeyStartKeyRefs = Object.create(null); // endKey -> { startKey: refCount }，用于从终点范围反向定位可能的 startKey 桶
@@ -364,6 +374,7 @@ let autoClearTick = Game.time;  // 用于避免重复清理缓存
 const cache = {
     globalPathCache,
     globalPathCacheByVariant,
+    roomSameRoomPathRefs,
     pathCacheTimer,
     creepPathCache,
     creepMoveCache,
@@ -418,7 +429,9 @@ let unWalkableCCost = 255;
  * @description moveOpt 内部会频繁对 roomName 做正则解析，这里做轻量缓存减少重复计算
  */
 let roomNameParseCache = Object.create(null);
+let shardRoomNameParseCache = Object.create(null);
 cache.roomNameParseCache = roomNameParseCache;
+cache.shardRoomNameParseCache = shardRoomNameParseCache;
 
 /**
  * 解析房间名
@@ -532,11 +545,19 @@ function getAdjacents(pos) {
  */
 function parseShardRoomName(roomName) {
     if (typeof roomName !== 'string') return { shard: null, room: roomName };
+    const cached = shardRoomNameParseCache[roomName];
+    if (cached !== undefined) return cached;
     const idx = roomName.indexOf('/');
-    if (idx === -1) return { shard: null, room: roomName };
+    if (idx === -1) {
+        const parsed = { shard: null, room: roomName };
+        shardRoomNameParseCache[roomName] = parsed;
+        return parsed;
+    }
     const shard = roomName.slice(0, idx);
     const room = roomName.slice(idx + 1);
-    return { shard: shard || null, room };
+    const parsed = { shard: shard || null, room };
+    shardRoomNameParseCache[roomName] = parsed;
+    return parsed;
 }
 
 /**
@@ -1260,6 +1281,10 @@ function isCpuStatsEnabled() {
     return !!config.enableCpuStats;
 }
 
+function isCacheStatsEnabled() {
+    return cacheStatsEnabled;
+}
+
 function createDueTickQueue() {
     return { heap: [], marks: Object.create(null) };
 }
@@ -1411,9 +1436,112 @@ function applySameRoomDetourCooldown(creep, toPos, ops) {
 }
 
 let routeCache = Object.create(null);
-let routeCacheGcTick = -1;
+let routeCacheKeysByDueTick = Object.create(null);
+let routeCacheDueQueue = createDueTickQueue();
+let routeCacheTrackedTtl = -1;
+let routeCacheEntryCount = 0;
+let routeCacheNonBypassEntryCount = 0;
+let routeCacheWriteTick = -1;
+let routeCacheWriteCount = 0;
+let routeCacheMaintainTick = -1;
+let routeCacheLookupCount = 0;
+let routeCacheHitCount = 0;
+let routeCacheWriteStoreCount = 0;
+let routeCacheSkipByBudgetCount = 0;
+let routeCacheSkipByCapacityCount = 0;
+let routeCacheEvictBypassCount = 0;
+let routeCacheEvictTTLCount = 0;
+let pathCacheInsertCount = 0;
+let pathCacheTrimRunCount = 0;
+let pathCacheTrimScanCount = 0;
+let pathCacheTrimDeleteCount = 0;
 let bypassRouteCacheKeysByTick = Object.create(null);
 let bypassRouteCacheDueQueue = createDueTickQueue();
+
+function setRouteCacheEntry(key, entry) {
+    const statsEnabled = isCacheStatsEnabled();
+    if (!(key in routeCache)) {
+        routeCacheEntryCount++;
+        if (!entry.bypass) {
+            routeCacheNonBypassEntryCount++;
+        }
+    }
+    routeCache[key] = entry;
+    if (statsEnabled) {
+        routeCacheWriteStoreCount++;
+    }
+}
+
+function removeRouteCacheEntry(key, reason) {
+    const statsEnabled = isCacheStatsEnabled();
+    if (!(key in routeCache)) return;
+    const prev = routeCache[key];
+    delete routeCache[key];
+    if (routeCacheEntryCount > 0) {
+        routeCacheEntryCount--;
+    }
+    if (prev && !prev.bypass && routeCacheNonBypassEntryCount > 0) {
+        routeCacheNonBypassEntryCount--;
+    }
+    if (statsEnabled) {
+        if (reason === 'bypass') routeCacheEvictBypassCount++;
+        else if (reason === 'ttl') routeCacheEvictTTLCount++;
+    }
+}
+
+function clearRouteCacheEntries() {
+    for (let key in routeCache) {
+        delete routeCache[key];
+    }
+    routeCacheEntryCount = 0;
+    routeCacheNonBypassEntryCount = 0;
+    routeCacheWriteTick = -1;
+    routeCacheWriteCount = 0;
+    routeCacheMaintainTick = -1;
+}
+
+function canCacheRouteKey(key) {
+    const statsEnabled = isCacheStatsEnabled();
+    if (key in routeCache) return true; // rewrite existing key is always allowed
+
+    const maxEntries = config.routeCacheMaxEntries | 0;
+    if (maxEntries > 0 && routeCacheNonBypassEntryCount >= maxEntries) {
+        if (statsEnabled) routeCacheSkipByCapacityCount++;
+        return false;
+    }
+
+    const maxNewPerTick = config.routeCacheMaxNewPerTick | 0;
+    if (maxNewPerTick <= 0) {
+        if (statsEnabled) routeCacheSkipByBudgetCount++;
+        return false;
+    }
+    if (routeCacheWriteTick !== Game.time) {
+        routeCacheWriteTick = Game.time;
+        routeCacheWriteCount = 0;
+    }
+    if (routeCacheWriteCount >= maxNewPerTick) {
+        if (statsEnabled) routeCacheSkipByBudgetCount++;
+        return false;
+    }
+    routeCacheWriteCount++;
+    return true;
+}
+
+function ensureRouteCacheMaintenance(force) {
+    if (!force && routeCacheMaintainTick === Game.time) return;
+    routeCacheMaintainTick = Game.time;
+    clearExpiredRouteCache(force);
+}
+
+function trackRouteCacheKey(key, dueTick) {
+    const tick = dueTick | 0;
+    if (tick < 0) return;
+    if (!(tick in routeCacheKeysByDueTick)) {
+        routeCacheKeysByDueTick[tick] = [];
+        enqueueDueTick(routeCacheDueQueue, tick);
+    }
+    routeCacheKeysByDueTick[tick].push(key);
+}
 
 function trackBypassRouteCacheKey(key) {
     if (!(Game.time in bypassRouteCacheKeysByTick)) {
@@ -1430,7 +1558,7 @@ function clearExpiredBypassRouteCache() {
         const keys = bypassRouteCacheKeysByTick[tick];
         if (keys && keys.length) {
             for (let i = keys.length; i--;) {
-                delete routeCache[keys[i]];
+                removeRouteCacheEntry(keys[i], 'bypass');
             }
         }
         delete bypassRouteCacheKeysByTick[tick];
@@ -1441,32 +1569,63 @@ function clearExpiredRouteCache(force) {
     clearExpiredBypassRouteCache();
 
     if (!config.enableRouteCache) {
-        if (!force && routeCacheGcTick === Game.time) return;
-        routeCacheGcTick = Game.time;
-        for (let key in routeCache) {
-            delete routeCache[key];
-        }
+        clearRouteCacheEntries();
+        routeCacheTrackedTtl = -1;
+        clearObjectKeys(routeCacheKeysByDueTick);
+        clearDueTickQueue(routeCacheDueQueue);
         clearObjectKeys(bypassRouteCacheKeysByTick);
         clearDueTickQueue(bypassRouteCacheDueQueue);
         return;
     }
 
     const ttl = config.routeCacheTTL | 0;
-    if (ttl <= 0) return;
-
-    const gcInterval = getPositiveConfigNumber(config.routeCacheGCInterval, 20);
-    if (!force && routeCacheGcTick !== -1 && (Game.time - routeCacheGcTick) < gcInterval) {
+    if (ttl <= 0) {
+        routeCacheTrackedTtl = ttl;
+        clearObjectKeys(routeCacheKeysByDueTick);
+        clearDueTickQueue(routeCacheDueQueue);
         return;
     }
-    routeCacheGcTick = Game.time;
 
-    for (let key in routeCache) {
-        const entry = routeCache[key];
-        if (!entry || entry.bypass) continue;
-        if ((Game.time - (entry.tick | 0)) > ttl) {
-            delete routeCache[key];
+    if (routeCacheTrackedTtl !== ttl) {
+        routeCacheTrackedTtl = ttl;
+        clearObjectKeys(routeCacheKeysByDueTick);
+        clearDueTickQueue(routeCacheDueQueue);
+        for (let key in routeCache) {
+            const entry = routeCache[key];
+            if (!entry || entry.bypass) continue;
+            if ((Game.time - (entry.tick | 0)) > ttl) {
+                removeRouteCacheEntry(key, 'ttl');
+                continue;
+            }
+            trackRouteCacheKey(key, (entry.tick | 0) + ttl + 1);
         }
     }
+
+    if (force) {
+        for (let key in routeCache) {
+            const entry = routeCache[key];
+            if (!entry || entry.bypass) continue;
+            if ((Game.time - (entry.tick | 0)) > ttl) {
+                removeRouteCacheEntry(key, 'ttl');
+            }
+        }
+        return;
+    }
+
+    drainDueTickQueue(routeCacheDueQueue, Game.time, (tick) => {
+        const keys = routeCacheKeysByDueTick[tick];
+        if (keys && keys.length) {
+            for (let i = keys.length; i--;) {
+                const key = keys[i];
+                const entry = routeCache[key];
+                if (!entry || entry.bypass) continue;
+                if ((Game.time - (entry.tick | 0)) > ttl) {
+                    removeRouteCacheEntry(key, 'ttl');
+                }
+            }
+        }
+        delete routeCacheKeysByDueTick[tick];
+    });
 }
 
 function getRouteCacheKey(fromRoomName, toRoomName, bypass) {
@@ -1514,20 +1673,33 @@ function findRoute(fromRoomName, toRoomName, bypass) {  // supports shard-prefix
     toRoomName = parsedTo.room;
 
     ensureAvoidRoomsUpToDate();
-    clearExpiredRouteCache(false);
+    ensureRouteCacheMaintenance(false);
     if (config.enableRouteCache) {
+        const statsEnabled = isCacheStatsEnabled();
         const key = getRouteCacheKey(fromRoomName, toRoomName, bypass);
         const cached = routeCache[key];
         const ttl = config.routeCacheTTL | 0;
+        if (statsEnabled) {
+            routeCacheLookupCount++;
+        }
         if (cached && (bypass || ttl <= 0 || (Game.time - cached.tick) <= ttl)) {
+            if (statsEnabled) {
+                routeCacheHitCount++;
+            }
             return cached.route;
         }
         const result = bypass
             ? Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: bypassRouteCallback })
             : Game.map.findRoute(fromRoomName, toRoomName, { routeCallback: routeCallback });
-        routeCache[key] = { tick: Game.time, route: result, bypass: bypass ? 1 : 0 };
+        const routeTick = Game.time;
+        if (!bypass && !canCacheRouteKey(key)) {
+            return result;
+        }
+        setRouteCacheEntry(key, { tick: routeTick, route: result, bypass: bypass ? 1 : 0 });
         if (bypass) {
             trackBypassRouteCacheKey(key);
+        } else if (ttl > 0) {
+            trackRouteCacheKey(key, routeTick + ttl + 1);
         }
         return result;
     }
@@ -1606,9 +1778,13 @@ function checkTemporalAvoidExit(pos, room, costMat, targetRoomName) {    // 用�
 
     temporalAvoidExitCache[cacheKey] = temporalAvoidTo || '';
 }
-function routeReduce(temp, item) {
-    temp[item.room] = 1;
-    return temp;
+function buildRouteRoomSet(routeList, startRoomName) {
+    const roomSet = Object.create(null);
+    roomSet[startRoomName] = 1;
+    for (let i = routeList.length; i--;) {
+        roomSet[routeList[i].room] = 1;
+    }
+    return roomSet;
 }
 function bypassHostile(creep) {
     return !creep.my || creep.memory.dontPullMe;
@@ -1646,14 +1822,11 @@ function getReusableBypassCostMatrix(roomName, ignoreCondition) {
 }
 
 function applyTemporaryCreepBlocks(mat, creeps, changedKeys, oldCosts) {
-    const seen = Object.create(null);
     for (let i = creeps.length; i--;) {
         const c = creeps[i];
         const x = c.pos.x;
         const y = c.pos.y;
         const k = x * 50 + y;
-        if (seen[k]) continue;
-        seen[k] = 1;
         changedKeys.push(k);
         oldCosts.push(mat.get(x, y));
         mat.set(x, y, unWalkableCCost);
@@ -1779,7 +1952,7 @@ function findTemporalPath(creep, toPos, ops) {
             }
             PathFinderOpts.maxRooms = PathFinderOpts.maxRooms || route.length + 1;
             PathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;  // 跨10room则有4000+10*10*100=14000
-            route = route.reduce(routeReduce, { [creep.pos.roomName]: 1 });     // 因为 key in Object 比 Array.includes(value) 快，但不知道值不值得reduce
+            route = buildRouteRoomSet(route, creep.pos.roomName);     // 路由房间集合，用于 roomCallback 快速判定
             PathFinderOpts.roomCallback = bypassRoomCallbackWithRoute;
         } else {
             PathFinderOpts.maxOps = ops.maxOps;
@@ -1888,7 +2061,7 @@ function findPath(fromPos, toPos, ops) {
         }
         PathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;  // 跨10room则有2000+10*10*50=7000
         PathFinderOpts.maxRooms = PathFinderOpts.maxRooms || route.length + 1;
-        route = route.reduce(routeReduce, { [fromPos.roomName]: 1 });   // 因为 key in Object 比 Array.includes(value) 快，但不知道值不值得reduce
+        route = buildRouteRoomSet(route, fromPos.roomName);   // 路由房间集合，用于 roomCallback 快速判定
         //console.log(fromPos + ' using route ' + JSON.stringify(route));
         PathFinderOpts.roomCallback = roomCallbackWithRoute;
     } else {
@@ -1902,11 +2075,81 @@ function findPath(fromPos, toPos, ops) {
 // ----------------------------------------------------------------------------
 // 10) 路径缓存：写入、删除、索引维护与检索
 // ----------------------------------------------------------------------------
+function compactPathCacheInsertQueue() {
+    if (pathCacheInsertHead > 1024 && pathCacheInsertHead * 2 >= pathCacheInsertQueue.length) {
+        pathCacheInsertQueue = pathCacheInsertQueue.slice(pathCacheInsertHead);
+        pathCacheInsertHead = 0;
+    }
+}
+
+function pushPathCacheInsertToken(token) {
+    pathCacheInsertQueue.push(token);
+    const maxEntries = config.pathCacheMaxEntries | 0;
+    const maxQueueSize = maxEntries > 0 ? Math.max(maxEntries * 2, 1024) : 4096;
+    const activeSize = pathCacheInsertQueue.length - pathCacheInsertHead;
+    if (activeSize > maxQueueSize) {
+        pathCacheInsertHead += activeSize - maxQueueSize;
+    }
+    compactPathCacheInsertQueue();
+}
+
+function resolvePathCacheInsertToken(token) {
+    if (!token) return null;
+    const xBucket = globalPathCache[token.startKey];
+    if (!xBucket) return null;
+    const pathArray = xBucket[token.endKey];
+    if (!pathArray || !pathArray.length) return null;
+    for (let i = pathArray.length; i--;) {
+        const path = pathArray[i];
+        if ((path._bmVersion | 0) === token.version) {
+            return path;
+        }
+    }
+    return null;
+}
+
+function trimGlobalPathCacheByLimit() {
+    const statsEnabled = isCacheStatsEnabled();
+    const maxEntries = config.pathCacheMaxEntries | 0;
+    if (maxEntries <= 0 || globalPathCachePathCount <= maxEntries) return;
+    if (statsEnabled) {
+        pathCacheTrimRunCount++;
+    }
+
+    const trimBatch = getPositiveConfigNumber(config.pathCacheTrimBatch, 64);
+    const scanLimit = trimBatch * 4;
+    let scanCount = 0;
+    let trimCount = 0;
+    while (
+        globalPathCachePathCount > maxEntries &&
+        pathCacheInsertHead < pathCacheInsertQueue.length &&
+        scanCount < scanLimit &&
+        trimCount < trimBatch
+    ) {
+        if (statsEnabled) {
+            pathCacheTrimScanCount++;
+        }
+        scanCount++;
+        const token = pathCacheInsertQueue[pathCacheInsertHead++];
+        const candidate = resolvePathCacheInsertToken(token);
+        if (!candidate) continue;
+        deletePath(candidate);
+        if (statsEnabled) {
+            pathCacheTrimDeleteCount++;
+        }
+        trimCount++;
+    }
+    compactPathCacheInsertQueue();
+}
+
 /**
  * @param {MyPath} newPath
  */
 function addPathIntoCache(newPath) {
     ensurePathVersion(newPath);
+    if (isCacheStatsEnabled()) {
+        pathCacheInsertCount++;
+    }
     // combinedX: 起点坐标打包 (x << 16 | y)，作为一级索引 Key，唯一对应世界坐标的一个点
     const combinedX = (newPath.start.x << 16) | (newPath.start.y & 0xFFFF);
     // combinedY: 终点坐标的曼哈顿和 (x + y)，作为二级索引 Key，用于范围搜索
@@ -1981,8 +2224,28 @@ function addPathIntoCache(newPath) {
             }
             // 记录该 endKey 在该房间内被多少路径引用
             roomEndRefs[combinedY]++;
+
+            const pathVersion = newPath._bmVersion | 0;
+            if (pathVersion > 0) {
+                let sameRoomRefs = roomSameRoomPathRefs[startRoomName];
+                if (!sameRoomRefs) {
+                    sameRoomRefs = roomSameRoomPathRefs[startRoomName] = Object.create(null);
+                    roomSameRoomPathCount[startRoomName] = 0;
+                }
+                if (!(pathVersion in sameRoomRefs)) {
+                    roomSameRoomPathCount[startRoomName] = (roomSameRoomPathCount[startRoomName] | 0) + 1;
+                }
+                sameRoomRefs[pathVersion] = newPath;
+            }
         }
     }
+
+    pushPathCacheInsertToken({
+        startKey: combinedX,
+        endKey: combinedY,
+        version: newPath._bmVersion | 0
+    });
+    trimGlobalPathCacheByLimit();
 }
 
 /**
@@ -2088,6 +2351,19 @@ function deletePath(path) {
                         roomEndRefs[endKey] = nextEndCount;
                     }
                 }
+
+                const version = path._bmVersion | 0;
+                const sameRoomRefs = roomSameRoomPathRefs[startRoomName];
+                if (sameRoomRefs && version > 0 && sameRoomRefs[version] === path) {
+                    delete sameRoomRefs[version];
+                    const nextSameRoomCount = (roomSameRoomPathCount[startRoomName] | 0) - 1;
+                    if (nextSameRoomCount > 0) {
+                        roomSameRoomPathCount[startRoomName] = nextSameRoomCount;
+                    } else {
+                        delete roomSameRoomPathCount[startRoomName];
+                        delete roomSameRoomPathRefs[startRoomName];
+                    }
+                }
             }
         }
 
@@ -2124,8 +2400,10 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepC
         startCacheSearch = Game.cpu.getUsed();
     }
 
-    const minY = formalToPos.x + formalToPos.y - 1 - ops.range;
-    const maxY = formalToPos.x + formalToPos.y + 1 + ops.range;
+    const range = ops.range | 0;
+    const endKey = formalToPos.x + formalToPos.y;
+    const minY = endKey - 1 - range;
+    const maxY = endKey + 1 + range;
     const variantKey = buildPathVariantKeyFromQuery(ops, toRoomName);
 
     const visit = (pathArray, skipOpsCheck) => {
@@ -2156,20 +2434,20 @@ function findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepC
             const variantBuckets = globalPathCacheByVariant[startKey];
             const variantYBuckets = variantBuckets && variantBuckets[variantKey];
             if (variantYBuckets) {
-                for (let combinedYKey in variantYBuckets) {
-                    let combinedY = +combinedYKey;
-                    if (combinedY < minY || combinedY > maxY) continue;
-                    if (visit(variantYBuckets[combinedY], true)) return true;
+                for (let combinedY = minY; combinedY <= maxY; combinedY++) {
+                    const pathArray = variantYBuckets[combinedY];
+                    if (!pathArray) continue;
+                    if (visit(pathArray, true)) return true;
                 }
                 continue;
             }
 
             const xBucket = globalPathCache[startKey];
             if (!xBucket) continue;
-            for (let combinedYKey in xBucket) {
-                let combinedY = +combinedYKey;
-                if (combinedY < minY || combinedY > maxY) continue;
-                if (visit(xBucket[combinedY], false)) return true;
+            for (let combinedY = minY; combinedY <= maxY; combinedY++) {
+                const pathArray = xBucket[combinedY];
+                if (!pathArray) continue;
+                if (visit(pathArray, false)) return true;
             }
         }
     }
@@ -2381,7 +2659,7 @@ function buildMoveToDedupKey(creep, args) {
 function runMoveOptTickMaintenance() {
     if (obTick < Game.time) {
         obTick = Game.time;
-        clearExpiredRouteCache(false);
+        ensureRouteCacheMaintenance(false);
         checkObResult();
         doObTask();
         scanPortals(false);
@@ -3201,6 +3479,7 @@ function flee(targets, opts) {
 // observers / avoidRooms 已改为按需刷新：仅在调用相关能力时触发，并在同 tick 去重。
 
 function applyConfig() {
+    cacheStatsEnabled = !!config.enableCacheStats;
     bmSetChangeMove(!!config.changeMove);
     bmSetChangeMoveTo(!!config.changeMoveTo);
     bmSetChangeFindClostestByPath(!!config.changeFindClostestByPath);
@@ -3225,6 +3504,23 @@ function bmDeletePathInRoom(roomName) {
         return OK;
     }
 
+    // 快速路径：优先按同房路径版本索引删除
+    const sameRoomRefs = roomSameRoomPathRefs[roomName];
+    if (sameRoomRefs) {
+        const versions = Object.keys(sameRoomRefs);
+        for (let i = 0; i < versions.length; i++) {
+            const version = versions[i];
+            const path = sameRoomRefs[version];
+            if (!path) continue;
+            deletePath(path);
+        }
+        const remainStart = roomStartKeyCount[roomName] || 0;
+        const remainEnd = roomEndKeyCount[roomName] || 0;
+        if (!remainStart && !remainEnd) {
+            return OK;
+        }
+    }
+
     const roomKeyCount = roomStartKeyCount[roomName] || 0;
     const roomEndCount = roomEndKeyCount[roomName] || 0;
     // 该房间没有登记过同房路径起点，说明无可删路径
@@ -3245,6 +3541,9 @@ function bmDeletePathInRoom(roomName) {
         if (!roomKeys) return OK;
         
         for (let startKey in roomKeys) {
+            const targetCount = roomKeys[startKey] | 0;
+            if (targetCount <= 0) continue;
+            let deletedCount = 0;
             const xBucket = globalPathCache[startKey];
             if (!xBucket) continue;
             
@@ -3260,7 +3559,14 @@ function bmDeletePathInRoom(roomName) {
                     // 仅删除“起点和终点都在该房间”的路径
                     if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
                         deletePath(path);
+                        deletedCount++;
+                        if (deletedCount >= targetCount) {
+                            break;
+                        }
                     }
+                }
+                if (deletedCount >= targetCount) {
+                    break;
                 }
             }
         }
@@ -3278,6 +3584,9 @@ function bmDeletePathInRoom(roomName) {
         const maxY = baseY + 50;
 
         for (let endKey in roomEndKeys) {
+            const targetCount = roomEndKeys[endKey] | 0;
+            if (targetCount <= 0) continue;
+            let deletedCount = 0;
             const startKeys = endKeyStartKeyRefs[endKey];
             if (!startKeys) continue;
             
@@ -3304,7 +3613,14 @@ function bmDeletePathInRoom(roomName) {
                     
                     if (posArray[0].roomName == roomName && posArray[posArray.length - 1].roomName == roomName) {
                         deletePath(path);
+                        deletedCount++;
+                        if (deletedCount >= targetCount) {
+                            break;
+                        }
                     }
+                }
+                if (deletedCount >= targetCount) {
+                    break;
                 }
             }
         }
@@ -3389,12 +3705,78 @@ function bmSetChangeMoveTo(bool) {
     return OK;
 }
 
+function resetCacheRuntimeStats() {
+    routeCacheLookupCount = 0;
+    routeCacheHitCount = 0;
+    routeCacheWriteStoreCount = 0;
+    routeCacheSkipByBudgetCount = 0;
+    routeCacheSkipByCapacityCount = 0;
+    routeCacheEvictBypassCount = 0;
+    routeCacheEvictTTLCount = 0;
+    pathCacheInsertCount = 0;
+    pathCacheTrimRunCount = 0;
+    pathCacheTrimScanCount = 0;
+    pathCacheTrimDeleteCount = 0;
+}
+
+function bmGetCacheStats() {
+    const safeDiv = (num, den) => den ? (num / den) : 0;
+    const routeLookups = routeCacheLookupCount;
+    const routeHits = routeCacheHitCount;
+    const routeMisses = routeLookups - routeHits;
+    const routeSkips = routeCacheSkipByBudgetCount + routeCacheSkipByCapacityCount;
+    return {
+        enabled: isCacheStatsEnabled(),
+        tick: Game.time,
+        route: {
+            lookups: routeLookups,
+            hits: routeHits,
+            misses: routeMisses,
+            hitRate: safeDiv(routeHits, routeLookups),
+            writes: routeCacheWriteStoreCount,
+            skipByBudget: routeCacheSkipByBudgetCount,
+            skipByCapacity: routeCacheSkipByCapacityCount,
+            skipRate: safeDiv(routeSkips, routeLookups),
+            evictTTL: routeCacheEvictTTLCount,
+            evictBypass: routeCacheEvictBypassCount,
+            size: routeCacheEntryCount,
+            nonBypassSize: routeCacheNonBypassEntryCount
+        },
+        path: {
+            inserts: pathCacheInsertCount,
+            trimRuns: pathCacheTrimRunCount,
+            trimScans: pathCacheTrimScanCount,
+            trimDeletes: pathCacheTrimDeleteCount,
+            trimHitRate: safeDiv(pathCacheTrimDeleteCount, pathCacheTrimScanCount),
+            size: globalPathCachePathCount,
+            insertQueueSize: Math.max(0, pathCacheInsertQueue.length - pathCacheInsertHead)
+        }
+    };
+}
+
+function bmResetCacheStats() {
+    resetCacheRuntimeStats();
+    return OK;
+}
+
+function appendCacheStatsText(text) {
+    const stats = bmGetCacheStats();
+    if (!stats.enabled) {
+        text += '\ncache stats disabled (set config.enableCacheStats=true to enable)';
+        return text;
+    }
+    text += '\nroute cache: size=' + stats.route.size + '/' + stats.route.nonBypassSize + ', hit=' + stats.route.hits + '/' + stats.route.lookups + ' (' + stats.route.hitRate.toFixed(4) + ')';
+    text += ', writes=' + stats.route.writes + ', skip(budget/cap)=' + stats.route.skipByBudget + '/' + stats.route.skipByCapacity + ', evict(ttl/bypass)=' + stats.route.evictTTL + '/' + stats.route.evictBypass;
+    text += '\npath cache: size=' + stats.path.size + ', inserts=' + stats.path.inserts + ', trim runs=' + stats.path.trimRuns + ', trim delete/scan=' + stats.path.trimDeletes + '/' + stats.path.trimScans + ' (' + stats.path.trimHitRate.toFixed(4) + ')';
+    return text;
+}
+
 function bmPrint() {
+    const safeDiv = (num, den) => den ? (num / den) : 0;
     if (!isCpuStatsEnabled()) {
-        return '\n[BetterMove] cpu stats disabled (set config.enableCpuStats=true to enable)';
+        return appendCacheStatsText('\n[BetterMove] cpu stats disabled (set config.enableCpuStats=true to enable)');
     }
 
-    const safeDiv = (num, den) => den ? (num / den) : 0;
     let text = '\navarageTime\tcalls\tFunctionName';
     for (let fn in analyzeCPU) {
         const calls = analyzeCPU[fn].calls;
@@ -3412,7 +3794,7 @@ function bmPrint() {
     text += '\nnear storage check rate: ' + safeDiv(testNearStorageCheck, moveToCalls).toFixed(4) + ', near storage cross rate: ' + safeDiv(testNearStorageSwap, testNearStorageCheck).toFixed(4);
     text += '\ncache search rate: ' + safeDiv(searchCount, moveToCalls).toFixed(4) + ', total hit rate: ' + hitRate.toFixed(4) + ', avg check paths: ' + safeDiv(pathCounter, searchCount).toFixed(3);
     text += '\ncache hit avg cost: ' + hitCost.toFixed(5) + ', cache miss avg cost: ' + missCost.toFixed(5) + ', total avg cost: ' + (hitCost * hitRate + missCost * missRate).toFixed(5);
-    return text;
+    return appendCacheStatsText(text);
 }
 
 function bmSetChangeMove(bool) {
@@ -3569,6 +3951,9 @@ function bmSetConfig(partial) {
         return ERR_INVALID_ARGS;
     }
     Object.assign(config, partial);
+    if ('enableCacheStats' in partial && !partial.enableCacheStats) {
+        resetCacheRuntimeStats();
+    }
     applyConfig();
     return OK;
 }
@@ -3588,6 +3973,7 @@ function resetMoveOptStats() {
     normalLogicalCost = 0;
     cacheHitCost = 0;
     cacheMissCost = 0;
+    resetCacheRuntimeStats();
 }
 
 /**
@@ -3606,6 +3992,10 @@ function bmClear(opts) {
     clearObjectKeys(globalPathCacheByVariant);
     globalPathCacheBucketCount = 0;
     globalPathCachePathCount = 0;
+    pathCacheInsertQueue.length = 0;
+    pathCacheInsertHead = 0;
+    clearObjectKeys(roomSameRoomPathRefs);
+    clearObjectKeys(roomSameRoomPathCount);
     clearObjectKeys(roomStartKeyRefs);
     clearObjectKeys(roomStartKeyCount);
     clearObjectKeys(endKeyStartKeyRefs);
@@ -3619,10 +4009,12 @@ function bmClear(opts) {
     clearObjectKeys(costMatrixRevision);
     clearObjectKeys(costMatrixCacheTimer);
     clearDueTickQueue(costMatrixCacheTimerDueQueue);
-    clearObjectKeys(routeCache);
+    clearRouteCacheEntries();
+    clearObjectKeys(routeCacheKeysByDueTick);
+    clearDueTickQueue(routeCacheDueQueue);
+    routeCacheTrackedTtl = -1;
     clearObjectKeys(bypassRouteCacheKeysByTick);
     clearDueTickQueue(bypassRouteCacheDueQueue);
-    routeCacheGcTick = -1;
     clearObjectKeys(bypassCostMatReuseCache);
     clearObjectKeys(temporalAvoidExitCache);
     temporalAvoidExitCacheTick = -1;
@@ -3630,6 +4022,7 @@ function bmClear(opts) {
     bounceAvoidFrom = bounceAvoidTo = '';
     bounceAvoidUntil = 0;
     clearObjectKeys(roomNameParseCache);
+    clearObjectKeys(shardRoomNameParseCache);
     squadDerivedMatCacheTick = -1;
     clearObjectKeys(squadDerivedMatCache);
 
@@ -3750,6 +4143,8 @@ global.BetterMove = {
     setEnableFlee: bmSetEnableFlee,
     getConfig: bmGetConfig,
     setConfig: bmSetConfig,
+    getCacheStats: bmGetCacheStats,
+    resetCacheStats: bmResetCacheStats,
     deletePathInRoom: bmDeletePathInRoom,
     addAvoidExits (fromRoomName, toRoomName) {
         if (parseRoomName(fromRoomName) && parseRoomName(toRoomName)) {
