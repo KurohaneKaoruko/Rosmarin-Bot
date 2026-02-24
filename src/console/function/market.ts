@@ -1,4 +1,4 @@
-import {getPrice} from "@/utils"
+import { getOrderPrice, getEnergyHistoryAvgPrice, calcTransactionCostSafe } from "@/modules/utils/marketUtils";
 import { getAutoMarketData } from "@/modules/utils/memory";
 import { BASE_CONFIG } from "@/constant/config";
 
@@ -56,7 +56,7 @@ export default {
                 for (const room of rooms) {
                     if (!room.terminal || room.terminal.cooldown > 0) continue;
                     let amount = Math.min(totalAmount, room.terminal.store.getFreeCapacity());
-                    const cost = Game.market.calcTransactionCost(amount, room.name, order.roomName);
+                    const cost = calcTransactionCostSafe(amount, room.name, order.roomName);
                     if (room.terminal.store[RESOURCE_ENERGY] < cost) {
                         amount = Math.floor(amount * room.terminal.store[RESOURCE_ENERGY] / cost);
                     }
@@ -67,7 +67,7 @@ export default {
                         continue;
                     }
                     totalAmount -= amount;
-                    console.log(`房间 ${room.name} 购买了 ${amount} 单位的 ${order.resourceType}, 传输成本${Game.market.calcTransactionCost(amount, room.name, order.roomName)}`);
+                    console.log(`房间 ${room.name} 购买了 ${amount} 单位的 ${order.resourceType}, 传输成本${calcTransactionCostSafe(amount, room.name, order.roomName)}`);
                     if (totalAmount <= 0) break;
                 }
                 totalAmount = Math.min(maxAmount, order.amount) - totalAmount;
@@ -85,7 +85,7 @@ export default {
                 for (const room of rooms) {
                     if (!room.terminal || room.terminal.cooldown > 0) continue;
                     let amount = Math.min(totalAmount, room.terminal.store[order.resourceType]);
-                    const cost = Game.market.calcTransactionCost(amount, room.name, order.roomName);
+                    const cost = calcTransactionCostSafe(amount, room.name, order.roomName);
                     if (room.terminal.store[RESOURCE_ENERGY] < cost) {
                         amount = Math.floor(amount * room.terminal.store[RESOURCE_ENERGY] / cost);
                     }
@@ -138,12 +138,12 @@ export default {
                     console.log(`缺少 roomName，无法计算综合单价。示例：market.look('energy', ORDER_SELL, 'W1N1', 20)`);
                     return;
                 }
-                let ENERGY_COST = Game.market.getHistory(RESOURCE_ENERGY)?.[0]?.avgPrice;
+                let ENERGY_COST = getEnergyHistoryAvgPrice(0.01);
                 if (!ENERGY_COST || ENERGY_COST < 0.01) ENERGY_COST = 0.01;
                 for (let i = 0; i < Math.min(orders.length, length); i++) {
                     const order = orders[i];
                     const dealAmount = order.amount;
-                    const transferEnergyCost = Game.market.calcTransactionCost(dealAmount, roomName, order.roomName);
+                    const transferEnergyCost = calcTransactionCostSafe(dealAmount, roomName, order.roomName);
                     const dealCredit = dealAmount * order.price;
                     let price = 0;  // 综合单价
                     if(resType === RESOURCE_ENERGY) {
@@ -203,7 +203,7 @@ export default {
 
             // 如果没有提供价格，获取市场订单并设置最优价格
             if (!price) {
-                price = getPrice(type, ORDER_BUY);
+                price = getOrderPrice(type, ORDER_BUY);
             }
             if (price === null) return Error(`获取价格失败：${type}`);
 
@@ -229,7 +229,7 @@ export default {
 
             // 如果没有提供价格，获取市场订单并设置最优价格
             if (!price) {
-                price = getPrice(type, ORDER_SELL);
+                price = getOrderPrice(type, ORDER_SELL);
             }
             if (price === null) return Error(`获取价格失败：${type}`);
 
@@ -482,7 +482,7 @@ function handleMarketTransaction(roomName: string, type: any, amount: number, or
         }
     });
 
-    let eCost = Game.market.getHistory(RESOURCE_ENERGY)?.[0]?.avgPrice;
+    let eCost = getEnergyHistoryAvgPrice(0.01);
     if (!eCost || eCost < 0.01) eCost = 0.01;
 
     let bestOrder = null;        // 最优订单
@@ -497,7 +497,7 @@ function handleMarketTransaction(roomName: string, type: any, amount: number, or
         // 交易数量
         const dealAmount = Math.min(amount, order.amount);
         // 传输成本
-        const transferEnergyCost = Game.market.calcTransactionCost(dealAmount, roomName, order.roomName);
+        const transferEnergyCost = calcTransactionCostSafe(dealAmount, roomName, order.roomName);
         // 交易金额
         const dealCredit = dealAmount * order.price;
         // 能量估算单价
@@ -614,3 +614,4 @@ function interShardMarket(type: any, amount: number, order: string, price: numbe
     }
     return result;
 }
+

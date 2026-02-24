@@ -2,6 +2,7 @@ import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, 
 import { log } from '@/utils';
 import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/modules/utils/memory';
 import { getLabAB } from '@/modules/utils/labReservations';
+import { getTransactionCostRatio } from '@/modules/utils/marketUtils';
 
 const br = '<br/>';
 const LOG_COLORS = {
@@ -1087,7 +1088,7 @@ export const ResourceManage = {
                 return cached.ratio;
             }
 
-            const ratio = Game.market.calcTransactionCost(1000, sourceRoomName, targetRoomName) / 1000;
+            const ratio = getTransactionCostRatio(sourceRoomName, targetRoomName);
             Memory.marketCostCache[key] = { ratio, tick: Game.time };
             return ratio;
         }

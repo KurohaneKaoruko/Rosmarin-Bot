@@ -41,57 +41,6 @@ export function log(typeOrText: string, textOrArg?: any, ...args: any[]) {
     write(text, rest);
 }
 
-/** 计算合适的订单价格
- * 根据订单类型和资源类型计算合适的订单价格
- * @param type 资源类型
- * @param orderType 订单类型
- * @returns 合适的订单价格
- */
-export function getPrice(type: any, orderType: any): any {
-    let Price = 0.01;
-    const orders = Game.market.getAllOrders({type: orderType, resourceType: type});
-    if (!orders || orders.length === 0) return null;
-    orders.sort((a, b) => {
-        if (orderType === ORDER_BUY) {
-            return b.price - a.price; // 按价格从高到低排序
-        } else {
-            return a.price - b.price; // 按价格从低到高排序
-        }
-    });
-    let rooms = {}
-    // 取前十
-    const topOrders = orders.filter(order => {
-        // 初步过滤
-        if (type == 'energy' && order.amount < 10000) return false;
-        const roomKey = order.roomName || order.id;
-        if (rooms[roomKey]) return false;
-        rooms[roomKey] = true;
-        return true;
-    }).slice(0, 10);
-    if (topOrders.length === 0) return null;
-
-    // 计算筛选出的订单的平均价格
-    const averagePrice = topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length;
-    if (averagePrice == topOrders[0].price) return averagePrice;
-    if (orderType === ORDER_BUY) {
-        // 过滤掉高于平均价格太多的订单
-        const filteredOrders = topOrders.filter(order => order.price <= averagePrice * 1.2);
-        // 实际价格不超过最高价的一定比例
-        const maxPrice = topOrders[0].price * 0.995;
-        const filterPrice = (filteredOrders[0]?.price ?? topOrders[0].price);
-        Price = Math.min(filterPrice, maxPrice);
-    } else if (orderType === ORDER_SELL) {
-        // 过滤掉低于平均价格太多的订单
-        const filteredOrders = topOrders.filter(order => order.price >= averagePrice * 0.8);
-        // 实际价格不低于最低价的一定比例
-        const minPrice = topOrders[0].price * 1.005;
-        const filterPrice = (filteredOrders[0]?.price ?? topOrders[0].price);
-        Price = Math.max(filterPrice, minPrice);
-    } else return null;
-
-    return Price;
-}
-
 /**
  * 二分匹配算法
  * @param left 左侧节点数组

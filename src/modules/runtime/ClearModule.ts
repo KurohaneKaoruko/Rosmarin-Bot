@@ -3,6 +3,7 @@
  */
 import { clearRoomRelatedMemory } from '@/modules/utils/roomMemory';
 import { getMissionPools, getRoomData } from '@/modules/utils/memory';
+import { hasMarketOrderApi } from '@/modules/utils/marketUtils';
 
 export const ClearModule = {
     end: () => {
@@ -79,6 +80,8 @@ function  memoryClear() {
 
 // 清理订单
 function orderClear() {
+    if (!hasMarketOrderApi()) return;
+
     const TIME_THRESHOLD = 50000; // 过期时间阈值
     const MAX_ORDERS = 250; // 最大允许订单数
     const TARGET_ORDERS = 50; // 清理到

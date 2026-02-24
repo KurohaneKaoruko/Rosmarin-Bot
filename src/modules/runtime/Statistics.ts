@@ -1,5 +1,6 @@
 /** 统计模块 */
 import { RoleData } from '@/constant/CreepConstant';
+import { hasMarketCredits, hasMarketOrderApi } from '@/modules/utils/marketUtils';
 
 // --- Configuration Constants ---
 const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)
@@ -156,12 +157,26 @@ function updateCreepCount() {
 }
 
 function updateCreditInfo() {
+    if (!hasMarketCredits()) {
+        Memory.stats.credit = 0;
+        Memory.stats.creditChanges = 0;
+        Memory.stats.energyAveragePrice = 0;
+        Memory.stats.energyAverageSellPrice = 0;
+        return;
+    }
+
     Memory.stats.credit = Game.market.credits;
 
     if(Game.time % LONG_STAT_INTERVAL !== 1) return;
     const cr = Game.market.credits;
     Memory.stats.creditChanges = cr - (Number(Memory.stats.lastCredit) || cr)
     Memory.stats.lastCredit = cr;
+
+    if (!hasMarketOrderApi()) {
+        Memory.stats.energyAveragePrice = 0;
+        Memory.stats.energyAverageSellPrice = 0;
+        return;
+    }
 
     // 能量前十求购均价
     const orders = Game.market.getAllOrders({type: ORDER_BUY, resourceType: RESOURCE_ENERGY});
