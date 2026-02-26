@@ -227,18 +227,22 @@ export default class MissionGet extends Room {
 
     // 获取每种role的孵化任务数量
     getSpawnMissionNum() {
-        if (this['SpawnMissionNumChecked']) return global.SpawnMissionNum[this.name];
-        const tasks = this.getAllMissionFromPool('spawn');
-        const spawnMissionNum = {};
-        for(const task of tasks) {
-            const data = task.data as SpawnTask;
-            const role = data.memory.role;
-            if (!spawnMissionNum[role]) spawnMissionNum[role] = 1;
-            else spawnMissionNum[role]++;
+        // 返回当前 tick 的 spawn 任务角色计数
+        const roomAny = this as any;
+        if (roomAny._spawnMissionNumCacheTick === Game.time) {
+            return roomAny._spawnMissionNumCache || {};
         }
-        if (!global.SpawnMissionNum) global.SpawnMissionNum = {};
-        global.SpawnMissionNum[this.name] = spawnMissionNum;
-        this['SpawnMissionNumChecked'] = true;
+
+        const tasks = this.getAllMissionFromPool('spawn');
+        const spawnMissionNum: Record<string, number> = {};
+        for (const task of tasks) {
+            const role = (task.data as SpawnTask)?.memory?.role;
+            if (!role) continue;
+            spawnMissionNum[role] = (spawnMissionNum[role] || 0) + 1;
+        }
+
+        roomAny._spawnMissionNumCache = spawnMissionNum;
+        roomAny._spawnMissionNumCacheTick = Game.time;
         return spawnMissionNum;
     }
 

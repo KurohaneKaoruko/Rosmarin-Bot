@@ -1,5 +1,6 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
+import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
 
 const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnMissionNum: {[role: string]: number}) => {
     const targetRoom = mineData.targetRoom;
@@ -269,33 +270,6 @@ const PowerMineMissionData = function (room: Room, P_num: number, power: number)
     }
 
     return data;
-}
-
-const getCreepByTargetRoom = function (targetRoom: string) {
-    if (global.CreepByTargetRoom &&
-        global.CreepByTargetRoom.time === Game.time) {
-        return global.CreepByTargetRoom[targetRoom] || {};
-    } else {
-        global.CreepByTargetRoom = { time: Game.time };
-        for (const name in Game.creeps) {
-            const creep = Game.creeps[name];
-            const role = creep.memory.role;
-            const tRoom = creep.memory.targetRoom;
-            if (!role || !tRoom) continue;
-            if (!global.CreepByTargetRoom[tRoom]) {
-                global.CreepByTargetRoom[tRoom] = {};
-            }
-            if (!global.CreepByTargetRoom[tRoom][role]) {
-                global.CreepByTargetRoom[tRoom][role] = [];
-            }
-            global.CreepByTargetRoom[tRoom][role].push({
-                ticksToLive: creep.ticksToLive,
-                spawning: creep.spawning,
-                homeRoom: creep.memory.homeRoom,
-            });
-        }
-        return global.CreepByTargetRoom[targetRoom] || {};
-    }
 }
 
 /**

@@ -1,6 +1,7 @@
 import Team from "../core/TeamClass";
 import TeamCalc from "../infra/TeamCalc";
 import { getTeamData } from "@/modules/utils/memory";
+import { getTeamCreeps } from "@/modules/utils/creepTickIndex";
 
 /**
  * Team 执行调度器（运行时）。
@@ -35,40 +36,41 @@ export default class TeamController {
      */
     private static runCreeps(): void {
         // 小队成员的行为
-        for (const creep of Object.values(Game.creeps)) {
+        for (const creep of getTeamCreeps()) {
             if (!creep || creep.spawning) continue;
-            const role = creep.memory.role;
-            if (role.startsWith('team')) {
-                // 关闭 notify（只设置一次）
-                if (!creep.memory.notified) {
-                    creep.notifyWhenAttacked(false);
-                    creep.memory.notified = true;
-                }
+            // getTeamCreeps() 已筛选 team 角色，这里保留兜底判断避免脏内存导致异常
+            const role = creep.memory.role || '';
+            if (!role.startsWith('team')) continue;
 
-                // boost
-                if (!creep.memory.boosted) {
-                    if (creep.memory['boostmap']) {
-                        // Team Creep 必须完成 Boost (must: true)，任务配额扣减由 Boost 内部自动处理
-                        const result = creep.goBoost(creep.memory['boostmap'], { must: true });
-                        if (result === OK) {
-                            creep.memory.boosted = true;
-                            delete creep.memory['boostmap'];
-                        }
-                    } else creep.memory.boosted = true;
-                    continue;
-                }
+            // 关闭 notify（只设置一次）
+            if (!creep.memory.notified) {
+                creep.notifyWhenAttacked(false);
+                creep.memory.notified = true;
+            }
 
-                // 归队
-                if (!creep.memory['rejoin']) {
-                    const teamID = creep.memory['teamID'];
-                    const team = getTeamData(teamID);
-                    if (!team) continue;
-                    team.creeps.push(creep.id);
-                    creep.memory['rejoin'] = true;
-                }
+            // boost
+            if (!creep.memory.boosted) {
+                if (creep.memory['boostmap']) {
+                    // Team Creep 必须完成 Boost (must: true)，任务配额扣减由 Boost 内部自动处理
+                    const result = creep.goBoost(creep.memory['boostmap'], { must: true });
+                    if (result === OK) {
+                        creep.memory.boosted = true;
+                        delete creep.memory['boostmap'];
+                    }
+                } else creep.memory.boosted = true;
+                continue;
+            }
+
+            // 归队
+            if (!creep.memory['rejoin']) {
                 const teamID = creep.memory['teamID'];
-                if (!getTeamData(teamID)) creep.suicide();
-            } else continue;
+                const team = getTeamData(teamID);
+                if (!team) continue;
+                team.creeps.push(creep.id);
+                creep.memory['rejoin'] = true;
+            }
+            const teamID = creep.memory['teamID'];
+            if (!getTeamData(teamID)) creep.suicide();
         }
     }
 
@@ -165,7 +167,7 @@ export default class TeamController {
         for (const [teamID, teamData] of noFullTeams) {
             if (soloHealers.length === 0) break;
             let healer = soloHealers.pop();
-            // 把creep从原来的队伍中去除
+            // 从当前队伍列表中移除该 creep
             let creepTeamData = getTeamData(healer.memory['teamID'])
             if (!creepTeamData) continue;
             let index = creepTeamData.creeps.indexOf(healer.id);

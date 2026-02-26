@@ -1079,7 +1079,7 @@ export class RoadMaintain {
             const health = this.checkHealth(homeRoom, targetRoom);
             needsRepair += health.damaged;
 
-            // 检查并修复被摧毁的道路
+            // 检查缺失道路并补建工地
             if (health.missing > 0) {
                 sitesCreated += this.checkDestroyed(homeRoom, targetRoom);
             }

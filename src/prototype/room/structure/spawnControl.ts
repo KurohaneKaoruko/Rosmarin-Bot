@@ -120,9 +120,9 @@ export default class SpawnControl extends Room {
         const result = spawn.spawnCreep(data.bodypart, data.name, {memory: data.memory})
         let role = data.memory.role;
         if (result == OK) {
-            if (!global.CreepNum) global.CreepNum = {};
-            if (!global.CreepNum[this.name]) global.CreepNum[this.name] = {};
-            global.CreepNum[this.name][role] = (global.CreepNum[this.name][role] || 0) + 1;
+            // 成功孵化后更新房间内角色计数
+            const creepNum = this.getCreepNum();
+            creepNum[role] = (creepNum[role] || 0) + 1;
             this.submitSpawnMission(data.taskId);
             return;
         }
@@ -143,9 +143,8 @@ export default class SpawnControl extends Room {
                     }
                     const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
                     if (emergencyResult === OK) {
-                        if (!global.CreepNum) global.CreepNum = {};
-                        if (!global.CreepNum[this.name]) global.CreepNum[this.name] = {};
-                        global.CreepNum[this.name][role] = (global.CreepNum[this.name][role] || 0) + 1;
+                        const creepNum = this.getCreepNum();
+                        creepNum[role] = (creepNum[role] || 0) + 1;
                         this.submitSpawnMission(data.taskId);
                         global.log(`房间 ${this.name} 不足以孵化目标体型 ${role}，已按当前能量孵化缩小体型。`);
                         return;
@@ -160,7 +159,7 @@ export default class SpawnControl extends Room {
                 if (c.memory.role == 'harvester') H_num++;
                 if (c.memory.role == 'universal') univ_num++;
             })
-            if (!global.SpawnMissionNum[this.name]) global.SpawnMissionNum[this.name] = {};
+            const spawnMissionNum = this.getSpawnMissionNum() || {};
 
             if ((this.storage && this.storage.store[RESOURCE_ENERGY] > data.cost * 10) ||
                 (this.terminal && this.terminal.store[RESOURCE_ENERGY] > data.cost * 10)) {
@@ -171,7 +170,7 @@ export default class SpawnControl extends Room {
                 if (H_num !== 0 && C_num !== 0) return;
             }
             
-            univ_num += global.SpawnMissionNum[this.name]['universal'] || 0;
+            univ_num += spawnMissionNum['universal'] || 0;
             if (univ_num >= 2) return;
 
             spawn.spawnCreep(

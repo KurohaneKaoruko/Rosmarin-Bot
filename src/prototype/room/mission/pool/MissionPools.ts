@@ -35,6 +35,12 @@ const PoolTypes = [
 
 /** 通用的任务池模块 */
 export default class MissionPools extends Room {
+    // 清理本房间 spawn 任务角色计数缓存
+    private clearSpawnMissionNumCache() {
+        delete (this as any)._spawnMissionNumCache;
+        delete (this as any)._spawnMissionNumCacheTick;
+    }
+
     // 任务池初始化
     public initMissionPool() {
         const root = getMissionPools();
@@ -103,6 +109,7 @@ export default class MissionPools extends Room {
         const id = `${type.toUpperCase()}-${this.generateId()}`; // 生成id
         let task: Task = {id, type, level, data}
         this.pushTaskToPool(PoolName, task);
+        if (PoolName === 'spawn') this.clearSpawnMissionNumCache();
         return OK;
     }
 
@@ -286,6 +293,7 @@ export default class MissionPools extends Room {
         if (index === -1) {return;}
 
         memory[PoolName].splice(index, 1);
+        if (PoolName === 'spawn') this.clearSpawnMissionNumCache();
 
         return OK
     }

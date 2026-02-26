@@ -3,6 +3,7 @@ import { BASE_CONFIG } from "@/constant/config";
 import { AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/utils/memory";
 import { calcTransactionCostSafe, getEnergyHistoryAvgPrice, getOrderPrice, hasMarketOrderApi } from "@/modules/utils/marketUtils";
+import { findMyOrderCached, getAllOrdersCached, hasEnergyReceiverRoomCached, hasEnergySupplierRoomCached } from "@/modules/utils/marketTickCache";
 
 const br = '<br/>';
 const LOG_COLORS = {
@@ -53,15 +54,8 @@ function getEnergyAvgPrice(): number {
 }
 
 function findMyOrder(roomName: string, resourceType: ResourceConstant, type: ORDER_BUY | ORDER_SELL): (Order & { resourceType: ResourceConstant }) | null {
-    if (!hasMarketOrderApi()) return null;
-    for (const order of Object.values(Game.market.orders)) {
-        if (order.roomName === roomName &&
-            order.resourceType === resourceType &&
-            order.type === type &&
-            order.remainingAmount > 0
-        ) return order as Order & { resourceType: ResourceConstant };
-    }
-    return null;
+    // 读取当前 tick 的订单索引
+    return findMyOrderCached(roomName, resourceType, type);
 }
 
 function hasAutoOrder(autoMarket: AutoMarketTask[], resourceType: ResourceConstant, orderTypes: AutoMarketTask['orderType'][]) {
@@ -98,24 +92,11 @@ function injectDefaultAutoMarket(room: Room, autoMarket: AutoMarketTask[]) {
 }
 
 function hasEnergySupplierRoom(targetRoom: Room, balanceAt: number) {
-    for (const room of Object.values(Game.rooms)) {
-        if (room.name === targetRoom.name) continue;
-        if (!room.controller?.my) continue;
-        if (!room.terminal || room.terminal.cooldown > 0) continue;
-        if (room.getResAmount(RESOURCE_ENERGY) > balanceAt) return true;
-    }
-    return false;
+    return hasEnergySupplierRoomCached(targetRoom, balanceAt);
 }
 
 function hasEnergyReceiverRoom(sourceRoom: Room, balanceAt: number) {
-    for (const room of Object.values(Game.rooms)) {
-        if (room.name === sourceRoom.name) continue;
-        if (!room.controller?.my) continue;
-        if (!room.terminal || room.terminal.cooldown > 0) continue;
-        if (room.terminal.store.getFreeCapacity() <= 0) continue;
-        if (room.getResAmount(RESOURCE_ENERGY) < balanceAt) return true;
-    }
-    return false;
+    return hasEnergyReceiverRoomCached(sourceRoom, balanceAt);
 }
 
 export default class AutoMarket extends Room {
@@ -509,7 +490,8 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
     if(!room || !room.terminal) return ERR_NOT_FOUND;
     if (!hasMarketOrderApi()) return ERR_NOT_FOUND;
 
-    let orders = Game.market.getAllOrders({type: orderType, resourceType: res});
+    // 读取当前 tick 的订单列表，并在副本上排序/过滤
+    let orders = getAllOrdersCached(orderType, res).slice();
     if(orders.length === 0) return ERR_NOT_FOUND;
 
     if (price) {
@@ -656,5 +638,3 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
 
     return result;
 }
-
-

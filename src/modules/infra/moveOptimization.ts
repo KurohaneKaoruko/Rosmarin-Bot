@@ -12,7 +12,7 @@ reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
 // 初始化参数
 let config = {
     changeMove: true,   // 为creep.move增加对穿能力
-    changeMoveTo: true, // 全面优化creep.moveTo，跨房移动也可以一个moveTo解决问题
+    changeMoveTo: true, // 为 creep.moveTo 提供统一跨房寻路入口
     changeFindClostestByPath: true,     // 轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
     autoVisual: false,  // 自动绘制路径
     enableCpuStats: false, // enable internal CPU statistics
@@ -22,7 +22,7 @@ let config = {
     enableRouteCache: true, // 是否启用寻路缓存
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
     routeCacheGCInterval: 20, // legacy compatibility option (no-op after due-queue GC)
-    routeCacheMaxEntries: 4000, // 非 bypass route cache 的最大条目数，超过后不再写入新键
+    routeCacheMaxEntries: 4000, // 非 bypass route cache 的最大条目数，达到上限后停止新增键
     routeCacheMaxNewPerTick: 200, // 每 tick 最多写入多少个新的非 bypass route cache 键
     enableBypassCostMatReuse: true,  // 是否启用绕过房间的costMatrix缓存
     enableSameRoomDetourCooldown: true, // 同房目标发生“绕房又回房”后短暂收敛到 maxRooms=1，避免反复进出房间
@@ -32,13 +32,13 @@ let config = {
     roomBounceTTL: 100, // 识别到 bounce 后封禁该跨房方向的时长
     enableSameRoomDetourCooldownV2: true, // 同房目标绕出再回时，临时收敛 maxRooms
     sameRoomDetourBounceWindow: 20, // 识别“绕出再回”的时间窗口
-    enableTemporalBypassRefine: true, // 堵路临时绕路的策略优化
+    enableTemporalBypassRefine: true, // 堵路时临时绕路策略开关
     temporalAvoidExitCheckTTL: 1, // 临时出口可达性检测缓存时长（tick）
     temporalBypassRetryMinTicks: 2, // 临时绕路失败后的最小重试间隔
     temporalBypassRetryMaxTicks: 6, // 临时绕路失败后的最大重试间隔（线性退避上限）
     pathCacheMaxEntries: 12000, // 全局路径缓存上限，超过后按插入顺序增量淘汰
     pathCacheTrimBatch: 64, // 单次写入后最多淘汰多少条，避免抖动
-    enableObserverQueueRefine: true, // Observer 任务队列优化
+    enableObserverQueueRefine: true, // Observer 任务队列策略开关
     observerTaskTTL: 12 // Observer 任务过期时长（tick）
 }
 // 运行时参数 
@@ -210,7 +210,7 @@ export function syncAvoidRooms(bypassRooms: string[]): void {
 
     let changed = false;
 
-    // 仅删除“曾由 bypassRooms 同步进来且现在不需要了”的房间，避免误删运行时临时避让。
+    // 仅回收由 bypassRooms 同步写入的房间，保留运行时临时避让房间。
     for (const roomName in syncedBypassRooms) {
         if (!(roomName in nextBypassRooms)) {
             delete syncedBypassRooms[roomName];
@@ -1033,7 +1033,7 @@ function generateCostMatrix(room, pos) {
     let structureCostMat = new PathFinder.CostMatrix;   // 在noStructrue的基础上加上所有不可行走的建筑
     let totalStructures = room.find(FIND_STRUCTURES);
     
-    // 优化：避免创建大数组，分别遍历
+    // 分别遍历各类对象并写入 costMatrix
     let sources = room.find(FIND_SOURCES);
     for (let i = sources.length; i--;) {
         noStructureCostMat.set(sources[i].pos.x, sources[i].pos.y, unWalkableCCost);
@@ -3242,7 +3242,6 @@ function betterMoveTo(firstArg, secondArg, opts) {
         // 自动绘制路径：调用方未传 visualizePathStyle 时注入默认样式
         ops.visualizePathStyle = {};
     }
-
     const moveToRange = ops.range === undefined ? 1 : ops.range;
     if (typeof toPos.x != "number" || typeof toPos.y != "number") {   // 房名无效或目的坐标不是数字，不合法
         //this.say('no tar');
@@ -3476,7 +3475,7 @@ function flee(targets, opts) {
 // ============================================================================
 // 15) 初始化与对外 API（global.BetterMove）
 // ============================================================================
-// observers / avoidRooms 已改为按需刷新：仅在调用相关能力时触发，并在同 tick 去重。
+// observers / avoidRooms 在调用相关能力时刷新，并在同 tick 去重。
 
 function applyConfig() {
     cacheStatsEnabled = !!config.enableCacheStats;
@@ -3591,7 +3590,7 @@ function bmDeletePathInRoom(roomName) {
             if (!startKeys) continue;
             
             for (let startKey in startKeys) {
-                // 优化：利用 startKey 包含的坐标信息进行快速预过滤
+                // 利用 startKey 内坐标先做边界过滤
                 // 显式转为数字，虽然 JS 位运算会自动转，但显式转换更安全且明确
                 const key = +startKey;
                 const globalX = key >> 16;

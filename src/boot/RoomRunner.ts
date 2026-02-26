@@ -21,10 +21,6 @@ export const roomRunner = function (room: Room) {
     // 初始化
     const pools = getMissionPools();
     if (!pools[room.name]) room.initMissionPool();
-    else if (!global.CreepNum[room.name]) {
-        global.CreepNum[room.name] = {};
-        global.SpawnMissionNum[room.name] = {};
-    }
     
     // 房间运行
     room.exec();

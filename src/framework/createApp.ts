@@ -22,11 +22,18 @@ export const createApp = () => {
     const events: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
     const runners: Record<RunnerType, RunnerFn> = { room: () => {}, creep: () => {}, powerCreep: () => {}, flag: () => {} };
 
+    const runRunner = <T>(objs: Record<string, T>, runner: (obj: T) => void) => {
+        for (const id in objs) {
+            if (!Object.prototype.hasOwnProperty.call(objs, id)) continue;
+            runner(objs[id]);
+        }
+    };
+
     /** 设置运行器 */
     const set = <T>(type: RunnerType, runner: (obj: T) => void) => {
         const getObjs = GAME_OBJECTS[type];
         if (getObjs) {
-            runners[type] = () => Object.values(getObjs()).forEach(runner);
+            runners[type] = () => runRunner(getObjs(), runner);
         }
     };
 
@@ -50,7 +57,11 @@ export const createApp = () => {
     const runInit = () => {
         if (initOK) return;
         const tryInit = (proto: any, objs: Record<string, any>) => {
-            if (proto.init) Object.values(objs).forEach((o: any) => o.init());
+            if (!proto.init) return;
+            for (const id in objs) {
+                if (!Object.prototype.hasOwnProperty.call(objs, id)) continue;
+                objs[id].init();
+            }
         };
         tryInit(Room.prototype, Game.rooms);
         tryInit(Creep.prototype, Game.creeps);

@@ -262,7 +262,7 @@ const RoleSpawnCheck = {
  * 房间孵化任务模块（spawn）
  * @description
  * - 根据房间状态与 RoleSpawnCheck 规则动态生成孵化任务
- * - 提供 SpawnMissionAdd 将孵化任务写入任务池并统计 global.SpawnMissionNum
+ * - 提供 SpawnMissionAdd 将孵化任务写入任务池，并失效 SpawnMissionNum 缓存
  */
 export default class SpawnMission extends Room {
     /**
@@ -337,10 +337,6 @@ export default class SpawnMission extends Room {
             upbody = upbody || false;
             this.addMissionToPool('spawn', 'spawn', level, {name, body, memory, energy, upbody})
         }
-        if (!global.SpawnMissionNum) global.SpawnMissionNum = {};
-        if (!global.SpawnMissionNum[this.name]) global.SpawnMissionNum[this.name] = {};
-        if (!global.SpawnMissionNum[this.name][role]) global.SpawnMissionNum[this.name][role] = 0;
-        global.SpawnMissionNum[this.name][role] = global.SpawnMissionNum[this.name][role] + 1;
         return OK;
     }
 }

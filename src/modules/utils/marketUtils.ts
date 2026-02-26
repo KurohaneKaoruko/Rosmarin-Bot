@@ -1,3 +1,5 @@
+import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
+
 /**
  * 市场兼容工具。
  * 赛季世界可能关闭订单相关 API，但终端传输成本依然需要可计算。
@@ -50,15 +52,15 @@ export const getOrderPrice = (
     orderType: ORDER_BUY | ORDER_SELL,
 ): number | null => {
     if (!hasMarketOrderApi()) return null;
-    const market = getMarket();
     let price = 0.01;
-    const orders = market.getAllOrders({ type: orderType, resourceType }) as Order[];
+    // 读取当前 tick 的订单缓存
+    const orders = getAllOrdersCached(orderType, resourceType);
     if (!orders || orders.length === 0) return null;
 
-    orders.sort((a, b) => orderType === ORDER_BUY ? b.price - a.price : a.price - b.price);
+    const sortedOrders = orders.slice().sort((a, b) => orderType === ORDER_BUY ? b.price - a.price : a.price - b.price);
 
     const seenRooms = Object.create(null) as Record<string, true>;
-    const topOrders = orders.filter((order) => {
+    const topOrders = sortedOrders.filter((order) => {
         if (resourceType === RESOURCE_ENERGY && order.amount < 10000) return false;
         const roomKey = order.roomName || order.id;
         if (seenRooms[roomKey]) return false;

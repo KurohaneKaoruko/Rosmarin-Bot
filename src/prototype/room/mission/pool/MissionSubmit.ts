@@ -24,14 +24,7 @@ export default class MissionSubmit extends Room {
     submitSpawnMission(id: Task['id']) {
         const task = this.getMissionFromPoolById('spawn', id);
         if (!task) return;
-        const role = (task.data as SpawnTask).memory.role;
         this.deleteMissionFromPool('spawn', id);
-
-        if (!global.SpawnMissionNum) global.SpawnMissionNum = {};
-        if (!global.SpawnMissionNum[this.name]) global.SpawnMissionNum[this.name] = {};
-        if (!global.SpawnMissionNum[this.name][role]) global.SpawnMissionNum[this.name][role] = 0;
-        global.SpawnMissionNum[this.name][role] = global.SpawnMissionNum[this.name][role] - 1;
-        if (global.SpawnMissionNum[this.name][role] < 0) global.SpawnMissionNum[this.name][role] = 0;
         return OK;
     }
 
@@ -46,7 +39,6 @@ export default class MissionSubmit extends Room {
         if (!Array.isArray(tasks) || tasks.length === 0) return 0;
 
         let removed = 0;
-        const removedByRole: Record<string, number> = {};
         const remaining: Task[] = [];
 
         for (const task of tasks) {
@@ -54,7 +46,6 @@ export default class MissionSubmit extends Room {
             const role = data?.memory?.role;
             if (role && roleSet.has(role)) {
                 removed++;
-                removedByRole[role] = (removedByRole[role] || 0) + 1;
                 continue;
             }
             remaining.push(task);
@@ -62,13 +53,8 @@ export default class MissionSubmit extends Room {
 
         pools.spawn = remaining as any;
 
-        delete (this as any)['SpawnMissionNumChecked'];
-        if (global.SpawnMissionNum?.[this.name]) {
-            for (const [role, num] of Object.entries(removedByRole)) {
-                const old = global.SpawnMissionNum[this.name][role] || 0;
-                global.SpawnMissionNum[this.name][role] = Math.max(0, old - num);
-            }
-        }
+        delete (this as any)._spawnMissionNumCache;
+        delete (this as any)._spawnMissionNumCacheTick;
         return removed;
     }
 
