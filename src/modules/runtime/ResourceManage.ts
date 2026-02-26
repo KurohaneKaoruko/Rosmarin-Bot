@@ -45,6 +45,11 @@ interface RoomProductionStats {
     missionPaused: boolean;
 }
 
+type MarketCostCacheEntry = {
+    ratio: number;
+    tick: number;
+}
+
 const resourceDeficitHistory: Record<string, ResourceDeficitRecord> = {};
 const roomProductionStats: Record<string, RoomProductionStats> = {};
 
@@ -151,6 +156,14 @@ const checkAndReleaseStalledMissions = (missionPools: Record<string, any>, stall
     }
 };
 
+const getGlobalMarketCostCache = (): Record<string, MarketCostCacheEntry> => {
+    const g = global as any;
+    if (!g.marketCostCache || typeof g.marketCostCache !== 'object') {
+        g.marketCostCache = {};
+    }
+    return g.marketCostCache as Record<string, MarketCostCacheEntry>;
+};
+
 const checkAndUpdateRoomEfficiency = (
     room: Room,
     productionRooms: Room[],
@@ -233,8 +246,8 @@ export const ResourceManage = {
     tick: function () {
         // 降低全局资源平衡的 CPU 占用：固定间隔执行
         if (Game.time % 50) return;
-        // 初始化市场交易成本缓存
-        if (!Memory.marketCostCache) Memory.marketCostCache = {};
+        // 初始化市场交易成本缓存（global 级缓存，避免写入 Memory）
+        const marketCostCache = getGlobalMarketCostCache();
         const ResManageMem = getResourceManage() || {};
         // 全局默认参与平衡的资源类型（可被 Memory.RosmarinBot.ResourceManage 的房间自定义条目扩展）
         const balanceResKeys = Object.keys(RESOURCE_BALANCE);
@@ -1081,7 +1094,7 @@ export const ResourceManage = {
 
         const getCostRatio = (sourceRoomName: string, targetRoomName: string) => {
             const key = `${sourceRoomName}->${targetRoomName}`;
-            const cached = Memory.marketCostCache?.[key];
+            const cached = marketCostCache[key];
             const CACHE_EXPIRY = 1000;
 
             if (cached && Game.time - cached.tick < CACHE_EXPIRY) {
@@ -1089,7 +1102,7 @@ export const ResourceManage = {
             }
 
             const ratio = getTransactionCostRatio(sourceRoomName, targetRoomName);
-            Memory.marketCostCache[key] = { ratio, tick: Game.time };
+            marketCostCache[key] = { ratio, tick: Game.time };
             return ratio;
         }
 
