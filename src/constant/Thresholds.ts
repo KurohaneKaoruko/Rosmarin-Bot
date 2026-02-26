@@ -42,5 +42,10 @@ export const THRESHOLDS = {
         NUKER_CHECK: 50,
         LAB_CHECK: 20,
         WALL_REPAIR_COOLDOWN: 5,
-    }
+    },
+    TERMINAL: {
+        CHECK_MOD: 30,
+        CHECK_OFFSET: 2,
+        ENERGY_COST_SAMPLE_AMOUNT: 1000,
+    },
 } as const;

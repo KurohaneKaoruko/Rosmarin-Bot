@@ -1,4 +1,4 @@
-import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, LabMap, PRIORITY_CONFIG, PRODUCTION_MIN, PRODUCTION_MONITOR_CONFIG, RESOURCE_BALANCE, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant'
+import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, LabMap, PRIORITY_CONFIG, PRODUCTION_MIN, PRODUCTION_MONITOR_CONFIG, RESOURCE_BALANCE, RESOURCE_DISPATCH_CONFIG, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
 import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/modules/utils/memory';
 import { getLabAB } from '@/modules/utils/labReservations';
@@ -253,7 +253,7 @@ export const ResourceManage = {
         const balanceResKeys = Object.keys(RESOURCE_BALANCE);
 
         const missionPools = getMissionPools() || {};
-        checkAndReleaseStalledMissions(missionPools, 500);
+        checkAndReleaseStalledMissions(missionPools, DEFAULT_STALL_THRESHOLD);
 
         // ResManageMap: 按资源维度收集“可供应房间/需求房间”
         const ResManageMap = Object.create(null) as Record<string, { source: string[], target: string[] }>;
@@ -1080,7 +1080,11 @@ export const ResourceManage = {
                     for (const res of prodNeedResSet) {
                         const amount = getResAmountCached(room, res);
                         // 生产需求：只要有原料就作为供给源
-                        const minSendAmount = res === RESOURCE_ENERGY ? 5000 : (Goods.includes(res as any) ? 50 : 500);
+                        const minSendAmount = res === RESOURCE_ENERGY
+                            ? RESOURCE_DISPATCH_CONFIG.energyMinSendAmount
+                            : (Goods.includes(res as any)
+                                ? RESOURCE_DISPATCH_CONFIG.productionSourceMarkMinGoods
+                                : RESOURCE_DISPATCH_CONFIG.productionSourceMarkMinDefault);
                         if (amount < minSendAmount) continue;
                         
                         if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
@@ -1099,7 +1103,7 @@ export const ResourceManage = {
         const getCostRatio = (sourceRoomName: string, targetRoomName: string) => {
             const key = `${sourceRoomName}->${targetRoomName}`;
             const cached = marketCostCache[key];
-            const CACHE_EXPIRY = 1000;
+            const CACHE_EXPIRY = RESOURCE_DISPATCH_CONFIG.marketCostCacheExpiry;
 
             if (cached && Game.time - cached.tick < CACHE_EXPIRY) {
                 return cached.ratio;
@@ -1157,13 +1161,26 @@ export const ResourceManage = {
             // Goods：终端单次发送最少 100（生产需求），最多 500；其它资源保持原先阈值约束
             const isGoods = Goods.includes(res as any);
             const hasProdNeed = prodNeedResSet.has(res);
-            const minSendAmount = isGoods ? 100 : (res == RESOURCE_ENERGY ? 5000 : (hasProdNeed ? 500 : 1000));
-            const maxSendAmount = isGoods ? 500 : Infinity;
+            const isEnergy = res == RESOURCE_ENERGY;
+            const minSendAmount = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsMinSendAmount
+                : (isEnergy
+                    ? RESOURCE_DISPATCH_CONFIG.energyMinSendAmount
+                    : (hasProdNeed
+                        ? RESOURCE_DISPATCH_CONFIG.productionDefaultMinSendAmount
+                        : RESOURCE_DISPATCH_CONFIG.defaultMinSendAmount));
+            const maxSendAmount = isGoods ? RESOURCE_DISPATCH_CONFIG.goodsMaxSendAmount : Infinity;
             // 调度上限：用于实现"一次性尽量下发完，但不至于某个富余房间排队爆炸"
             // Goods 类资源提高上限以支持生产需求
-            const perPairCap = isGoods ? 500 : (res == RESOURCE_ENERGY ? 50000 : 10000);
-            const perSourceCap = isGoods ? 1000 : (res == RESOURCE_ENERGY ? 100000 : 20000);
-            const perSourceMaxPairs = isGoods ? 5 : 3;
+            const perPairCap = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerPairCap
+                : (isEnergy ? RESOURCE_DISPATCH_CONFIG.energyPerPairCap : RESOURCE_DISPATCH_CONFIG.defaultPerPairCap);
+            const perSourceCap = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerSourceCap
+                : (isEnergy ? RESOURCE_DISPATCH_CONFIG.energyPerSourceCap : RESOURCE_DISPATCH_CONFIG.defaultPerSourceCap);
+            const perSourceMaxPairs = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerSourceMaxPairs
+                : RESOURCE_DISPATCH_CONFIG.defaultPerSourceMaxPairs;
 
             const sourceRooms = ResManageMap[res].source
                 .map(roomName => Game.rooms[roomName])
@@ -1184,7 +1201,7 @@ export const ResourceManage = {
                     const thresholds = ThresholdMap[room.name]?.[res];
                     const targetThreshold = thresholds ? thresholds[0] : 0;
                     const reserve = hasProdNeed
-                        ? Math.min(targetThreshold, Math.max(minSendAmount, Math.floor(targetThreshold * 0.5)))
+                        ? Math.min(targetThreshold, Math.max(minSendAmount, Math.floor(targetThreshold * RESOURCE_DISPATCH_CONFIG.productionReserveRatio)))
                         : targetThreshold;
                     return { room, amount, surplus: amount - reserve };
                 })

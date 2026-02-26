@@ -40,10 +40,8 @@ export default class RoomExecute extends Room {
             this.autoFactory();      // 自动Factory生产
             this.autoPower();        // 自动Power处理
             this.outMine();          // 外矿采集
-        }
-        
-        // 显示防御cost矩阵
-        if (!lowMode) {
+
+            // 显示防御cost矩阵
             this.showDefenseCostMatrix();
         }
 

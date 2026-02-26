@@ -1,6 +1,6 @@
 import { log } from "@/utils"
 import { BASE_CONFIG } from "@/constant/config";
-import { AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
+import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/utils/memory";
 import { calcTransactionCostSafe, getEnergyHistoryAvgPrice, getOrderPrice, hasMarketOrderApi } from "@/modules/utils/marketUtils";
 import { findMyOrderCached, getAllOrdersCached, hasEnergyReceiverRoomCached, hasEnergySupplierRoomCached } from "@/modules/utils/marketTickCache";
@@ -45,10 +45,10 @@ const resTag = (resType: any, color: string = LOG_COLORS.text) => `${getResource
 const normalizeResType = (resType: any) => (BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType) as ResourceConstant;
 
 let cachedEnergyAvgPriceTick = -1;
-let cachedEnergyAvgPrice = 0.01;
+let cachedEnergyAvgPrice: number = AUTO_MARKET_CONFIG.energyAvgPriceFallback;
 function getEnergyAvgPrice(): number {
     if (cachedEnergyAvgPriceTick === Game.time) return cachedEnergyAvgPrice;
-    cachedEnergyAvgPrice = getEnergyHistoryAvgPrice(0.01);
+    cachedEnergyAvgPrice = getEnergyHistoryAvgPrice(AUTO_MARKET_CONFIG.energyAvgPriceFallback);
     cachedEnergyAvgPriceTick = Game.time;
     return cachedEnergyAvgPrice;
 }
@@ -102,7 +102,7 @@ function hasEnergyReceiverRoom(sourceRoom: Room, balanceAt: number) {
 export default class AutoMarket extends Room {
     // 自动市场交易
     autoMarket() {
-        if (Game.time % 50 !== 0) return;
+        if (Game.time % AUTO_MARKET_CONFIG.tickInterval !== 0) return;
         if (!hasMarketOrderApi()) return;
         const autoMaket = getAutoMarketData(this.name);
         injectDefaultAutoMarket(this, autoMaket);
@@ -157,8 +157,8 @@ function AutoBuy(roomName: string, item: any) {
     if(totalBuyAmount <= 0) return;
 
     // 根据资源类型确定单次订单数量
-    const orderAmount = Math.min(totalBuyAmount, resourceType === RESOURCE_ENERGY ? 20000 : 3000);
-    const minOrderAmount = resourceType === RESOURCE_ENERGY ? 5000 : 500;
+    const orderAmount = Math.min(totalBuyAmount, resourceType === RESOURCE_ENERGY ? AUTO_MARKET_CONFIG.energyOrderBuyAmount : AUTO_MARKET_CONFIG.defaultOrderAmount);
+    const minOrderAmount = resourceType === RESOURCE_ENERGY ? AUTO_MARKET_CONFIG.energyMinOrderAmount : AUTO_MARKET_CONFIG.defaultMinOrderAmount;
     if (orderAmount < minOrderAmount) return;
 
     // 检查是否已有同类型订单未完成
@@ -170,7 +170,7 @@ function AutoBuy(roomName: string, item: any) {
         if (suggested === null) return;
         const nextPrice = Math.min(suggested, priceLimit);
         const diff = Math.abs(nextPrice - existingOrder.price);
-        if (diff >= Math.max(0.01, existingOrder.price * 0.02)) {
+        if (diff >= Math.max(AUTO_MARKET_CONFIG.priceAdjustMinAbs, existingOrder.price * AUTO_MARKET_CONFIG.priceAdjustMinRatio)) {
             const rc = Game.market.changeOrderPrice(existingOrder.id, nextPrice);
             if (rc === OK) {
                 const pct = existingOrder.price ? (nextPrice / existingOrder.price - 1) : 0;
@@ -312,14 +312,14 @@ function AutoSell(roomName: string, item: any) {
 
     // 自动卖能量时先尝试即时成交，按“有效成交单价”与挂单预期价动态选择路径
     if (resourceType === RESOURCE_ENERGY && terminal.cooldown <= 0) {
-        const dealAmount = Math.min(sellAmount, terminalAmount, 10000);
-        if (dealAmount >= 5000) {
+        const dealAmount = Math.min(sellAmount, terminalAmount, AUTO_MARKET_CONFIG.energyDirectDealAmount);
+        if (dealAmount >= AUTO_MARKET_CONFIG.energyMinDealAmount) {
             const dealResult = AutoDeal(
                 room.name,
                 resourceType,
                 dealAmount,
                 ORDER_BUY,
-                10,
+                AUTO_MARKET_CONFIG.dealCandidateLength,
                 expectedOrderPrice,
                 expectedOrderPrice
             );
@@ -328,8 +328,8 @@ function AutoSell(roomName: string, item: any) {
     }
 
     // 根据资源类型确定单次订单数量
-    const orderAmount = Math.min(sellAmount, resourceType === RESOURCE_ENERGY ? 10000 : 3000);
-    const minOrderAmount = resourceType === RESOURCE_ENERGY ? 5000 : 500;
+    const orderAmount = Math.min(sellAmount, resourceType === RESOURCE_ENERGY ? AUTO_MARKET_CONFIG.energyOrderSellAmount : AUTO_MARKET_CONFIG.defaultOrderAmount);
+    const minOrderAmount = resourceType === RESOURCE_ENERGY ? AUTO_MARKET_CONFIG.energyMinOrderAmount : AUTO_MARKET_CONFIG.defaultMinOrderAmount;
     if (orderAmount < minOrderAmount) return;
 
     // 检查是否已有同类型订单未完成
@@ -340,7 +340,7 @@ function AutoSell(roomName: string, item: any) {
         if (suggested === null) return;
         const nextPrice = Math.max(suggested, priceLimit);
         const diff = Math.abs(nextPrice - existingOrder.price);
-        if (diff >= Math.max(0.01, existingOrder.price * 0.02)) {
+        if (diff >= Math.max(AUTO_MARKET_CONFIG.priceAdjustMinAbs, existingOrder.price * AUTO_MARKET_CONFIG.priceAdjustMinRatio)) {
             const rc = Game.market.changeOrderPrice(existingOrder.id, nextPrice);
             if (rc === OK) {
                 const pct = existingOrder.price ? (nextPrice / existingOrder.price - 1) : 0;
@@ -472,9 +472,9 @@ function AutoDealBuy(roomName: string, item: any) {
     // 计算需要购买的数量
     const buyAmount = Math.min(amount - totalAmount, terminal.store.getFreeCapacity());  // 总购买量
     if (buyAmount <= 0) return;
-    if (resourceType == RESOURCE_ENERGY && buyAmount <= 10000) return;
+    if (resourceType == RESOURCE_ENERGY && buyAmount <= AUTO_MARKET_CONFIG.dealBuyMinEnergyAmount) return;
 
-    AutoDeal(room.name, resourceType, buyAmount, ORDER_SELL, 10, price)
+    AutoDeal(room.name, resourceType, buyAmount, ORDER_SELL, AUTO_MARKET_CONFIG.dealCandidateLength, price)
 
 }
 
@@ -499,9 +499,9 @@ function AutoDealSell(roomName: string, item: any) {
     const sellAmount = Math.min(totalAmount - amount, terminalAmount);
     if (sellAmount <= 0) return;
 
-    if (resourceType == RESOURCE_ENERGY && sellAmount <= 5000) return;
+    if (resourceType == RESOURCE_ENERGY && sellAmount <= AUTO_MARKET_CONFIG.dealSellMinEnergyAmount) return;
 
-    AutoDeal(room.name, resourceType, sellAmount, ORDER_BUY, 10, price);
+    AutoDeal(room.name, resourceType, sellAmount, ORDER_BUY, AUTO_MARKET_CONFIG.dealCandidateLength, price);
 }
 
 
@@ -521,7 +521,7 @@ function AutoDeal(
     const allOrders = getAllOrdersCached(orderType, res);
     if(allOrders.length === 0) return ERR_NOT_FOUND;
 
-    const candidateLimit = Math.min(allOrders.length, Math.max(length, 50));
+    const candidateLimit = Math.min(allOrders.length, Math.max(length, AUTO_MARKET_CONFIG.dealCandidateFloor));
     const candidates: Array<{ order: Order; distance: number }> = [];
 
     for (const order of allOrders) {
@@ -629,7 +629,7 @@ function AutoDeal(
 
     if (orderType == ORDER_SELL && TotalPrice >= Game.market.credits) return;
 
-    if (res == RESOURCE_ENERGY && TotalDealAmount < 5000) {
+    if (res == RESOURCE_ENERGY && TotalDealAmount < AUTO_MARKET_CONFIG.energyMinDealAmount) {
         return;
     } else if (TotalDealAmount <= 0) {
         return;

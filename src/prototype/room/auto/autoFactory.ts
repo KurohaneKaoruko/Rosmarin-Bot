@@ -165,7 +165,7 @@ const getTask = (room: Room, getAvail: (res: ResourceConstant) => number, factor
         const limit = Number(autoFactoryMap[res] || 0);
         const cur = getAvail(res as any);
         if (limit > 0) {
-            if (cur >= limit * 0.9) continue;
+            if (cur >= limit * AUTO_FACTORY_CONFIG.taskDoneRatio) continue;
         }
         if (!canStartTask(getAvail, res as any)) continue;
         const output = getCraftableOutput(getAvail, res as any);

@@ -31,6 +31,52 @@ export const AUTO_MARKET_DEFAULT = {
     ] as ResourceConstant[],
 } as const;
 
+/**
+ * AutoMarket 策略参数
+ * @description
+ * - 控制自动买卖、调价、即时成交与候选订单筛选行为
+ */
+export const AUTO_MARKET_CONFIG = {
+    /** 自动市场执行间隔 */
+    tickInterval: 50,
+    /** 历史均价不可用时的回退价格 */
+    energyAvgPriceFallback: 0.01,
+    /** 估算跨房能量成本比时的采样量 */
+    energyPriceCostSampleAmount: 1000,
+    /** 调价最小绝对变化 */
+    priceAdjustMinAbs: 0.01,
+    /** 调价最小相对变化 */
+    priceAdjustMinRatio: 0.02,
+
+    /** 能量买单默认挂单量 */
+    energyOrderBuyAmount: 20e3,
+    /** 能量卖单默认挂单量 */
+    energyOrderSellAmount: 10e3,
+    /** 非能量默认挂单量 */
+    defaultOrderAmount: 3e3,
+    /** 能量挂单最小生效量 */
+    energyMinOrderAmount: 5e3,
+    /** 非能量挂单最小生效量 */
+    defaultMinOrderAmount: 500,
+
+    /** 能量优先尝试即时成交的单次上限 */
+    energyDirectDealAmount: 10e3,
+    /** 能量即时成交最小生效量 */
+    energyMinDealAmount: 5e3,
+    /** 即时成交优先扫描的候选长度 */
+    dealCandidateLength: 10,
+    /** 即时成交候选池最小保底长度 */
+    dealCandidateFloor: 50,
+    /** 挂单定价时按房间去重后的头部订单数量 */
+    topOrderRoomLimit: 10,
+    /** 能量参与挂单定价的最小订单量 */
+    energyOrderMinAmountForPricing: 10e3,
+    /** dealbuy 模式下能量最小成交量 */
+    dealBuyMinEnergyAmount: 10e3,
+    /** dealsell 模式下能量最小成交量 */
+    dealSellMinEnergyAmount: 5e3,
+} as const;
+
 export const RESOURCE_BALANCE = {
     'energy': [AUTO_ENERGY_POLICY.balanceAt, AUTO_ENERGY_POLICY.balanceAt],
     'power': [5e3, 10e3],
@@ -466,6 +512,20 @@ export const AUTO_LAB_CONFIG = {
     continueInputMin: 1e3,
     /** 自定义 AutoLabData 任务选择时，raw1/raw2 的最低库存门槛（默认沿用旧逻辑） */
     customTaskInputMin: 6e3,
+    /** 自定义任务达到该比例视为接近完成 */
+    customTaskDoneRatio: 0.9,
+    /** 兜底任务的检查间隔 */
+    fallbackCheckInterval: 100,
+    /** 兜底任务每次追加的目标增量 */
+    fallbackBatchAmount: 10e3,
+    /** 兜底任务原矿判定的主阈值 */
+    fallbackPrimaryThreshold: 10e3,
+    /** 兜底任务原矿判定的辅阈值 */
+    fallbackSecondaryThreshold: 5e3,
+    /** 单原料模式下的阈值 */
+    fallbackSingleReagentThreshold: 10e3,
+    /** T2/T3 与前级库存差值阈值 */
+    fallbackDiffFloor: 20e3,
     /** 缺料时最多保持任务的 tick 数，超过后允许自动切换/清空，避免永久卡死 */
     waitTimeoutTicks: 500,
 } as const;
@@ -479,6 +539,8 @@ export const AUTO_FACTORY_CONFIG = {
     tickInterval: 50,
     /** 缺料时最多保持任务的 tick 数，超过后允许自动切换/清空 */
     waitTimeoutTicks: 500,
+    /** 任务达到该比例视为接近完成 */
+    taskDoneRatio: 0.9,
     /** 缺料且存在其它可开工计划时的等待上限（避免长期占用任务阻塞切换） */
     waitTimeoutTicksWhenAlternatives: 50,
     /** 因“填装不足”超时结束任务后，对同一产物的冷却期（避免立刻重分配抖动） */
@@ -487,6 +549,35 @@ export const AUTO_FACTORY_CONFIG = {
     goodsComponentMultiplier: 10,
     /** 非 goods 组件库存门槛（默认保持与旧逻辑一致） */
     componentMin: 10e3,
+} as const;
+
+/**
+ * 资源跨房调度参数
+ * @description
+ * - 用于 ResourceManage 的 send 任务分发与生产需求补料
+ * - 仅抽取“策略阈值”，局部算法细节仍保留在调用处
+ */
+export const RESOURCE_DISPATCH_CONFIG = {
+    marketCostCacheExpiry: 1000,
+    productionReserveRatio: 0.5,
+
+    energyMinSendAmount: 5e3,
+    goodsMinSendAmount: 100,
+    defaultMinSendAmount: 1e3,
+    productionDefaultMinSendAmount: 500,
+    goodsMaxSendAmount: 500,
+
+    energyPerPairCap: 50e3,
+    goodsPerPairCap: 500,
+    defaultPerPairCap: 10e3,
+    energyPerSourceCap: 100e3,
+    goodsPerSourceCap: 1e3,
+    defaultPerSourceCap: 20e3,
+    goodsPerSourceMaxPairs: 5,
+    defaultPerSourceMaxPairs: 3,
+
+    productionSourceMarkMinGoods: 50,
+    productionSourceMarkMinDefault: 500,
 } as const;
 
 /**

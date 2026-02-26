@@ -1,4 +1,5 @@
 import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
+import { AUTO_MARKET_CONFIG } from '@/constant/ResourceConstant';
 
 /**
  * 市场兼容工具。
@@ -32,11 +33,12 @@ export const calcTransactionCostSafe = (amount: number, sourceRoom: string, targ
 };
 
 export const getTransactionCostRatio = (sourceRoom: string, targetRoom: string): number => {
-    const cost = calcTransactionCostSafe(1000, sourceRoom, targetRoom);
-    return cost / 1000;
+    const sampleAmount = AUTO_MARKET_CONFIG.energyPriceCostSampleAmount;
+    const cost = calcTransactionCostSafe(sampleAmount, sourceRoom, targetRoom);
+    return cost / sampleAmount;
 };
 
-export const getEnergyHistoryAvgPrice = (fallback = 0.01): number => {
+export const getEnergyHistoryAvgPrice = (fallback: number = AUTO_MARKET_CONFIG.energyAvgPriceFallback): number => {
     const market = getMarket();
     if (!market || typeof market.getHistory !== 'function') return fallback;
     const avg = market.getHistory(RESOURCE_ENERGY)?.[0]?.avgPrice;
@@ -85,7 +87,7 @@ const pickTopOrdersByRoom = (
     const bestByRoom: Record<string, Order> = {};
 
     for (const order of orders) {
-        if (resourceType === RESOURCE_ENERGY && order.amount < 10000) continue;
+        if (resourceType === RESOURCE_ENERGY && order.amount < AUTO_MARKET_CONFIG.energyOrderMinAmountForPricing) continue;
         const roomKey = order.roomName || order.id;
         const prev = bestByRoom[roomKey];
         if (!prev || isBetterPrice(order, prev, orderType)) {
@@ -108,13 +110,13 @@ export const getOrderPrice = (
     orderType: ORDER_BUY | ORDER_SELL,
 ): number | null => {
     if (!hasMarketOrderApi()) return null;
-    let price = 0.01;
+    let price: number = AUTO_MARKET_CONFIG.energyAvgPriceFallback;
 
     // 读取当前 tick 的订单缓存。
     const orders = getAllOrdersCached(orderType, resourceType);
     if (!orders || orders.length === 0) return null;
 
-    const topOrders = pickTopOrdersByRoom(orders, resourceType, orderType, 10);
+    const topOrders = pickTopOrdersByRoom(orders, resourceType, orderType, AUTO_MARKET_CONFIG.topOrderRoomLimit);
     if (topOrders.length === 0) return null;
 
     const avgPrice = topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length;

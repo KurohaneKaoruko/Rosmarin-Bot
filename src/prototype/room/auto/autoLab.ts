@@ -112,7 +112,7 @@ const getCustomizeTask = (room: Room, getAvail: (res: ResourceConstant) => numbe
         const raw2 = LabMap[res]['raw2'] as ResourceConstant;
         if (limit > 0) {
             const cur = getAvail(res as any);
-            if (cur >= limit * 0.9) continue;
+            if (cur >= limit * AUTO_LAB_CONFIG.customTaskDoneRatio) continue;
         }
         const inputMin = getInputMin(res);
         if (getAvail(raw1) < inputMin || getAvail(raw2) < inputMin) continue;
@@ -128,82 +128,91 @@ const getCustomizeTask = (room: Room, getAvail: (res: ResourceConstant) => numbe
 }
 
 const getT1Task = (room: Room) => {
-    if (Game.time % 100) return [ null, 0 ];
+    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
 
-    let threshold = 10e3;
+    const threshold = AUTO_LAB_CONFIG.fallbackPrimaryThreshold;
+    const sideThreshold = AUTO_LAB_CONFIG.fallbackSecondaryThreshold;
+    const singleThreshold = AUTO_LAB_CONFIG.fallbackSingleReagentThreshold;
+    const batch = AUTO_LAB_CONFIG.fallbackBatchAmount;
     const H = r(RESOURCE_HYDROGEN);
     const O = r(RESOURCE_OXYGEN);
 
-    if ((H >= threshold && O >= 5000) || (O >= threshold && H >= 5000)) {
-        return [ 'OH', r('OH') + 10e3 ];
+    if ((H >= threshold && O >= sideThreshold) || (O >= threshold && H >= sideThreshold)) {
+        return [ 'OH', r('OH') + batch ];
     }
-    if (r('U') >= threshold && H >= 5000) {
-        return [ 'UH', r('UH') + 10e3 ];
+    if (r('U') >= threshold && H >= sideThreshold) {
+        return [ 'UH', r('UH') + batch ];
     }
-    if (r('K') >= threshold && O >= 5000) {
-        return [ 'KO', r('KO') + 10e3 ];
+    if (r('K') >= threshold && O >= sideThreshold) {
+        return [ 'KO', r('KO') + batch ];
     }
     
     if (r('L') >= threshold) {
         const LO = r('LO'), LH = r('LH');
-        if (O >= 5000 && H >= 5000) {
-            if (LO <= LH) return [ 'LO', LO + 10e3 ];
-            if (LH <= LO) return [ 'LH', LH + 10e3 ];
+        if (O >= sideThreshold && H >= sideThreshold) {
+            if (LO <= LH) return [ 'LO', LO + batch ];
+            if (LH <= LO) return [ 'LH', LH + batch ];
         } else {
-            if (O >= 10000) return [ 'LO', LO + 10e3 ];
-            if (H >= 10000) return [ 'LH', LH + 10e3 ];
+            if (O >= singleThreshold) return [ 'LO', LO + batch ];
+            if (H >= singleThreshold) return [ 'LH', LH + batch ];
         }
     }
     if (r('Z') >= threshold) {
         const ZO = r('ZO'), ZH = r('ZH');
-        if (O >= 5000 && H >= 5000) {
-            if (ZO <= ZH) return [ 'ZO', ZO + 10e3 ];
-            if (ZH <= ZO) return [ 'ZH', ZH + 10e3 ];
+        if (O >= sideThreshold && H >= sideThreshold) {
+            if (ZO <= ZH) return [ 'ZO', ZO + batch ];
+            if (ZH <= ZO) return [ 'ZH', ZH + batch ];
         } else {
-            if (O >= 10000) return [ 'ZO', ZO + 10e3 ];
-            if (H >= 10000) return [ 'ZH', ZH + 10e3 ];
+            if (O >= singleThreshold) return [ 'ZO', ZO + batch ];
+            if (H >= singleThreshold) return [ 'ZH', ZH + batch ];
         }
     }
 
-    if (r('ZK') >= 5000 && r('UL') >= 5000) {
-        return [ 'G', r('G') + 10e3 ];
+    if (r('ZK') >= sideThreshold && r('UL') >= sideThreshold) {
+        return [ 'G', r('G') + batch ];
     }
 
     return [ null, 0 ];
 }
 
 const getT2Task = (room: Room) => {
-    if (Game.time % 100) return [ null, 0 ];
+    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
-    if (r('OH') < 5000) return [ null, 0 ];
-    const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), 20e3);
-    if (check('GH', 'GH2O')) return [ 'GH2O', r('GH2O') + 10e3 ];
-    if (check('GO', 'GHO2')) return [ 'GHO2', r('GHO2') + 10e3 ];
-    if (check('LH', 'LH2O')) return [ 'LH2O', r('LH2O') + 10e3 ];
-    if (check('LO', 'LHO2')) return [ 'LHO2', r('LHO2') + 10e3 ];
-    if (check('ZH', 'ZH2O')) return [ 'ZH2O', r('ZH2O') + 10e3 ];
-    if (check('ZO', 'ZHO2')) return [ 'ZHO2', r('ZHO2') + 10e3 ];
-    if (check('UH', 'UH2O')) return [ 'UH2O', r('UH2O') + 10e3 ];
-    if (check('KO', 'KHO2')) return [ 'KHO2', r('KHO2') + 10e3 ];
+    const batch = AUTO_LAB_CONFIG.fallbackBatchAmount;
+    const minOH = AUTO_LAB_CONFIG.fallbackSecondaryThreshold;
+    const diffFloor = AUTO_LAB_CONFIG.fallbackDiffFloor;
+    if (r('OH') < minOH) return [ null, 0 ];
+    const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), diffFloor);
+    if (check('GH', 'GH2O')) return [ 'GH2O', r('GH2O') + batch ];
+    if (check('GO', 'GHO2')) return [ 'GHO2', r('GHO2') + batch ];
+    if (check('LH', 'LH2O')) return [ 'LH2O', r('LH2O') + batch ];
+    if (check('LO', 'LHO2')) return [ 'LHO2', r('LHO2') + batch ];
+    if (check('ZH', 'ZH2O')) return [ 'ZH2O', r('ZH2O') + batch ];
+    if (check('ZO', 'ZHO2')) return [ 'ZHO2', r('ZHO2') + batch ];
+    if (check('UH', 'UH2O')) return [ 'UH2O', r('UH2O') + batch ];
+    if (check('KO', 'KHO2')) return [ 'KHO2', r('KHO2') + batch ];
     return [ null, 0 ];
 }
 
 const getT3Task = (room: Room) => {
-    if (Game.time % 100) return [ null, 0 ];
+    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
-    if (r('X') <5000) return [ null, 0 ];
-    const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), 20e3);
-    if (check('GH2O', 'XGH2O')) return [ 'XGH2O', r('XGH2O') + 10e3 ];
-    if (check('GHO2', 'XGHO2')) return [ 'XGHO2', r('XGHO2') + 10e3 ];
-    if (check('LH2O', 'XLH2O')) return [ 'XLH2O', r('XLH2O') + 10e3 ];
-    if (check('LHO2', 'XLHO2')) return [ 'XLHO2', r('XLHO2') + 10e3 ];
-    if (check('ZH2O', 'XZH2O')) return [ 'XZH2O', r('XZH2O') + 10e3 ];
-    if (check('ZHO2', 'XZHO2')) return [ 'XZHO2', r('XZHO2') + 10e3 ];
-    if (check('UH2O', 'XUH2O')) return [ 'XUH2O', r('XUH2O') + 10e3 ];
-    if (check('KHO2', 'XKHO2')) return [ 'XKHO2', r('XKHO2') + 10e3 ];
+    const batch = AUTO_LAB_CONFIG.fallbackBatchAmount;
+    const minCatalyst = AUTO_LAB_CONFIG.fallbackSecondaryThreshold;
+    const diffFloor = AUTO_LAB_CONFIG.fallbackDiffFloor;
+    if (r('X') < minCatalyst) return [ null, 0 ];
+    const check = (res1: string, res2: string) => r(res1) > Math.max(r(res2), diffFloor);
+    if (check('GH2O', 'XGH2O')) return [ 'XGH2O', r('XGH2O') + batch ];
+    if (check('GHO2', 'XGHO2')) return [ 'XGHO2', r('XGHO2') + batch ];
+    if (check('LH2O', 'XLH2O')) return [ 'XLH2O', r('XLH2O') + batch ];
+    if (check('LHO2', 'XLHO2')) return [ 'XLHO2', r('XLHO2') + batch ];
+    if (check('ZH2O', 'XZH2O')) return [ 'XZH2O', r('XZH2O') + batch ];
+    if (check('ZHO2', 'XZHO2')) return [ 'XZHO2', r('XZHO2') + batch ];
+    if (check('UH2O', 'XUH2O')) return [ 'XUH2O', r('XUH2O') + batch ];
+    if (check('KHO2', 'XKHO2')) return [ 'XKHO2', r('XKHO2') + batch ];
     return [ null, 0 ];
 }

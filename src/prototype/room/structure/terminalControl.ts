@@ -1,8 +1,9 @@
 import { log } from "@/utils";
+import { THRESHOLDS } from "@/constant/Thresholds";
 
 export default class TerminalControl extends Room {
     TerminalWork() {
-        if (Game.time % 30 !== 2) return;
+        if (Game.time % THRESHOLDS.TERMINAL.CHECK_MOD !== THRESHOLDS.TERMINAL.CHECK_OFFSET) return;
         const terminal = this.terminal;
         if (!terminal || terminal.cooldown > 0) return;
 
@@ -27,7 +28,7 @@ export default class TerminalControl extends Room {
             // 能量发送：需要满足 send + cost(send) <= energyInTerminal
             // 用 sampleAmount 估算 cost/amount（ratio）来近似求解最大可发送量，减少试探/反复 calc
             if (energyInTerminal <= 0) return;
-            const sampleAmount = 1000;
+            const sampleAmount = THRESHOLDS.TERMINAL.ENERGY_COST_SAMPLE_AMOUNT;
             const ratio = Game.market.calcTransactionCost(sampleAmount, this.name, targetRoom) / sampleAmount;
             sendAmount = Math.min(sendAmount, Math.floor(energyInTerminal / (1 + ratio)));
             if (sendAmount <= 0) return;
