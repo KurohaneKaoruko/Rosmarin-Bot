@@ -1,3 +1,4 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 /** 双人小队 heal */
 const double_heal = {
     run: function (creep: Creep) {
@@ -29,9 +30,14 @@ const double_heal = {
         let healed = false;
     
         if(!creep.memory.bind) {
-            const creeps = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => !c.memory.bind && c.memory.role != 'double-heal' &&
-                                 c.memory.squad == creep.memory.squad });
+            const roleCreeps = getRoomTickCacheValue(creep.room, 'double_heal_squad_candidates', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (myCreep) =>
+                        myCreep.memory.role != 'double-heal' &&
+                        myCreep.memory.squad == creep.memory.squad
+                }) as Creep[]
+            );
+            const creeps = roleCreeps.filter((myCreep) => !myCreep.memory.bind);
             if(creeps.length) {
                 const squadCreep = creep.pos.findClosestByRange(creeps);
                 creep.memory.bind = squadCreep.id;
@@ -41,9 +47,12 @@ const double_heal = {
     
         if(!creep.memory.bind) {
             if (creep.hits < creep.hitsMax) creep.heal(creep);
-            let needHeal = creep.pos.findClosestByPath(FIND_MY_CREEPS,{
-                filter: (creep: Creep) => creep.hitsMax-creep.hits>100
-            });
+            const needHealTargets = getRoomTickCacheValue(creep.room, 'double_heal_need_targets', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (myCreep: Creep) => myCreep.hitsMax - myCreep.hits > 100
+                }) as Creep[]
+            );
+            let needHeal = creep.pos.findClosestByPath(needHealTargets);
             if(needHeal) {
                 if (creep.pos.isNearTo(needHeal)) {
                     creep.heal(needHeal);
@@ -81,3 +90,4 @@ const double_heal = {
 }
 
 export default double_heal
+

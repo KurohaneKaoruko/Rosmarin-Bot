@@ -1,17 +1,23 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const outDefend = {
     run: function(creep: Creep) {
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom);
             return;
         }
-        const hostileCreeps = creep.room.find(FIND_HOSTILE_CREEPS, {
-            filter: (c) => !Memory['whitelist']?.includes(c.owner.username)
-        });
+        const hostileCreeps = getRoomTickCacheValue(creep.room, 'out_defend_hostiles', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS, {
+                filter: (c) => !Memory['whitelist']?.includes(c.owner.username)
+            }) as Creep[]
+        );
         let targets = hostileCreeps as any;
         if(targets.length == 0) {
-            const invaderCores = creep.room.find(FIND_STRUCTURES, {
-                filter: (structure) => structure.structureType === STRUCTURE_INVADER_CORE
-            });
+            const invaderCores = getRoomTickCacheValue(creep.room, 'out_defend_invader_core', () =>
+                creep.room.find(FIND_STRUCTURES, {
+                    filter: (structure) => structure.structureType === STRUCTURE_INVADER_CORE
+                }) as StructureInvaderCore[]
+            );
             targets = invaderCores as any;
         }
               
@@ -49,11 +55,13 @@ const outDefend = {
             return;
         }
 
-        // 没有敌人时，治疗房间内的受损单位
+        // Heal damaged friendly creeps when no hostile target exists.
         else {
-            const damagedCreeps = creep.room.find(FIND_MY_CREEPS, {
-                filter: (c) => c.hits < c.hitsMax
-            });
+            const damagedCreeps = getRoomTickCacheValue(creep.room, 'out_defend_damaged_allies', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.hits < c.hitsMax
+                }) as Creep[]
+            );
             if (damagedCreeps.length > 0) {
                 const closestDamagedCreep = creep.pos.findClosestByRange(damagedCreeps);
                 const range = creep.pos.getRangeTo(closestDamagedCreep);
@@ -72,10 +80,9 @@ const outDefend = {
             }
         }
 
-
-
         return;
     }
 }
 
 export default outDefend;
+

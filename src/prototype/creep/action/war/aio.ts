@@ -1,3 +1,25 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
+const getRoomNonWhitelistHostiles = (creep: Creep) =>
+    getRoomTickCacheValue(creep.room, 'aio_room_non_whitelist_hostiles', () =>
+        creep.room.find(FIND_HOSTILE_CREEPS, { filter: (e) => !e.isWhiteList() }) as Creep[]
+    );
+
+const getRoomHostileStructures = (creep: Creep) =>
+    getRoomTickCacheValue(creep.room, 'aio_room_hostile_structures', () =>
+        creep.room.find(FIND_HOSTILE_STRUCTURES) as Structure[]
+    );
+
+const getRoomNonRoadStructures = (creep: Creep) =>
+    getRoomTickCacheValue(creep.room, 'aio_room_non_road_structures', () =>
+        creep.room.find(FIND_STRUCTURES, { filter: (e) => e.hits && e.structureType != STRUCTURE_ROAD }) as AnyStructure[]
+    );
+
+const findNonWhitelistHostilesInRange = (creep: Creep, range: number, filter?: (e: Creep) => boolean) => {
+    const hostiles = getRoomNonWhitelistHostiles(creep).filter((e) => creep.pos.inRangeTo(e, range));
+    return filter ? hostiles.filter(filter) : hostiles;
+};
+
 let autoAttack = (creep) => {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
     let flag = Game.flags[`aio-${name}`];
@@ -36,8 +58,15 @@ let autoAttack = (creep) => {
         em = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, { filter: e => !e.pos.coverRampart() && !e.isWhiteList() && e.body.some(e => e.type == ATTACK || e.type == RANGED_ATTACK) });
         if (em) isHostileCreep = true;
     }
-    if (!em) em = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 3, { filter: e => !e.pos.coverRampart() && !e.isWhiteList() })[0]
-    if (!em) em = creep.pos.findInRange(FIND_HOSTILE_STRUCTURES, 3, {filter: e => e.hits && !e.pos.coverRampart() && e.structureType != STRUCTURE_ROAD })[0];
+    if (!em) em = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart())[0]
+    if (!em) {
+        em = getRoomHostileStructures(creep).find((e) =>
+            creep.pos.inRangeTo(e, 3) &&
+            !!e.hits &&
+            !e.pos.coverRampart() &&
+            e.structureType != STRUCTURE_ROAD
+        );
+    }
 
     if (em) creep.room.visual.text('_', em.pos.x, em.pos.y + 0.35, { color: 'red', opacity: 0.75, font: 1 });
     if (em && (em as any).structureType) isHostileConstruction = true
@@ -46,18 +75,18 @@ let autoAttack = (creep) => {
     if (isHostileConstruction) {
         creep.moveTo(em)
         if (creep.pos.isNearTo(em) && (em.pos.coverRampart() || (em as any).owner)) {
-            let em1 = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 3, { filter: e => !e.pos.coverRampart() && !creep.pos.isNearTo(e) && !e.isWhiteList() })[0];// 找附近的爬
+            let em1 = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];// 找附近的爬
             // if(!em1) em1 = this.pos.findInRange(FIND_STRUCTURES,3,{filter:e=>e.hits<=25000&&!e.owner&&!e.pos.coverRampart()})[0];// 没事就找建筑打
             if (em1) creep.rangedAttack(em1)
             else creep.rangedMassAttack()
         } else if (creep.rangedAttack(em) == ERR_NOT_IN_RANGE) {//||!inner(creep.pos)
             // creep.rangedMassAttack()
             if (creep.room.controller && creep.room.controller.owner && !creep.room.my) {
-                em = creep.pos.findClosestByRange(FIND_STRUCTURES, { filter: e => e.hits && e.structureType != STRUCTURE_ROAD })
+                em = creep.pos.findClosestByRange(getRoomNonRoadStructures(creep));
                 creep.rangedAttack(em)
             }
         }
-        let em1 = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 3, { filter: e => !e.pos.coverRampart() && !creep.pos.isNearTo(e) && !e.isWhiteList() })[0];// 找附近的爬
+        let em1 = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];// 找附近的爬
         if (em1) creep.rangedAttack(em1)
     } else if (isHostileCreep) {
         creep.moveTo(em);
@@ -65,7 +94,7 @@ let autoAttack = (creep) => {
         else if (creep.rangedAttack(em) == ERR_NOT_IN_RANGE) {//||!inner(creep.pos)
             // creep.rangedMassAttack()
             if (creep.room.controller && creep.room.controller.owner && !creep.room.my) {
-                em = creep.pos.findClosestByRange(FIND_STRUCTURES, { filter: e => e.hits && e.structureType != STRUCTURE_ROAD })
+                em = creep.pos.findClosestByRange(getRoomNonRoadStructures(creep));
                 creep.rangedAttack(em)
             }
             else if (creep.pos.isNearTo(em) && (em as any).structureType != STRUCTURE_WALL && (em as any).structureType != STRUCTURE_ROAD && (em as any).structureType != STRUCTURE_CONTAINER) {
@@ -122,7 +151,9 @@ const aio = {
         creep.heal(creep);
 
         // 躲避
-        let attackHostile = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 3).find(e => e.body.some(t => t.boost == "XUH2O") && !e.isWhiteList());
+        let attackHostile = findNonWhitelistHostilesInRange(creep, 3, (e) =>
+            e.body.some((t) => t.boost == "XUH2O")
+        )[0];
         if (attackHostile) {
             if (creep.room.level > 0 && !creep.room.my && creep.room.tower) {
                 let exit = creep.pos.findClosestByPath(FIND_EXIT);
@@ -158,11 +189,11 @@ const aio = {
         }
 
         let rangedAttack = (c) => {
-            let creeps = c.pos.findInRange(FIND_HOSTILE_CREEPS, 1, { filter: e => !e.isWhiteList() });
+            let creeps = findNonWhitelistHostilesInRange(c, 1);
             if (creeps.length) {
                 return c.rangedMassAttack();
             }
-            creeps = c.pos.findInRange(FIND_HOSTILE_CREEPS, 3, { filter: e => !e.isWhiteList() });
+            creeps = findNonWhitelistHostilesInRange(c, 3);
             if (creeps.length) {
                 c.rangedAttack(creeps.reduce((a, b) => a.hits < b.hits ? a : b));
             }

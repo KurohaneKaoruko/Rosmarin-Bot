@@ -130,8 +130,12 @@ export default class TeamController {
                     continue;
                 }
                 // 成员集齐则排序, 结束准备状态
-                let creeps = teamData.creeps.map(Game.getObjectById).filter(Boolean) as Creep[];
-                creeps.sort((a, b) => TeamCalc.calcCreepDamage(b) - TeamCalc.calcCreepDamage(a));
+                const creeps = teamData.creeps.map(Game.getObjectById).filter(Boolean) as Creep[];
+                const creepDamageById: Record<string, number> = {};
+                for (const creep of creeps) {
+                    creepDamageById[creep.id] = TeamCalc.calcCreepDamage(creep);
+                }
+                creeps.sort((a, b) => creepDamageById[b.id] - creepDamageById[a.id]);
                 teamData.creeps = creeps.map(creep => creep.id);
                 teamData.status = 'attack';
                 continue;

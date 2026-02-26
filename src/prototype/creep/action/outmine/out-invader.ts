@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const outInvader = {
     run: function(creep: any) {
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -11,10 +13,13 @@ const outInvader = {
 
         let targets = invaderCores;
         if (targets.length === 0) {
-            const hostileCreeps = creep.room.find(FIND_HOSTILE_CREEPS, {
-                filter: (c: Creep) => !Memory['whitelist']?.includes(c.owner.username) && (
-                    c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0
-                )});
+            const hostileCreeps = getRoomTickCacheValue(creep.room, 'out_invader_hostile_creeps', () =>
+                creep.room.find(FIND_HOSTILE_CREEPS, {
+                    filter: (c: Creep) => !Memory['whitelist']?.includes(c.owner.username) && (
+                        c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0
+                    )
+                }) as Creep[]
+            );
             targets = hostileCreeps;
         }
         

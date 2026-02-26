@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const deposit_ranged = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -19,12 +21,19 @@ const deposit_ranged = {
             healOK = true;
         }
 
-        const hostileCreeps = creep.room.find(FIND_HOSTILE_CREEPS, {
+        const combatHostiles = getRoomTickCacheValue(creep.room, 'deposit_ranged_combat_hostiles', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS, {
                 filter: (c) => !Memory['whitelist'].includes(c.owner.username) &&
                 c.body.some(part => part.type == ATTACK || part.type == RANGED_ATTACK ||
-                    part.type == HEAL || part.type == WORK || part.type == CARRY) &&
-                (c.pos.inRangeTo(creep, 3) || c.pos.findInRange(FIND_DEPOSITS, 5).length)
-            });
+                    part.type == HEAL || part.type == WORK || part.type == CARRY)
+            }) as Creep[]
+        );
+        const deposits = getRoomTickCacheValue(creep.room, 'deposit_ranged_deposits', () =>
+            creep.room.find(FIND_DEPOSITS) as Deposit[]
+        );
+        const hostileCreeps = combatHostiles.filter((c) =>
+            c.pos.inRangeTo(creep, 3) || deposits.some((d) => d.pos.inRangeTo(c.pos, 5))
+        );
 
         if (hostileCreeps.length > 0) {
             const healer = hostileCreeps.find(c => c.body.some(p => p.type == HEAL));
@@ -56,16 +65,18 @@ const deposit_ranged = {
         }
 
         if (!healOK || !rangedOK || !moveOK) {
-            const myCreeps = creep.room.find(FIND_MY_CREEPS, 
-                {filter: (c) => c.hits < c.hitsMax &&
-                creep.pos.inRangeTo(c, 3) && 
-                c.memory.role !== 'deposit-attack' &&
-                c.memory.role !== 'deposit-heal'});
+            const damagedAllies = getRoomTickCacheValue(creep.room, 'deposit_ranged_damaged_allies', () =>
+                creep.room.find(FIND_MY_CREEPS,
+                    {filter: (c) => c.hits < c.hitsMax &&
+                    c.memory.role !== 'deposit-attack' &&
+                    c.memory.role !== 'deposit-heal'}) as Creep[]
+            );
+            const myCreeps = damagedAllies.filter((c) => creep.pos.inRangeTo(c, 3));
             let healTarget = myCreeps.find(c => creep.pos.inRangeTo(c, 1));
             if (healTarget) {
                 if(!healOK) creep.heal(healTarget);
             } else if (myCreeps.length > 0){
-                let healTarget = creep.pos.findClosestByRange(myCreeps);
+                healTarget = creep.pos.findClosestByRange(myCreeps);
                 if(!moveOK) creep.moveTo(healTarget,{ignoreCreeps: false});
                 if(!rangedOK && creep.pos.isNearTo(healTarget)) creep.rangedHeal(healTarget);
             }
@@ -79,54 +90,8 @@ const deposit_ranged = {
                 creep.moveTo(deposit, {range: 5, ignoreCreeps: false});
             }
         }
-
-
-
-        // let hostiles = creep.room.find(FIND_HOSTILE_CREEPS, {
-        //     filter: (c) => !Memory['whitelist'].includes(c.owner.username) &&
-        //     c.body.some(part => part.type == ATTACK || part.type == RANGED_ATTACK ||
-        //         part.type == HEAL || part.type == WORK || part.type == CARRY) &&
-        //     (c.pos.inRangeTo(creep, 3) || c.pos.findInRange(FIND_DEPOSITS, 3).length)
-        // });
-    
-        // if (hostiles.length) {
-        //     let hostile = creep.pos.findClosestByRange(hostiles);
-        //     if (creep.pos.isNearTo(hostile)) {
-        //         creep.rangedMassAttack();
-        //         creep.heal(creep);
-        //     } else if (creep.pos.inRangeTo(hostile, 3)) {
-        //         creep.rangedAttack(hostile);
-        //         creep.heal(creep);
-        //         creep.moveTo(hostile, { reusePath: 0, ignoreCreeps: false });
-        //     } else {
-        //         creep.moveTo(hostile, { reusePath: 0, ignoreCreeps: false });
-        //     }
-        // }
-        // if (creep.hits < creep.hitsMax) {
-        //     creep.heal(creep);
-        // } else {
-        //     let healTarget = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
-        //         filter: (c) => c.hits < c.hitsMax && 
-        //         c.memory.role !== 'deposit-attack' &&
-        //         c.memory.role !== 'deposit-heal'
-        //     });
-        //     if (healTarget) {
-        //         if (creep.pos.inRangeTo(healTarget, 1)) {
-        //             creep.heal(healTarget);
-        //         } else {
-        //             creep.moveTo(healTarget, { ignoreCreeps: false });
-        //         }
-        //     } else {
-        //         let deposit = creep.pos.findClosestByRange(FIND_DEPOSITS);
-        //         if (!deposit) return;
-        //         if (creep.pos.inRangeTo(deposit, 5)) {
-        //             creep.harvest(deposit);
-        //         } else {
-        //             creep.moveTo(deposit, { range: 5, ignoreCreeps: false });
-        //         }
-        //     }
-        // }
     }
 }
 
 export default deposit_ranged;
+

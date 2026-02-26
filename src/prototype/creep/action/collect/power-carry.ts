@@ -1,6 +1,13 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const power_carry = {
     source: function(creep: Creep) {
-        let powerTombstone = creep.room.find(FIND_TOMBSTONES,{filter: (r) => r.store.getUsedCapacity(RESOURCE_POWER) > 0})[0];
+        const powerTombstones = getRoomTickCacheValue(creep.room, 'power_carry_tombstones', () =>
+            creep.room.find(FIND_TOMBSTONES, {
+                filter: (r) => r.store.getUsedCapacity(RESOURCE_POWER) > 0
+            }) as Tombstone[]
+        );
+        let powerTombstone = powerTombstones.find((t) => t.store.getUsedCapacity(RESOURCE_POWER) > 0);
         if (powerTombstone) {
             creep.memory['powerTombstoneId'] = powerTombstone.id;
             creep.goWithdraw(powerTombstone as any, RESOURCE_POWER);
@@ -43,13 +50,23 @@ const power_carry = {
             return;
         }
         // 再处理能找到的目标
-        powerDropped = creep.room.find(FIND_DROPPED_RESOURCES,{filter: (r) => r.resourceType == RESOURCE_POWER})[0];
+        const droppedPowerResources = getRoomTickCacheValue(creep.room, 'power_carry_dropped_power', () =>
+            creep.room.find(FIND_DROPPED_RESOURCES, {
+                filter: (r) => r.resourceType == RESOURCE_POWER
+            }) as Resource[]
+        );
+        powerDropped = droppedPowerResources.find((r) => r.amount > 0);
         if (powerDropped) {
             creep.memory['powerDroppedId'] = powerDropped.id;
             creep.goPickup(powerDropped);
             return;
         }
-        powerRuin = creep.room.find(FIND_RUINS,{filter: (r) => r.store.getUsedCapacity(RESOURCE_POWER) > 0})[0];
+        const powerRuins = getRoomTickCacheValue(creep.room, 'power_carry_power_ruins', () =>
+            creep.room.find(FIND_RUINS, {
+                filter: (r) => r.store.getUsedCapacity(RESOURCE_POWER) > 0
+            }) as Ruin[]
+        );
+        powerRuin = powerRuins.find((r) => r.store.getUsedCapacity(RESOURCE_POWER) > 0);
         if (powerRuin) {
             creep.memory['powerRuinId'] = powerRuin.id;
             creep.goWithdraw(powerRuin, RESOURCE_POWER);
@@ -58,10 +75,12 @@ const power_carry = {
         
         // 如果都没有, 那么做如下处理。
         if (!powerBank && !powerDropped && !powerRuin) {
-            _.filter(Game.creeps, (c) => 
-                c.memory.role == 'power-carry' &&
-                c.memory.targetRoom == creep.room.name)
-                .forEach((c) => {c.memory['suicide'] = true});
+            const powerCarryCreeps = getRoomTickCacheValue(creep.room, 'power_carry_target_creeps', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'power-carry' && c.memory.targetRoom == creep.room.name
+                }) as Creep[]
+            );
+            powerCarryCreeps.forEach((c) => { c.memory['suicide'] = true; });
             if (creep.store.getUsedCapacity(RESOURCE_POWER) === 0) {
                 creep.suicide();
                 return false;

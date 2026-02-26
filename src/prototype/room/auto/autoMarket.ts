@@ -490,47 +490,60 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
     if(!room || !room.terminal) return ERR_NOT_FOUND;
     if (!hasMarketOrderApi()) return ERR_NOT_FOUND;
 
-    // 读取当前 tick 的订单列表，并在副本上排序/过滤
-    let orders = getAllOrdersCached(orderType, res).slice();
-    if(orders.length === 0) return ERR_NOT_FOUND;
+    const allOrders = getAllOrdersCached(orderType, res);
+    if(allOrders.length === 0) return ERR_NOT_FOUND;
 
-    if (price) {
-        orders = orders.filter(order => {
-            if (orderType === ORDER_SELL) {
-                return order.price <= price;
-            } else {
-                return order.price >= price;
+    const candidateLimit = Math.min(allOrders.length, Math.max(length, 50));
+    const candidates: Array<{ order: Order; distance: number }> = [];
+
+    for (const order of allOrders) {
+        if (price) {
+            if (orderType === ORDER_SELL && order.price > price) continue;
+            if (orderType === ORDER_BUY && order.price < price) continue;
+        }
+
+        const distance = Game.map.getRoomLinearDistance(roomName, order.roomName);
+        let insertAt = candidates.length;
+
+        for (let i = 0; i < candidates.length; i++) {
+            const current = candidates[i];
+            const betterPrice = orderType === ORDER_SELL
+                ? order.price < current.order.price
+                : order.price > current.order.price;
+            const better = betterPrice || (order.price === current.order.price && distance < current.distance);
+            if (better) {
+                insertAt = i;
+                break;
             }
-        })
+        }
+
+        if (insertAt === candidates.length) {
+            if (candidates.length < candidateLimit) {
+                candidates.push({ order, distance });
+            }
+            continue;
+        }
+
+        candidates.splice(insertAt, 0, { order, distance });
+        if (candidates.length > candidateLimit) {
+            candidates.pop();
+        }
     }
 
-    // 按照单价排序
-    orders.sort((a, b) => {
-        if (a.price === b.price) {
-            return Game.map.getRoomLinearDistance(roomName, a.roomName) -
-                   Game.map.getRoomLinearDistance(roomName, b.roomName)
-        }
-        if (orderType === ORDER_SELL) {
-            return a.price - b.price;
-        } else {
-            return b.price - a.price;
-        }
-    });
-    
+    if (candidates.length === 0) return ERR_NOT_FOUND;
 
     const ecost = getEnergyAvgPrice();
 
-    let bestOrder = null;
+    let bestOrder: Order | null = null;
     let bestCost = (orderType === ORDER_SELL) ? Infinity : 0;
     let TotalDealAmount = 0;
     let TransferEnergyCost = 0;
     let TotalPrice = 0;
-    const maxOrders = Math.min(orders.length, Math.max(length, 50));
-    for (let i = 0; i < maxOrders; i++) {
-        const order = orders[i];    // 订单
+    for (let i = 0; i < candidates.length; i++) {
+        const order = candidates[i].order;
 
-        let dealAmount = Math.min(amount, order.amount);  // 交易数量
-        let transferEnergyCost = calcTransactionCostSafe(dealAmount, roomName, order.roomName);  // 交易能量成本
+        let dealAmount = Math.min(amount, order.amount);
+        let transferEnergyCost = calcTransactionCostSafe(dealAmount, roomName, order.roomName);
         if (res != RESOURCE_ENERGY && transferEnergyCost > room.terminal.store[RESOURCE_ENERGY]) {
             dealAmount *= room.terminal.store[RESOURCE_ENERGY] / transferEnergyCost;
             dealAmount = Math.floor(dealAmount);
@@ -548,7 +561,7 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
             transferEnergyCost = calcTransactionCostSafe(dealAmount, roomName, order.roomName);
         }
 
-        let totalPrice = dealAmount * order.price;  // 交易金额
+        let totalPrice = dealAmount * order.price;
 
         let cost = 0;
         const ENERGY_COST_FACTOR = ecost;
@@ -556,15 +569,15 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
             if(orderType === ORDER_SELL) {
                 const net = (dealAmount - transferEnergyCost);
                 if (net <= 0) continue;
-                cost = totalPrice / net;  // 购买能量：交易金额÷(交易数量-传输消耗)=实际价格
+                cost = totalPrice / net;
             } else {
-                cost = totalPrice / (dealAmount + transferEnergyCost);  // 出售能量：交易金额÷(交易数量+传输消耗)=实际价格
+                cost = totalPrice / (dealAmount + transferEnergyCost);
             }
         } else {
             if(orderType === ORDER_SELL) {
-                cost = (totalPrice + transferEnergyCost * ENERGY_COST_FACTOR) / dealAmount;  // 购买资源：(交易金额+能量估算成本)÷实际到账数量=实际价格
+                cost = (totalPrice + transferEnergyCost * ENERGY_COST_FACTOR) / dealAmount;
             } else {
-                cost = (totalPrice - transferEnergyCost * ENERGY_COST_FACTOR) / dealAmount;  // 出售资源：(交易金额-能量估算成本)÷实际消耗数量=实际价格
+                cost = (totalPrice - transferEnergyCost * ENERGY_COST_FACTOR) / dealAmount;
             }
         }
 
@@ -638,3 +651,4 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
 
     return result;
 }
+

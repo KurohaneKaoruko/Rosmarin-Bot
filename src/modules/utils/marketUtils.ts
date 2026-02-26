@@ -2,7 +2,7 @@ import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
 
 /**
  * 市场兼容工具。
- * 赛季世界可能关闭订单相关 API，但终端传输成本依然需要可计算。
+ * 赛季世界可能关闭订单相关 API，但终端传输成本仍然需要可计算。
  */
 const getMarket = () => (Game as any).market as any;
 
@@ -44,6 +44,62 @@ export const getEnergyHistoryAvgPrice = (fallback = 0.01): number => {
     return avg;
 };
 
+const isBetterPrice = (a: Order, b: Order, orderType: ORDER_BUY | ORDER_SELL): boolean => {
+    if (orderType === ORDER_BUY) return a.price > b.price;
+    return a.price < b.price;
+};
+
+const pushTopOrder = (
+    topOrders: Order[],
+    order: Order,
+    orderType: ORDER_BUY | ORDER_SELL,
+    limit: number,
+): void => {
+    let insertAt = topOrders.length;
+    for (let i = 0; i < topOrders.length; i++) {
+        if (isBetterPrice(order, topOrders[i], orderType)) {
+            insertAt = i;
+            break;
+        }
+    }
+
+    if (insertAt === topOrders.length) {
+        if (topOrders.length < limit) {
+            topOrders.push(order);
+        }
+        return;
+    }
+
+    topOrders.splice(insertAt, 0, order);
+    if (topOrders.length > limit) {
+        topOrders.pop();
+    }
+};
+
+const pickTopOrdersByRoom = (
+    orders: Order[],
+    resourceType: ResourceConstant,
+    orderType: ORDER_BUY | ORDER_SELL,
+    limit: number,
+): Order[] => {
+    const bestByRoom: Record<string, Order> = {};
+
+    for (const order of orders) {
+        if (resourceType === RESOURCE_ENERGY && order.amount < 10000) continue;
+        const roomKey = order.roomName || order.id;
+        const prev = bestByRoom[roomKey];
+        if (!prev || isBetterPrice(order, prev, orderType)) {
+            bestByRoom[roomKey] = order;
+        }
+    }
+
+    const topOrders: Order[] = [];
+    for (const roomKey in bestByRoom) {
+        pushTopOrder(topOrders, bestByRoom[roomKey], orderType, limit);
+    }
+    return topOrders;
+};
+
 /**
  * 从不同房间的头部订单中估算一个较稳健的挂单价。
  */
@@ -53,21 +109,12 @@ export const getOrderPrice = (
 ): number | null => {
     if (!hasMarketOrderApi()) return null;
     let price = 0.01;
-    // 读取当前 tick 的订单缓存
+
+    // 读取当前 tick 的订单缓存。
     const orders = getAllOrdersCached(orderType, resourceType);
     if (!orders || orders.length === 0) return null;
 
-    const sortedOrders = orders.slice().sort((a, b) => orderType === ORDER_BUY ? b.price - a.price : a.price - b.price);
-
-    const seenRooms = Object.create(null) as Record<string, true>;
-    const topOrders = sortedOrders.filter((order) => {
-        if (resourceType === RESOURCE_ENERGY && order.amount < 10000) return false;
-        const roomKey = order.roomName || order.id;
-        if (seenRooms[roomKey]) return false;
-        seenRooms[roomKey] = true;
-        return true;
-    }).slice(0, 10);
-
+    const topOrders = pickTopOrdersByRoom(orders, resourceType, orderType, 10);
     if (topOrders.length === 0) return null;
 
     const avgPrice = topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length;
@@ -87,3 +134,4 @@ export const getOrderPrice = (
 
     return price;
 };
+

@@ -1,4 +1,6 @@
 /** 双人小队 heal */
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const double_heal = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -29,11 +31,15 @@ const double_heal = {
         let healed = false;
     
         if(!creep.memory.bind) {
-            const attackCreep = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => c.memory.role == 'defend-2attack' && !c.memory.bind});
-            if (attackCreep.length > 0) {
-                creep.memory.bind = attackCreep[0].id;
-                attackCreep[0].memory.bind = creep.id;
+            const attackCreeps = getRoomTickCacheValue(creep.room, 'defend_2heal_attack_creeps', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'defend-2attack'
+                }) as Creep[]
+            );
+            const attackCreep = attackCreeps.find((c) => !c.memory.bind);
+            if (attackCreep) {
+                creep.memory.bind = attackCreep.id;
+                attackCreep.memory.bind = creep.id;
             }
             return;
         }

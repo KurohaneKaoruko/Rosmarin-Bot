@@ -152,13 +152,11 @@ export default class SpawnControl extends Room {
                 }
             }
             
-            let T_num = 0, C_num = 0, H_num = 0, univ_num = 0;
-            this.find(FIND_MY_CREEPS).forEach(c => {
-                if (c.memory.role == 'transport') T_num++;
-                if (c.memory.role == 'carrier') C_num++;
-                if (c.memory.role == 'harvester') H_num++;
-                if (c.memory.role == 'universal') univ_num++;
-            })
+            const creepNum = this.getCreepNum();
+            const T_num = creepNum['transport'] || 0;
+            const C_num = creepNum['carrier'] || 0;
+            const H_num = creepNum['harvester'] || 0;
+            let univ_num = creepNum['universal'] || 0;
             const spawnMissionNum = this.getSpawnMissionNum() || {};
 
             if ((this.storage && this.storage.store[RESOURCE_ENERGY] > data.cost * 10) ||
@@ -183,3 +181,4 @@ export default class SpawnControl extends Room {
         }
     }
 }
+

@@ -2,6 +2,7 @@ import { RoleData, RoleLevelData } from '@/constant/CreepConstant'
 import { decompressBodyConfig } from "@/modules/utils/compress";
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/utils/memory';
+import { getDowngradedLogisticsCountByHomeRoom, hasSoonDeadCreepByHomeRoomRole } from '@/modules/utils/creepTickIndex';
 
 // 孵化相关
 const SPAWN_MIN_ENERGY = THRESHOLDS.SPAWN.EMERGENCY_ENERGY_THRESHOLD * 50;
@@ -49,41 +50,14 @@ const hasMyConstructionSitesCached = (room: Room) => {
     return false;
 }
 
-const getDowngradedLogisticsCountByHomeRoom = (() => {
-    let cachedTick = -1;
-    let cached: Record<string, Record<string, number>> = {};
-    return () => {
-        if (cachedTick === Game.time) return cached;
-        cachedTick = Game.time;
-        cached = {};
-        for (const creep of Object.values(Game.creeps)) {
-            if (!creep || creep.ticksToLive < creep.body.length * 3) continue;
-            if (!creep.memory?.downgraded) continue;
-            const role = creep.memory.role;
-            if (role !== 'transport' && role !== 'carrier' && role !== 'manager') continue;
-            const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
-            if (!cached[home]) cached[home] = {};
-            cached[home][role] = (cached[home][role] || 0) + 1;
-        }
-        return cached;
-    };
-})();
-
 const RoleSpawnCheck = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
         let num = room.source.length;
         if (num <= 0) return false;
         if (getRoomMode(room) === 'high') {
-            // high mode: pre-spawn one replacement to reduce source idle time.
-            const harvesters = room.find(FIND_MY_CREEPS, {
-                filter: (creep: Creep) =>
-                    creep.memory.role === 'harvester' &&
-                    (creep.memory.home || creep.memory.homeRoom || creep.room.name) === room.name
-            }) as Creep[];
-            const shouldPreSpawn = harvesters.some(
-                (creep) => (creep.ticksToLive || 0) <= creep.body.length * 4 + 10
-            );
+            // High mode pre-spawns one replacement when a local harvester is near expiry.
+            const shouldPreSpawn = hasSoonDeadCreepByHomeRoomRole(room.name, 'harvester', 10);
             if (shouldPreSpawn) num += 1;
         }
         return current < num;
@@ -278,7 +252,7 @@ export default class SpawnMission extends Room {
         const state = getEnergyState(this);
         const shouldRecover = state === 'NORMAL' || state === 'SURPLUS';
         const downgradedCount: Record<string, number> = shouldRecover
-            ? (getDowngradedLogisticsCountByHomeRoom()[this.name] || {})
+            ? (getDowngradedLogisticsCountByHomeRoom(this.name))
             : {};
     
         for (const role in RoleSpawnCheck) {
@@ -340,3 +314,4 @@ export default class SpawnMission extends Room {
         return OK;
     }
 }
+

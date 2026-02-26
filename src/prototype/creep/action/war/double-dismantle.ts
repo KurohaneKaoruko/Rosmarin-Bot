@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 function FlagActionMove(creep: Creep) {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
     const moveflag = Game.flags[`2D-${name}-MOVE`];
@@ -27,6 +29,11 @@ function FlagActionDismantle(creep: Creep) {
 
 function AutoFindTarget(creep: Creep) {
     let room = creep.room;
+    const dangerousHostiles = creep.findHostileCreeps().filter((hostile) =>
+        !hostile.my &&
+        !hostile.isWhiteList() &&
+        (hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0)
+    );
     const enemiesStructures = [
         ...room.rampart, ...room.constructedWall, ...room.extension, ...room.tower, ...room.spawn, ...room.lab,
         room.observer, room.factory, room.storage, room.terminal, room.nuker, room.powerSpawn,
@@ -37,9 +44,7 @@ function AutoFindTarget(creep: Creep) {
     let Structures = enemiesStructures.filter((s: any) => s &&
         s.structureType != STRUCTURE_RAMPART && s.structureType != STRUCTURE_WALL &&
         (!s.store || s.store.getUsedCapacity() <= 3000) &&
-        s.pos.findInRange(FIND_HOSTILE_CREEPS, 8)
-        .filter((c: Creep) => !c.my && !c.isWhiteList() &&
-        (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)).length == 0
+        !dangerousHostiles.some((hostile) => hostile.pos.inRangeTo(s.pos, 8))
     );
     let targetStructure = creep.pos.findClosestByPath(Structures, {
         ignoreCreeps: false,
@@ -51,9 +56,7 @@ function AutoFindTarget(creep: Creep) {
     if (!targetStructure) {
         Structures = enemiesStructures.filter((s: any) => s &&
             (s.structureType == STRUCTURE_RAMPART || s.structureType == STRUCTURE_WALL) &&
-            s.pos.findInRange(FIND_HOSTILE_CREEPS, 8)
-            .filter((c: Creep) => !c.my && !c.isWhiteList() &&
-            (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)).length == 0
+            !dangerousHostiles.some((hostile) => hostile.pos.inRangeTo(s.pos, 8))
         );
         targetStructure = creep.pos.findClosestByPath(Structures, {
             ignoreCreeps: true,
@@ -83,24 +86,31 @@ function AutoFindTarget(creep: Creep) {
 function AutoActionDismantle(creep: Creep) {
     // 获取缓存的目标
     let target = Game.getObjectById(creep.memory['targetId']) as Structure;
+    const roomHostiles = getRoomTickCacheValue(creep.room, 'double_dismantle_room_hostiles', () =>
+        creep.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+    );
+    const targetDangerHostiles = target ? roomHostiles.filter((c) =>
+        target.pos.inRangeTo(c, 6) &&
+        ((!c.isWhiteList() &&
+        c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 4)) ||
+        (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6)))
+    ) : undefined;
 
     // 如果目标位于危险区域, 更换目标
-    if (target && target.pos.findInRange(FIND_HOSTILE_CREEPS, 6, {
-        filter: (c) => !c.isWhiteList() &&
-        (c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 4)) ||
-        (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6))
-    })) {
+    if (target && targetDangerHostiles) {
         creep.memory['targetId'] = null;
         AutoFindTarget(creep);
         target = Game.getObjectById(creep.memory['targetId']) as Structure;
     }
 
     // 规避
-    if (creep.pos.findInRange(FIND_HOSTILE_CREEPS, 6, {
-        filter: (c) => !c.isWhiteList() &&
-        (c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 5)) ||
-        (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6))
-    }).length) {
+    const closeDangerHostiles = roomHostiles.filter((c) =>
+        creep.pos.inRangeTo(c, 6) &&
+        ((!c.isWhiteList() &&
+        c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 5)) ||
+        (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6)))
+    );
+    if (closeDangerHostiles.length) {
         let result = creep.doubleFlee();
         if (result === OK) return true;
     }

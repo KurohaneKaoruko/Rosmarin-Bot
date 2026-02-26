@@ -1,6 +1,11 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 // 未绑定时的行动
 const noBindAction = (creep: Creep) => {
-    let hostiles = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 8) || [];
+    const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_room_hostiles', () =>
+        creep.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+    );
+    const hostiles = roomHostiles.filter((c) => creep.pos.inRangeTo(c, 8));
     if (hostiles.length == 0) return;
     const healHostiles = hostiles.filter((c: any) => c.body.some((p: any) => p.type == HEAL));
     if (healHostiles.length > 0) {
@@ -77,9 +82,12 @@ const power_attack = {
 
         // 索敌
         if (Game.time % 5 == 0 || !creep.memory['hostile']) {
-            let hostiles = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 8, {
-                filter: (c) => c.pos.inRangeTo(powerBank.pos, 8)
-            }) || [];
+            const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_room_hostiles', () =>
+                creep.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+            );
+            const hostiles = roomHostiles.filter((c) =>
+                creep.pos.inRangeTo(c, 8) && c.pos.inRangeTo(powerBank.pos, 8)
+            );
             const attackHostiles = hostiles.filter((c: any) => c.body.some((p: any) => p.type == ATTACK || p.type == RANGED_ATTACK));
             const healHostiles = hostiles.filter((c: any) => c.body.some((p: any) => p.type == HEAL));
             let hostile = creep.pos.findClosestByRange([...healHostiles, ...attackHostiles]) ||
@@ -96,9 +104,12 @@ const power_attack = {
             if (hostile && hostile.pos.inRangeTo(powerBank.pos, 10)) {
                 if (creep.pos.isNearTo(hostile)) creep.attack(hostile);
                 else {
-                    const nearCreeps = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 1, {
-                        filter: (c) => !Memory['whitelist'].includes(c.owner.username)
-                    }) || [];
+                    const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_non_whitelist_hostiles', () =>
+                        creep.room.find(FIND_HOSTILE_CREEPS, {
+                            filter: (c) => !Memory['whitelist'].includes(c.owner.username)
+                        }) as Creep[]
+                    );
+                    const nearCreeps = roomHostiles.filter((c) => creep.pos.inRangeTo(c, 1));
                     if (nearCreeps.length > 0) creep.attack(nearCreeps[0]);
                 }
                 if (!hostile.getActiveBodyparts(ATTACK)) {
@@ -115,9 +126,12 @@ const power_attack = {
             powerBank.ticksToDecay > 1500 &&
             creep.ticksToLive > 100) {
             // 如果没有搬运工在附近, 暂时停止采集
-            if (creep.pos.findInRange(FIND_MY_CREEPS, 10, {
-                filter: (c) => c.memory.role == 'power-carry'
-            }).length == 0) return;
+            const powerCarryCreeps = getRoomTickCacheValue(creep.room, 'power_attack_power_carries', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'power-carry'
+                }) as Creep[]
+            );
+            if (!powerCarryCreeps.some((c) => creep.pos.inRangeTo(c, 10))) return;
         }
         
         // 攻击 powerBank

@@ -1,4 +1,6 @@
-/** 外矿防御 双人小队 heal */
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
+/** å¤–çŸ¿é˜²å¾¡ åŒäººå°é˜Ÿ heal */
 const out_double_heal = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -9,8 +11,12 @@ const out_double_heal = {
         let healed = false;
     
         if(!creep.memory.bind) {
-            const squadCreeps = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => c.memory.role == 'out-2attack' && !c.memory.bind});
+            const roleCreeps = getRoomTickCacheValue(creep.room, 'out_2heal_attackers', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'out-2attack'
+                }) as Creep[]
+            );
+            const squadCreeps = roleCreeps.filter((c) => !c.memory.bind);
             if(squadCreeps.length) {
                 const squadCreep = creep.pos.findClosestByRange(squadCreeps);
                 creep.memory.bind = squadCreep.id;

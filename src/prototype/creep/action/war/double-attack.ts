@@ -1,3 +1,11 @@
+function isDoubleAttackDangerHostile(hostile: Creep, creep: Creep): boolean {
+    return (!hostile.my &&
+        !hostile.isWhiteList() &&
+        hostile.getActiveBodyparts(ATTACK) >= 30 &&
+        hostile.pos.inRangeTo(creep, 5)) ||
+        hostile.getActiveBodyparts(RANGED_ATTACK) >= 30;
+}
+
 function FlagActionMove(creep: Creep) {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
     const moveflag = Game.flags[`2A-${name}-MOVE`];
@@ -46,12 +54,8 @@ function AutoFindTarget(creep: Creep) {
 
     // 使用 findHostileCreeps 找敌方creep
     const allEnemies = creep.findHostileCreeps();
-    const enemies = allEnemies.filter((c) =>
-        c.pos.findInRange(FIND_HOSTILE_CREEPS, 8)
-        .filter((c: Creep) => !c.my && !c.isWhiteList() &&
-        (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 5)) ||
-        (c.getActiveBodyparts(RANGED_ATTACK) >= 30)).length == 0
-    );
+    const dangerousEnemies = allEnemies.filter((hostile) => isDoubleAttackDangerHostile(hostile, creep));
+    const enemies = allEnemies.filter((c) => !dangerousEnemies.some((hostile) => hostile.pos.inRangeTo(c.pos, 8)));
     if (enemies.length > 0) {
         const targetEnemy = creep.pos.findClosestByPath(enemies);
         if (targetEnemy) {
@@ -77,10 +81,7 @@ function AutoFindTarget(creep: Creep) {
     let Structures = enemiesStructures.filter((s: any) => s &&
         s.structureType != STRUCTURE_RAMPART && s.structureType != STRUCTURE_WALL &&
         (!s.store || s.store.getUsedCapacity() <= 3000) &&
-        s.pos.findInRange(FIND_HOSTILE_CREEPS, 6)
-        .filter((c: Creep) => !c.my && !c.isWhiteList() &&
-        (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 5)) ||
-        (c.getActiveBodyparts(RANGED_ATTACK) >= 30)).length == 0
+        !dangerousEnemies.some((hostile) => hostile.pos.inRangeTo(s.pos, 6))
     );
     let targetStructure = creep.pos.findClosestByPath(Structures, {
         ignoreCreeps: false,
@@ -92,10 +93,7 @@ function AutoFindTarget(creep: Creep) {
     if (!targetStructure) {
         Structures = enemiesStructures.filter((s: any) => s &&
             (s.structureType == STRUCTURE_RAMPART || s.structureType == STRUCTURE_WALL) &&
-            s.pos.findInRange(FIND_HOSTILE_CREEPS, 6)
-            .filter((c: Creep) => !c.my && !c.isWhiteList() &&
-            (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 5)) ||
-            (c.getActiveBodyparts(RANGED_ATTACK) >= 30)).length == 0
+            !dangerousEnemies.some((hostile) => hostile.pos.inRangeTo(s.pos, 6))
         );
         targetStructure = creep.pos.findClosestByPath(Structures, {
             ignoreCreeps: true,

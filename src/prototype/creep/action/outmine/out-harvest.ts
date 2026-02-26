@@ -1,4 +1,5 @@
 import { compress } from '@/modules/utils/compress';
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 
 
@@ -143,10 +144,14 @@ const outHarvest = {
 
     // 尝试将能量传递给附近的运输单位
     transferToNearbyCarrier: function(creep) {
-        const nearbyCarrier = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-            filter: (c) => ((c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                    c.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
-        })[0];
+        const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
+            creep.room.find(FIND_MY_CREEPS, {
+                filter: (c) =>
+                    (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                    c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            }) as Creep[]
+        );
+        const nearbyCarrier = carriers.find((c) => creep.pos.inRangeTo(c, 1));
 
         if (!nearbyCarrier) return false;
 
@@ -225,7 +230,14 @@ const outHarvest = {
             if (targetSource.energy == 0) return;
             creep.harvest(targetSource);
         } else {
-            if(targetSource.pos.findInRange(FIND_HOSTILE_CREEPS, 3).length > 0) return;
+            const dangerousHostiles = getRoomTickCacheValue(creep.room, 'out_harvest_dangerous_hostiles', () =>
+                creep.room.find(FIND_HOSTILE_CREEPS, {
+                    filter: (c) =>
+                        !c.isWhiteList() &&
+                        (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
+                }) as Creep[]
+            );
+            if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource.pos, 3))) return;
             creep.moveTo(targetSource, {range: 1, maxRooms: 1, plainCost: 2, swampCost: 10});
         }
 
@@ -241,3 +253,4 @@ const outHarvest = {
 }
 
 export default outHarvest;
+

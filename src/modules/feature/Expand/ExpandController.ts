@@ -1,6 +1,7 @@
 import { parseShardRoomName } from '@/modules/infra/shardRoom';
 import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/infra/interShard';
 import { getBotMemory, getMissionPools } from '@/modules/utils/memory';
+import { getExpandCreepCountsAll } from '@/modules/utils/creepTickIndex';
 
 type LocalExpandPlan = {
     id: string;
@@ -32,18 +33,15 @@ const getExpandCreepCounts = (() => {
     return () => {
         if (cachedTick === Game.time) return cached;
         cachedTick = Game.time;
-        const localCounts: Record<string, Record<string, number>> = {};
-        for (const creep of Object.values(Game.creeps)) {
-            if (!creep) continue;
-            const id = (creep.memory as any).expandId;
-            if (!id) continue;
-            const role = creep.memory.role || 'unknown';
-            if (!localCounts[id]) localCounts[id] = {};
-            localCounts[id][role] = (localCounts[id][role] || 0) + 1;
-        }
+
+        const localCounts = getExpandCreepCountsAll();
         publishExpandCreepCounts(localCounts);
 
-        const merged: Record<string, Record<string, number>> = { ...localCounts };
+        const merged: Record<string, Record<string, number>> = {};
+        for (const planId in localCounts) {
+            merged[planId] = { ...localCounts[planId] };
+        }
+
         const maxStale = 100;
         for (const shardName of getKnownShardNames()) {
             if (shardName === Game.shard.name) continue;
@@ -280,3 +278,4 @@ export const ExpandController = {
         }
     }
 };
+

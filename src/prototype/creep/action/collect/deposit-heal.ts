@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const deposit_heal = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -8,8 +10,12 @@ const deposit_heal = {
         let healed = false;
     
         if(!creep.memory.bind) {
-            const squadCreeps = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => c.memory.role == 'deposit-attack' && !c.memory.bind});
+            const roleCreeps = getRoomTickCacheValue(creep.room, 'deposit_heal_attackers', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'deposit-attack'
+                }) as Creep[]
+            );
+            const squadCreeps = roleCreeps.filter((c) => !c.memory.bind);
             if(squadCreeps.length) {
                 const squadCreep = creep.pos.findClosestByRange(squadCreeps);
                 creep.memory.bind = squadCreep.id;

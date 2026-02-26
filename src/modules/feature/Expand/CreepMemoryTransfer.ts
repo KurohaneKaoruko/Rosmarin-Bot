@@ -27,7 +27,8 @@ const restoreIncoming = () => {
     const remotes = getKnownShardNames().filter((s) => s !== myShard);
     if (!remotes.length) return;
 
-    for (const creep of Object.values(Game.creeps)) {
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
         if (!creep) continue;
         const mem = Memory.creeps?.[creep.name] as any;
         if (mem && mem.role) continue;
@@ -48,7 +49,8 @@ const restoreIncoming = () => {
 };
 
 const sendOutgoing = () => {
-    for (const creep of Object.values(Game.creeps)) {
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
         if (!creep) continue;
         const expandId = (creep.memory as any).expandId;
         if (!expandId) continue;

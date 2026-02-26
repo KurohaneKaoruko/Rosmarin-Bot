@@ -1,5 +1,6 @@
 /** 统计模块 */
 import { RoleData } from '@/constant/CreepConstant';
+import { getCreepRoleCountsAll } from '@/modules/utils/creepTickIndex';
 import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
 import { hasMarketCredits, hasMarketOrderApi } from '@/modules/utils/marketUtils';
 
@@ -152,12 +153,11 @@ function updateRoomStats() {
 
 function updateCreepCount() {
     // 统计所有 creep 的数量
-    Memory.stats.creeps = {};
+    const roleCounts = getCreepRoleCountsAll();
+    Memory.stats.creeps = { ...roleCounts };
     let creepCount = 0;
-    for (const creepName in Game.creeps) {
-        const role = Game.creeps[creepName].memory.role;
-        Memory.stats.creeps[role] = (Memory.stats.creeps[role] || 0) + 1;
-        creepCount++;
+    for (const role in roleCounts) {
+        creepCount += roleCounts[role] || 0;
     }
     Memory.stats.creepCount = creepCount;
 }
@@ -252,13 +252,21 @@ const STYLE = {
 
 function drawStatsHUD(roomNames: string[]) {
     const stats = Memory.stats || {};
+    const creepCount = stats.creepCount || 0;
+    const roleSummaryLines = getTopRolesSummaryLines(stats.creeps);
     for (const roomName of roomNames) {
         if (!Game.rooms[roomName]) continue;
-        renderStatsHUD(Game.rooms[roomName].visual, roomName, stats);
+        renderStatsHUD(Game.rooms[roomName].visual, roomName, stats, creepCount, roleSummaryLines);
     }
 }
 
-function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
+function renderStatsHUD(
+    visual: RoomVisual,
+    roomName: string,
+    stats: any,
+    creepCount: number,
+    roleSummaryLines: string[]
+) {
     let x = 1;
     let y = 1;
     const width = 14; 
@@ -290,8 +298,6 @@ function renderStatsHUD(visual: RoomVisual, roomName: string, stats: any) {
     totalHeight += lineHeight * 3;
     
     // Creeps (1 or 2 rows)
-    const creepCount = stats.creepCount || 0;
-    const roleSummaryLines = getTopRolesSummaryLines(stats.creeps);
     totalHeight += lineHeight; 
     if (roleSummaryLines.length > 0) {
         totalHeight += lineHeight * roleSummaryLines.length; 

@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const outMineral = {
     source: function (creep: Creep) {        
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -15,7 +17,14 @@ const outMineral = {
             if (creep.pos.isNearTo(mineral)) {
                 creep.harvest(mineral);
             } else {
-                if (mineral.pos.findInRange(FIND_HOSTILE_CREEPS, 3).length > 0) {
+                const dangerousHostiles = getRoomTickCacheValue(creep.room, 'out_mineral_dangerous_hostiles', () =>
+                    creep.room.find(FIND_HOSTILE_CREEPS, {
+                        filter: (c) =>
+                            !c.isWhiteList() &&
+                            (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
+                    }) as Creep[]
+                );
+                if (dangerousHostiles.some((h) => h.pos.inRangeTo(mineral, 3))) {
                     if (creep.pos.x <= 1) creep.move(RIGHT);
                     else if (creep.pos.x >= 48) creep.move(LEFT);
                     else if (creep.pos.y <= 1) creep.move(BOTTOM);
@@ -30,11 +39,15 @@ const outMineral = {
     },
 
     transferToNearbyCarrier: function(creep) {
-        const res = Object.keys(creep.store)[0];
-        const nearbyCarrier = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-            filter: (c) => ((c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                    c.store.getFreeCapacity(res) > 0)
-        })[0];
+        const res = Object.keys(creep.store)[0] as ResourceConstant;
+        const carriers = getRoomTickCacheValue(creep.room, 'out_mineral_carriers', () =>
+            creep.room.find(FIND_MY_CREEPS, {
+                filter: (c) => c.memory.role === 'out-carry' || c.memory.role === 'out-car'
+            }) as Creep[]
+        );
+        const nearbyCarrier = carriers.find((c) =>
+            c.store.getFreeCapacity(res) > 0 && creep.pos.inRangeTo(c, 1)
+        );
 
         if (nearbyCarrier){
             if (creep.transfer(nearbyCarrier, res) === OK) return true;

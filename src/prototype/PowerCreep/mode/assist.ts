@@ -1,4 +1,5 @@
 import { RoleData } from '@/constant/CreepConstant';
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
     const PC_RETREAT_TTL = 800;
@@ -32,10 +33,8 @@ export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
     }
 
     if (!mem.healerName) {
-        const candidate = Object.values(Game.creeps).find(
-            c => c.memory.role === 'pc-heal' && (c.memory as any).targetPcName === pc.name
-        );
-        if (candidate) mem.healerName = candidate.name;
+        const candidateName = findAssignedHealerName(pc.name);
+        if (candidateName) mem.healerName = candidateName;
     }
 
     const activeHealer = mem.healerName ? Game.creeps[mem.healerName] : undefined;
@@ -238,7 +237,9 @@ export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
         if (pc.Disrupt_Tower()) return true;
         if (pc.Disrupt_Spawn()) return true;
 
-        const hostiles = pc.room.find(FIND_HOSTILE_CREEPS);
+        const hostiles = getRoomTickCacheValue(pc.room, 'pc_assist_hostiles', () =>
+            pc.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+        );
         if (hostiles.length > 0) {
             if (pc.Shield(pc.pos)) return true;
         }
@@ -250,8 +251,7 @@ export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
 }
 
 function hasPendingHealer(room: Room, targetPcName: string): boolean {
-    const creeps = Object.values(Game.creeps);
-    if (creeps.some(c => c.memory.role === 'pc-heal' && (c.memory as any).targetPcName === targetPcName)) return true;
+    if (findAssignedHealerName(targetPcName)) return true;
 
     const spawns = (room as any).spawn as StructureSpawn[] | undefined;
     if (spawns) {
@@ -266,6 +266,29 @@ function hasPendingHealer(room: Room, targetPcName: string): boolean {
     const tasks = (room as any).getAllMissionFromPool?.('spawn') as any[] | undefined;
     if (!tasks || tasks.length <= 0) return false;
     return tasks.some(t => t?.type === 'spawn' && t?.data?.memory?.role === 'pc-heal' && t.data.memory.targetPcName === targetPcName);
+}
+
+const getAssignedHealerNameByPc = (() => {
+    let cachedTick = -1;
+    let byPcName: Record<string, string> = {};
+    return (): Record<string, string> => {
+        if (cachedTick === Game.time) return byPcName;
+        cachedTick = Game.time;
+        byPcName = {};
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep) continue;
+            if (creep.memory.role !== 'pc-heal') continue;
+            const targetPcName = (creep.memory as any).targetPcName as string | undefined;
+            if (!targetPcName || byPcName[targetPcName]) continue;
+            byPcName[targetPcName] = creep.name;
+        }
+        return byPcName;
+    };
+})();
+
+function findAssignedHealerName(targetPcName: string): string | undefined {
+    return getAssignedHealerNameByPc()[targetPcName];
 }
 
 function canStandOn(room: Room, pos: RoomPosition): boolean {

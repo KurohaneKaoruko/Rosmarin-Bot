@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const outRanged = {
     run: function (creep: Creep) {
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -22,12 +24,15 @@ const outRanged = {
                 }
             }
         } else {
-            let myCreeps = creep.room.find(FIND_MY_CREEPS, {
-                filter: (c) => c.hits < c.hitsMax
-            });
+            const myCreeps = getRoomTickCacheValue(creep.room, 'out_ranged_injured_mine', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.hits < c.hitsMax
+                }) as Creep[]
+            );
 
-            if (myCreeps.length > 0) {
-                let target = creep.pos.findClosestByRange(myCreeps);
+            const injuredCreeps = myCreeps.filter((c) => c.hits < c.hitsMax);
+            if (injuredCreeps.length > 0) {
+                let target = creep.pos.findClosestByRange(injuredCreeps);
                 if (target) {
                     if (creep.pos.isNearTo(target)) {
                         creep.heal(target);

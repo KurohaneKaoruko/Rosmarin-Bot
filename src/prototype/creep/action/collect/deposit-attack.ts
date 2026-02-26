@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const deposit_attack = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -18,11 +20,29 @@ const deposit_attack = {
         // 移动到目标房间.未到达房间不继续行动
         if (creep.doubleMoveToRoom(creep.memory.targetRoom, '#ff0000')) return;
     
-        let hostiles = creep.room.find(FIND_HOSTILE_CREEPS, {
-            filter: (c) => !Memory['whitelist'].includes(c.owner.username) &&
-            c.body.some(part => part.type == ATTACK || part.type == RANGED_ATTACK || part.type == HEAL || part.type == WORK) &&
-            (c.pos.findInRange(FIND_DEPOSITS, 5).length || c.pos.inRangeTo(creep, 3))
+        const combatHostiles = getRoomTickCacheValue(creep.room, 'deposit_attack_combat_hostiles', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS, {
+                filter: (c) =>
+                    !Memory['whitelist'].includes(c.owner.username) &&
+                    c.body.some((part) =>
+                        part.type == ATTACK ||
+                        part.type == RANGED_ATTACK ||
+                        part.type == HEAL ||
+                        part.type == WORK
+                    )
+            }) as Creep[]
+        );
+        const deposits = getRoomTickCacheValue(creep.room, 'deposit_attack_deposits', () =>
+            creep.room.find(FIND_DEPOSITS) as Deposit[]
+        );
+        const hostileNearDeposit = getRoomTickCacheValue(creep.room, 'deposit_attack_hostile_near_deposit', () => {
+            const result: Record<string, true> = {};
+            for (const hostile of combatHostiles) {
+                if (deposits.some((d) => d.pos.inRangeTo(hostile.pos, 5))) result[hostile.id] = true;
+            }
+            return result;
         });
+        let hostiles = combatHostiles.filter((c) => hostileNearDeposit[c.id] || c.pos.inRangeTo(creep, 3));
     
 
         if (hostiles.length) {

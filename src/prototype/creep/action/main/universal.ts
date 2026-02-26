@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const selectBestSource = function (creep: Creep): Source | null {
     const sources = creep.room.source.filter(s => s.energy > 0);
     if (sources.length === 0) return null;
@@ -6,9 +8,11 @@ const selectBestSource = function (creep: Creep): Source | null {
     const sourceCounts = new Map<string, number>();
     sources.forEach(s => sourceCounts.set(s.id, 0));
 
-    const myCreeps = creep.room.find(FIND_MY_CREEPS, {
-        filter: c => c.memory.role === 'universal' && c.memory.targetSourceId
-    });
+    const myCreeps = getRoomTickCacheValue(creep.room, 'universal_bound_collectors', () =>
+        creep.room.find(FIND_MY_CREEPS, {
+            filter: c => c.memory.role === 'universal' && c.memory.targetSourceId
+        }) as Creep[]
+    );
 
     myCreeps.forEach(c => {
         const sid = c.memory.targetSourceId as string;
@@ -162,3 +166,4 @@ const UniversalFunction = {
 };
 
 export default UniversalFunction;
+

@@ -3,21 +3,22 @@
  * 统一管理房间内 Observer 的调用，提供队列管理和回调功能
  */
 
+const observerQueueByRoom: Record<string, ObserveTask[]> = {};
+const observerCallbackQueue: ObserveCallback[] = [];
+
 export default class ObserveControl extends Room {
     /**
      * 房间的 Observer 任务队列
      */
     private get observerQueue(): ObserveTask[] {
-        if (!global._observerQueue) global._observerQueue = {};
-        return global._observerQueue[this.name] || (global._observerQueue[this.name] = []);
+        return observerQueueByRoom[this.name] || (observerQueueByRoom[this.name] = []);
     }
 
     /**
      * Observer 回调结果缓存 (在 observe 成功的下一 tick 执行)
      */
     private get observerCallbacks(): ObserveCallback[] {
-        if (!global._observerCallbacks) global._observerCallbacks = [];
-        return global._observerCallbacks;
+        return observerCallbackQueue;
     }
 
     /**

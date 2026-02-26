@@ -140,31 +140,26 @@ export default class OutMine extends Room {
             }
 
             const hostiles = targetRoom.find(FIND_HOSTILE_CREEPS, {
-                filter: (creep) => (
-                    (creep.getActiveBodyparts(ATTACK) > 0 ||
-                    creep.getActiveBodyparts(RANGED_ATTACK) > 0) &&
-                    creep.owner.username !== 'Source Keeper' &&
-                    !Memory['whitelist']?.includes(creep.owner.username)
-                )
+                filter: (creep) => !Memory['whitelist']?.includes(creep.owner.username)
             });
+            const dangerousHostiles = hostiles.filter((creep) =>
+                creep.owner.username !== 'Source Keeper' &&
+                (creep.getActiveBodyparts(ATTACK) > 0 || creep.getActiveBodyparts(RANGED_ATTACK) > 0)
+            );
 
-            // 有敌人时暂不孵化
-            if (hostiles.length > 0) {
-                outDoubleDefendSpawn(this, targetRoom, hostiles);    // 防御
+            // 有敌人时暂停孵化
+            if (dangerousHostiles.length > 0) {
+                outDoubleDefendSpawn(this, targetRoom, dangerousHostiles);    // 防御
                 continue;
             }
 
             if (!(/^[EW]\d*[5][NS]\d*[5]$/.test(roomName))) {
                 outAttackSpawn(this, targetRoom);    // 攻击者
-                const SourceKeeper = targetRoom.find(FIND_HOSTILE_CREEPS, {
-                    filter: (creep) => (
-                        creep.owner.username === 'Source Keeper'
-                    )
-                });
+                const hasSourceKeeper = hostiles.some((creep) => creep.owner.username === 'Source Keeper');
                 const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
                 const outerAttackers = (CreepByTargetRoom['out-attack'] || []).length;
                 // 有Source Keeper, 且没有攻击者时不孵化
-                if (SourceKeeper.length > 0 && outerAttackers < 1) continue;
+                if (hasSourceKeeper && outerAttackers < 1) continue;
             }
 
             
@@ -406,3 +401,4 @@ const outBuilderSpawn = function (homeRoom: Room, targetRoom: Room) {
     homeRoom.SpawnMissionAdd('OB', '', -1, 'out-build', memory);
     return true;
 }
+

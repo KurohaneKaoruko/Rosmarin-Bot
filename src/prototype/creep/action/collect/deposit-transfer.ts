@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const deposit_transfer = {
     source: function(creep) {
         creep.memory.cacheSource = creep.memory.cacheSource || {}
@@ -65,16 +67,19 @@ const deposit_transfer = {
             return;
         }
 
-        const harvesters = creep.room.find(FIND_MY_CREEPS, {
-            filter: creep => creep.memory.role === 'deposit-harvest' &&
-                             creep.room.name === creep.memory.targetRoom &&
-                             creep.store.getUsedCapacity() > 0
-        });
-        if (harvesters.length > 0) {
-            let closestHarvester = creep.pos.findClosestByRange(harvesters, {
+        const harvesters = getRoomTickCacheValue(creep.room, 'deposit_transfer_harvesters', () =>
+            creep.room.find(FIND_MY_CREEPS, {
+                filter: (c) => c.memory.role === 'deposit-harvest' &&
+                    c.room.name === c.memory.targetRoom &&
+                    c.store.getUsedCapacity() > 0
+            }) as Creep[]
+        );
+        const activeHarvesters = harvesters.filter((harvester) => harvester.store.getUsedCapacity() > 0);
+        if (activeHarvesters.length > 0) {
+            let closestHarvester = creep.pos.findClosestByRange(activeHarvesters, {
                 filter: (creep: Creep) => creep.store.getFreeCapacity() == 0
             });
-            if (!closestHarvester) closestHarvester = creep.pos.findClosestByRange(harvesters);
+            if (!closestHarvester) closestHarvester = creep.pos.findClosestByRange(activeHarvesters);
             if (!creep.pos.isNearTo(closestHarvester)) {
                 cache.targetId = closestHarvester.id;
                 cache.targetType = 'harvester';

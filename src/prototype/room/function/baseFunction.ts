@@ -1,25 +1,7 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
 import { inWhitelist } from '@/modules/utils/whitelist';
 import { getRoomData, getStructData } from '@/modules/utils/memory';
-
-const getCreepNumByHomeRoom = (() => {
-    let cachedTick = -1;
-    let cached: Record<string, Record<string, number>> = {};
-    return () => {
-        if (cachedTick === Game.time) return cached;
-        cachedTick = Game.time;
-        cached = {};
-        for (const creep of Object.values(Game.creeps) as Creep[]) {
-            if(!creep || creep.ticksToLive < creep.body.length * 3) continue;
-            const role = creep.memory.role;
-            const home = creep.memory.home || creep.memory.homeRoom || creep.room.name;
-            if(!role || !home) continue;
-            if (!cached[home]) cached[home] = {};
-            cached[home][role] = (cached[home][role] || 0) + 1;
-        }
-        return cached;
-    };
-})();
+import { getCreepNumByHomeRoom } from '@/modules/utils/creepTickIndex';
 
 const getMyCreepsByRoleByRoom = (() => {
     let cachedTick = -1;
@@ -67,8 +49,7 @@ export default class BaseFunction extends Room {
 
     // 获取属于该房间的creep数量
     getCreepNum() {
-        const byRoom = getCreepNumByHomeRoom();
-        return byRoom[this.name] || (byRoom[this.name] = {});
+        return getCreepNumByHomeRoom(this.name);
     }
 
     // 获取当前房间的有效等级，根据可用能量判断
@@ -658,3 +639,4 @@ function AddList(list: any[], num: number, type: any) {
     }
     return list
 }
+

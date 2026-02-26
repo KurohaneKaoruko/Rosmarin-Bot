@@ -2,6 +2,13 @@ import { compress } from '@/modules/utils/compress';
 import { pickTowerFocusTarget } from '@/modules/utils/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
+type TowerTargetId = Id<Creep> | Id<PowerCreep>
+
+const towerHealTargetsByRoom: Record<string, TowerTargetId[]> = {}
+const towerAttackNpcTargetsByRoom: Record<string, Id<Creep>[]> = {}
+const towerAttackTargetsByRoom: Record<string, TowerTargetId[]> = {}
+const towerRepairTargetByRoom: Record<string, Id<Structure> | null> = {}
+
 export default class TowerControl extends Room {
     // 处理 Tower 防御和修复逻辑
     TowerWork() {
@@ -173,9 +180,9 @@ export default class TowerControl extends Room {
 
     // 治疗己方单位
     TowerHealCreep() {
-        if (!global.towerHealTargets) global.towerHealTargets = {};
-        if (Game.time % 10 == 0) {
-            const targets = global.towerHealTargets[this.name] = [];
+        if (!towerHealTargetsByRoom[this.name] || Game.time % 10 == 0) {
+            const targets: TowerTargetId[] = [];
+            towerHealTargetsByRoom[this.name] = targets;
             targets.push(...this.find(FIND_POWER_CREEPS, {
                 filter: c => c.hits < c.hitsMax && (c.my || c.isWhiteList())
                 }).map(c => c.id));
@@ -183,8 +190,8 @@ export default class TowerControl extends Room {
                 filter: c => c.hits < c.hitsMax && (c.my || c.isWhiteList())
             }).map(c => c.id));
         }
-        const healTarget = (global.towerHealTargets[this.name]||[])
-                .map((id: Id<Creep>) => Game.getObjectById(id))
+        const healTarget = (towerHealTargetsByRoom[this.name] || [])
+                .map((id: TowerTargetId) => Game.getObjectById(id))
                 .filter((c: Creep | null) => c && c.hits < c.hitsMax) as any[];
         if (healTarget.length > 0) {
             // 战力单位优先
@@ -209,13 +216,12 @@ export default class TowerControl extends Room {
 
     // 攻击NPC单位
     TowerAttackNPC() {
-        if (!global.towerAttackNPC) global.towerAttackNPC = {};
-        if (Game.time % 10 == 0) {
-            global.towerAttackNPC[this.name] = this.find(FIND_HOSTILE_CREEPS, {
+        if (!towerAttackNpcTargetsByRoom[this.name] || Game.time % 10 == 0) {
+            towerAttackNpcTargetsByRoom[this.name] = this.find(FIND_HOSTILE_CREEPS, {
                 filter: c => c.owner.username == 'Source Keeper' || c.owner.username == 'Invader'
             }).map(c => c.id);
         }
-        let Hostiles = (global.towerAttackNPC[this.name]||[])
+        let Hostiles = (towerAttackNpcTargetsByRoom[this.name] || [])
                     .map((id: Id<Creep>) => Game.getObjectById(id))
                     .filter((c:Creep) => c && this.TowerDamageToCreep(c) > 0);
         if (Hostiles.length > 0) {
@@ -231,10 +237,8 @@ export default class TowerControl extends Room {
     // 攻击敌人
     TowerAttackEnemy() {
         // 搜寻敌人
-        if (!global.towerTargets) global.towerTargets = {};
-        const cache = global.towerTargets;
-        if (Game.time % 10 == 0) {
-            cache[this.name] = 
+        if (!towerAttackTargetsByRoom[this.name] || Game.time % 10 == 0) {
+            towerAttackTargetsByRoom[this.name] =
                 [
                     ...this.find(FIND_HOSTILE_CREEPS, {
                         filter: c => !c.isWhiteList()
@@ -244,10 +248,10 @@ export default class TowerControl extends Room {
                     }).map(c => c.id)
                 ]
         }
-        if (!cache[this.name] || cache[this.name].length == 0) return false;
+        if (!towerAttackTargetsByRoom[this.name] || towerAttackTargetsByRoom[this.name].length == 0) return false;
         
         // 筛选敌人
-        let Hostiles = (cache[this.name]||[])
+        let Hostiles = (towerAttackTargetsByRoom[this.name] || [])
                         .map((id: Id<Creep> | Id<PowerCreep>) => Game.getObjectById(id))
                         .filter((c: Creep | PowerCreep) => c) as Creep[] | PowerCreep[];
         if (Hostiles.length == 0) return false;
@@ -283,8 +287,7 @@ export default class TowerControl extends Room {
             return false;
         }
 
-        if (!global.towerRepairTarget) global.towerRepairTarget = {};
-        let targetCache = global.towerRepairTarget;
+        const targetCache = towerRepairTargetByRoom;
         if (Game.time % 20 == 0) {
             targetCache[this.name] = null;
             if (this.checkMissionInPool('repair')) {
@@ -342,7 +345,8 @@ export default class TowerControl extends Room {
                 }
             }
         }
-        const target = Game.getObjectById(targetCache[this.name]) as Structure;
+        const targetId = targetCache[this.name];
+        const target = targetId ? (Game.getObjectById(targetId) as Structure | null) : null;
         if(target) {
             const towerEnergyCap = _.sum(this.tower, t => t.store.getCapacity(RESOURCE_ENERGY) || 0);
             const towerEnergy = _.sum(this.tower, t => t.store[RESOURCE_ENERGY] || 0);

@@ -1,5 +1,6 @@
 import { getStructureSignature } from '@/utils';
 import { shouldRun } from '@/modules/infra/qos';
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 type DefenderCounts = {
     attack: number;
@@ -32,6 +33,24 @@ const getDefenderCounts = (() => {
     };
 })();
 
+function selectTopByScore<T>(items: T[], limit: number, compare: (a: T, b: T) => number): T[] {
+    if (!items || items.length <= 0 || limit <= 0) return [];
+    const result: T[] = [];
+    for (const item of items) {
+        let inserted = false;
+        for (let i = 0; i < result.length; i++) {
+            if (compare(item, result[i]) < 0) {
+                result.splice(i, 0, item);
+                inserted = true;
+                break;
+            }
+        }
+        if (!inserted) result.push(item);
+        if (result.length > limit) result.length = limit;
+    }
+    return result;
+}
+
 export default class RoomDefense extends Room {
     activeDefense() {
         // 如果处于安全模式，则不进行后续处理
@@ -54,9 +73,7 @@ export default class RoomDefense extends Room {
                     b.type === CLAIM
                 )
         }) as any as Creep[];
-        const powerHostiles = this.find(FIND_HOSTILE_POWER_CREEPS, {
-            filter: hostile => !hostile.isWhiteList()
-        }) as any;
+        const powerHostiles = this.findEnemyPowerCreeps() as any;
         const threats = roomHostiles.concat(powerHostiles);
 
         if (!global.Hostiles) global.Hostiles = {};
@@ -152,7 +169,7 @@ export default class RoomDefense extends Room {
                 const meanPos = new RoomPosition(meanX, meanY, this.name);
 
                 const blockedDefenseRampartPos = new Set<number>();
-                const allStructures = this.find(FIND_STRUCTURES);
+                const allStructures = this.getStructures();
                 for (const s of allStructures as Structure[]) {
                     const st = s.structureType;
                     if (st === STRUCTURE_RAMPART || st === STRUCTURE_ROAD || st === STRUCTURE_CONTAINER) continue;
@@ -169,10 +186,8 @@ export default class RoomDefense extends Room {
                     const rangedScore = -Math.abs(dist - 3) - dist * 0.05;
                     return { id: r.id, meleeScore, rangedScore };
                 });
-                scored.sort((a, b) => b.meleeScore - a.meleeScore);
-                const melee = scored.slice(0, 10).map(s => s.id);
-                scored.sort((a, b) => b.rangedScore - a.rangedScore);
-                const ranged = scored.slice(0, 10).map(s => s.id);
+                const melee = selectTopByScore(scored, 10, (a, b) => b.meleeScore - a.meleeScore).map((s) => s.id);
+                const ranged = selectTopByScore(scored, 10, (a, b) => b.rangedScore - a.rangedScore).map((s) => s.id);
 
                 this.memory['defenseRamparts'] = { tick: Game.time, melee, ranged, minHits: rampartMinHits };
             }
@@ -317,46 +332,40 @@ export default class RoomDefense extends Room {
         if (!this.controller.safeModeAvailable) return;
         if (this.controller.safeModeCooldown) return;
         if (this.controller.upgradeBlocked) return;
+
+        const myCriticalRuins = getRoomTickCacheValue(this, 'room_defense_my_critical_ruins', () =>
+            this.find(FIND_RUINS, {
+                filter: (e: any) =>
+                    e.structure?.owner &&
+                    e.structure.owner.username === this.controller.owner.username &&
+                    e.structure.structureType !== STRUCTURE_ROAD &&
+                    e.structure.structureType !== STRUCTURE_CONTAINER &&
+                    e.structure.structureType !== STRUCTURE_WALL &&
+                    e.structure.structureType !== STRUCTURE_RAMPART &&
+                    e.structure.structureType !== STRUCTURE_EXTRACTOR &&
+                    e.structure.structureType !== STRUCTURE_LINK
+            }) as Ruin[]
+        );
+
         // 强威胁优先：高强度 boost 治疗团一旦压进来，若我方已有关键建筑被打爆（出现 Ruin），应立刻保全核心。
-        const hostiles = this.find(FIND_HOSTILE_CREEPS, {
+        const hostiles = this.findEnemyCreeps({
             filter: (c: Creep) =>
                 c.owner.username !== 'Invader' &&
-                !c.isWhiteList() &&
                 c.body?.some(b => b.hits > 0 && b.type === HEAL && !!b.boost)
-        }) as any as Creep[];
+        }) as Creep[];
         if (hostiles.length) {
             const boostedHealParts = hostiles.reduce((sum, c) => {
                 return sum + (c.body?.filter(b => b.hits > 0 && b.type === HEAL && !!b.boost).length || 0);
             }, 0);
             const threshold = this.level >= 8 ? 12 : this.level >= 7 ? 6 : 999;
             if (boostedHealParts >= threshold) {
-                const hasMyRuin = this.find(FIND_RUINS, {
-                    filter: (e: any) =>
-                        e.structure?.owner &&
-                        e.structure.owner.username === this.controller.owner.username &&
-                        e.structure.structureType !== STRUCTURE_ROAD &&
-                        e.structure.structureType !== STRUCTURE_CONTAINER &&
-                        e.structure.structureType !== STRUCTURE_WALL &&
-                        e.structure.structureType !== STRUCTURE_RAMPART &&
-                        e.structure.structureType !== STRUCTURE_EXTRACTOR &&
-                        e.structure.structureType !== STRUCTURE_LINK
-                }).length;
-                if (hasMyRuin) {
+                if (myCriticalRuins.length > 0) {
                     this.controller.activateSafeMode();
                     return true;
                 }
             }
         }
-        let RuinCount = this.find(FIND_RUINS, {filter: (e: any) => e.structure.owner &&
-            e.structure.owner.username==this.controller.owner.username
-            &&e.structure.structureType!=STRUCTURE_ROAD
-            &&e.structure.structureType!=STRUCTURE_CONTAINER
-            &&e.structure.structureType!=STRUCTURE_WALL
-            &&e.structure.structureType!=STRUCTURE_RAMPART
-            &&e.structure.structureType!=STRUCTURE_EXTRACTOR
-            &&e.structure.structureType!=STRUCTURE_LINK
-            &&e.structure.ticksToDecay<=500
-        }).length
+        let RuinCount = myCriticalRuins.filter((e: any) => e.structure.ticksToDecay <= 500).length
         if (!RuinCount)  return;
         this.controller.activateSafeMode();
         return true;
@@ -712,7 +721,7 @@ export default class RoomDefense extends Room {
             if (rn !== roomName) return cm;
             const base = this.getDefenseDangerCostMatrix();
             const matrix = base.clone();
-            const creeps = this.find(FIND_CREEPS) as Creep[];
+            const creeps = getRoomTickCacheValue(this, 'room_defense_all_creeps', () => this.find(FIND_CREEPS) as Creep[]);
             for (const other of creeps) {
                 if (!other?.pos) continue;
                 if (excludeCreepName && other.name === excludeCreepName) continue;

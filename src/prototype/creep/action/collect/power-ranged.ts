@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const power_ranged = {
     run: function(creep: Creep) {
         if (!creep.memory.notified) {
@@ -19,10 +21,13 @@ const power_ranged = {
             healOK = true;
         }
 
-        const hostileCreeps = creep.pos.findInRange(FIND_HOSTILE_CREEPS, 8, {
-            filter: (c) => 
-                c.body.some(p => p.type == HEAL || p.type == ATTACK || p.type == RANGED_ATTACK)
-        });
+        const roomCombatHostiles = getRoomTickCacheValue(creep.room, 'power_ranged_combat_hostiles', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS, {
+                filter: (c) =>
+                    c.body.some((p) => p.type == HEAL || p.type == ATTACK || p.type == RANGED_ATTACK)
+            }) as Creep[]
+        );
+        const hostileCreeps = roomCombatHostiles.filter((c) => creep.pos.inRangeTo(c, 8));
         if (hostileCreeps.length > 0) {
             const healer = hostileCreeps.find(c => c.body.some(p => p.type == HEAL));
             const attacker = hostileCreeps.find(c => c.body.some(p => p.type == ATTACK));
@@ -53,9 +58,14 @@ const power_ranged = {
         }
 
         if (!healOK || !rangedOK || !moveOK) {
-            const myCreeps = creep.room.find(FIND_MY_CREEPS, 
-                {filter: (c) => c.hits < c.hitsMax &&
-                (creep.pos.inRangeTo(c, 3) || c.memory.role == 'power-ranged')});
+            const injuredMyCreeps = getRoomTickCacheValue(creep.room, 'power_ranged_injured_mine', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.hits < c.hitsMax
+                }) as Creep[]
+            );
+            const myCreeps = injuredMyCreeps.filter((c) =>
+                c.hits < c.hitsMax && (creep.pos.inRangeTo(c, 3) || c.memory.role == 'power-ranged')
+            );
             let healTarget = myCreeps.find(c => creep.pos.inRangeTo(c, 1));
             if (healTarget) {
                 if(!healOK) creep.heal(healTarget);

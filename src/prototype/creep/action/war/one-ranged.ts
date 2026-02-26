@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const one_ranged = {
     run: function (creep: Creep) {
         if (!creep.memory.notified) {
@@ -40,19 +42,23 @@ const one_ranged = {
             return;
         }
     
-        const creepTarget = creep.room.find(FIND_HOSTILE_CREEPS);
-        const structureTarget = creep.room.find(FIND_STRUCTURES, {
-            filter: (structure) => {
-                return !structure.room.my &&
-                structure.structureType !== STRUCTURE_CONTROLLER &&
-                structure.structureType !== STRUCTURE_CONTAINER &&
-                structure.structureType !== STRUCTURE_STORAGE &&
-                structure.structureType !== STRUCTURE_TERMINAL &&
-                structure.structureType !== STRUCTURE_WALL &&
-                structure.structureType !== STRUCTURE_RAMPART &&
-                structure.structureType !== STRUCTURE_ROAD;
-            }
-        });
+        const creepTarget = getRoomTickCacheValue(creep.room, 'one_ranged_hostile_creeps', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+        );
+        const structureTarget = getRoomTickCacheValue(creep.room, 'one_ranged_hostile_structures', () =>
+            creep.room.find(FIND_STRUCTURES, {
+                filter: (structure) => {
+                    return !structure.room.my &&
+                        structure.structureType !== STRUCTURE_CONTROLLER &&
+                        structure.structureType !== STRUCTURE_CONTAINER &&
+                        structure.structureType !== STRUCTURE_STORAGE &&
+                        structure.structureType !== STRUCTURE_TERMINAL &&
+                        structure.structureType !== STRUCTURE_WALL &&
+                        structure.structureType !== STRUCTURE_RAMPART &&
+                        structure.structureType !== STRUCTURE_ROAD;
+                }
+            }) as Structure[]
+        );
     
         let target = creep.pos.findClosestByRange([...creepTarget, ...structureTarget]) as any;
         if (target) {

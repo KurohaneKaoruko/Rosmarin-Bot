@@ -1,3 +1,4 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 export default class DoubleAction extends Creep {
     // 双人小队移动
     doubleMove(Direction: DirectionConstant): number {
@@ -101,20 +102,26 @@ export default class DoubleAction extends Creep {
     // 规避敌人
     doubleFlee() {
         const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
-        let goals = this.pos.findInRange(FIND_HOSTILE_CREEPS, 10, {
-            filter: (c) => !c.isWhiteList() &&
-            (c.getActiveBodyparts(ATTACK) || c.getActiveBodyparts(RANGED_ATTACK))
-        }).map(c => {
-            return {
+        const dangerousHostiles = getRoomTickCacheValue(this.room, 'double_action_dangerous_hostiles', () =>
+            this.room.find(FIND_HOSTILE_CREEPS, {
+                filter: (c) =>
+                    !c.isWhiteList() &&
+                    (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
+            }) as Creep[]
+        );
+        const goals = dangerousHostiles
+            .filter((c) => this.pos.inRangeTo(c, 10))
+            .map((c) => ({
                 pos: c.pos,
                 range: c.getActiveBodyparts(RANGED_ATTACK) ? 6 : 4
-            };
-        });
-        let creep = bindcreep ? bindcreep : this;
-        let path = PathFinder.search(
+            }));
+        if (goals.length <= 0) return 1;
+
+        const creep = bindcreep ? bindcreep : this;
+        const path = PathFinder.search(
             creep.pos,
             goals,
-            { 
+            {
                 flee: true,
                 plainCost: 1,
                 swampCost: 5,
@@ -123,7 +130,6 @@ export default class DoubleAction extends Creep {
         if (path.length <= 0) return 1;
         return creep.doubleMove(creep.pos.getDirection(path[0]));
     }
-
     doubleToAttack(target: Creep | Structure): number | boolean {
         const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
         if (!this.pos.isNearTo(bindcreep)) {

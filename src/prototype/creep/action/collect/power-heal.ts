@@ -1,3 +1,5 @@
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+
 const power_heal = {
     run: function(creep: Creep) {
         if (!creep.memory.notified) {
@@ -16,12 +18,16 @@ const power_heal = {
         }
 
         if(!creep.memory.bind) {
-            const attackCreep = creep.room.find(FIND_MY_CREEPS,
-                {filter: (c) => c.memory.role == 'power-attack' && !c.memory.bind &&
-                                c.memory.targetRoom == creep.memory.targetRoom});
-            if (attackCreep.length > 0) {
-                creep.memory.bind = attackCreep[0].id;
-                attackCreep[0].memory.bind = creep.id;
+            const attackCreeps = getRoomTickCacheValue(creep.room, 'power_heal_attack_creeps', () =>
+                creep.room.find(FIND_MY_CREEPS, {
+                    filter: (c) => c.memory.role == 'power-attack' &&
+                        c.memory.targetRoom == creep.memory.targetRoom
+                }) as Creep[]
+            );
+            const attackCreep = attackCreeps.find((c) => !c.memory.bind);
+            if (attackCreep) {
+                creep.memory.bind = attackCreep.id;
+                attackCreep.memory.bind = creep.id;
             }
             return;
         }

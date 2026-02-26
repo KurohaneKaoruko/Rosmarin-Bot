@@ -3,6 +3,7 @@
  * 提供战斗相关方法的原型扩展
  */
 import { inWhitelist } from '@/modules/utils/whitelist';
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 export default class CombatFunction extends Creep {
     /**
@@ -28,30 +29,27 @@ export default class CombatFunction extends Creep {
             ...options
         };
 
-        const filter = (creep: Creep): boolean => {
-            // 排除白名单玩家
-            if (opts.excludeWhitelist && inWhitelist(creep.owner.username)) {
-                return false;
-            }
-            // 过滤有攻击部件的
-            if (opts.hasAttack && creep.getActiveBodyparts(ATTACK) === 0) {
-                return false;
-            }
-            // 过滤有远程攻击部件的
-            if (opts.hasRangedAttack && creep.getActiveBodyparts(RANGED_ATTACK) === 0) {
-                return false;
-            }
-            // 过滤有治疗部件的
-            if (opts.hasHeal && creep.getActiveBodyparts(HEAL) === 0) {
-                return false;
-            }
-            return true;
-        };
+        const baseHostiles = getRoomTickCacheValue(this.room, 'combat_hostile_creeps_all', () =>
+            this.room.find(FIND_HOSTILE_CREEPS) as Creep[]
+        );
 
-        if (range) {
-            return this.pos.findInRange(FIND_HOSTILE_CREEPS, range, { filter });
+        let hostiles = baseHostiles;
+        if (opts.excludeWhitelist) {
+            hostiles = hostiles.filter((creep) => !inWhitelist(creep.owner.username));
         }
-        return this.room.find(FIND_HOSTILE_CREEPS, { filter });
+        if (opts.hasAttack) {
+            hostiles = hostiles.filter((creep) => creep.getActiveBodyparts(ATTACK) > 0);
+        }
+        if (opts.hasRangedAttack) {
+            hostiles = hostiles.filter((creep) => creep.getActiveBodyparts(RANGED_ATTACK) > 0);
+        }
+        if (opts.hasHeal) {
+            hostiles = hostiles.filter((creep) => creep.getActiveBodyparts(HEAL) > 0);
+        }
+        if (range) {
+            hostiles = hostiles.filter((creep) => this.pos.inRangeTo(creep, range));
+        }
+        return hostiles;
     }
 
     /**
@@ -189,22 +187,22 @@ export default class CombatFunction extends Creep {
                 roomCallback: (roomName) => {
                     const room = Game.rooms[roomName];
                     if (!room) return false;
-
-                    const costs = new PathFinder.CostMatrix();
-
-                    // 避开建筑
-                    room.find(FIND_STRUCTURES).forEach(struct => {
-                        if (struct.structureType === STRUCTURE_ROAD) {
-                            costs.set(struct.pos.x, struct.pos.y, 1);
-                        } else if (
-                            struct.structureType !== STRUCTURE_CONTAINER &&
-                            (struct.structureType !== STRUCTURE_RAMPART || !(struct as StructureRampart).my)
-                        ) {
-                            costs.set(struct.pos.x, struct.pos.y, 255);
-                        }
+                    const cacheKey = `combat_flee_costs_${this.owner.username}`;
+                    return getRoomTickCacheValue(room, cacheKey, () => {
+                        const costs = new PathFinder.CostMatrix();
+                        // 避开建筑
+                        room.find(FIND_STRUCTURES).forEach(struct => {
+                            if (struct.structureType === STRUCTURE_ROAD) {
+                                costs.set(struct.pos.x, struct.pos.y, 1);
+                            } else if (
+                                struct.structureType !== STRUCTURE_CONTAINER &&
+                                (struct.structureType !== STRUCTURE_RAMPART || !(struct as StructureRampart).my)
+                            ) {
+                                costs.set(struct.pos.x, struct.pos.y, 255);
+                            }
+                        });
+                        return costs;
                     });
-
-                    return costs;
                 }
             }
         );

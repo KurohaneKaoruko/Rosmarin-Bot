@@ -68,21 +68,25 @@ const lockCarrierTarget = (roomName: string, id: string, creepName: string, ttl:
 };
 
 const getClaimedTargetIdsByCarrier = (() => {
-    const cache: Record<string, { time: number; ids: Set<string> }> = {};
+    let cachedTick = -1;
+    let byRoom: Record<string, Set<string>> = {};
+    const EMPTY_IDS = new Set<string>();
     return (roomName: string): Set<string> => {
-        const hit = cache[roomName];
-        if (hit && hit.time === Game.time) return hit.ids;
-
-        const ids = new Set<string>();
-        for (const creep of Object.values(Game.creeps)) {
-            if (!creep) continue;
-            if (creep.memory?.role !== 'carrier') continue;
-            if (creep.room.name !== roomName) continue;
-            const sourceId = creep.memory.cacheSource?.sourceId || creep.memory.cacheTarget?.sourceId;
-            if (sourceId) ids.add(sourceId);
+        if (cachedTick !== Game.time) {
+            cachedTick = Game.time;
+            byRoom = {};
+            for (const creepName in Game.creeps) {
+                const creep = Game.creeps[creepName];
+                if (!creep) continue;
+                if (creep.memory?.role !== 'carrier') continue;
+                const sourceId = creep.memory.cacheSource?.sourceId || creep.memory.cacheTarget?.sourceId;
+                if (!sourceId) continue;
+                const creepRoom = creep.room.name;
+                if (!byRoom[creepRoom]) byRoom[creepRoom] = new Set<string>();
+                byRoom[creepRoom].add(sourceId);
+            }
         }
-        cache[roomName] = { time: Game.time, ids };
-        return ids;
+        return byRoom[roomName] || EMPTY_IDS;
     };
 })();
 

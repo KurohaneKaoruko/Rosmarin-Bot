@@ -1,5 +1,6 @@
 import { compress } from '@/modules/utils/compress';
 import { getLayoutData } from '@/modules/utils/memory';
+import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 const RepairWork = function (creep: Creep) {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {}
@@ -17,17 +18,17 @@ const RepairWork = function (creep: Creep) {
         rampartMem = [...new Set(rampartMem.concat(structRampart))];
 
         // 全部
-        let allRamWalls = creep.room.find(FIND_STRUCTURES, {
-            filter: structure => {
+        const allRamWalls = getRoomTickCacheValue(creep.room, 'up_repair_all_ram_walls', () =>
+            creep.room.getStructures().filter((structure) => {
                 if (structure.structureType !== STRUCTURE_RAMPART &&
                     structure.structureType !== STRUCTURE_WALL) return false;
-                if (structure.structureType == STRUCTURE_RAMPART && 
-                    !rampartMem.includes(compress(structure.pos.x,structure.pos.y))) return false;
+                if (structure.structureType == STRUCTURE_RAMPART &&
+                    !rampartMem.includes(compress(structure.pos.x, structure.pos.y))) return false;
                 if (structure.structureType == STRUCTURE_WALL &&
-                    !wallMem.includes(compress(structure.pos.x,structure.pos.y))) return false;
+                    !wallMem.includes(compress(structure.pos.x, structure.pos.y))) return false;
                 return structure.hits < structure.hitsMax;
-            }
-        })
+            }) as (StructureRampart | StructureWall)[]
+        );
         
         // 附近
         let inRangeRamWalls = []
@@ -72,23 +73,34 @@ const WithdrawLink = function (creep: Creep) {
     if (!linktarget) {
         const centerPos = creep.room.getCenter();
         const sources = creep.room.source;
+        const weakRamparts = getRoomTickCacheValue(creep.room, 'up_repair_weak_ramparts', () =>
+            creep.room.getStructures().filter((structure) =>
+                structure.structureType == STRUCTURE_RAMPART &&
+                structure.hits < (structure.hitsMax - 5e3)
+            ) as StructureRampart[]
+        );
         const links = creep.room.link.filter(link => 
             link.store[RESOURCE_ENERGY] > 0 &&
             (!link.pos.isNearTo(centerPos)) &&
             (!sources || !link.pos.inRangeTo(sources[0].pos, 2)) &&
             (!sources || !link.pos.inRangeTo(sources[1].pos, 2)) &&
-            (link.pos.findInRange(FIND_STRUCTURES, 5, {
-                filter: structure =>
-                    structure.structureType == STRUCTURE_RAMPART &&
-                    structure.hits < (structure.hitsMax - 5e3)
-            }).length)
+            weakRamparts.some((rampart) => rampart.pos.inRangeTo(link.pos, 5))
         );
         if (links.length > 0) {
+            const bindNumByLinkId = getRoomTickCacheValue(creep.room, 'up_repair_link_bind_num', () => {
+                const countMap: Record<string, number> = {};
+                const boundCreeps = creep.room.find(FIND_MY_CREEPS, {
+                    filter: (myCreep) => !!myCreep.memory['linkId']
+                }) as Creep[];
+                for (const myCreep of boundCreeps) {
+                    const linkId = myCreep.memory['linkId'] as string;
+                    countMap[linkId] = (countMap[linkId] || 0) + 1;
+                }
+                return countMap;
+            });
             let minBind = Infinity;
             for (let link of links) {
-                const bindNum = creep.room.find(FIND_MY_CREEPS, {
-                    filter: creep => creep.memory['linkId'] == link.id
-                }).length;
+                const bindNum = bindNumByLinkId[link.id] || 0;
                 if (bindNum == 0) {
                     linktarget = link;
                     break;
@@ -98,7 +110,11 @@ const WithdrawLink = function (creep: Creep) {
                 }
             }
         }
-        if (linktarget) creep.memory['linkId'] = linktarget.id;
+        if (linktarget) {
+            creep.memory['linkId'] = linktarget.id;
+            const bindNumByLinkId = getRoomTickCacheValue(creep.room, 'up_repair_link_bind_num', () => ({} as Record<string, number>));
+            bindNumByLinkId[linktarget.id] = (bindNumByLinkId[linktarget.id] || 0) + 1;
+        }
     }
 
     if (linktarget && linktarget.store[RESOURCE_ENERGY] > 0) {

@@ -2,9 +2,8 @@ import { compress, decompress } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 const getWorkTargetCache = (() => {
-    global._workTargetCache ??= {};
+    const root: Record<string, { tick: number; [key: string]: any }> = {};
     return (roomName: string) => {
-        const root = global._workTargetCache as any;
         if (!root[roomName]) root[roomName] = { tick: -1 };
         return root[roomName];
     };
