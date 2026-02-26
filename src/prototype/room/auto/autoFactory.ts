@@ -51,20 +51,22 @@ export default class AutoFactory extends Room {
                 }
                 const pools = getMissionPools() as any;
                 const manageTasks = pools?.[this.name]?.manage;
-                const hasManageFor = (res: string) => {
-                    if (!Array.isArray(manageTasks)) return false;
-                    return manageTasks.some((t: any) => {
-                        if (t?.type !== 'manage') return false;
+                // 收集当前正在向 factory 补料的资源类型
+                const supplyingResources = new Set<string>();
+                if (Array.isArray(manageTasks)) {
+                    for (const t of manageTasks) {
+                        if (t?.type !== 'manage') continue;
                         const d = t?.data as any;
-                        if (!d || d.target !== 'factory') return false;
-                        if (String(d.resourceType) !== res) return false;
-                        if (typeof d.amount !== 'number' || d.amount <= 0) return false;
+                        if (!d || d.target !== 'factory') continue;
+                        if (typeof d.amount !== 'number' || d.amount <= 0) continue;
+                        const res = String(d.resourceType || '');
+                        if (!res) continue;
                         const source = d.source;
                         const sourceObj = source ? (this as any)[source] : null;
                         const sourceAmount = sourceObj?.store?.[res] || 0;
-                        return sourceAmount > 0;
-                    });
-                };
+                        if (sourceAmount > 0) supplyingResources.add(res);
+                    }
+                }
 
                 const missingDetails = missing.map(([c, need]) => {
                     const res = String(c);
@@ -76,24 +78,21 @@ export default class AutoFactory extends Room {
 
                 const supplyPossible = missingDetails.every(({ res, needRemain }) => {
                     if (needRemain <= 0) return true;
-                    if (hasManageFor(res)) return true;
+                    if (supplyingResources.has(res)) return true;
                     return this.getResAmount(res as any) >= needRemain;
                 });
 
-                const hasSupplyManage = missingDetails.some(({ res }) => hasManageFor(res));
                 if (!supplyPossible) {
                     missReasons.push('no_supply');
-                } else if (!hasSupplyManage) {
-                    missReasons.push('not_scheduled');
                 }
             }
 
-            if (missReasons.includes('no_supply')) {
-                botmem.factoryProduct = null;
-                botmem.factoryAmount = 0;
+            if (missReasons.length === 0) {
                 delete (botmem as any).factoryWaitSince;
-                global.log(`[${this.name}] 已自动结束factory生产任务(无补料): ${Product}. 现库存: ${getAvail(Product as any)}`)
-            } else {
+                return;
+            }
+
+            if (missReasons.includes('no_supply')) {
                 const hasAlternativeRunnable = hasAutoList && Object.keys(autoFactoryMap).some((p) => {
                     if (!p || p === Product) return false;
                     const info = (COMMODITIES as any)?.[p];
@@ -101,26 +100,22 @@ export default class AutoFactory extends Room {
                     if (!isFactoryLevelCompatible(flv, level)) return false;
                     return canStartTask(getAvail, p as any);
                 });
-                const waitLimit = missReasons.includes('not_scheduled')
-                    ? Number((AUTO_FACTORY_CONFIG as any).waitTimeoutTicksWhenAlternatives ?? 50)
-                    : hasAlternativeRunnable
+                const waitLimit = hasAlternativeRunnable
                     ? Number((AUTO_FACTORY_CONFIG as any).waitTimeoutTicksWhenAlternatives ?? AUTO_FACTORY_CONFIG.waitTimeoutTicks)
                     : AUTO_FACTORY_CONFIG.waitTimeoutTicks;
                 const since = (botmem as any).factoryWaitSince ?? Game.time;
                 (botmem as any).factoryWaitSince = since;
                 if (Game.time - since < waitLimit) return;
 
-                const fillTimeout = missReasons.includes('not_scheduled');
                 botmem.factoryProduct = null;
                 botmem.factoryAmount = 0;
                 delete (botmem as any).factoryWaitSince;
-                if (!botmem.factoryBan) botmem.factoryBan = Object.create(null);
-                if (fillTimeout) {
-                    botmem.factoryBan[Product as any] = Game.time + (AUTO_FACTORY_CONFIG as any).banTicksAfterFillTimeout;
-                    global.log(`[${this.name}] 已自动结束factory生产任务(超时未填装): ${Product}. ban 至 ${botmem.factoryBan[Product as any]}`)
-                } else {
-                    global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
-                }
+                global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+            } else {
+                botmem.factoryProduct = null;
+                botmem.factoryAmount = 0;
+                delete (botmem as any).factoryWaitSince;
+                global.log(`[${this.name}] 已自动结束factory生产任务(无配方): ${Product}.`)
             }
         }
 
