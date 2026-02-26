@@ -307,6 +307,26 @@ function AutoSell(roomName: string, item: any) {
     const sellAmount = totalAmount - amount;
     if(sellAmount <= 0) return;
 
+    const suggestedSellPrice = getOrderPrice(resourceType, ORDER_SELL);
+    const expectedOrderPrice = suggestedSellPrice === null ? priceLimit : Math.max(suggestedSellPrice, priceLimit);
+
+    // 自动卖能量时先尝试即时成交，按“有效成交单价”与挂单预期价动态选择路径
+    if (resourceType === RESOURCE_ENERGY && terminal.cooldown <= 0) {
+        const dealAmount = Math.min(sellAmount, terminalAmount, 10000);
+        if (dealAmount >= 5000) {
+            const dealResult = AutoDeal(
+                room.name,
+                resourceType,
+                dealAmount,
+                ORDER_BUY,
+                10,
+                expectedOrderPrice,
+                expectedOrderPrice
+            );
+            if (dealResult === OK) return OK;
+        }
+    }
+
     // 根据资源类型确定单次订单数量
     const orderAmount = Math.min(sellAmount, resourceType === RESOURCE_ENERGY ? 10000 : 3000);
     const minOrderAmount = resourceType === RESOURCE_ENERGY ? 5000 : 500;
@@ -316,7 +336,7 @@ function AutoSell(roomName: string, item: any) {
     const existingOrder = findMyOrder(room.name, resourceType, ORDER_SELL);
 
     if (existingOrder) {
-        const suggested = getOrderPrice(existingOrder.resourceType, ORDER_SELL);
+        const suggested = suggestedSellPrice;
         if (suggested === null) return;
         const nextPrice = Math.max(suggested, priceLimit);
         const diff = Math.abs(nextPrice - existingOrder.price);
@@ -386,7 +406,7 @@ function AutoSell(roomName: string, item: any) {
     }
 
     // 创建订单
-    const suggested = getOrderPrice(resourceType, ORDER_SELL);
+    const suggested = suggestedSellPrice;
     if (suggested === null) return;
     const price = Math.max(suggested, priceLimit);
     const result = Game.market.createOrder({
@@ -485,7 +505,15 @@ function AutoDealSell(roomName: string, item: any) {
 }
 
 
-function AutoDeal(roomName: string, res: ResourceConstant, amount: number, orderType: ORDER_BUY | ORDER_SELL, length: number, price: number) {
+function AutoDeal(
+    roomName: string,
+    res: ResourceConstant,
+    amount: number,
+    orderType: ORDER_BUY | ORDER_SELL,
+    length: number,
+    price: number,
+    minEffectiveUnitPrice?: number
+) {
     const room = Game.rooms[roomName];
     if(!room || !room.terminal) return ERR_NOT_FOUND;
     if (!hasMarketOrderApi()) return ERR_NOT_FOUND;
@@ -592,6 +620,12 @@ function AutoDeal(roomName: string, res: ResourceConstant, amount: number, order
     }
 
     if (!bestOrder) return;
+
+    if (orderType === ORDER_BUY &&
+        typeof minEffectiveUnitPrice === 'number' &&
+        bestCost < minEffectiveUnitPrice) {
+        return ERR_NOT_FOUND;
+    }
 
     if (orderType == ORDER_SELL && TotalPrice >= Game.market.credits) return;
 
