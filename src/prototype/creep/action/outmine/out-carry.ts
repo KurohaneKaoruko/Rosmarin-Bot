@@ -59,8 +59,9 @@ const outCarry = {
             }
         }
 
-        // 使用 collectDroppedResource 收集掉落资源
-        if (creep.collectDroppedResource(undefined, 500)) {
+        // 掉落阈值按自身容量动态调整：大于自身容量的掉落能量应允许拾取。
+        const droppedPickupThreshold = Math.min(500, creep.store.getCapacity());
+        if (creep.collectDroppedResource(undefined, droppedPickupThreshold)) {
             return;
         }
 

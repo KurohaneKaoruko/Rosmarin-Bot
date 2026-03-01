@@ -10,6 +10,14 @@ type UniversalTargetCache = {
     lastPosKey?: string;
 };
 
+type SourceBoundStats = {
+    universal: Map<string, number>;
+    dedicated: Map<string, number>;
+};
+
+const DEDICATED_SOURCE_ROLES = new Set(['harvester', 'out-harvest']);
+const DEDICATED_SOURCE_WEIGHT = 2;
+
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
 
 const shouldForceUpgrade = (room: Room) => {
@@ -20,19 +28,32 @@ const shouldForceUpgrade = (room: Room) => {
     return ttd < (room.level <= 3 ? 5000 : 3000);
 };
 
-const getBoundSourceCounts = (room: Room) => {
-    return getRoomTickCacheValue(room, 'universal_bound_source_counts', () => {
-        const counts = new Map<string, number>();
-        for (const source of room.source) counts.set(source.id, 0);
+const getSourceBoundStats = (room: Room) => {
+    return getRoomTickCacheValue(room, 'universal_source_bound_stats', () => {
+        const universal = new Map<string, number>();
+        const dedicated = new Map<string, number>();
+        for (const source of room.source) {
+            universal.set(source.id, 0);
+            dedicated.set(source.id, 0);
+        }
+
         const myCreeps = room.find(FIND_MY_CREEPS, {
-            filter: c => c.memory.role === 'universal' && c.memory.targetSourceId
+            filter: c => !!c.memory.targetSourceId
         }) as Creep[];
+
         for (const c of myCreeps) {
             const sid = c.memory.targetSourceId as string;
-            if (counts.has(sid)) counts.set(sid, (counts.get(sid) || 0) + 1);
+            if (!universal.has(sid)) continue;
+
+            if (c.memory.role === 'universal') {
+                universal.set(sid, (universal.get(sid) || 0) + 1);
+            } else if (DEDICATED_SOURCE_ROLES.has(c.memory.role || '')) {
+                dedicated.set(sid, (dedicated.get(sid) || 0) + 1);
+            }
         }
-        return counts;
-    }) as Map<string, number>;
+
+        return { universal, dedicated };
+    }) as SourceBoundStats;
 };
 
 const getSourceWalkableMap = (room: Room) => {
@@ -56,22 +77,74 @@ const getSourceWalkableMap = (room: Room) => {
     }) as Map<string, number>;
 };
 
+const getDedicatedReservedSlots = (walkable: number, dedicatedBound: number) => {
+    return Math.min(walkable, dedicatedBound * DEDICATED_SOURCE_WEIGHT);
+};
+
+const shouldYieldSourceToDedicated = (creep: Creep, source: Source) => {
+    const boundStats = getSourceBoundStats(creep.room);
+    const walkable = getSourceWalkableMap(creep.room).get(source.id) || 1;
+    const dedicatedBound = boundStats.dedicated.get(source.id) || 0;
+    if (dedicatedBound <= 0) return false;
+
+    const reservedSlots = getDedicatedReservedSlots(walkable, dedicatedBound);
+    return reservedSlots >= walkable;
+};
+
+const stepAsideFromSource = (creep: Creep, source: Source) => {
+    if (!creep.pos.inRangeTo(source.pos, 1)) return;
+
+    const terrain = creep.room.getTerrain();
+    let bestPos: RoomPosition | null = null;
+    let bestScore = -Infinity;
+
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const x = creep.pos.x + dx;
+            const y = creep.pos.y + dy;
+            if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+            const pos = new RoomPosition(x, y, creep.room.name);
+            if (pos.inRangeTo(source.pos, 1)) continue;
+            if (pos.lookFor(LOOK_CREEPS).length > 0 || pos.lookFor(LOOK_POWER_CREEPS).length > 0) continue;
+
+            const score = pos.getRangeTo(source.pos);
+            if (score > bestScore) {
+                bestScore = score;
+                bestPos = pos;
+            }
+        }
+    }
+
+    if (bestPos) {
+        creep.moveTo(bestPos, { range: 0, reusePath: 0 });
+    }
+};
+
 const selectBestSource = function (creep: Creep): Source | null {
     const sources = creep.room.source.filter(s => s.energy > 0);
     if (sources.length === 0) return null;
 
-    const sourceCounts = getBoundSourceCounts(creep.room);
+    const boundStats = getSourceBoundStats(creep.room);
     const walkableMap = getSourceWalkableMap(creep.room);
 
     let best: Source | null = null;
     let bestScore = -Infinity;
     for (const source of sources) {
-        const bound = sourceCounts.get(source.id) || 0;
         const walkable = walkableMap.get(source.id) || 1;
-        const freeSpots = Math.max(0, walkable - bound);
+        const universalBound = boundStats.universal.get(source.id) || 0;
+        const dedicatedBound = boundStats.dedicated.get(source.id) || 0;
+        const reservedSlots = getDedicatedReservedSlots(walkable, dedicatedBound);
+        const freeSpots = Math.max(0, walkable - reservedSlots - universalBound);
+
+        // 专职采集占满后，UNIV不再竞争该 source。
+        if (walkable - reservedSlots <= 0) continue;
+
         const energyRatio = source.energyCapacity > 0 ? source.energy / source.energyCapacity : 0;
         const distance = creep.pos.getRangeTo(source.pos);
-        const score = energyRatio * 30 + freeSpots * 8 - bound * 18 - distance;
+        const score = energyRatio * 30 + freeSpots * 12 - universalBound * 18 - dedicatedBound * 24 - distance;
         if (score > bestScore) {
             best = source;
             bestScore = score;
@@ -105,6 +178,12 @@ const getEnergy = function (creep: Creep) {
             delete creep.memory.targetSourceId;
             source = null;
         }
+    }
+
+    if (source && shouldYieldSourceToDedicated(creep, source)) {
+        stepAsideFromSource(creep, source);
+        delete creep.memory.targetSourceId;
+        source = null;
     }
 
     if (!source) {

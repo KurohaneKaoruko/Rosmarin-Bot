@@ -376,7 +376,7 @@ export const RoleLevelData = {
         8: { bodypart: [[CARRY, 32], [MOVE, 16]], num: 0 },
     },
     "out-defend": {
-        1: { bodypart: [[MOVE, 1], [HEAL, 1]], num: 0 },
+        1: { bodypart: [[MOVE, 1], [RANGED_ATTACK, 1]], num: 0 },
         2: { bodypart: [[MOVE, 2], [RANGED_ATTACK, 1], [HEAL, 1]], num: 0 },
         3: { bodypart: [[MOVE, 2], [RANGED_ATTACK, 1], [HEAL, 1]], num: 0 },
         4: { bodypart: [[MOVE, 4], [RANGED_ATTACK, 2], [HEAL, 2]], num: 0 },
