@@ -108,16 +108,21 @@ export default class OutMine extends Room {
 
             // 外矿加速搬运策略 OutSpeedCarryTactics
             const allowWorkCarry = this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
+            // 低等级未铺路阶段（无 WORK 搬运）需要更多搬运爬，避免源点堆积
+            let carryNum = sourceNum;
+            if (!allowWorkCarry) {
+                carryNum = Math.max(sourceNum + 1, Math.ceil(sourceNum * 2.5));
+            }
             if (Game.flags[`${this.name}/OSCT`] || Game.flags[`ALL/OSCT`]) {
                 let num = sourceNum;
                 if (this.level <= 4) {
-                    num *= 2.5
+                    num = carryNum;
                 } else {
-                    num *= 3.5
+                    num = Math.ceil(num * 3.5);
                 }
                 outCarry2Spawn(this, targetRoom, num, allowWorkCarry);
             } else {
-                outCarrySpawn(this, targetRoom, sourceNum, allowWorkCarry);
+                outCarrySpawn(this, targetRoom, carryNum, allowWorkCarry);
             }
             
             if (qosLevel === 'normal') {
@@ -230,6 +235,7 @@ const outRangedSpawn = function (homeRoom: Room, targetRoom: Room) {
 
 // 元素矿采集者
 const outMineSpawn = function (homeRoom: Room, targetRoom: Room) {
+    if (homeRoom.level < 6) return false;
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerMiners = (CreepByTargetRoom['out-mineral'] || []).length;
     const spawnNum = getSpawnRoleNum(homeRoom, 'out-mineral');

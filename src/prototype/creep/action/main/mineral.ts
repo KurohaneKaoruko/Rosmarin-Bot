@@ -39,6 +39,7 @@ const MineralAction = {
         if (!cache.targetId) {
             const mineralContainer = creep.room.container.find(c => c.pos.inRangeTo(creep.room.mineral, 1)) || null;
             if(!mineralContainer &&
+                creep.room.level >= 6 &&
                 creep.pos.inRange(creep.room.mineral.pos, 1) &&
                 creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2)
                 .filter(cs => cs.structureType === STRUCTURE_CONTAINER).length === 0) {

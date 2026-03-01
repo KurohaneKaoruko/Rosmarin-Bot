@@ -1,6 +1,13 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 const outMineral = {
+    canPlaceMineralContainer: function (creep: Creep): boolean {
+        const homeRoomName = creep.memory.homeRoom;
+        if (!homeRoomName) return false;
+        const homeRoom = Game.rooms[homeRoomName];
+        if (!homeRoom) return false;
+        return homeRoom.level >= 6;
+    },
     source: function (creep: Creep) {        
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom);
@@ -62,6 +69,7 @@ const outMineral = {
         })[0];
 
         if (!constructionSite) {
+            if (!this.canPlaceMineralContainer(creep)) return;
             // 建造容器前确保在采集点附近
             const mineral = creep.room.mineral || creep.room.find(FIND_MINERALS)[0];
             if (!creep.pos.inRangeTo(mineral, 1)) {
