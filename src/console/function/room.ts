@@ -2,6 +2,7 @@ import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
 import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memory";
+import { parseShardRoomName } from "@/modules/infra/shardRoom";
 
 // 房间控制
 export default {
@@ -162,6 +163,41 @@ export default {
             const room = Game.rooms[roomName];
             room.SendMissionAdd(targetRoom, type, amount);
             global.log(`[任务模块] 在房间 ${room.name} 添加了发送任务: ${amount} ${type} -> ${targetRoom} `);
+            return OK;
+        },
+        // 迁移房间归属：将属于 roomName 的 creep home/homeRoom 修改为 targetRoom
+        jump(roomName: string, targetRoom: string) {
+            if (!roomName) return Error('请输入源房间名。');
+            if (!targetRoom) return Error('请输入目标房间名。');
+
+            const fromSpec = parseShardRoomName(roomName);
+            const toSpec = parseShardRoomName(targetRoom);
+            if (!fromSpec.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('源房间名格式不正确。');
+            if (!toSpec.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('目标房间名格式不正确。');
+
+            let changed = 0;
+            let matched = 0;
+            for (const name in Game.creeps) {
+                const creep = Game.creeps[name];
+                const mem = creep.memory as any;
+                const localHome = mem.home ? parseShardRoomName(mem.home).roomName : undefined;
+                const localHomeRoom = mem.homeRoom ? parseShardRoomName(mem.homeRoom).roomName : undefined;
+                if (localHome !== fromSpec.roomName && localHomeRoom !== fromSpec.roomName) continue;
+
+                matched++;
+                mem.home = targetRoom;
+                mem.homeRoom = toSpec.roomName;
+                // clear stale source lock after room migration
+                delete mem.targetSourceId;
+                if (mem.cache && typeof mem.cache === 'object') delete mem.cache.targetSourceId;
+                if (mem.cacheSource && typeof mem.cacheSource === 'object') {
+                    delete mem.cacheSource.targetId;
+                    delete mem.cacheSource.targetType;
+                }
+                changed++;
+            }
+
+            global.log(`[RoomJump] ${fromSpec.roomName} -> ${targetRoom}，匹配 ${matched}，修改 ${changed}`);
             return OK;
         }
     },

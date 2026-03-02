@@ -221,8 +221,12 @@ const outHarvest = {
         }
 
         let targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        if(!targetSource) {
-            return;
+        if (!targetSource || targetSource.room.name !== creep.room.name) {
+            delete creep.memory.targetSourceId;
+            const rebound = creep.room.closestSource(creep);
+            if (!rebound) return;
+            creep.memory.targetSourceId = rebound.id;
+            targetSource = rebound;
         }
 
         // 如果离采集点过远，则移动过去
@@ -253,4 +257,3 @@ const outHarvest = {
 }
 
 export default outHarvest;
-

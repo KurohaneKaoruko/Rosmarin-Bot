@@ -17,11 +17,26 @@ function withdraw(creep: Creep) {
     }
 
     const res = creep.memory['resource'];
+    const jumpMode = !!creep.memory.jumpMode;
 
-    const target = [creep.room.storage, creep.room.terminal].filter((i) => {
+    let target = creep.pos.findClosestByRange([creep.room.storage, creep.room.terminal].filter((i) => {
         return i && i.store[res] > 0 && (creep.room.my || 
             i.pos.lookFor(LOOK_STRUCTURES).every((i) => i.structureType !== STRUCTURE_RAMPART));
-    })[0];
+    })) as AnyStoreStructure | null;
+
+    if (!target) {
+        const containers = [...creep.room.container].filter((i) => i && (i.store[res] || 0) > 0);
+        target = creep.pos.findClosestByRange(containers) as AnyStoreStructure | null;
+    }
+
+    if (!target && jumpMode && res === RESOURCE_ENERGY) {
+        const energyStructs = creep.room.find(FIND_MY_STRUCTURES, {
+            filter: (s) =>
+                (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_EXTENSION) &&
+                (s.store?.[RESOURCE_ENERGY] || 0) > 0
+        }) as AnyStoreStructure[];
+        target = creep.pos.findClosestByRange(energyStructs) as AnyStoreStructure | null;
+    }
 
     if (target) creep.goWithdraw(target, res);
 
@@ -37,11 +52,21 @@ function transfer(creep: Creep) {
     const res = creep.memory['resource'] || RESOURCE_ENERGY;
 
     
-    let targets = [creep.room.storage, creep.room.terminal].filter((i) => i && i.store.getFreeCapacity(res) > 0) as any;
-    let target = creep.pos.findClosestByRange(targets) as any;
+    let target: AnyStoreStructure | null = null;
+    const jumpMode = !!creep.memory.jumpMode;
+
+    if (jumpMode) {
+        const containerTargets = [...creep.room.container].filter((i) => i && i.store.getFreeCapacity(res) > 0);
+        target = creep.pos.findClosestByRange(containerTargets) as any;
+    }
+
     if (!target) {
-        targets = [...creep.room.container].filter((i) => i && i.store.getFreeCapacity(res) > 0);
-        target = creep.pos.findClosestByRange(targets);
+        let targets = [creep.room.storage, creep.room.terminal].filter((i) => i && i.store.getFreeCapacity(res) > 0) as any;
+        target = creep.pos.findClosestByRange(targets) as any;
+        if (!target) {
+            targets = [...creep.room.container].filter((i) => i && i.store.getFreeCapacity(res) > 0);
+            target = creep.pos.findClosestByRange(targets) as any;
+        }
     }
 
     if (target) {

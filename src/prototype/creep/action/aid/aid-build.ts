@@ -11,6 +11,9 @@ const aid_build = {
             case 'harvest':
                 this.harvest(creep);
                 return;
+            case 'stage':
+                this.stage(creep);
+                return;
             case 'build':
                 this.build(creep);
                 return;
@@ -78,11 +81,12 @@ const aid_build = {
 
         if (!creep.room.source) return;
 
-        const targetSource = creep.room.source.find(s => s.energy > 0);
+        const targetSource = this.getBalancedSource(creep);
         if (!targetSource && creep.store[RESOURCE_ENERGY] > 0) {
             creep.memory.action = '';
             return;
         }
+        if (!targetSource) return;
 
         let result = creep.goHaverst(targetSource);
         if (!result) return;
@@ -98,6 +102,23 @@ const aid_build = {
     },
 
     build: function (creep: Creep) {
+        const controller = creep.room.controller;
+        const isJumpMode = !!creep.memory.jumpMode;
+        const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
+            filter: (s) => s.structureType === STRUCTURE_SPAWN
+        }).length > 0;
+        const hasSpawnSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES, {
+            filter: (s) => s.structureType === STRUCTURE_SPAWN
+        }).length > 0;
+        const shouldForceSpawnFirst = isJumpMode && !hasSpawn && hasSpawnSite;
+
+        if (controller?.my && controller.level < 2) {
+            if (!shouldForceSpawnFirst) {
+                creep.memory.action = 'upgrade';
+                return;
+            }
+        }
+
         if (creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.action = '';
             return;
@@ -118,23 +139,44 @@ const aid_build = {
             return;
         }
 
-        // 使用 findAndBuild 方法查找并建造
-        // 优先级: road > spawn > storage > terminal > extension > tower
-        if (!creep.findAndBuild({
-            priority: [
+        const buildPriority = isJumpMode
+            ? [
+                STRUCTURE_SPAWN,
+                STRUCTURE_EXTENSION,
+                STRUCTURE_TOWER,
+                STRUCTURE_STORAGE,
+                STRUCTURE_TERMINAL,
+                STRUCTURE_CONTAINER,
+                STRUCTURE_ROAD
+            ]
+            : [
                 STRUCTURE_ROAD,
                 STRUCTURE_SPAWN,
                 STRUCTURE_STORAGE,
                 STRUCTURE_TERMINAL,
                 STRUCTURE_EXTENSION,
                 STRUCTURE_TOWER
-            ]
+            ];
+
+        // 使用 findAndBuild 方法查找并建造
+        if (!creep.findAndBuild({
+            priority: buildPriority
         })) {
             creep.memory.action = '';
         }
     },
 
     repair: function (creep: Creep) {
+        const controller = creep.room.controller;
+        if (!controller?.my) {
+            creep.memory.action = 'stage';
+            return;
+        }
+        if (controller.level < 2) {
+            creep.memory.action = 'upgrade';
+            return;
+        }
+
         if (creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.action = '';
             return;
@@ -183,22 +225,186 @@ const aid_build = {
             return;
         }
 
-        const contoroller = creep.room.controller;
-        if (creep.room.level < 8) {
-            if (creep.upgradeController(contoroller) == ERR_NOT_IN_RANGE) {
-                creep.moveTo(contoroller, { maxRooms: 1 });
+        const controller = creep.room.controller;
+        if (!controller?.my) {
+            creep.memory.action = 'stage';
+            return;
+        }
+
+        if (controller.level < 8) {
+            if (creep.upgradeController(controller) == ERR_NOT_IN_RANGE) {
+                creep.moveTo(controller, { maxRooms: 1 });
             }
             return;
         }
     },
 
-    switch: function (creep: Creep) {
-        creep.memory.cache = {};
-        
-        if (creep.store[RESOURCE_ENERGY] === 0) {
-            creep.memory.action = 'harvest';
+    stage: function (creep: Creep) {
+        const targetRoom = creep.memory.targetRoom;
+        if (targetRoom) {
+            const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
+            const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
+            if (!arrived) {
+                creep.moveToRoom(targetRoom);
+                return;
+            }
+        }
+
+        if (creep.pos.isRoomEdge()) {
+            const center = new RoomPosition(25, 25, creep.room.name);
+            creep.moveTo(center, { maxRooms: 1 });
             return;
         }
+
+        // stage is a temporary state: re-evaluate each tick to avoid getting stuck.
+        const controller = creep.room.controller;
+        const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+        if (creep.store[RESOURCE_ENERGY] > 0) {
+            if (!controller?.my && sites.length > 0) {
+                creep.memory.action = 'build';
+                return;
+            }
+            if (controller?.my && controller.level < 2) {
+                creep.memory.action = 'upgrade';
+                return;
+            }
+            if (controller?.my && controller.level >= 2 && sites.length > 0) {
+                creep.memory.action = 'build';
+                return;
+            }
+        }
+
+        const containers = [...(creep.room.container || [])];
+        const container = creep.pos.findClosestByRange(
+            containers.filter((c) => c.store.getFreeCapacity(RESOURCE_ENERGY) > 0)
+        ) as StructureContainer | null;
+        const source = this.getBalancedSource(creep);
+        const hasBuildSite = creep.room.find(FIND_CONSTRUCTION_SITES).length > 0;
+        const canUpgrade = !!controller?.my && controller.level < 8;
+        const hasEnergySink = !!container || hasBuildSite || canUpgrade;
+
+        // 有容器但都满了：继续采集并落地囤积，不停止
+
+        if (creep.store[RESOURCE_ENERGY] === 0) {
+            // Avoid pickup->drop oscillation when there is nowhere to use energy.
+            if (hasEnergySink) {
+                const dropped = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 2, {
+                    filter: (r) => r.resourceType === RESOURCE_ENERGY && r.amount >= 30
+                })[0];
+                if (dropped) {
+                    if (creep.pickup(dropped) === ERR_NOT_IN_RANGE) {
+                        creep.moveTo(dropped, { maxRooms: 1 });
+                    }
+                    return;
+                }
+
+                const tombstone = creep.pos.findInRange(FIND_TOMBSTONES, 2, {
+                    filter: (t) => (t.store[RESOURCE_ENERGY] || 0) > 0
+                })[0];
+                if (tombstone) {
+                    if (creep.withdraw(tombstone, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                        creep.moveTo(tombstone, { maxRooms: 1 });
+                    }
+                    return;
+                }
+
+                const ruin = creep.pos.findInRange(FIND_RUINS, 2, {
+                    filter: (r) => (r.store[RESOURCE_ENERGY] || 0) > 0
+                })[0];
+                if (ruin) {
+                    if (creep.withdraw(ruin, RESOURCE_ENERGY) === ERR_NOT_IN_RANGE) {
+                        creep.moveTo(ruin, { maxRooms: 1 });
+                    }
+                    return;
+                }
+            }
+
+            if (source) {
+                if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                    creep.moveTo(source, { maxRooms: 1 });
+                }
+                return;
+            }
+
+            if (container && !creep.pos.inRangeTo(container, 1)) {
+                // 没有可采目标时，先靠近容器等待机会
+                creep.moveTo(container, { range: 1, maxRooms: 1 });
+            }
+            return;
+        }
+
+        // 囤积阶段优先把自己采满，避免“采几下就去存”反复来回。
+        if (creep.store.getFreeCapacity() > 0 && source && source.energy > 0) {
+            if (creep.harvest(source) === ERR_NOT_IN_RANGE) {
+                creep.moveTo(source, { maxRooms: 1 });
+            }
+            return;
+        }
+
+        if (container) {
+            if (creep.pos.inRangeTo(container, 1)) {
+                creep.transfer(container, RESOURCE_ENERGY);
+            } else {
+                creep.moveTo(container, { range: 1, maxRooms: 1 });
+            }
+            return;
+        }
+
+        // 无容器时，允许落地囤积
+        creep.drop(RESOURCE_ENERGY);
+    },
+
+    getBalancedSource: function (creep: Creep): Source | null {
+        const activeSources = [...(creep.room.source || creep.room.find(FIND_SOURCES))]
+            .filter((s) => s.energy > 0);
+        if (activeSources.length <= 0) {
+            delete creep.memory.targetSourceId;
+            return null;
+        }
+
+        const current = creep.getBoundSource();
+        const focusFlag = creep.memory.spawnFlag;
+        const sameRole = creep.room.find(FIND_MY_CREEPS, {
+            filter: (c) =>
+                c.id !== creep.id &&
+                c.memory.role === creep.memory.role &&
+                (!focusFlag || c.memory.spawnFlag === focusFlag)
+        });
+
+        const counts: Record<string, number> = {};
+        for (const s of activeSources) counts[s.id] = 0;
+        for (const c of sameRole) {
+            const sid = c.memory.targetSourceId as Id<Source> | undefined;
+            if (!sid || counts[sid] == null) continue;
+            counts[sid]++;
+        }
+
+        let minCount = Infinity;
+        for (const s of activeSources) {
+            const cnt = counts[s.id] || 0;
+            if (cnt < minCount) minCount = cnt;
+        }
+
+        if (current && current.energy > 0 && counts[current.id] != null) {
+            const currentCount = counts[current.id] || 0;
+            // 当前源没有明显过载则保持绑定，避免频繁抖动
+            if (currentCount <= minCount + 1) return current;
+        }
+
+        activeSources.sort((a, b) => {
+            const ca = counts[a.id] || 0;
+            const cb = counts[b.id] || 0;
+            if (ca !== cb) return ca - cb;
+            return creep.pos.getRangeTo(a) - creep.pos.getRangeTo(b);
+        });
+
+        const selected = activeSources[0];
+        creep.setBoundSourceId(selected.id);
+        return selected;
+    },
+
+    switch: function (creep: Creep) {
+        creep.memory.cache = {};
 
         const targetRoom = creep.memory.targetRoom;
         if (targetRoom) {
@@ -210,8 +416,40 @@ const aid_build = {
             }
         }
 
-
+        const controller = creep.room.controller;
+        const canUpgrade = !!controller?.my;
         const site = creep.room.find(FIND_CONSTRUCTION_SITES);
+        const isJumpMode = !!creep.memory.jumpMode;
+
+        if (!canUpgrade && site.length === 0) {
+            creep.memory.action = 'stage';
+            return;
+        }
+
+        if (creep.store[RESOURCE_ENERGY] === 0) {
+            creep.memory.action = 'harvest';
+            return;
+        }
+
+        if (!canUpgrade) {
+            creep.memory.action = 'build';
+            return;
+        }
+
+        const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
+            filter: (s) => s.structureType === STRUCTURE_SPAWN
+        }).length > 0;
+        const hasSpawnSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES, {
+            filter: (s) => s.structureType === STRUCTURE_SPAWN
+        }).length > 0;
+        const shouldForceSpawnFirst = isJumpMode && !hasSpawn && hasSpawnSite;
+        if (controller.level < 2) {
+            if (!shouldForceSpawnFirst) {
+                creep.memory.action = 'upgrade';
+                return;
+            }
+        }
+
         if (site.length > 0) {
             creep.memory.action = 'build';
             return;

@@ -4213,12 +4213,12 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
 /**
  * moveTo 前更新 dontPullMe 状态
  * @description
- * - 靠近房间边缘两格（<=1 或 >=48）时：禁止被对穿/拉动
- * - 原地停留超过 6 tick 时：禁止被对穿/拉动
+ * - 仅在真正边缘格（x/y 为 0 或 49）时：禁止被对穿/拉动
+ * - 其余情况允许对穿，避免门口队列因 dontPullMe 互锁
  * 说明：保持使用 creep.memory.lastPos 字段，避免影响已有线上行为/数据结构
  */
 function updateDontPullMeForMoveTo(creep) {
-    let isNearEdge = creep.pos.x <= 1 || creep.pos.x >= 48 || creep.pos.y <= 1 || creep.pos.y >= 48;
+    const isEdge = creep.pos.x === 0 || creep.pos.x === 49 || creep.pos.y === 0 || creep.pos.y === 49;
 
     // 使用数字编码替代对象存储，避免每 tick 创建新字符串或对象
     const currentPacked = (creep.pos.x << 6) | creep.pos.y;
@@ -4229,7 +4229,8 @@ function updateDontPullMeForMoveTo(creep) {
         creep.memory._lpt = 0;
     }
 
-    creep.memory.dontPullMe = isNearEdge || creep.memory._lpt > 6;
+    // 移动阶段尽量允许对穿；只有边缘格锁定，防止被拉回出口抖动。
+    creep.memory.dontPullMe = isEdge;
 }
 
 /**
@@ -4258,4 +4259,3 @@ wrapActionSetDontPullMeTrue('attack');
 
 // wrapActionSetDontPullMeTrue('move');
 // wrapActionSetDontPullMeTrue('withdraw');
-

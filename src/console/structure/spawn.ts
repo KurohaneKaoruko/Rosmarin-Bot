@@ -35,5 +35,16 @@ export default {
             console.log(`[${roomName}] 即将孵化scout到${targetRoom}进行签名。签名内容: ${sign}`);
             return 0;
         },
+        stomp(roomName: string, targetRoom: string, num: number = 1) {
+            const room = Game.rooms[roomName];
+            for (let i = 0; i < num; i++) {
+                room.SpawnMissionAdd('', '', 0, 'scout', {
+                    targetRoom,
+                    stompSite: true
+                } as any);
+            }
+            console.log(`[${roomName}] 即将孵化 ${num} 个 scout 前往 ${targetRoom} 踩工地。`);
+            return 0;
+        },
     }
 }

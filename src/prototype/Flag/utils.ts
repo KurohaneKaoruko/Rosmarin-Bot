@@ -8,7 +8,7 @@ export const parseFlagToken = (flagName: string, key: string): string | undefine
 }
 
 export const parseSpawnRoomName = (flagName: string): string | undefined => {
-    return flagName.match(/\/([EW][1-9]+[NS][1-9]+)/)?.[1]
+    return flagName.match(/\/([EW]\d+[NS]\d+)/)?.[1]
 }
 
 export const getSpawnRoomOrRemove = (flag: Flag): Room | undefined => {
@@ -27,4 +27,3 @@ export const tickThrottle = (flag: Flag, interval: number, key = 'lastTime'): bo
     mem[key] = Game.time
     return true
 }
-

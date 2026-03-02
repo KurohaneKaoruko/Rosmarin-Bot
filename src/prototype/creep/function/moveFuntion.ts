@@ -20,6 +20,11 @@ export default class MoveFunction extends Creep {
         const opts: any = options || {};
         if (opts.range === undefined) opts.range = 3;
 
+        // 已在目标房且卡在边缘时，先脱离边缘再执行常规寻路，避免门口互锁。
+        if (sameShard && this.room.name === localRoomName && this.handleRoomEdge()) {
+            return OK;
+        }
+
         // moveToRoom 状态缓存：降低跨房抖动并保持目标点稳定
         let state = this.memory._moveToRoomState;
         if (!state || state.targetRoom !== fullRoomName) {

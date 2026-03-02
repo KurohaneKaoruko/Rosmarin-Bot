@@ -450,8 +450,8 @@ export const RoleLevelData = {
     },
     "aid-build": {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
-        2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 0 },
-        3: { bodypart: [[WORK, 3], [CARRY, 3], [MOVE, 6]], num: 0 },
+        2: { bodypart: [[WORK, 3], [CARRY, 2], [MOVE, 3]], num: 0 },
+        3: { bodypart: [[WORK, 4], [CARRY, 3], [MOVE, 4]], num: 0 },
         4: { bodypart: [[WORK, 5], [CARRY, 4], [MOVE, 9]], num: 0 },
         5: { bodypart: [[WORK, 6], [CARRY, 6], [MOVE, 12]], num: 0 },
         6: { bodypart: [[WORK, 10], [CARRY, 10], [MOVE, 10]], num: 0 },

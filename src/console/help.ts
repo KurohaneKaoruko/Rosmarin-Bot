@@ -71,6 +71,7 @@ const helpTexts: Record<string, string> = {
         `${cmd('room.sign(roomName, text?)')}：设置房间签名`,
         `${cmd('room.setram(roomName, hits)')}：设置刷墙上限（比例 0-1 或具体血量）`,
         `${cmd('room.send(roomName, targetRoom, type, amount)')}：添加资源发送任务`,
+        `${cmd('room.jump(roomName, targetRoom)')}：将属于 roomName 的 creep 的 home/homeRoom 批量迁移到 targetRoom`,
         line(),
     ].join(br),
 
@@ -305,6 +306,7 @@ const helpTexts: Record<string, string> = {
         `${cmd('spawn.creep(roomName, bodypart, role, memory?)')}：孵化指定体型的 Creep（bodypart: 体型字符串）`,
         `${cmd('spawn.role(roomName, role, memory?, num?)')}：孵化指定角色的 Creep（使用默认体型）`,
         `${cmd('spawn.sign(roomName, targetRoom, sign)')}：孵化 scout 进行签名`,
+        `${cmd('spawn.stomp(roomName, targetRoom, num?)')}：孵化 scout 前往目标房间踩敌方工地`,
         line(),
         sub('🚩', '旗帜孵化（每10tick扫描）'),
         `- 通用：${cmd('T-xx')} 是孵化间隔；${cmd('N-xx')} 是次数上限（部分旗默认一次性）`,
