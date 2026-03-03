@@ -16,10 +16,22 @@ export const THRESHOLDS = {
         LAB_TRIGGER: 50,
         LAB_MIN_CAPACITY: 100,
     },
+    UNIVERSAL: {
+        CONTROLLER_CONTAINER_BUFFER_TARGET: 1200,
+        CONTROLLER_LINK_BUFFER_TARGET: 400,
+    },
     SPAWN: {
         MIN_ENERGY: 200,
         EMERGENCY_ENERGY_THRESHOLD: 1000,
         BODY_REDUCTION_THRESHOLD: 1000,
+        UNIV_EMERGENCY_CAP: {
+            RCL1_2: 3,
+            RCL1_2_HIGH: 4,
+            RCL3: 2,
+            RCL3_HIGH: 2,
+            RCL4P: 1,
+            RCL4P_HIGH: 1,
+        },
     },
     REPAIR: {
         URGENT_STRUCTURE: 0.1,

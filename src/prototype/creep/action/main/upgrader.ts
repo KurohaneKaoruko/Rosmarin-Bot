@@ -67,9 +67,16 @@ const Upgrader = {
         if (creep.store.getUsedCapacity() === 0) {
             creep.say('🔄');
             takeEnergy(creep);
-            return true;
+            if (creep.store.getUsedCapacity() === 0) return true;
+            upgrade(creep);
+            return creep.store.getUsedCapacity() === 0;
         }
         upgrade(creep);
+        if (creep.store.getUsedCapacity() === 0) {
+            creep.say('🔄');
+            takeEnergy(creep);
+            return creep.store.getUsedCapacity() === 0;
+        }
         return false;
     },
     
@@ -82,6 +89,11 @@ const Upgrader = {
             return true;
         }
         takeEnergy(creep);
+        if (creep.store.getFreeCapacity() === 0) {
+            creep.say('⚡');
+            upgrade(creep);
+            return true;
+        }
         return false;
     },
 }

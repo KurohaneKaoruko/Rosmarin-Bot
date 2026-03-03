@@ -1,7 +1,12 @@
 import { RoleData } from '@/constant/CreepConstant';
+import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/modules/utils/compress';
+import { getRoomData } from '@/modules/utils/memory';
 
+const getRoomMode = (room: Room) => {
+    return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+};
 
 
 export default class SpawnControl extends Room {
@@ -130,7 +135,11 @@ export default class SpawnControl extends Room {
         if (Game.time % 10) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
-            if (role !== 'harvester' && role !== 'transport' && role !== 'carrier' && role !== 'manager') return;
+            const allowEmergencyDownsize = role === 'harvester' ||
+                role === 'transport' ||
+                role === 'carrier' ||
+                role === 'manager';
+            if (!allowEmergencyDownsize) return;
 
             const state = this.memory.energyState || this.updateEnergyState?.(false);
             if (state === 'LOW' || state === 'CRITICAL') {
@@ -169,7 +178,18 @@ export default class SpawnControl extends Room {
             }
             
             univ_num += spawnMissionNum['universal'] || 0;
-            if (univ_num >= 2) return;
+            const highMode = getRoomMode(this) === 'high';
+            const emergencyUnivCap = this.level <= 2
+                ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2)
+                : this.level === 3
+                    ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3)
+                    : (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P);
+            const criticalPending =
+                (spawnMissionNum['harvester'] || 0) +
+                (spawnMissionNum['transport'] || 0) +
+                (spawnMissionNum['carrier'] || 0);
+            if (criticalPending > 0 && univ_num > 0) return;
+            if (univ_num >= emergencyUnivCap) return;
 
             spawn.spawnCreep(
                 this.GenerateBodys(RoleData['universal'].bodypart),
@@ -181,4 +201,3 @@ export default class SpawnControl extends Room {
         }
     }
 }
-

@@ -1,18 +1,19 @@
 import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
 import { isTickAligned } from '@/modules/infra/qos';
-import { getStructData } from '@/modules/utils/memory';
+import { getRoomData, getStructData } from '@/modules/utils/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 
 
 type PosLike = RoomPosition | { pos: RoomPosition } | number;
-type TransportLevelKey = 'boost' | 'ext' | 'tower' | 'labEnergy' | 'lab' | 'powerSpawn' | 'nuker';
+type TransportLevelKey = 'boost' | 'ext' | 'tower' | 'controllerBuffer' | 'labEnergy' | 'lab' | 'powerSpawn' | 'nuker';
 
 const TransportLevelMap: Record<TransportLevelKey, number> = {
     boost: 0,
     ext: 1,
     tower: 1,
+    controllerBuffer: 2,
     labEnergy: 1,
     lab: 2,
     powerSpawn: 2,
@@ -234,6 +235,50 @@ export default class TransportMission extends Room {
             })
         }
 
+        const state = room.memory.energyState || room.updateEnergyState?.(false);
+        const roomMode = (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+        const highMode = roomMode === 'high';
+        const creepNum = room.getCreepNum() || {};
+        const hasUpgradeConsumer = (creepNum['upgrader'] || 0) + (creepNum['aid-upgrade'] || 0) + (creepNum['universal'] || 0) > 0;
+        if (state !== 'LOW' && state !== 'CRITICAL' && room.controller && (highMode || hasUpgradeConsumer)) {
+            const controller = room.controller;
+            const linkTargetEnergy = THRESHOLDS.UNIVERSAL.CONTROLLER_LINK_BUFFER_TARGET;
+            for (const link of room.link || []) {
+                if (!link.pos.inRangeTo(controller, 2)) continue;
+                const free = link.store.getFreeCapacity(RESOURCE_ENERGY);
+                if (free <= 0) continue;
+                const lack = Math.min(free, Math.max(0, linkTargetEnergy - link.store[RESOURCE_ENERGY]));
+                if (lack <= 0 || energy <= 0) continue;
+                const amount = Math.min(lack, energy);
+                energy -= amount;
+                this.addTransportMission(this.TransportLevel('controllerBuffer'), {
+                    pos: link,
+                    source: storageOrTerminal.id,
+                    target: link.id,
+                    resourceType: RESOURCE_ENERGY,
+                    amount,
+                });
+            }
+
+            const containerTargetEnergy = THRESHOLDS.UNIVERSAL.CONTROLLER_CONTAINER_BUFFER_TARGET;
+            for (const container of room.container || []) {
+                if (!container.pos.inRangeTo(controller, 3)) continue;
+                const free = container.store.getFreeCapacity(RESOURCE_ENERGY);
+                if (free <= 0) continue;
+                const lack = Math.min(free, Math.max(0, containerTargetEnergy - container.store[RESOURCE_ENERGY]));
+                if (lack <= 0 || energy <= 0) continue;
+                const amount = Math.min(lack, energy);
+                energy -= amount;
+                this.addTransportMission(this.TransportLevel('controllerBuffer'), {
+                    pos: container,
+                    source: storageOrTerminal.id,
+                    target: container.id,
+                    resourceType: RESOURCE_ENERGY,
+                    amount,
+                });
+            }
+        }
+
         if (room.level >= 6 && room.lab) {
             // 对能量极低 (<LAB_MIN_ENERGY) 的 Lab 取消频率限制，其他 Lab 保持频率限制
             const checkAllLabs = isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
@@ -265,7 +310,6 @@ export default class TransportMission extends Room {
             })
         }
 
-        const state = room.memory.energyState || room.updateEnergyState?.(false);
         if (state === 'LOW' || state === 'CRITICAL') return;
 
         if(room.getResAmount(RESOURCE_ENERGY) < THRESHOLDS.ENERGY.SEND_REQUEST_MIN) return;
