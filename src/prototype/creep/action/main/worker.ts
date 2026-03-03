@@ -1,5 +1,6 @@
 import { compress, decompress } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { getRoomData } from '@/modules/utils/memory';
 
 const getWorkTargetCache = (() => {
     const root: Record<string, { tick: number; [key: string]: any }> = {};
@@ -12,6 +13,47 @@ const getWorkTargetCache = (() => {
 const getCache = (creep: Creep) => {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {}
     return creep.memory.cacheTarget as any
+}
+
+const isEarlyRushEnabled = (room: Room) => {
+    if (!room.controller?.my) return false;
+    const cfg = getRoomData(room.name) as any;
+    const enabled = cfg?.devRush ?? cfg?.rcl3Rush;
+    if (!enabled) return false;
+    const rawMax = cfg?.devRushMaxRcl;
+    const maxRcl = Math.max(1, Math.min(8, typeof rawMax === 'number' ? Math.floor(rawMax) : 3));
+    return room.controller.level <= maxRcl;
+}
+
+const getBuildSitePriority = (room: Room, site: ConstructionSite) => {
+    const remaining = Math.max(0, site.progressTotal - site.progress);
+    const remainingBucket = Math.min(90, Math.floor(remaining / 500));
+
+    if (isEarlyRushEnabled(room)) {
+        let base = 6;
+        if (site.structureType === STRUCTURE_SPAWN) base = 0;
+        else if (site.structureType === STRUCTURE_EXTENSION || site.structureType === STRUCTURE_TOWER) base = 1;
+        else if (site.structureType === STRUCTURE_CONTAINER) base = 2;
+        else if (site.structureType === STRUCTURE_ROAD) base = 4;
+        else if (site.structureType === STRUCTURE_LINK) base = 5;
+        return base * 100 + remainingBucket;
+    }
+
+    let level = Math.round((1 - site.progress / site.progressTotal) * 4);
+    if (site.structureType === STRUCTURE_TERMINAL ||
+        site.structureType === STRUCTURE_STORAGE ||
+        site.structureType === STRUCTURE_SPAWN) {
+        level = 0;
+    } else if (site.structureType === STRUCTURE_EXTENSION ||
+        site.structureType === STRUCTURE_ROAD) {
+        level += 0;
+    } else if (site.structureType === STRUCTURE_LINK ||
+        site.structureType === STRUCTURE_TOWER) {
+        level += 4;
+    } else {
+        level += 8;
+    }
+    return level * 100 + remainingBucket;
 }
 
 const RepairRampart = function (creep: Creep) {
@@ -105,26 +147,13 @@ const BuildRepairWork = function (creep: Creep) {
                     return true;
                 }
                 let best = null as ConstructionSite | null;
-                let bestLevel = Infinity;
+                let bestScore = Infinity;
                 let bestDist = Infinity;
                 for (const site of mySites) {
-                    let level = Math.round((1 - site.progress / site.progressTotal) * 4);
-                    if (site.structureType === STRUCTURE_TERMINAL ||
-                        site.structureType === STRUCTURE_STORAGE ||
-                        site.structureType === STRUCTURE_SPAWN) {
-                        level = 0;
-                    } else if (site.structureType === STRUCTURE_EXTENSION ||
-                        site.structureType === STRUCTURE_ROAD) {
-                        level += 0;
-                    } else if (site.structureType === STRUCTURE_LINK ||
-                        site.structureType === STRUCTURE_TOWER) {
-                        level += 4;
-                    } else {
-                        level += 8;
-                    }
+                    const score = getBuildSitePriority(creep.room, site);
                     const dist = creep.pos.getRangeTo(site.pos);
-                    if (level < bestLevel || (level === bestLevel && dist < bestDist)) {
-                        bestLevel = level;
+                    if (score < bestScore || (score === bestScore && dist < bestDist)) {
+                        bestScore = score;
                         bestDist = dist;
                         best = site;
                     }

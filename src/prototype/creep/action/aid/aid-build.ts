@@ -139,24 +139,37 @@ const aid_build = {
             return;
         }
 
-        const buildPriority = isJumpMode
-            ? [
-                STRUCTURE_SPAWN,
-                STRUCTURE_EXTENSION,
-                STRUCTURE_TOWER,
-                STRUCTURE_STORAGE,
-                STRUCTURE_TERMINAL,
-                STRUCTURE_CONTAINER,
-                STRUCTURE_ROAD
-            ]
-            : [
-                STRUCTURE_ROAD,
-                STRUCTURE_SPAWN,
-                STRUCTURE_STORAGE,
-                STRUCTURE_TERMINAL,
-                STRUCTURE_EXTENSION,
-                STRUCTURE_TOWER
-            ];
+        const earlyRoomPriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_TOWER,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD,
+            STRUCTURE_STORAGE,
+            STRUCTURE_TERMINAL
+        ];
+        const jumpPriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_TOWER,
+            STRUCTURE_STORAGE,
+            STRUCTURE_TERMINAL,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD
+        ];
+        const defaultPriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_STORAGE,
+            STRUCTURE_TERMINAL,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_TOWER,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD
+        ];
+        const isEarlyOwnedRoom = !!controller?.my && controller.level <= 4;
+        const buildPriority = shouldForceSpawnFirst
+            ? jumpPriority
+            : (isEarlyOwnedRoom ? earlyRoomPriority : (isJumpMode ? jumpPriority : defaultPriority));
 
         // 使用 findAndBuild 方法查找并建造
         if (!creep.findAndBuild({

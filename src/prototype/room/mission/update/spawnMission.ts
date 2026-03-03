@@ -31,6 +31,15 @@ const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 }
 
+const isEarlyRushEnabled = (room: Room) => {
+    const cfg = getRoomData(room.name) as any;
+    const enabled = cfg?.devRush ?? cfg?.rcl3Rush;
+    if (!enabled) return false;
+
+    const rawMax = cfg?.devRushMaxRcl;
+    const maxRcl = Math.max(1, Math.min(8, typeof rawMax === 'number' ? Math.floor(rawMax) : 3));
+    return room.level <= maxRcl;
+}
 const hasControllerEnergyBuffer = (room: Room) => {
     if (!room.controller) return false;
     const hasLink = room.link?.some(link => link.pos.inRangeTo(room.controller!.pos, 2));
@@ -38,16 +47,29 @@ const hasControllerEnergyBuffer = (room: Room) => {
     return !!room.container?.some(container => container.pos.inRangeTo(room.controller!.pos, 3));
 }
 
-const hasMyConstructionSitesCached = (room: Room) => {
+const getMyConstructionSites = (room: Room) => {
     const cachedSites = (room as any).constructionSite as ConstructionSite[] | undefined;
-    if (cachedSites && cachedSites.length > 0) {
-        for (const site of cachedSites) {
-            if ((site as any).my) return true;
-            else site.remove();
+    const sites = (cachedSites && cachedSites.length > 0)
+        ? cachedSites
+        : room.find(FIND_CONSTRUCTION_SITES);
+    return sites.filter((s) => s && (s as any).my);
+}
+
+const hasMyConstructionSitesCached = (room: Room) => {
+    return getMyConstructionSites(room).length > 0;
+}
+
+const getCoreConstructionSiteCount = (room: Room) => {
+    let count = 0;
+    for (const site of getMyConstructionSites(room)) {
+        if (site.structureType === STRUCTURE_SPAWN ||
+            site.structureType === STRUCTURE_EXTENSION ||
+            site.structureType === STRUCTURE_TOWER ||
+            site.structureType === STRUCTURE_CONTAINER) {
+            count++;
         }
-        return false;
     }
-    return false;
+    return count;
 }
 
 const getWalkableSourceSlots = (room: Room, source: Source): number => {
@@ -102,12 +124,27 @@ const RoleSpawnCheck = {
         const lv = room.level;
         const mode = getRoomMode(room);
         const highMode = mode === 'high';
+        const earlyRush = isEarlyRushEnabled(room);
         const baseNum = RoleLevelData['upgrader'][lv]['num'];
         let num = highMode ? Math.min(baseNum * 2, 8) : baseNum;
         if (room.memory.defend) return false;
+        const state = getEnergyState(room);
+        if (earlyRush) {
+            if (lv <= 2) num = Math.max(num, 4);
+            else if (lv === 3) num = Math.max(num, 5);
+
+            const coreSiteCount = getCoreConstructionSiteCount(room);
+            if (coreSiteCount > 0) {
+                num = Math.max(2, num - 1);
+            }
+
+            if (state === 'CRITICAL' && room.energyAvailable < THRESHOLDS.SPAWN.MIN_ENERGY && current >= 2) {
+                return false;
+            }
+            return current < num;
+        }
         const ttd = room.controller?.ticksToDowngrade || 0;
         if (highMode) {
-            const state = getEnergyState(room);
             if (state === 'CRITICAL') return false;
             if (state === 'LOW' && ttd > 10000 && current >= 1) return false;
 
@@ -175,9 +212,12 @@ const RoleSpawnCheck = {
         const state = getEnergyState(room);
         const cap = room.energyCapacityAvailable || 0;
         const totalEnergy = getTotalEnergy(room);
+        const earlyRush = isEarlyRushEnabled(room);
 
         const hasBuildMission = room.checkMissionInPool('build');
-        const hasConstruction = hasMyConstructionSitesCached(room);
+        const siteCount = getMyConstructionSites(room).length;
+        const coreSiteCount = getCoreConstructionSiteCount(room);
+        const hasConstruction = siteCount > 0;
         const needBuilder = hasBuildMission || hasConstruction;
 
         // 1. 只要有建造需求，就先保证至少 1 个 worker
@@ -188,14 +228,29 @@ const RoleSpawnCheck = {
             }
         }
 
-        // 2. 有大量 build 任务时，根据能量状态扩容 worker 数量
-        if (hasBuildMission) {
-            const buildNum = room.getMissionNumInPool('build');
-            if ((state === 'SURPLUS' || state === 'NORMAL') && buildNum > 10 && current < 2) {
+        // 2. 有建造需求时，根据工地规模和模式扩容 worker 数量
+        if (needBuilder) {
+            if (earlyRush) {
+                let rushTarget = room.level <= 2 ? 2 : 1;
+                if (room.level === 3) {
+                    if (siteCount >= 10) rushTarget = 3;
+                    else if (siteCount >= 4 || coreSiteCount > 0) rushTarget = 2;
+                }
+                if (state === 'CRITICAL') rushTarget = 1;
+                if (state === 'LOW') rushTarget = Math.min(rushTarget, 2);
+                if (current < rushTarget &&
+                    (room.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY || totalEnergy >= cap)) {
+                    return true;
+                }
+            }
+
+            if ((state === 'SURPLUS' || state === 'NORMAL') && siteCount >= 6 && current < 2) {
+                return true;
+            }
+            if (state === 'SURPLUS' && siteCount >= 16 && current < 3) {
                 return true;
             }
             if (state === 'LOW' && current < 1 && totalEnergy >= Math.max(THRESHOLDS.SPAWN.BODY_REDUCTION_THRESHOLD, cap * 2)) {
-                // 如果你觉得多余，也可以直接删掉这句，只保留上面的“至少一个”逻辑
                 return true;
             }
         }
