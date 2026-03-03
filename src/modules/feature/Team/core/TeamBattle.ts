@@ -1,7 +1,7 @@
-import TeamCalc from "../infra/TeamCalc"
-import TeamCache from "../infra/TeamCache";
+import TeamCalc from "./TeamCalc"
+import TeamCache from "./TeamCache";
 import TeamAction from "./TeamAction";
-import TeamUtils from "../core/TeamUtils";
+import TeamUtils from "./TeamUtils";
 
 /**
  * 战斗类

@@ -1,8 +1,8 @@
-import TeamUtils from '../core/TeamUtils';
-import TeamCache from '../infra/TeamCache';
-import TeamCalc from '../infra/TeamCalc';
-import TeamVisual from '../debug/TeamVisual';
-import RoomArray from '../infra/RoomArray'
+import TeamUtils from './TeamUtils';
+import TeamCache from './TeamCache';
+import TeamCalc from './TeamCalc';
+import TeamVisual from './TeamVisual';
+import RoomArray from './RoomArray'
 import { creepPosBipartiteMatch } from '@/utils'
 
 const emptyCostMatrix = new PathFinder.CostMatrix()

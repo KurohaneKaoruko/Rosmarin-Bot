@@ -1,5 +1,5 @@
 import Team from "../core/TeamClass";
-import TeamCalc from "../infra/TeamCalc";
+import TeamCalc from "../core/TeamCalc";
 import { getTeamData } from "@/modules/utils/memory";
 import { getTeamCreeps } from "@/modules/utils/creepTickIndex";
 

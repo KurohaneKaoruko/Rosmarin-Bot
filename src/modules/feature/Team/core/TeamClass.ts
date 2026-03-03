@@ -1,7 +1,7 @@
 import TeamUtils from './TeamUtils';
-import TeamAction from '../ai/TeamAction';
-import TeamBattle from '../ai/TeamBattle';
-import TeamVisual from '../debug/TeamVisual';
+import TeamAction from './TeamAction';
+import TeamBattle from './TeamBattle';
+import TeamVisual from '../core/TeamVisual';
 import { getTeamData } from '@/modules/utils/memory';
 
 /**
