@@ -19,6 +19,7 @@ const DEDICATED_SOURCE_ROLES = new Set(['harvester', 'out-harvest']);
 const DEDICATED_SOURCE_WEIGHT = 2;
 
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
+const hasMyConstructionSites = (room: Room) => room.find(FIND_CONSTRUCTION_SITES).some(site => (site as any).my);
 
 const shouldForceUpgrade = (room: Room) => {
     const controller = room.controller;
@@ -305,6 +306,16 @@ const resolveTransferTarget = (creep: Creep, cache: UniversalTargetCache) => {
 const doWork = function (creep: Creep) {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {};
     const cache = creep.memory.cacheTarget as UniversalTargetCache;
+    const urgent = isUrgentRefill(creep.room);
+    const hasBuildSite = hasMyConstructionSites(creep.room);
+
+    // 有工地且不处于补能紧急态时，优先建造，避免被控制器缓冲补能长期占用。
+    if (hasBuildSite && !urgent) {
+        const buildPriority = creep.room.level <= 3
+            ? [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART]
+            : [STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART];
+        if (creep.findAndBuild({ priority: buildPriority, range: 3 })) return;
+    }
 
     const transferTask = resolveTransferTarget(creep, cache);
     if (transferTask) {
