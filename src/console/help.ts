@@ -66,7 +66,6 @@ const helpTexts: Record<string, string> = {
         `${cmd('room.remove(roomName)')}：从控制列表删除房间`,
         `${cmd('room.list()')}：查看控制列表`,
         `${cmd('room.mode(roomName, mode)')}：设置房间运行模式（main / stop / low / high / rush）`,
-        `${cmd('room.rush(roomName, on?, maxRcl?)')}：开关前期冲刺模式（核心建筑优先 + 加速升级，默认 maxRcl=3）`,
         `${cmd('room.setcenter(roomName, x, y)')}：设置房间布局中心`,
         `${cmd('room.defendmode(roomName, mode)')}：设置房间防御模式`,
         `${cmd('room.sign(roomName, text?)')}：设置房间签名`,

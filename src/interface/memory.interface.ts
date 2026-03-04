@@ -247,25 +247,6 @@ interface RoomControlMemory {
      * @description > Game.time 表示当前房间处于 SafeRush 强化窗口
      */
     season8SafeRushActiveUntil?: number;
-
-    /**
-     * 通用前期冲刺开关
-     * @description 开启后在低 RCL 阶段采用更激进的建造/升级孵化策略
-     */
-    devRush?: boolean;
-
-    /**
-     * 通用前期冲刺生效上限 RCL
-     * @description 仅在 controller.level <= devRushMaxRcl 时启用冲刺策略
-     * @default 3
-     */
-    devRushMaxRcl?: number;
-
-    /**
-     * 旧字段兼容：RCL3 冲刺开关
-     * @deprecated 请使用 devRush
-     */
-    rcl3Rush?: boolean;
 }
 
 type Season8Policy = 'aggressive' | 'balanced' | 'safe';

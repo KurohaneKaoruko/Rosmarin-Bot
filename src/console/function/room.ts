@@ -81,45 +81,8 @@ export default {
             if(!room || !room.my || !BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
             }
-            const roomMem = BotMemRooms[roomName] as any;
-            roomMem['mode'] = mode;
-            if (mode === 'rush') {
-                roomMem.devRush = true;
-                roomMem.rcl3Rush = true;
-                if (!Number.isFinite(roomMem.devRushMaxRcl)) roomMem.devRushMaxRcl = 3;
-                global.log(`已设置 ${roomName} 的运行模式为 rush（devRush=true, maxRcl=${roomMem.devRushMaxRcl}）。`);
-                return OK;
-            }
+            BotMemRooms[roomName]['mode'] = mode;
             global.log(`已设置 ${roomName} 的运行模式为 ${mode}。`);
-            return OK;
-        },
-        // 通用前期冲刺模式：优先核心建筑 + 加速升级
-        rush(roomName: string, on?: boolean, maxRcl?: number) {
-            if (!roomName) return Error('请输入房间名。');
-            if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
-            if (maxRcl !== undefined) {
-                if (!Number.isFinite(maxRcl) || maxRcl < 1 || maxRcl > 8) {
-                    return Error('maxRcl 必须是 1~8 的数字。');
-                }
-            }
-
-            const room = Game.rooms[roomName];
-            const BotMemRooms = getRoomData();
-            if (!room || !room.my || !BotMemRooms[roomName]) {
-                return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
-            }
-
-            const roomMem = BotMemRooms[roomName] as any;
-            const current = roomMem.devRush ?? roomMem.rcl3Rush;
-            const next = on === undefined ? !current : !!on;
-            const nextMaxRcl = Math.max(1, Math.min(8, Math.floor(maxRcl ?? roomMem.devRushMaxRcl ?? 3)));
-            roomMem.devRush = next;
-            roomMem.devRushMaxRcl = nextMaxRcl;
-            // backward-compat for old logic/data
-            roomMem.rcl3Rush = next;
-            if (next && roomMem.mode === 'low') roomMem.mode = 'rush';
-
-            global.log(`已设置 ${roomName} 的前期冲刺模式为 ${next ? '开启' : '关闭'}（maxRcl=${nextMaxRcl}）。`);
             return OK;
         },
         // 设置房间中心

@@ -34,20 +34,7 @@ const getRoomMode = (room: Room) => {
 const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
 
 const isEarlyRushEnabled = (room: Room) => {
-    const cfg = getRoomData(room.name) as any;
-    const enabled = cfg?.devRush ?? cfg?.rcl3Rush;
-    if (!enabled) return false;
-
-    const rawMax = cfg?.devRushMaxRcl;
-    const maxRcl = Math.max(1, Math.min(8, typeof rawMax === 'number' ? Math.floor(rawMax) : 3));
-    return room.level <= maxRcl;
-}
-
-
-const getEarlyRushMaxRcl = (room: Room) => {
-    const cfg = getRoomData(room.name) as any;
-    const rawMax = cfg?.devRushMaxRcl;
-    return Math.max(1, Math.min(8, typeof rawMax === 'number' ? Math.floor(rawMax) : 3));
+    return getRoomMode(room) === 'rush';
 }
 
 const hasControllerEnergyBuffer = (room: Room) => {
@@ -256,15 +243,12 @@ const RoleSpawnCheck = {
             }
 
             if (earlyRush) {
-                // 通用前期冲刺：不锁死 RCL3，按 devRushMaxRcl 内的等级与工地规模动态扩容 worker。
-                const maxRcl = getEarlyRushMaxRcl(room);
+                // rush 模式：不锁死 RCL3，按等级与工地规模动态扩容 worker。
                 let rushTarget = room.level <= 2 ? 2 : 3;
                 if (siteCount >= 8 || coreSiteCount >= 3) rushTarget += 1;
                 if (siteCount >= 16 || coreSiteCount >= 7) rushTarget += 1;
                 const hardCap = room.level <= 2 ? 4 : 5;
                 rushTarget = Math.min(rushTarget, hardCap);
-                // 越接近冲刺上限，适当保守，避免在更高 RCL 过度挤占物流角色。
-                if (room.level >= maxRcl) rushTarget = Math.max(2, rushTarget - 1);
                 if (state === 'CRITICAL') rushTarget = 1;
                 if (state === 'LOW') rushTarget = Math.min(rushTarget, room.level <= 2 ? 2 : 3);
                 if (current < rushTarget &&
