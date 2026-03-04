@@ -164,9 +164,10 @@ interface RoomControlMemory {
      * - 'main': 正常运行模式
      * - 'low': 低功耗模式，减少 CPU 消耗
      * - 'high': 高功耗模式，最大化运行效率
+     * - 'rush': 冲刺模式，保留高功耗策略并强调前期冲刺
      * - 'stop': 停止模式，暂停大部分功能
      */
-    mode: 'main' | 'low' | 'high' | 'stop';
+    mode: 'main' | 'low' | 'high' | 'rush' | 'stop';
 
     /**
      * 布局类型
@@ -284,7 +285,7 @@ type Season8RoomSnapshot = {
     progress: number;
     progressTotal: number;
     safeMode: number;
-    mode: 'main' | 'low' | 'high' | 'stop';
+    mode: 'main' | 'low' | 'high' | 'rush' | 'stop';
     policy: Season8Policy;
     pushTarget?: string;
     safeRush: boolean;

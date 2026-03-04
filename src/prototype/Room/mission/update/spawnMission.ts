@@ -31,6 +31,8 @@ const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 }
 
+const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
+
 const isEarlyRushEnabled = (room: Room) => {
     const cfg = getRoomData(room.name) as any;
     const enabled = cfg?.devRush ?? cfg?.rcl3Rush;
@@ -121,7 +123,7 @@ const RoleSpawnCheck = {
         if (room.memory.defend) return false;
         let num = getHarvesterTargetBySource(room);
         if (num <= 0) return false;
-        if (getRoomMode(room) === 'high') {
+        if (isHighLikeMode(getRoomMode(room))) {
             // High mode pre-spawns one replacement when a local harvester is near expiry.
             const shouldPreSpawn = hasSoonDeadCreepByHomeRoomRole(room.name, 'harvester', 10);
             if (shouldPreSpawn) num += 1;
@@ -131,7 +133,7 @@ const RoleSpawnCheck = {
     'upgrader': (room: Room, current: number) => {
         const lv = room.level;
         const mode = getRoomMode(room);
-        const highMode = mode === 'high';
+        const highMode = isHighLikeMode(mode);
         const earlyRush = isEarlyRushEnabled(room);
         const baseNum = RoleLevelData['upgrader'][lv]['num'];
         let num = highMode ? Math.min(baseNum * 2, 8) : baseNum;
@@ -181,7 +183,7 @@ const RoleSpawnCheck = {
         return current < num;
     },
     'transport': (room: Room, current: number) => {
-        const highMode = getRoomMode(room) === 'high';
+        const highMode = isHighLikeMode(getRoomMode(room));
         const state = getEnergyState(room);
         const storedEnergy = getStoredEnergy(room);
         let num = RoleLevelData['transport'][room.level]['num'];
@@ -432,4 +434,3 @@ export default class SpawnMission extends Room {
         return OK;
     }
 }
-
