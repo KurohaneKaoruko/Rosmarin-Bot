@@ -33,6 +33,25 @@ const getSpawnRoleNum = (homeRoom: Room, role: string): number => {
     return homeRoom.getSpawnMissionNum()?.[role] || 0;
 }
 
+const getSpawnRoleNumByTarget = (homeRoom: Room, role: string, targetRoomName: string): number => {
+    const roomAny = homeRoom as any;
+    if (roomAny._spawnRoleTargetCacheTick !== Game.time) {
+        const cache: Record<string, number> = {};
+        const tasks = homeRoom.getAllMissionFromPool('spawn') || [];
+        for (const task of tasks) {
+            const memory = (task as any)?.data?.memory;
+            if (!memory?.role) continue;
+            if (memory.homeRoom && memory.homeRoom !== homeRoom.name) continue;
+            const key = `${memory.role}|${memory.targetRoom || ''}`;
+            cache[key] = (cache[key] || 0) + 1;
+        }
+        roomAny._spawnRoleTargetCache = cache;
+        roomAny._spawnRoleTargetCacheTick = Game.time;
+    }
+    const key = `${role}|${targetRoomName}`;
+    return (roomAny._spawnRoleTargetCache?.[key] || 0) as number;
+}
+
 const calcEnergyOutCarryTarget = (homeRoom: Room, targetRoomName: string, sourceNum: number, allowWorkCarry: boolean): number => {
     const lv = Math.max(1, Math.min(8, homeRoom.level));
     const baseNum = allowWorkCarry
@@ -62,14 +81,17 @@ const calcAggressiveSmallCarryTarget = (homeRoom: Room, targetRoomName: string, 
     const scale = Math.max(1, Math.ceil(largeCarryCapacity / OUTMINE_SMALL_CARRY_CAPACITY));
 
     // 把“大体型估算”换算到小体型数量，并给最低链路冗余。
-    const scaledTarget = Math.ceil(baseCarryNum * scale * 1.25);
-    const minBySource = Math.max(6, sourceNum * 6);
-    const cap = Math.max(18, sourceNum * 30);
+    const scaledTarget = Math.ceil(baseCarryNum * scale * 1.6);
+    const minBySource = Math.max(8, sourceNum * 8);
+    const cap = Math.max(24, sourceNum * 42);
     return Math.min(cap, Math.max(minBySource, scaledTarget));
 }
 
-const isHighMode = (room: Room): boolean => {
-    const mode = (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+const getRoomMode = (room: Room): string => {
+    return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+}
+
+const isAggressiveMode = (mode: string): boolean => {
     return mode === 'high' || mode === 'rush';
 }
 
@@ -135,7 +157,10 @@ export default class OutMine extends Room {
 
     EnergyMine() { // 能量矿
         const qosLevel = getQoS()?.level || 'normal';
-        const interval = qosLevel === 'constrained' ? 40 : 20;
+        const roomMode = getRoomMode(this);
+        const interval = qosLevel === 'constrained'
+            ? (roomMode === 'rush' ? 10 : roomMode === 'high' ? 20 : 40)
+            : (roomMode === 'rush' ? 5 : roomMode === 'high' ? 10 : 20);
         if (Game.time % interval != 0) return;
         const Mem = getOutMineData(this.name)?.['energy'];
         if (!Mem || !Mem.length) return;
@@ -204,10 +229,15 @@ export default class OutMine extends Room {
             // high/rush 模式自动使用激进搬运：更多小体型 + 交接链路
             const allowWorkCarry = this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
             const carryNum = calcEnergyOutCarryTarget(this, roomName, sourceNum, allowWorkCarry);
-            const aggressiveCarry = isHighMode(this);
+            const aggressiveCarry = isAggressiveMode(roomMode);
             if (aggressiveCarry) {
-                const num = calcAggressiveSmallCarryTarget(this, roomName, sourceNum, allowWorkCarry);
-                const maxSpawnPerTick = Math.max(1, Math.min(6, sourceNum * 3));
+                const baseNum = calcAggressiveSmallCarryTarget(this, roomName, sourceNum, allowWorkCarry);
+                const num = roomMode === 'rush'
+                    ? Math.min(Math.max(30, sourceNum * 56), Math.ceil(baseNum * 1.35))
+                    : baseNum;
+                const maxSpawnPerTick = roomMode === 'rush'
+                    ? Math.max(3, Math.min(14, sourceNum * 5))
+                    : Math.max(2, Math.min(10, sourceNum * 4));
                 const smallCarryBody = getSmallCarryBody(this, roomName);
                 outCarry2Spawn(this, targetRoom, num, allowWorkCarry, true, true, maxSpawnPerTick, smallCarryBody);
             } else {
@@ -222,7 +252,10 @@ export default class OutMine extends Room {
 
     CenterMine() { // 中央九房
         const qosLevel = getQoS()?.level || 'normal';
-        const interval = qosLevel === 'constrained' ? 20 : 10;
+        const roomMode = getRoomMode(this);
+        const interval = qosLevel === 'constrained'
+            ? (roomMode === 'rush' ? 6 : roomMode === 'high' ? 10 : 20)
+            : (roomMode === 'rush' ? 4 : roomMode === 'high' ? 5 : 10);
         if (Game.time % interval != 0) return;
         const Mem = getOutMineData(this.name)?.['centerRoom'];
         if (!Mem || !Mem.length) return;
@@ -268,18 +301,27 @@ export default class OutMine extends Room {
                 if (hasSourceKeeper && outerAttackers < 1) continue;
             }
 
-            
-            outHarvesterSpawn(this, targetRoom, 3, true);    // 采集
+            const centerSourceNum = 3;
+
+            outHarvesterSpawn(this, targetRoom, centerSourceNum, true);    // 采集
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];
             if (mineral && mineral.mineralAmount > 0) {
                 outMineSpawn(this, targetRoom);
             }    // 采矿
             const allowWorkCarry = this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
-            const centerCarryNum = calcEnergyOutCarryTarget(this, roomName, 3, allowWorkCarry);
-            if (isHighMode(this)) {
-                const num = calcAggressiveSmallCarryTarget(this, roomName, 3, allowWorkCarry);
+            const centerCarryNum = calcEnergyOutCarryTarget(this, roomName, centerSourceNum, allowWorkCarry);
+            if (isAggressiveMode(roomMode)) {
+                // 中央九房链路更长、吞吐更高，按更高等效 source 数做激进估算。
+                const effectiveCenterSource = Math.max(4, centerSourceNum + 1);
+                const baseNum = calcAggressiveSmallCarryTarget(this, roomName, effectiveCenterSource, allowWorkCarry);
+                const num = roomMode === 'rush'
+                    ? Math.min(Math.max(36, effectiveCenterSource * 56), Math.ceil(baseNum * 1.4))
+                    : baseNum;
                 const smallCarryBody = getSmallCarryBody(this, roomName);
-                outCarry2Spawn(this, targetRoom, num, allowWorkCarry, true, true, 6, smallCarryBody);    // 激进搬运
+                const maxSpawnPerTick = roomMode === 'rush'
+                    ? Math.max(4, Math.min(16, effectiveCenterSource * 4))
+                    : Math.max(3, Math.min(12, effectiveCenterSource * 3));
+                outCarry2Spawn(this, targetRoom, num, allowWorkCarry, true, true, maxSpawnPerTick, smallCarryBody);    // 激进搬运
             } else {
                 outCarrySpawn(this, targetRoom, centerCarryNum, allowWorkCarry, false);    // 搬运
             }
@@ -440,8 +482,8 @@ const outCarrySpawn = function (
     const outerCar = (CreepByTargetRoom['out-car'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;
     
-    const spawnCarryNum = getSpawnRoleNum(homeRoom, 'out-carry');
-    const spawnCarNum = getSpawnRoleNum(homeRoom, 'out-car');
+    const spawnCarryNum = getSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
+    const spawnCarNum = getSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
 
     if (!allowWorkCarry) {
         const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
@@ -488,8 +530,8 @@ const outCarry2Spawn = function (
     const outerCar = (CreepByTargetRoom['out-car'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;
     
-    const spawnCarryNum = getSpawnRoleNum(homeRoom, 'out-carry');
-    const spawnCarNum = getSpawnRoleNum(homeRoom, 'out-car');
+    const spawnCarryNum = getSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
+    const spawnCarNum = getSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
 
     if (preferSmall) {
         const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
