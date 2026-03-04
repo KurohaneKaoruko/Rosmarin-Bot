@@ -54,44 +54,191 @@ const outCarry = {
                 !c.pos.isRoomEdge() &&
                 (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
                 c.memory.homeRoom === creep.memory.homeRoom &&
-                c.memory.targetRoom === creep.memory.targetRoom &&
-                c.memory.working === true &&
-                c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                c.memory.targetRoom === creep.memory.targetRoom
         });
         if (teammates.length === 0) return false;
 
-        const candidates = teammates.filter((c: Creep) => this.getExitProgress(c.pos, exitDirection) > selfProgress);
-        if (candidates.length === 0) return false;
-
-        let target: Creep | null = null;
-        let bestProgress = -1;
-        let bestFree = -1;
-        for (const c of candidates) {
-            const progress = this.getExitProgress(c.pos, exitDirection);
-            const free = c.store.getFreeCapacity(RESOURCE_ENERGY);
-            if (!target ||
-                progress > bestProgress ||
-                (progress === bestProgress && free > bestFree) ||
-                (progress === bestProgress && free === bestFree && c.id < target.id)) {
-                target = c;
-                bestProgress = progress;
-                bestFree = free;
+        const pickBestTarget = (pool: Creep[]): Creep | null => {
+            let best: Creep | null = null;
+            let bestProgress = -1;
+            let bestFree = -1;
+            for (const c of pool) {
+                const progress = this.getExitProgress(c.pos, exitDirection);
+                if (progress <= selfProgress) continue;
+                const free = c.store.getFreeCapacity(RESOURCE_ENERGY);
+                if (free <= 0) continue;
+                if (!best ||
+                    progress > bestProgress ||
+                    (progress === bestProgress && free > bestFree) ||
+                    (progress === bestProgress && free === bestFree && c.id < best.id)) {
+                    best = c;
+                    bestProgress = progress;
+                    bestFree = free;
+                }
             }
+            return best;
+        };
+
+        let target = pickBestTarget(teammates.filter((c: Creep) => c.memory.working === true));
+        let switchedFromOutbound = false;
+        if (!target) {
+            target = pickBestTarget(teammates.filter((c: Creep) => c.memory.working === false));
+            switchedFromOutbound = !!target;
         }
         if (!target) return false;
 
         const ret = creep.transfer(target, RESOURCE_ENERGY);
         if (ret !== OK) return false;
 
-        // 接力后后撤一步，让出前向位，形成稳定链式输运。
+        if (switchedFromOutbound && target.memory.working === false && target.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+            target.memory.working = true;
+            target.memory.cacheSource = {};
+            target.memory.cache = {};
+        }
+
         const reverseDirection = this.getOppositeDirection(exitDirection);
         if (reverseDirection) creep.move(reverseDirection);
         return true;
     },
 
+    estimateIncomingPerTick: function (container: StructureContainer): number {
+        const feeders = container.pos.lookFor(LOOK_CREEPS).filter((c: Creep) =>
+            c.my &&
+            (c.memory.role === 'out-harvest' || c.memory.role === 'out-mineral')
+        );
+        if (feeders.length === 0) return 0;
+
+        let incoming = 0;
+        for (const feeder of feeders) {
+            const work = Math.max(0, feeder.getActiveBodyparts(WORK));
+            if (work === 0) continue;
+            if (feeder.memory.role === 'out-harvest') incoming += work * HARVEST_POWER;
+            else incoming += work * HARVEST_MINERAL_POWER;
+        }
+        return incoming;
+    },
+
+    calcWaitTicksNearHarvester: function (creep: Creep, container: StructureContainer): number {
+        const incoming = this.estimateIncomingPerTick(container);
+        if (incoming <= 0) return 0;
+
+        const free = creep.store.getFreeCapacity();
+        const current = container.store.getUsedCapacity();
+        if (free <= 0 || current >= free) return 0;
+
+        const need = free - current;
+        let sleepTicks = Math.ceil(need / incoming);
+        sleepTicks = Math.min(sleepTicks, 25);
+        sleepTicks = Math.min(sleepTicks, Math.max(0, creep.ticksToLive - 50));
+        if (sleepTicks <= 2) return 0;
+        return sleepTicks;
+    },
+
+    findBestWithdrawTarget: function (creep: Creep): { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null {
+        const room = creep.room;
+        const homeRoom = Game.rooms[creep.memory.homeRoom];
+        const canStoreMinerals = !!(homeRoom?.storage || homeRoom?.terminal);
+
+        const dangerousHostiles = room.find(FIND_HOSTILE_CREEPS, {
+            filter: (c: Creep) =>
+                !c.isWhiteList() &&
+                (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
+        });
+        const isDangerousPos = (pos: RoomPosition) =>
+            dangerousHostiles.some((h: Creep) => h.pos.inRangeTo(pos, 5));
+
+        const reservedByTarget: Record<string, number> = {};
+        for (const name in Game.creeps) {
+            const other = Game.creeps[name];
+            if (!other || other.id === creep.id || other.spawning) continue;
+            if (other.memory.role !== 'out-carry' && other.memory.role !== 'out-car') continue;
+            if (other.memory.homeRoom !== creep.memory.homeRoom) continue;
+            if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
+            if (other.memory.working !== false) continue;
+            const targetId = other.memory.cacheSource?.targetId;
+            if (!targetId) continue;
+            reservedByTarget[targetId] = (reservedByTarget[targetId] || 0) + other.store.getFreeCapacity();
+        }
+
+        let bestScore = -Infinity;
+        let best: { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null = null;
+
+        const consider = (id: string, type: 'dropped' | 'container' | 'tombstone' | 'ruin', pos: RoomPosition, amount: number, nonEnergyBonus = 0) => {
+            if (!id || amount <= 0) return;
+            if (isDangerousPos(pos)) return;
+
+            const reserved = reservedByTarget[id] || 0;
+            const remaining = amount - reserved;
+            if (remaining <= 0) return;
+
+            const range = creep.pos.getRangeTo(pos);
+            let score = remaining + nonEnergyBonus;
+            score -= range * range * 0.5;
+
+            if (score > bestScore) {
+                bestScore = score;
+                best = { id, type };
+            }
+        };
+
+        const droppedThreshold = Math.min(500, creep.store.getCapacity());
+        const dropped = room.find(FIND_DROPPED_RESOURCES, {
+            filter: (r: Resource) => r.amount >= droppedThreshold
+        });
+        for (const resource of dropped) {
+            if (!canStoreMinerals && resource.resourceType !== RESOURCE_ENERGY) continue;
+            const bonus = resource.resourceType === RESOURCE_ENERGY ? 0 : resource.amount * 3;
+            consider(resource.id, 'dropped', resource.pos, resource.amount, bonus);
+        }
+
+        const containers = (room.container || []).filter((c: StructureContainer) => c.store.getUsedCapacity() >= 300);
+        for (const container of containers) {
+            const energyAmount = container.store[RESOURCE_ENERGY] || 0;
+            const totalAmount = container.store.getUsedCapacity();
+            const amount = canStoreMinerals ? totalAmount : energyAmount;
+            const incoming = this.estimateIncomingPerTick(container);
+            const bonus = incoming > 0 ? Math.min(creep.store.getFreeCapacity(), incoming * 5) : 0;
+            consider(container.id, 'container', container.pos, amount, bonus);
+        }
+
+        const tombstones = room.find(FIND_TOMBSTONES, {
+            filter: (t: Tombstone) => t.store.getUsedCapacity() > 0
+        });
+        for (const tombstone of tombstones) {
+            const energyAmount = tombstone.store[RESOURCE_ENERGY] || 0;
+            const totalAmount = tombstone.store.getUsedCapacity();
+            const amount = canStoreMinerals ? totalAmount : energyAmount;
+            const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 200 : 0;
+            consider(tombstone.id, 'tombstone', tombstone.pos, amount, mixedBonus);
+        }
+
+        const ruins = room.find(FIND_RUINS, {
+            filter: (r: Ruin) => r.store.getUsedCapacity() > 0
+        });
+        for (const ruin of ruins) {
+            const energyAmount = ruin.store[RESOURCE_ENERGY] || 0;
+            const totalAmount = ruin.store.getUsedCapacity();
+            const amount = canStoreMinerals ? totalAmount : energyAmount;
+            const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 120 : 0;
+            consider(ruin.id, 'ruin', ruin.pos, amount, mixedBonus);
+        }
+
+        return best;
+    },
+
     withdraw: function(creep: Creep) {
         creep.memory.cacheSource = creep.memory.cacheSource || {}
         const cache = creep.memory.cacheSource as any
+
+        if (cache.waitUntil && Game.time < cache.waitUntil) {
+            const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+                filter: (r: Resource) => r.amount > 0
+            })[0];
+            if (nearbyDrop) creep.pickup(nearbyDrop);
+            return;
+        }
+        delete cache.waitUntil;
+
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
             return;
@@ -99,7 +246,7 @@ const outCarry = {
         
         // 处理缓存的目标
         if (cache.targetId) {
-            let target = Game.getObjectById(cache.targetId) as any;
+            let target = Game.getObjectById(cache.targetId as Id<any>) as any;
             if (!target) {
                 delete cache.targetId;
                 delete cache.targetType;
@@ -115,7 +262,20 @@ const outCarry = {
             if (targetType === 'dropped') {
                 creep.pickup(target);
             } else if (targetType === 'container' || targetType === 'ruin' || targetType === 'tombstone') {
-                const resourceType = Object.keys(target.store)[0] as ResourceConstant;
+                if (targetType === 'container' && target.store.getUsedCapacity() < creep.store.getFreeCapacity()) {
+                    const waitTicks = this.calcWaitTicksNearHarvester(creep, target as StructureContainer);
+                    if (waitTicks > 0) {
+                        cache.waitUntil = Game.time + waitTicks;
+                        return;
+                    }
+                }
+
+                const nonEnergyResource = Object.keys(target.store).find((res) => res !== RESOURCE_ENERGY && target.store[res] > 0) as ResourceConstant;
+                const energyAmount = target.store[RESOURCE_ENERGY] || 0;
+                const canStoreMinerals = !!(Game.rooms[creep.memory.homeRoom]?.storage || Game.rooms[creep.memory.homeRoom]?.terminal);
+                const resourceType = (canStoreMinerals && nonEnergyResource)
+                    ? nonEnergyResource
+                    : (energyAmount > 0 ? RESOURCE_ENERGY : (Object.keys(target.store)[0] as ResourceConstant));
                 creep.withdraw(target, resourceType);
             }
 
@@ -126,27 +286,29 @@ const outCarry = {
                 return;
             }
 
-            delete cache.targetId;
-            delete cache.targetType;
+            if (creep.store.getFreeCapacity() === 0) {
+                delete cache.targetId;
+                delete cache.targetType;
+            }
+            return;
         }
 
-        // 先找mineral旁边的container (特殊逻辑，保留原有行为)
-        if (creep.room.mineral) {
-            const containers = creep.room.container?.filter((container: StructureContainer) =>
-                container && container.store.getUsedCapacity() >= 300 &&
-                container.pos.inRangeTo(creep.room.mineral, 2) &&
-                Object.values(Memory.creeps).every((m) => 
-                    (m.role != 'out-carry' && m.role != 'out-car') || (m.cacheSource?.targetId || m.cacheTarget?.targetId || m.cache?.targetId) !== container.id)
-            );
-            if (containers && containers.length > 0) {
-                const container = creep.pos.findClosestByRange(containers);
-                if (container) {
-                    cache.targetId = container.id;
-                    cache.targetType = 'container';
-                    creep.moveTo(container, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
-                    return;
+        const bestTarget = this.findBestWithdrawTarget(creep);
+        if (bestTarget) {
+            cache.targetId = bestTarget.id;
+            cache.targetType = bestTarget.type;
+
+            const target = Game.getObjectById(bestTarget.id as Id<any>) as any;
+            if (target) {
+                if (bestTarget.type === 'dropped' && creep.pos.isNearTo(target)) {
+                    creep.pickup(target);
+                } else {
+                    creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
                 }
+                return;
             }
+            delete cache.targetId;
+            delete cache.targetType;
         }
 
         // 掉落阈值按自身容量动态调整：大于自身容量的掉落能量应允许拾取。
@@ -363,3 +525,5 @@ const outCarry = {
 }
 
 export default outCarry;
+
+
