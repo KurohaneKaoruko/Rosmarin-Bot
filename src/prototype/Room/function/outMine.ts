@@ -27,6 +27,8 @@ const OUTMINE_ROAD_CARRY_BODY = 'c4m2';
 const OUTMINE_ROAD_BODY_CHECK_INTERVAL = 25;
 const OUTMINE_ROAD_BODY_MIN_VISIBLE = 8;
 const OUTMINE_ROAD_BODY_MIN_COVERAGE = 0.75;
+const OUTMINE_SOURCE_TARGET_WORK = 5;
+const OUTMINE_MAX_HARVESTERS_PER_SOURCE = 3;
 
 const getSpawnRoleNum = (homeRoom: Room, role: string): number => {
     // 读取指定角色在孵化队列中的数量
@@ -93,6 +95,28 @@ const getRoomMode = (room: Room): string => {
 
 const isAggressiveMode = (mode: string): boolean => {
     return mode === 'high' || mode === 'rush';
+}
+
+const getOutHarvesterWorkParts = (homeRoom: Room, upbody?: boolean): number => {
+    if (upbody) return 16;
+    const body = homeRoom.GetRoleBodys('out-harvest');
+    if (!Array.isArray(body) || body.length === 0) return 1;
+
+    let workParts = 0;
+    for (const part of body as ((BodyPartConstant | number)[])[]) {
+        if (!Array.isArray(part) || part.length < 2) continue;
+        if (part[0] !== WORK) continue;
+        if (typeof part[1] !== 'number') continue;
+        workParts += part[1];
+    }
+    return Math.max(1, workParts);
+}
+
+const calcOutHarvesterTargetNum = (homeRoom: Room, sourceNum: number, upbody?: boolean): number => {
+    const workParts = getOutHarvesterWorkParts(homeRoom, upbody);
+    const perSource = Math.ceil(OUTMINE_SOURCE_TARGET_WORK / workParts);
+    const cappedPerSource = Math.min(OUTMINE_MAX_HARVESTERS_PER_SOURCE, Math.max(1, perSource));
+    return Math.max(sourceNum, sourceNum * cappedPerSource);
 }
 
 const getSmallCarryBody = (homeRoom: Room, targetRoomName: string): string => {
@@ -455,9 +479,11 @@ const outDoubleDefendSpawn = function (homeRoom: Room, targetRoom: Room, hostile
 // 采集
 const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum: number, upbody?: boolean) {
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-    const outerHarvesters = (CreepByTargetRoom['out-harvest'] || []).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'out-harvest');
-    if (outerHarvesters + spawnNum >= sourceNum) return false; 
+    const outerHarvesters = (CreepByTargetRoom['out-harvest'] || [])
+        .filter((c: any) => c.homeRoom === homeRoom.name).length;
+    const spawnNum = getSpawnRoleNumByTarget(homeRoom, 'out-harvest', targetRoom.name);
+    const targetNum = calcOutHarvesterTargetNum(homeRoom, sourceNum, upbody);
+    if (outerHarvesters + spawnNum >= targetNum) return false;
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
     if (upbody) {
