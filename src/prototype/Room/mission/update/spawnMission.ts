@@ -227,23 +227,7 @@ const RoleSpawnCheck = {
 
         // 2. 有建造需求时，根据工地规模和模式扩容 worker 数量
         if (needBuilder) {
-            if (room.level === 3) {
-                // RCL3 建造阶段：按工地规模动态提高 worker，显著加速起房速度。
-                let rcl3Target = 2;
-                if (siteCount >= 8 || coreSiteCount >= 3) rcl3Target = 3;
-                if (siteCount >= 16 || coreSiteCount >= 7) rcl3Target = 4;
-                if (earlyRush) rcl3Target = Math.min(5, rcl3Target + 1);
-                if (state === 'LOW') rcl3Target = Math.min(rcl3Target, 3);
-                if (state === 'CRITICAL') rcl3Target = 1;
-
-                if (current < rcl3Target &&
-                    (room.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY || totalEnergy >= cap)) {
-                    return true;
-                }
-            }
-
             if (earlyRush) {
-                // rush 模式：不锁死 RCL3，按等级与工地规模动态扩容 worker。
                 let rushTarget = room.level <= 2 ? 2 : 3;
                 if (siteCount >= 8 || coreSiteCount >= 3) rushTarget += 1;
                 if (siteCount >= 16 || coreSiteCount >= 7) rushTarget += 1;
