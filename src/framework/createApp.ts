@@ -2,17 +2,14 @@ import { log } from '@/utils.js';
 import { errorMapper } from './errorMapper.js'
 import { BASE_CONFIG } from '@/constant/config.js'
 import { updateQoS } from '@/modules/infra/qos.js';
+import { roomRunner } from './runner/RoomRunner';
+import { creepRunner } from './runner/CreepRunner';
+import { powerCreepRunner } from './runner/PowerCreepRunner';
+import { flagRunner } from './runner/FlagRunner';
 
 type EventType = 'init' | 'start' | 'tick' | 'end';
 type RunnerType = 'room' | 'creep' | 'powerCreep' | 'flag';
 type RunnerFn = () => void;
-
-const GAME_OBJECTS: Record<RunnerType, () => Record<string, any>> = {
-    room: () => Game.rooms,
-    creep: () => Game.creeps,
-    powerCreep: () => Game.powerCreeps,
-    flag: () => Game.flags,
-};
 
 /**
  * 基本框架，用于管理游戏循环，挂载各种模块
@@ -20,20 +17,18 @@ const GAME_OBJECTS: Record<RunnerType, () => Record<string, any>> = {
 export const createApp = () => {
     const name = BASE_CONFIG.BOT_NAME;
     const events: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
-    const runners: Record<RunnerType, RunnerFn> = { room: () => {}, creep: () => {}, powerCreep: () => {}, flag: () => {} };
-
-    const runRunner = <T>(objs: Record<string, T>, runner: (obj: T) => void) => {
-        for (const id in objs) {
-            if (!Object.prototype.hasOwnProperty.call(objs, id)) continue;
-            runner(objs[id]);
-        }
+    const runners: Record<RunnerType, RunnerFn> = {
+        room: () => runRunner(Game.rooms, roomRunner),
+        creep: () => runRunner(Game.creeps, creepRunner),
+        powerCreep: () => runRunner(Game.powerCreeps, powerCreepRunner),
+        flag: () => runRunner(Game.flags, flagRunner),
     };
 
-    /** 设置运行器 */
-    const set = <T>(type: RunnerType, runner: (obj: T) => void) => {
-        const getObjs = GAME_OBJECTS[type];
-        if (getObjs) {
-            runners[type] = () => runRunner(getObjs(), runner);
+    const hasOwnProperty = Object.prototype.hasOwnProperty;
+    const runRunner = <T>(objs: Record<string, T>, runner: (obj: T) => void) => {
+        for (const id in objs) {
+            if (!hasOwnProperty.call(objs, id)) continue;
+            runner(objs[id]);
         }
     };
 
@@ -111,5 +106,5 @@ export const createApp = () => {
         errorMapper(exec);
     };
 
-    return { name, set, on, run };
+    return { name, on, run };
 };

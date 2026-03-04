@@ -1,7 +1,7 @@
 import { assignPrototype } from "@/utils"
 import BaseFunction from "./function/baseFunction"
-import AidSpawnFunction from "./manualspawn/aidSpawn"
-import WarSpawnFunction from "./manualspawn/warSpawn"
+import AidSpawnFunction from "./function/aidSpawn"
+import WarSpawnFunction from "./function/warSpawn"
 
 const plugins = [
     BaseFunction,

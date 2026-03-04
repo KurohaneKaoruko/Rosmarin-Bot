@@ -1,6 +1,6 @@
 import { RoleData } from "@/constant/CreepConstant";
 import { log } from "@/utils";
-import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
+import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./spawnConfig";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
 export default class WarSpawnFunction extends Flag {

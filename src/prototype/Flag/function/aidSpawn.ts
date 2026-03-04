@@ -1,6 +1,6 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
 import { log } from "@/utils";
-import { AidBodys } from "./config";
+import { AidBodys } from "./spawnConfig";
 import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle } from "../utils";
 
 // Spawn mission uses smaller level as higher priority; 0 is highest practical priority.
