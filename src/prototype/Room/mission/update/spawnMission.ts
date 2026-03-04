@@ -13,6 +13,8 @@ const WALL_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN;
 // 搬运任务生成阈值
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
 const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
+const WORKER_MIN_SPAWN_ENERGY = BODYPART_COST[WORK] + BODYPART_COST[CARRY] + BODYPART_COST[MOVE] * 2;
+const HARVESTER_MAX_WORK_PER_SOURCE = 8;
 
 const getEnergyState = (room: Room) => {
     return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
@@ -93,14 +95,27 @@ const getWalkableSourceSlots = (room: Room, source: Source): number => {
     return slots;
 };
 
+const getWorkPartCount = (body: BodyPartConstant[]) => {
+    let work = 0;
+    for (const part of body) {
+        if (part === WORK) work++;
+    }
+    return work;
+};
+
 const getHarvesterTargetBySource = (room: Room): number => {
     let target = 0;
     const lowRcl = room.level <= 3;
+    const harvesterBody = room.GenerateBodys(room.GetRoleBodys('harvester'), 'harvester');
+    const workPerHarvester = Math.max(1, getWorkPartCount(harvesterBody));
+    const maxByWorkCap = Math.max(1, Math.floor(HARVESTER_MAX_WORK_PER_SOURCE / workPerHarvester));
     for (const source of room.source || []) {
         const slots = getWalkableSourceSlots(room, source);
+        if (slots <= 0) continue;
         // RCL 1~3：按可站位直接决定采集孵化数量。
-        // 其他等级：每 source 恢复为 1 个（若无可站位则为 0）。
-        target += lowRcl ? slots : Math.min(1, slots);
+        // 其他等级：恢复为每 source 1 个（若无可站位则为 0）。
+        const bySlot = lowRcl ? slots : 1;
+        target += Math.min(bySlot, maxByWorkCap);
     }
     return target;
 };
@@ -210,6 +225,7 @@ const RoleSpawnCheck = {
         const cap = room.energyCapacityAvailable || 0;
         const totalEnergy = getTotalEnergy(room);
         const earlyRush = isEarlyRushEnabled(room);
+        const workerSpawnEnergyMin = Math.max(THRESHOLDS.SPAWN.MIN_ENERGY, WORKER_MIN_SPAWN_ENERGY);
 
         const hasBuildMission = room.checkMissionInPool('build');
         const siteCount = getMyConstructionSites(room).length;
@@ -220,7 +236,7 @@ const RoleSpawnCheck = {
         // 1. 只要有建造需求，就先保证至少 1 个 worker
         if (needBuilder && current < 1) {
             // 条件可以适当放宽：房间当前能量或总能量至少能支撑一个基础体型
-            if (room.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY || totalEnergy >= cap) {
+            if (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap) {
                 return true;
             }
         }
@@ -236,7 +252,7 @@ const RoleSpawnCheck = {
                 if (state === 'CRITICAL') rushTarget = 1;
                 if (state === 'LOW') rushTarget = Math.min(rushTarget, room.level <= 2 ? 2 : 3);
                 if (current < rushTarget &&
-                    (room.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY || totalEnergy >= cap)) {
+                    (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap)) {
                     return true;
                 }
             }

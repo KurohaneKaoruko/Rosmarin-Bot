@@ -60,7 +60,10 @@ export default class SpawnControl extends Room {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            const budget = state === 'LOW' || state === 'CRITICAL' ? this.energyAvailable : undefined;
+            const safeRushActive = isSeason8SafeRushActive(this);
+            const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL' ||
+                (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'));
+            const budget = allowBudgetSpawn ? this.energyAvailable : undefined;
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
         }
@@ -135,14 +138,16 @@ export default class SpawnControl extends Room {
         if (Game.time % 10) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
+            const safeRushActive = isSeason8SafeRushActive(this);
             const allowEmergencyDownsize = role === 'harvester' ||
                 role === 'transport' ||
                 role === 'carrier' ||
-                role === 'manager';
+                role === 'manager' ||
+                (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'));
             if (!allowEmergencyDownsize) return;
 
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            if (state === 'LOW' || state === 'CRITICAL') {
+            if (state === 'LOW' || state === 'CRITICAL' || (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'))) {
                 const config = this.GetRoleBodys(role, false, this.energyAvailable);
                 const bodypart = this.GenerateBodys(config, role);
                 const cost = this.CalculateEnergy(bodypart);
@@ -192,8 +197,10 @@ export default class SpawnControl extends Room {
             if (criticalPending > 0 && univ_num > 0) return;
             if (univ_num >= emergencyUnivCap) return;
 
+            const universalBody = this.GenerateBodys(this.GetRoleBodys('universal'), 'universal');
+            if (!universalBody || universalBody.length <= 0) return;
             spawn.spawnCreep(
-                this.GenerateBodys(RoleData['universal'].bodypart),
+                universalBody,
                 GenCreepName(RoleData['universal'].code),
                 { memory: { role: 'universal', home: this.name, cache: {} } as CreepMemory }
             );
