@@ -10,6 +10,7 @@ import { flagRunner } from './runner/FlagRunner';
 type EventType = 'init' | 'start' | 'tick' | 'end';
 type RunnerType = 'room' | 'creep' | 'powerCreep' | 'flag';
 type RunnerFn = () => void;
+const EVENT_TYPES: readonly EventType[] = ['init', 'start', 'tick', 'end'];
 
 /**
  * 基本框架，用于管理游戏循环，挂载各种模块
@@ -35,11 +36,9 @@ export const createApp = () => {
     /** 添加模块 */
     const on = (callbacks: RuntimeModule) => {
         if (!callbacks) return;
-        for (const type in callbacks) {
-            if (type in events) {
-                const cb = callbacks[type as EventType];
-                if (cb) events[type as EventType].push(cb as RunnerFn);
-            }
+        for (const type of EVENT_TYPES) {
+            const cb = callbacks[type];
+            if (cb) events[type].push(cb);
         }
     };
 
@@ -51,12 +50,9 @@ export const createApp = () => {
     let initOK = false;
     const runInit = () => {
         if (initOK) return;
-        const tryInit = (proto: any, objs: Record<string, any>) => {
+        const tryInit = (proto: { init?: () => void }, objs: Record<string, any>) => {
             if (!proto.init) return;
-            for (const id in objs) {
-                if (!Object.prototype.hasOwnProperty.call(objs, id)) continue;
-                objs[id].init();
-            }
+            runRunner(objs, (obj) => obj.init?.());
         };
         tryInit(Room.prototype, Game.rooms);
         tryInit(Creep.prototype, Game.creeps);
