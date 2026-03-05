@@ -1,13 +1,8 @@
 import { compress, decompress, decompressBodyConfig } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getLayoutData, getRoomData, getStructData } from '@/modules/utils/memory';
+import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
-
-const isSeason8SafeRushActive = (room: Room) => {
-    const cfg = getRoomData(room.name) as any;
-    return !!cfg?.season8Enabled && (cfg.season8SafeRushActiveUntil || 0) > Game.time;
-};
 
 /**
  * 任务获取模块
@@ -236,9 +231,7 @@ export default class MissionGet extends Room {
             // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
             if (!hasFixedBody) {
                 const state = this.memory.energyState || this.updateEnergyState?.(false);
-                const safeRushActive = isSeason8SafeRushActive(this);
-                const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL' ||
-                    (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'));
+                const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL';
                 const budget = allowBudgetSpawn ? energyAvailable : undefined;
                 body = this.GetRoleBodys(role, data.upbody, budget);
                 const bodypart = this.GenerateBodys(body as any[], role);

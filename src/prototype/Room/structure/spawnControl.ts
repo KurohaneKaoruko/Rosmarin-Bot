@@ -60,9 +60,7 @@ export default class SpawnControl extends Room {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            const safeRushActive = isSeason8SafeRushActive(this);
-            const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL' ||
-                (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'));
+            const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL';
             const budget = allowBudgetSpawn ? this.energyAvailable : undefined;
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
@@ -138,16 +136,14 @@ export default class SpawnControl extends Room {
         if (Game.time % 10) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
-            const safeRushActive = isSeason8SafeRushActive(this);
             const allowEmergencyDownsize = role === 'harvester' ||
                 role === 'transport' ||
                 role === 'carrier' ||
-                role === 'manager' ||
-                (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'));
+                role === 'manager';
             if (!allowEmergencyDownsize) return;
 
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            if (state === 'LOW' || state === 'CRITICAL' || (safeRushActive && (role === 'upgrader' || role === 'aid-upgrade'))) {
+            if (state === 'LOW' || state === 'CRITICAL') {
                 const config = this.GetRoleBodys(role, false, this.energyAvailable);
                 const bodypart = this.GenerateBodys(config, role);
                 const cost = this.CalculateEnergy(bodypart);
