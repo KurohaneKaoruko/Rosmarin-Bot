@@ -59,7 +59,7 @@ function buildCache(): CreepTickIndexCache {
             byTargetRoom[targetRoom][role].push({
                 ticksToLive: creep.ticksToLive,
                 spawning: creep.spawning,
-                homeRoom: creep.memory.homeRoom,
+                homeRoom: creep.memory.homeRoom || creep.memory.home,
             })
         }
 
@@ -158,4 +158,3 @@ export function hasSoonDeadCreepByHomeRoomRole(homeRoom: string, role: string, b
     const minRespawnGap = getCache().minRespawnGapByHomeRoomRole[homeRoom]?.[role]
     return typeof minRespawnGap === 'number' && minRespawnGap <= bufferTick
 }
-

@@ -1,4 +1,5 @@
 import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/feature/externalRoad';
 import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
@@ -6,15 +7,42 @@ import { getQoS, shouldRun } from '@/modules/infra/qos';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
 const OUTMINE_PRIORITY = {
-    reserver: 4,
-    harvest: 5,
-    carry: 6,
-    scout: 6,
-    build: 7,
-    mineral: 7,
+    reserver: RoleData['reserver'].level,
+    harvest: RoleData['out-harvest'].level,
+    carry: RoleData['out-carry'].level,
+    scout: RoleData['scout'].level,
+    build: RoleData['out-build'].level,
+    mineral: RoleData['out-mineral'].level,
 } as const;
 
 const DOUBLE_DEFEND_MIN_LEVEL = 7;
+const LOCAL_CORE_SPAWN_ROLES = new Set([
+    'harvester',
+    'transport',
+    'carrier',
+    'manager',
+    'worker',
+    'upgrader',
+    'universal',
+]);
+const OUTMINE_ECONOMIC_ROLES = [
+    'scout',
+    'reserver',
+    'out-harvest',
+    'out-car',
+    'out-carry',
+    'out-build',
+    'out-mineral',
+];
+const OUTMINE_ROLE_PRIORITY_BY_ROLE: Record<string, number> = {
+    scout: OUTMINE_PRIORITY.scout,
+    reserver: OUTMINE_PRIORITY.reserver,
+    'out-harvest': OUTMINE_PRIORITY.harvest,
+    'out-car': OUTMINE_PRIORITY.carry,
+    'out-carry': OUTMINE_PRIORITY.carry,
+    'out-build': OUTMINE_PRIORITY.build,
+    'out-mineral': OUTMINE_PRIORITY.mineral,
+};
 
 // 按房间等级估算单 source 每 tick 产能（对应 out-harvest 动态 body 的 WORK 数）
 const OUTMINE_HARVEST_PER_SOURCE = [0, 2, 4, 6, 8, 8, 10, 20, 20] as const;
@@ -54,6 +82,63 @@ const getSpawnRoleNumByTarget = (homeRoom: Room, role: string, targetRoomName: s
     return (roomAny._spawnRoleTargetCache?.[key] || 0) as number;
 }
 
+const isSameHomeRoom = (creepHomeRoom: string | undefined, homeRoomName: string): boolean => {
+    if (!creepHomeRoom) return false;
+    return creepHomeRoom === homeRoomName;
+}
+
+const hasActiveOutHarvesterByTargetName = (homeRoom: Room, targetRoomName: string): boolean => {
+    const CreepByTargetRoom = getCreepByTargetRoom(targetRoomName);
+    const activeHarvesters = (CreepByTargetRoom['out-harvest'] || [])
+        .filter((c: any) =>
+            c &&
+            isSameHomeRoom(c.homeRoom, homeRoom.name) &&
+            !c.spawning &&
+            (c.ticksToLive == null || c.ticksToLive > 0)
+        ).length;
+    return activeHarvesters > 0;
+}
+
+const clearTargetOutCarrySpawnMissions = (homeRoom: Room, targetRoomName: string): number => {
+    const tasks = homeRoom.getAllMissionFromPool('spawn') || [];
+    let removed = 0;
+    for (const task of tasks) {
+        const data = (task as any)?.data;
+        const memory = data?.memory;
+        const role = memory?.role;
+        if (role !== 'out-carry' && role !== 'out-car') continue;
+        if (memory?.targetRoom !== targetRoomName) continue;
+        if (memory?.homeRoom && memory.homeRoom !== homeRoom.name) continue;
+        homeRoom.deleteMissionFromPool('spawn', (task as any).id);
+        removed++;
+    }
+    return removed;
+}
+
+const pruneInvalidOutCarrySpawnMissions = (homeRoom: Room): number => {
+    const tasks = homeRoom.getAllMissionFromPool('spawn') || [];
+    const invalidTargets = new Set<string>();
+    for (const task of tasks) {
+        const memory = (task as any)?.data?.memory;
+        const role = memory?.role;
+        if (role !== 'out-carry' && role !== 'out-car') continue;
+        const targetRoom = memory?.targetRoom;
+        if (!targetRoom) continue;
+        if (memory?.homeRoom && memory.homeRoom !== homeRoom.name) continue;
+        if (!hasActiveOutHarvesterByTargetName(homeRoom, targetRoom)) {
+            invalidTargets.add(targetRoom);
+        }
+    }
+
+    if (invalidTargets.size <= 0) return 0;
+
+    let removed = 0;
+    for (const targetRoom of invalidTargets) {
+        removed += clearTargetOutCarrySpawnMissions(homeRoom, targetRoom);
+    }
+    return removed;
+}
+
 const calcEnergyOutCarryTarget = (homeRoom: Room, targetRoomName: string, sourceNum: number, allowWorkCarry: boolean): number => {
     const lv = Math.max(1, Math.min(8, homeRoom.level));
     const baseNum = allowWorkCarry
@@ -91,6 +176,44 @@ const calcAggressiveSmallCarryTarget = (homeRoom: Room, targetRoomName: string, 
 
 const getRoomMode = (room: Room): string => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+}
+
+const getEnergyState = (room: Room): string => {
+    return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
+}
+
+const hasLocalCoreSpawnBacklog = (room: Room): boolean => {
+    const tasks = room.getAllMissionFromPool('spawn') || [];
+    for (const task of tasks) {
+        const role = (task as any)?.data?.memory?.role;
+        if (!role) continue;
+        if (LOCAL_CORE_SPAWN_ROLES.has(role)) return true;
+    }
+    return false;
+}
+
+const shouldPauseOutMineEconomy = (room: Room): boolean => {
+    const state = getEnergyState(room);
+    if (state === 'LOW' || state === 'CRITICAL') return true;
+    if (hasLocalCoreSpawnBacklog(room)) return true;
+    return false;
+}
+
+const clearOutMineEconomicSpawnMissions = (room: Room): void => {
+    room.deleteSpawnMissionsByRole(OUTMINE_ECONOMIC_ROLES);
+}
+
+const normalizeOutMineEconomicPriority = (room: Room): void => {
+    const tasks = room.getAllMissionFromPool('spawn') || [];
+    for (const task of tasks) {
+        const role = (task as any)?.data?.memory?.role;
+        if (!role) continue;
+        const targetLevel = OUTMINE_ROLE_PRIORITY_BY_ROLE[role];
+        if (targetLevel == null) continue;
+        if ((task as any).level < targetLevel) {
+            (task as any).level = targetLevel;
+        }
+    }
 }
 
 const isAggressiveMode = (mode: string): boolean => {
@@ -167,6 +290,12 @@ export default class OutMine extends Room {
     outMine() {
         if (this.memory.defend) return;
         if (Memory['warmode']) return;
+        pruneInvalidOutCarrySpawnMissions(this);
+        normalizeOutMineEconomicPriority(this);
+        if (shouldPauseOutMineEconomy(this)) {
+            clearOutMineEconomicSpawnMissions(this);
+            return;
+        }
 
         const qosLevel = getQoS()?.level || 'normal';
         if (qosLevel === 'emergency') return;
@@ -495,15 +624,7 @@ const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum:
 }
 
 const hasActiveOutHarvester = function (homeRoom: Room, targetRoom: Room): boolean {
-    const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-    const activeHarvesters = (CreepByTargetRoom['out-harvest'] || [])
-        .filter((c: any) =>
-            c &&
-            c.homeRoom === homeRoom.name &&
-            !c.spawning &&
-            (c.ticksToLive == null || c.ticksToLive > 0)
-        ).length;
-    return activeHarvesters > 0;
+    return hasActiveOutHarvesterByTargetName(homeRoom, targetRoom.name);
 }
 
 // 搬运
@@ -515,7 +636,10 @@ const outCarrySpawn = function (
     aggressiveCarry = false
 ) {
     // 采集爬未到位前禁止孵化搬运，避免“空转搬运”抢占孵化队列。
-    if (!hasActiveOutHarvester(homeRoom, targetRoom)) return false;
+    if (!hasActiveOutHarvester(homeRoom, targetRoom)) {
+        clearTargetOutCarrySpawnMissions(homeRoom, targetRoom.name);
+        return false;
+    }
 
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerCarry = (CreepByTargetRoom['out-carry'] || [])
@@ -566,7 +690,10 @@ const outCarry2Spawn = function (
     smallCarryBody = OUTMINE_SMALL_CARRY_BODY
 ) {
     // 采集爬未到位前禁止孵化搬运，避免“空转搬运”抢占孵化队列。
-    if (!hasActiveOutHarvester(homeRoom, targetRoom)) return false;
+    if (!hasActiveOutHarvester(homeRoom, targetRoom)) {
+        clearTargetOutCarrySpawnMissions(homeRoom, targetRoom.name);
+        return false;
+    }
 
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerCarry = (CreepByTargetRoom['out-carry'] || [])

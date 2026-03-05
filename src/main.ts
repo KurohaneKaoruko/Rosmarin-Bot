@@ -1,7 +1,7 @@
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
-import { EventModule } from '@/modules/runtime/event';
+import { EventModule } from '@/modules/runtime/EventModule';
 import { ClearModule  } from '@/modules/runtime/ClearModule';
 import { GeneratePixel } from '@/modules/runtime/Pixel';
 import { Statistics } from '@/modules/runtime/Statistics';

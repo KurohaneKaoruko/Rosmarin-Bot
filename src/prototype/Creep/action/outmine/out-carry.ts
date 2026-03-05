@@ -4,6 +4,16 @@ const relayExitCache: Record<string, { tick: number; exit: number | null }> = {}
 const relayQueuePosCache: Record<string, { tick: number; positions: RoomPosition[] }> = {};
 
 const outCarry = {
+    markForcedMove: function (creep: Creep, direction?: DirectionConstant | null, keepTicks = 1) {
+        if (!creep || !direction) return;
+        creep.memory.cacheSource = creep.memory.cacheSource || {};
+        const cache = creep.memory.cacheSource as any;
+        cache.forcedMoveDirection = direction;
+        cache.forcedMoveTick = Game.time;
+        const until = Game.time + Math.max(1, keepTicks | 0);
+        cache.forcedMoveUntil = Math.max(Number(cache.forcedMoveUntil || 0), until);
+    },
+
     markReceivedEnergy: function (receiver: Creep, homeDirection?: DirectionConstant | null) {
         if (!receiver) return;
         receiver.memory.cacheSource = receiver.memory.cacheSource || {};
@@ -11,6 +21,9 @@ const outCarry = {
         cache.receivedEnergyTick = Game.time;
         if (homeDirection) cache.receivedMoveDirection = homeDirection;
         cache.receivedRetreatUntil = Math.max(Number(cache.receivedRetreatUntil || 0), Game.time + 3);
+        // 接收能量后先锁住自己，避免同 tick 被其他 creep 的对穿覆盖移动意图。
+        receiver.memory.dontPullMe = true;
+        this.markForcedMove(receiver, homeDirection, 2);
         // 被接力后立即清空采集目标缓存，下一 tick 优先进入回程流程。
         delete cache.targetId;
         delete cache.targetType;
@@ -105,25 +118,47 @@ const outCarry = {
         return true;
     },
 
-    tryForceLineMove: function (creep: Creep, direction: DirectionConstant | null): boolean {
+    tryForceLineMove: function (
+        creep: Creep,
+        direction: DirectionConstant | null,
+        markIntent = true,
+        depth = 0,
+        visited?: Record<string, 1>
+    ): boolean {
         if (!direction) return false;
-        if (!creep.pos.isRoomEdge()) {
-            const blocker = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-                filter: (c: Creep) =>
-                    c.id !== creep.id &&
-                    !c.spawning &&
-                    (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                    creep.pos.getDirectionTo(c.pos) === direction
-            })[0];
-            if (blocker) {
-                blocker.memory.dontPullMe = false;
+        if (markIntent) this.markForcedMove(creep, direction, 1);
+
+        const moveSelf = () => {
+            creep.memory.dontPullMe = false;
+            creep.move(direction);
+            return true;
+        };
+
+        if (creep.pos.isRoomEdge()) return moveSelf();
+
+        const seen = visited || Object.create(null);
+        if (seen[creep.id]) return moveSelf();
+        seen[creep.id] = 1;
+
+        const blocker = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+            filter: (c: Creep) =>
+                c.id !== creep.id &&
+                !c.spawning &&
+                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                creep.pos.getDirectionTo(c.pos) === direction
+        })[0];
+        if (blocker) {
+            blocker.memory.dontPullMe = false;
+            if (markIntent) this.markForcedMove(blocker, direction, 1);
+            if (depth < 4 && !seen[blocker.id]) {
+                // 级联推动同向 blocker，避免前方多层占位时接收者原地不动。
+                this.tryForceLineMove(blocker, direction, markIntent, depth + 1, seen);
+            } else {
                 blocker.move(direction);
             }
         }
 
-        creep.memory.dontPullMe = false;
-        creep.move(direction);
-        return true;
+        return moveSelf();
     },
 
     getRelayQueuePositions: function (creep: Creep, exitDirection: number): RoomPosition[] {
@@ -294,7 +329,8 @@ const outCarry = {
         if (ret !== OK) return false;
         const homeDirection = this.getHomeDirection(exitDirection);
         this.markReceivedEnergy(target, homeDirection);
-        target.memory.dontPullMe = false;
+        // 被传递后同 tick 先锁住，避免被其他 moveTo 的对穿逻辑覆盖返程移动。
+        target.memory.dontPullMe = true;
         creep.memory.dontPullMe = false;
         this.tryForceLineMove(target, homeDirection);
 
@@ -744,14 +780,35 @@ const outCarry = {
         delete creep.memory.working;
 
         const sourceCache = creep.memory.cacheSource as any;
+        const forcedMoveDir = sourceCache.forcedMoveDirection as DirectionConstant | undefined;
+        const forcedMoveUntil = Number(sourceCache.forcedMoveUntil || 0);
+        const forcedMoveTick = Number(sourceCache.forcedMoveTick || 0);
+        if (forcedMoveDir && forcedMoveUntil >= Game.time && !creep.pos.isRoomEdge()) {
+            // 同 tick 可能被多段逻辑调用 move，最后一次会覆盖前面意图；
+            // 把“被传能后返程/被让路推动”的移动锁定到 run 最前面，避免被后续逻辑改写。
+            this.tryForceLineMove(creep, forcedMoveDir, false);
+            creep.memory.dontPullMe = true;
+            if (forcedMoveUntil <= Game.time) {
+                delete sourceCache.forcedMoveDirection;
+                delete sourceCache.forcedMoveTick;
+                delete sourceCache.forcedMoveUntil;
+            }
+            return;
+        } else if (forcedMoveTick > 0 && forcedMoveUntil < Game.time) {
+            delete sourceCache.forcedMoveDirection;
+            delete sourceCache.forcedMoveTick;
+            delete sourceCache.forcedMoveUntil;
+        }
+
         const used = creep.store.getUsedCapacity();
         const forcedReceivedTick = Number(sourceCache.receivedEnergyTick || 0);
         const retreatUntil = Number(sourceCache.receivedRetreatUntil || 0);
         const forcedDir = sourceCache.receivedMoveDirection as DirectionConstant | undefined;
-        if (forcedReceivedTick === Game.time && forcedDir && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+        if (!forcedMoveDir && forcedReceivedTick === Game.time && forcedDir && used > 0 && creep.room.name !== creep.memory.homeRoom) {
             sourceCache.partialLeaveWait = 0;
-            this.tryForceLineMove(creep, forcedDir);
-            creep.memory.dontPullMe = false;
+            this.markForcedMove(creep, forcedDir, 1);
+            this.tryForceLineMove(creep, forcedDir, false);
+            creep.memory.dontPullMe = true;
             return;
         }
 
