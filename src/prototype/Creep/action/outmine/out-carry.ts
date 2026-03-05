@@ -1,6 +1,21 @@
 const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
 const outCarry = {
+    isLikelyCollecting: function (creep: Creep): boolean {
+        if (!creep || creep.spawning) return false;
+        if (creep.store.getFreeCapacity() <= 0) return false;
+
+        const targetRoom = creep.memory.targetRoom;
+        if (targetRoom && creep.room.name === targetRoom) return true;
+
+        // 非目标房且已经带了不少资源，通常处于回程，不应参与采集目标预留。
+        const used = creep.store.getUsedCapacity();
+        const cap = creep.store.getCapacity();
+        if (used > 0 && used >= Math.floor(cap * 0.4)) return false;
+
+        return true;
+    },
+
     getRelayExitDirection: function (creep: Creep): number | null {
         const homeRoom = creep.memory.homeRoom;
         if (!homeRoom || creep.room.name === homeRoom) return null;
@@ -79,22 +94,16 @@ const outCarry = {
             return best;
         };
 
-        let target = pickBestTarget(teammates.filter((c: Creep) => c.memory.working === true));
-        let switchedFromOutbound = false;
+        let target = pickBestTarget(teammates.filter((c: Creep) =>
+            c.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+        ));
         if (!target) {
-            target = pickBestTarget(teammates.filter((c: Creep) => c.memory.working === false));
-            switchedFromOutbound = !!target;
+            target = pickBestTarget(teammates);
         }
         if (!target) return false;
 
         const ret = creep.transfer(target, RESOURCE_ENERGY);
         if (ret !== OK) return false;
-
-        if (switchedFromOutbound && target.memory.working === false && target.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
-            target.memory.working = true;
-            target.memory.cacheSource = {};
-            target.memory.cache = {};
-        }
 
         const reverseDirection = this.getOppositeDirection(exitDirection);
         if (reverseDirection) creep.move(reverseDirection);
@@ -154,7 +163,7 @@ const outCarry = {
             if (other.memory.role !== 'out-carry' && other.memory.role !== 'out-car') continue;
             if (other.memory.homeRoom !== creep.memory.homeRoom) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
-            if (other.memory.working !== false) continue;
+            if (!this.isLikelyCollecting(other)) continue;
             const targetId = other.memory.cacheSource?.targetId;
             if (!targetId) continue;
             reservedByTarget[targetId] = (reservedByTarget[targetId] || 0) + other.store.getFreeCapacity();
@@ -500,30 +509,42 @@ const outCarry = {
         return false;
     },
 
-    source: function(creep: Creep) {
-        if (creep.store.getFreeCapacity() === 0) {
-            return true;
+    run: function (creep: Creep) {
+        creep.memory.cache = creep.memory.cache || {};
+        creep.memory.cacheSource = creep.memory.cacheSource || {};
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        delete creep.memory.working;
+
+        if (this.buildRepair(creep)) {
+            creep.memory.dontPullMe = false;
+            return;
         }
 
-        if (creep.hits < creep.hitsMax * 0.5 &&
-            creep.store.getUsedCapacity() > 0) return true;
-        this.withdraw(creep);
-        creep.memory.dontPullMe = false;
-        return false;
-    },
+        const used = creep.store.getUsedCapacity();
+        const free = creep.store.getFreeCapacity();
+        const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+        const lowHealth = creep.hits < creep.hitsMax * 0.5;
+        const shouldTopUp = inTargetRoom && !lowHealth && used > 0 && free > 0 && used < Math.max(200, Math.floor(creep.store.getCapacity() * 0.8));
 
-    target: function(creep: Creep) {
-        if (creep.store.getUsedCapacity() === 0) {
-            return true;
+        if (used === 0 || shouldTopUp) {
+            const before = used;
+            this.withdraw(creep);
+            creep.memory.dontPullMe = false;
+
+            // 无缝模式：在目标房间仅在“继续装货成功”时停留，否则立刻进入回程投递。
+            if (shouldTopUp) {
+                const after = creep.store.getUsedCapacity();
+                if (after <= before && after > 0) {
+                    this.carry(creep);
+                    creep.memory.dontPullMe = false;
+                }
+            }
+            return;
         }
 
-        if (this.buildRepair(creep)) return;
         this.carry(creep);
         creep.memory.dontPullMe = false;
-        return false;
-    },
+    }
 }
 
 export default outCarry;
-
-

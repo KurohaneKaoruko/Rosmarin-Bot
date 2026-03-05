@@ -165,8 +165,8 @@ export const RoleData: RoleConfig = {
     /* 外矿 */
     'reserver': { bodypart: [], level: 11, code: 'RSV', work: 'reserve' },
     'out-harvest': { bodypart: [], level: 12, code: 'OH', work: 'out-harvest' },
-    'out-car': { bodypart: [], level: 13, code: 'OC', work: 'out-carry' },
-    'out-carry': { bodypart: [], level: 13, code: 'OC', work: 'out-carry' },
+    'out-car': { bodypart: [], level: 13, code: 'OC', action: 'out-carry' },
+    'out-carry': { bodypart: [], level: 13, code: 'OC', action: 'out-carry' },
     'out-build': { bodypart: [], level: 12, code: 'OB', work: 'out-build' },
     'out-defend': { bodypart: [], level: 8, code: 'OD', action: 'out-defend' },
     'out-2attack': { bodypart: [], level: 8, code: 'O2A', action: 'out-2attack' },

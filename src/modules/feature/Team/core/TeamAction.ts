@@ -514,8 +514,19 @@ export default class TeamAction {
 
         // 单个creep直接移动
         if (team.creeps.length == 1) {
-            let creep = team.creeps[0];
-            if (creep.pos.isEqualTo(pos)) return;
+            if (!team.cache) team.cache = {}
+            team.cache.lastMoveTick = Game.time
+            team.cache.lastMoveHold = false
+            delete team.cache.lastCreepMoveDirections
+
+            const creep = team.creeps[0];
+            if (creep.pos.isEqualTo(pos)) {
+                team.cache.lastMoveDirection = undefined
+                return;
+            }
+            const dir = creep.pos.getDirectionTo(pos) as DirectionConstant | 0
+            team.cache.lastMoveDirection = dir ? dir : undefined
+            if (dir) team.cache.lastCreepMoveDirections = { [creep.id]: dir }
             creep.moveTo(pos);
             return;
         }
@@ -537,6 +548,7 @@ export default class TeamAction {
         team.cache.lastMoveDirection = headDirection ? headDirection : undefined
         team.cache.lastMoveHold = false
         delete team.cache.lastCreepMoveDirections
+        const creepDirections: Record<string, DirectionConstant> = {}
 
         // 队伍是否保持直形
         const isLine = TeamUtils.isLinear(team);
@@ -555,6 +567,7 @@ export default class TeamAction {
 
         let moved = [false, false, false, false];
         if (headMove) {
+            if (headDirection) creepDirections[creeps[0].id] = headDirection
             creeps[0].moveTo(pos, { ignoreCreeps: false });
             moved[0] = true;
         }
@@ -564,17 +577,31 @@ export default class TeamAction {
             let prevCreep = creeps[i - 1];
 
             if (isLine) {
-                creep.move(creep.pos.getDirectionTo(prevCreep));
+                const dir = creep.pos.getDirectionTo(prevCreep) as DirectionConstant | 0
+                if (dir) {
+                    creepDirections[creep.id] = dir
+                    creep.move(dir);
+                }
                 continue;
             }
 
             if (!creep.pos.isNearTo(prevCreep)) {
+                const dir = creep.pos.getDirectionTo(prevCreep) as DirectionConstant | 0
+                if (dir) creepDirections[creep.id] = dir
                 creep.moveTo(prevCreep, { ignoreCreeps: false });
                 moved[i] = true;
             } else if (moved[i - 1]) {
-                creep.move(creep.pos.getDirectionTo(prevCreep));
+                const dir = creep.pos.getDirectionTo(prevCreep) as DirectionConstant | 0
+                if (dir) {
+                    creepDirections[creep.id] = dir
+                    creep.move(dir);
+                }
                 moved[i] = true;
             }
+        }
+
+        if (Object.keys(creepDirections).length > 0) {
+            team.cache.lastCreepMoveDirections = creepDirections
         }
     }
 
