@@ -16,7 +16,7 @@ const EVENT_TYPES: readonly EventType[] = ['init', 'start', 'tick', 'end'];
  */
 export const createApp = () => {
     const name = BASE_CONFIG.BOT_NAME;
-    const events: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
+    const modules: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
     const runners: Record<RunnerType, RunnerFn> = {
         room: () => runRunner(Game.rooms, roomRunner),
         creep: () => runRunner(Game.creeps, creepRunner),
@@ -37,13 +37,13 @@ export const createApp = () => {
         if (!callbacks) return;
         for (const type of EVENT_TYPES) {
             const cb = callbacks[type];
-            if (cb) events[type].push(cb);
+            if (cb) modules[type].push(cb);
         }
     };
 
     /** 运行模块 */
     const runCall = (type: EventType) => {
-        for (const cb of events[type]) cb();
+        for (const cb of modules[type]) cb();
     };
 
     let initOK = false;
