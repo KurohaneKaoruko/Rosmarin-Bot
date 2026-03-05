@@ -494,6 +494,18 @@ const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum:
     return true;
 }
 
+const hasActiveOutHarvester = function (homeRoom: Room, targetRoom: Room): boolean {
+    const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
+    const activeHarvesters = (CreepByTargetRoom['out-harvest'] || [])
+        .filter((c: any) =>
+            c &&
+            c.homeRoom === homeRoom.name &&
+            !c.spawning &&
+            (c.ticksToLive == null || c.ticksToLive > 0)
+        ).length;
+    return activeHarvesters > 0;
+}
+
 // 搬运
 const outCarrySpawn = function (
     homeRoom: Room,
@@ -502,6 +514,9 @@ const outCarrySpawn = function (
     allowWorkCarry = true,
     aggressiveCarry = false
 ) {
+    // 采集爬未到位前禁止孵化搬运，避免“空转搬运”抢占孵化队列。
+    if (!hasActiveOutHarvester(homeRoom, targetRoom)) return false;
+
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerCarry = (CreepByTargetRoom['out-carry'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;
@@ -550,6 +565,9 @@ const outCarry2Spawn = function (
     maxSpawnPerTick = 1,
     smallCarryBody = OUTMINE_SMALL_CARRY_BODY
 ) {
+    // 采集爬未到位前禁止孵化搬运，避免“空转搬运”抢占孵化队列。
+    if (!hasActiveOutHarvester(homeRoom, targetRoom)) return false;
+
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerCarry = (CreepByTargetRoom['out-carry'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;

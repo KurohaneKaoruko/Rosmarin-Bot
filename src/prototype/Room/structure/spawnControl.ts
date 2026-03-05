@@ -8,6 +8,9 @@ const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 };
 
+// 仅这些角色允许在低能量时按当前可用能量降级体型，避免 upgrader/worker 等被误降级。
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
+
 
 export default class SpawnControl extends Room {
     SpawnWork() {
@@ -60,7 +63,9 @@ export default class SpawnControl extends Room {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length == 0) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL';
+            const allowBudgetSpawn =
+                (state === 'LOW' || state === 'CRITICAL') &&
+                EMERGENCY_DOWNSIZE_ROLES.has(role);
             const budget = allowBudgetSpawn ? this.energyAvailable : undefined;
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
@@ -136,10 +141,7 @@ export default class SpawnControl extends Room {
         if (Game.time % 10) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
-            const allowEmergencyDownsize = role === 'harvester' ||
-                role === 'transport' ||
-                role === 'carrier' ||
-                role === 'manager';
+            const allowEmergencyDownsize = EMERGENCY_DOWNSIZE_ROLES.has(role);
             if (!allowEmergencyDownsize) return;
 
             const state = this.memory.energyState || this.updateEnergyState?.(false);

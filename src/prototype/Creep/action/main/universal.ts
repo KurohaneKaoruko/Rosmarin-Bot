@@ -354,11 +354,14 @@ const UniversalFunction = {
         const used = creep.store.getUsedCapacity();
         const free = creep.store.getFreeCapacity();
         const cap = creep.store.getCapacity();
-        const urgent = isUrgentRefill(creep.room) || shouldForceUpgrade(creep.room);
-        const minWorkPayload = Math.min(300, Math.max(50, Math.floor(cap * 0.6)));
+        const urgentRefill = isUrgentRefill(creep.room);
+        // 非紧急补能场景必须采满再干活；仅在 spawn/tower 紧急补能时允许半仓回流。
+        const minWorkPayload = urgentRefill
+            ? Math.min(cap, Math.max(50, Math.floor(cap * 0.5)))
+            : cap;
 
         // 无缝模式：优先按“载荷阈值”决策，不再依赖 source/target 状态切换。
-        if (used === 0 || (!urgent && free > 0 && used < minWorkPayload)) {
+        if (used === 0 || (free > 0 && used < minWorkPayload)) {
             getEnergy(creep);
             return;
         }

@@ -1,4 +1,7 @@
+import { decompress } from '@/modules/utils/compress';
+
 const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
+const relayQueuePosCache: Record<string, { tick: number; positions: RoomPosition[] }> = {};
 
 const outCarry = {
     markReceivedEnergy: function (receiver: Creep, homeDirection?: DirectionConstant | null) {
@@ -7,6 +10,7 @@ const outCarry = {
         const cache = receiver.memory.cacheSource as any;
         cache.receivedEnergyTick = Game.time;
         if (homeDirection) cache.receivedMoveDirection = homeDirection;
+        cache.receivedRetreatUntil = Math.max(Number(cache.receivedRetreatUntil || 0), Game.time + 3);
         // 被接力后立即清空采集目标缓存，下一 tick 优先进入回程流程。
         delete cache.targetId;
         delete cache.targetType;
@@ -27,22 +31,25 @@ const outCarry = {
         return true;
     },
 
-    getRelayExitDirection: function (creep: Creep): number | null {
-        const homeRoom = creep.memory.homeRoom;
-        if (!homeRoom || creep.room.name === homeRoom) return null;
+    getRouteExitDirection: function (creep: Creep, targetRoom: string | undefined): number | null {
+        if (!targetRoom || creep.room.name === targetRoom) return null;
 
-        const cacheKey = `${creep.room.name}->${homeRoom}`;
+        const cacheKey = `${creep.room.name}->${targetRoom}`;
         const cached = relayExitCache[cacheKey];
         if (cached && cached.tick === Game.time) return cached.exit;
 
         let exit: number | null = null;
-        const route = Game.map.findRoute(creep.room.name, homeRoom);
+        const route = Game.map.findRoute(creep.room.name, targetRoom);
         if (Array.isArray(route) && route.length > 0) {
             exit = route[0].exit;
         }
 
         relayExitCache[cacheKey] = { tick: Game.time, exit };
         return exit;
+    },
+
+    getRelayExitDirection: function (creep: Creep): number | null {
+        return this.getRouteExitDirection(creep, creep.memory.homeRoom);
     },
 
     getExitProgress: function (pos: RoomPosition, exitDirection: number): number {
@@ -73,6 +80,166 @@ const outCarry = {
             case FIND_EXIT_RIGHT: return RIGHT;
             default: return null;
         }
+    },
+
+    moveAlongRouteExit: function (creep: Creep, targetRoom: string | undefined): boolean {
+        if (!targetRoom) return false;
+        if (creep.room.name === targetRoom) return false;
+        if (creep.pos.isRoomEdge()) return false;
+
+        const exitDirection = this.getRouteExitDirection(creep, targetRoom);
+        if (!exitDirection) return false;
+        const exits = creep.room.find(exitDirection);
+        if (!exits || exits.length <= 0) return false;
+        const exitPos = creep.pos.findClosestByRange(exits);
+        if (!exitPos) return false;
+
+        creep.moveTo(exitPos, {
+            maxRooms: 1,
+            range: 0,
+            ignoreCreeps: false,
+            plainCost: 2,
+            swampCost: 10,
+            reusePath: 3
+        });
+        return true;
+    },
+
+    tryForceLineMove: function (creep: Creep, direction: DirectionConstant | null): boolean {
+        if (!direction) return false;
+        if (!creep.pos.isRoomEdge()) {
+            const blocker = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+                filter: (c: Creep) =>
+                    c.id !== creep.id &&
+                    !c.spawning &&
+                    (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                    creep.pos.getDirectionTo(c.pos) === direction
+            })[0];
+            if (blocker) {
+                blocker.memory.dontPullMe = false;
+                blocker.move(direction);
+            }
+        }
+
+        creep.memory.dontPullMe = false;
+        creep.move(direction);
+        return true;
+    },
+
+    getRelayQueuePositions: function (creep: Creep, exitDirection: number): RoomPosition[] {
+        const roadMemory = creep.room.memory.road as number[] | undefined;
+        if (!Array.isArray(roadMemory) || roadMemory.length === 0) return [];
+
+        const cacheKey = `${creep.room.name}:${exitDirection}`;
+        const cached = relayQueuePosCache[cacheKey];
+        if (cached && cached.tick === Game.time) return cached.positions;
+
+        const terrain = creep.room.getTerrain();
+        const sources = creep.room.find(FIND_SOURCES);
+        const sourceContainers = (creep.room.container || []).filter((c: StructureContainer) =>
+            sources.some((s: Source) => c.pos.inRangeTo(s.pos, 1))
+        );
+        const positions: RoomPosition[] = [];
+        const seen = new Set<string>();
+
+        for (const packed of roadMemory) {
+            if (typeof packed !== 'number') continue;
+            const [x, y] = decompress(packed);
+            if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+            const key = `${x}:${y}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+
+            const pos = new RoomPosition(x, y, creep.room.name);
+            // 采集位周围留空，避免排队 creep 抢占矿工与直连传递位置。
+            if (sources.some((s: Source) => pos.inRangeTo(s.pos, 1))) continue;
+            // 采集容器周围也留空，避免堵住 OH 的取放与掉头路径。
+            if (sourceContainers.some((c: StructureContainer) => pos.inRangeTo(c.pos, 1))) continue;
+            positions.push(pos);
+        }
+
+        // 按“到回家出口的推进度”从小到大排序，形成由矿点向出口延展的站位序列。
+        positions.sort((a, b) => this.getExitProgress(a, exitDirection) - this.getExitProgress(b, exitDirection));
+        relayQueuePosCache[cacheKey] = { tick: Game.time, positions };
+        return positions;
+    },
+
+    getRelayQueueContext: function (creep: Creep): {
+        exitDirection: number;
+        carriers: Creep[];
+        myIndex: number;
+        frontCollectors: number;
+        slotPos: RoomPosition;
+    } | null {
+        if (creep.room.name !== creep.memory.targetRoom) return null;
+        if (creep.pos.isRoomEdge()) return null;
+
+        const exitDirection = this.getRelayExitDirection(creep);
+        if (!exitDirection) return null;
+
+        const queuePositions = this.getRelayQueuePositions(creep, exitDirection);
+        if (queuePositions.length === 0) return null;
+
+        const carriers = creep.room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) =>
+                !c.spawning &&
+                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                c.memory.homeRoom === creep.memory.homeRoom &&
+                c.memory.targetRoom === creep.memory.targetRoom &&
+                c.store.getFreeCapacity() > 0
+        }) as Creep[];
+        if (carriers.length <= 1) return null;
+
+        carriers.sort((a: Creep, b: Creep) => {
+            const progressA = this.getExitProgress(a.pos, exitDirection);
+            const progressB = this.getExitProgress(b.pos, exitDirection);
+            if (progressA !== progressB) return progressA - progressB;
+            return a.id.localeCompare(b.id);
+        });
+
+        const myIndex = carriers.findIndex((c: Creep) => c.id === creep.id);
+        if (myIndex < 0) return null;
+
+        const frontCollectors = 1;
+        const waitingRank = Math.max(0, myIndex - frontCollectors);
+        const lineLength = queuePositions.length;
+        if (lineLength <= 1) return null;
+
+        // 槽位分配策略：
+        // 1) 先使用 1,3,5...（隔一格站位，给接收后返程留空）
+        // 2) 超出后再使用 2,4,6...（扩大容量，避免队尾多人叠在同一格）
+        // 3) 再超出时按已有槽位循环，至少保证分布而不是固定挤在末尾
+        const slotOrder: number[] = [];
+        for (let i = 1; i < lineLength; i += 2) slotOrder.push(i);
+        for (let i = 2; i < lineLength; i += 2) slotOrder.push(i);
+        if (slotOrder.length <= 0) return null;
+
+        const slotIndex = slotOrder[waitingRank % slotOrder.length];
+        const slotPos = queuePositions[slotIndex];
+        if (!slotPos) return null;
+
+        return { exitDirection, carriers, myIndex, frontCollectors, slotPos };
+    },
+
+    waitInRelayLine: function (creep: Creep): boolean {
+        const context = this.getRelayQueueContext(creep);
+        if (!context) return false;
+        if (context.myIndex < context.frontCollectors) return false;
+
+        if (!creep.pos.isEqualTo(context.slotPos)) {
+            creep.moveTo(context.slotPos, {
+                maxRooms: 1,
+                range: 0,
+                ignoreCreeps: false,
+                plainCost: 2,
+                swampCost: 10,
+                reusePath: 3
+            });
+        }
+
+        return true;
     },
 
     relayCarryToForward: function (creep: Creep): boolean {
@@ -127,10 +294,12 @@ const outCarry = {
         if (ret !== OK) return false;
         const homeDirection = this.getHomeDirection(exitDirection);
         this.markReceivedEnergy(target, homeDirection);
-        if (homeDirection) target.move(homeDirection);
+        target.memory.dontPullMe = false;
+        creep.memory.dontPullMe = false;
+        this.tryForceLineMove(target, homeDirection);
 
         const reverseDirection = this.getOppositeDirection(exitDirection);
-        if (reverseDirection) creep.move(reverseDirection);
+        this.tryForceLineMove(creep, reverseDirection);
         return true;
     },
 
@@ -264,20 +433,50 @@ const outCarry = {
         const cache = creep.memory.cacheSource as any
 
         if (cache.waitUntil && Game.time < cache.waitUntil) {
-            const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
-                filter: (r: Resource) => r.amount > 0
-            })[0];
-            if (nearbyDrop) creep.pickup(nearbyDrop);
-            return;
+            const relayContextOnWait = this.getRelayQueueContext(creep);
+            if (!relayContextOnWait ||
+                relayContextOnWait.carriers.length < 3 ||
+                relayContextOnWait.myIndex < relayContextOnWait.frontCollectors) {
+                const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+                    filter: (r: Resource) => r.amount > 0
+                })[0];
+                if (nearbyDrop) creep.pickup(nearbyDrop);
+                return;
+            }
         }
         delete cache.waitUntil;
 
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
+            if (this.moveAlongRouteExit(creep, creep.memory.targetRoom)) return;
             creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
         
         // 处理缓存的目标
+        const relayContext = this.getRelayQueueContext(creep);
+        if (relayContext && relayContext.carriers.length >= 3) {
+            // 仅允许前排少量搬运冲前取货，其余固定在接力位，避免全体挤到采集点。
+            if (relayContext.myIndex >= relayContext.frontCollectors) {
+                delete cache.targetId;
+                delete cache.targetType;
+
+                if (creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && this.relayCarryToForward(creep)) {
+                    return;
+                }
+
+                const nearEnergy = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+                    filter: (r: Resource) => r.resourceType === RESOURCE_ENERGY && r.amount > 0
+                })[0];
+                if (nearEnergy) {
+                    creep.pickup(nearEnergy);
+                    return;
+                }
+
+                this.waitInRelayLine(creep);
+                return;
+            }
+        }
+
         if (cache.targetId) {
             let target = Game.getObjectById(cache.targetId as Id<any>) as any;
             if (!target) {
@@ -367,6 +566,11 @@ const outCarry = {
 
         // 如果没有可以拿的资源，移动到最近的out-harvest身边，或者out-mineral身边
         // 优先miner
+        // 资源暂时断流时先在道路上排成接力线，避免所有搬运同时堆在采集点。
+        if (this.waitInRelayLine(creep)) {
+            return;
+        }
+
         const nearestMiner = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
             filter: (c) => c.memory.role === 'out-mineral'
         });
@@ -417,6 +621,7 @@ const outCarry = {
         if (creep.room.name != creep.memory.homeRoom || creep.pos.isRoomEdge()) {
             if (creep.room.name != creep.memory.homeRoom && !creep.pos.isRoomEdge()) {
                 if (this.relayCarryToForward(creep)) return;
+                if (this.moveAlongRouteExit(creep, creep.memory.homeRoom)) return;
             }
             creep.moveToRoom(creep.memory.homeRoom, { plainCost: 2, swampCost: 10 });
             return;
@@ -541,10 +746,11 @@ const outCarry = {
         const sourceCache = creep.memory.cacheSource as any;
         const used = creep.store.getUsedCapacity();
         const forcedReceivedTick = Number(sourceCache.receivedEnergyTick || 0);
+        const retreatUntil = Number(sourceCache.receivedRetreatUntil || 0);
         const forcedDir = sourceCache.receivedMoveDirection as DirectionConstant | undefined;
         if (forcedReceivedTick === Game.time && forcedDir && used > 0 && creep.room.name !== creep.memory.homeRoom) {
             sourceCache.partialLeaveWait = 0;
-            creep.move(forcedDir);
+            this.tryForceLineMove(creep, forcedDir);
             creep.memory.dontPullMe = false;
             return;
         }
@@ -559,14 +765,16 @@ const outCarry = {
         const lowHealth = creep.hits < creep.hitsMax * 0.5;
         const receivedEnergyTick = Number(sourceCache.receivedEnergyTick || 0);
         const recentlyReceived = receivedEnergyTick >= Game.time - 1;
+        const inRetreatWindow = retreatUntil >= Game.time || recentlyReceived;
 
         if (used === 0) {
             delete sourceCache.receivedEnergyTick;
             delete sourceCache.receivedMoveDirection;
+            delete sourceCache.receivedRetreatUntil;
         }
 
         // 刚被接力到能量时，优先回程，不再继续向前找货。
-        if (recentlyReceived && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+        if (inRetreatWindow && used > 0 && creep.room.name !== creep.memory.homeRoom) {
             sourceCache.partialLeaveWait = 0;
             this.carry(creep);
             creep.memory.dontPullMe = false;

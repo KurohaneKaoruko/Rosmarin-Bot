@@ -273,6 +273,8 @@ const RoleSpawnCheck = {
         const state = getEnergyState(room);
         const cap = room.energyCapacityAvailable || 0;
         const totalEnergy = getTotalEnergy(room);
+        const mode = getRoomMode(room);
+        const highMode = isHighLikeMode(mode);
         const earlyRush = isEarlyRushEnabled(room);
         const workerSpawnEnergyMin = Math.max(THRESHOLDS.SPAWN.MIN_ENERGY, WORKER_MIN_SPAWN_ENERGY);
 
@@ -293,14 +295,24 @@ const RoleSpawnCheck = {
         // 2. 有建造需求时，根据工地规模和模式扩容 worker 数量
         if (needBuilder) {
             if (earlyRush) {
-                let rushTarget = room.level <= 2 ? 2 : 3;
-                if (siteCount >= 8 || coreSiteCount >= 3) rushTarget += 1;
-                if (siteCount >= 16 || coreSiteCount >= 7) rushTarget += 1;
-                const hardCap = room.level <= 2 ? 4 : 5;
-                rushTarget = Math.min(rushTarget, hardCap);
+                let rushTarget = 5;
                 if (state === 'CRITICAL') rushTarget = 1;
                 if (state === 'LOW') rushTarget = Math.min(rushTarget, room.level <= 2 ? 2 : 3);
                 if (current < rushTarget &&
+                    (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap)) {
+                    return true;
+                }
+            }
+
+            if (highMode) {
+                let highTarget = room.level <= 2 ? 2 : 3;
+                if (siteCount >= 6 || coreSiteCount >= 2) highTarget += 1;
+                if (siteCount >= 12 || coreSiteCount >= 5) highTarget += 1;
+                // high 需要增产，但上限低于 rush（rush 最多）
+                highTarget = Math.min(highTarget, room.level <= 2 ? 3 : 4);
+                if (state === 'CRITICAL') highTarget = 1;
+                if (state === 'LOW') highTarget = Math.min(highTarget, room.level <= 2 ? 2 : 3);
+                if (current < highTarget &&
                     (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap)) {
                     return true;
                 }
@@ -355,10 +367,14 @@ const RoleSpawnCheck = {
     },
     'universal': (room: Room, current: number) => {
         const lv = room.level;
-        if (current < 2 && lv < 3) {
-            return (!room.container || room.container.length < 1);
-        }
-        return false;
+        if (lv >= 3) return false;
+        if (room.container && room.container.length > 0) return false;
+
+        const mode = getRoomMode(room);
+        let target = 2;
+        if (isHighLikeMode(mode)) target = 3;
+        if (mode === 'rush') target = 5;
+        return current < target;
     },
     'up-upgrade': (room: Room, current: number) => {
         if (room.level == 8) return false;
