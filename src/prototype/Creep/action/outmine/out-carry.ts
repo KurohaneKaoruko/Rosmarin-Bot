@@ -1,6 +1,16 @@
 const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
 const outCarry = {
+    markReceivedEnergy: function (receiver: Creep) {
+        if (!receiver) return;
+        receiver.memory.cacheSource = receiver.memory.cacheSource || {};
+        const cache = receiver.memory.cacheSource as any;
+        cache.receivedEnergyTick = Game.time;
+        // 被接力后立即清空采集目标缓存，下一 tick 优先进入回程流程。
+        delete cache.targetId;
+        delete cache.targetType;
+    },
+
     isLikelyCollecting: function (creep: Creep): boolean {
         if (!creep || creep.spawning) return false;
         if (creep.store.getFreeCapacity() <= 0) return false;
@@ -104,6 +114,7 @@ const outCarry = {
 
         const ret = creep.transfer(target, RESOURCE_ENERGY);
         if (ret !== OK) return false;
+        this.markReceivedEnergy(target);
 
         const reverseDirection = this.getOppositeDirection(exitDirection);
         if (reverseDirection) creep.move(reverseDirection);
@@ -524,6 +535,18 @@ const outCarry = {
         const inTargetRoom = creep.room.name === creep.memory.targetRoom;
         const lowHealth = creep.hits < creep.hitsMax * 0.5;
         const sourceCache = creep.memory.cacheSource as any;
+        const receivedEnergyTick = Number(sourceCache.receivedEnergyTick || 0);
+        const recentlyReceived = receivedEnergyTick >= Game.time - 1;
+
+        if (used === 0) delete sourceCache.receivedEnergyTick;
+
+        // 刚被接力到能量时，优先回程，不再继续向前找货。
+        if (recentlyReceived && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+            sourceCache.partialLeaveWait = 0;
+            this.carry(creep);
+            creep.memory.dontPullMe = false;
+            return;
+        }
 
         // 目标房内优先拿满：只要有空位就继续取货；连续若干 tick 无增量时才允许半仓回程。
         if (inTargetRoom && !lowHealth && free > 0) {

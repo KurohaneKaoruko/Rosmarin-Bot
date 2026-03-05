@@ -155,7 +155,13 @@ const outHarvest = {
 
         if (!nearbyCarrier) return false;
 
-        if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) return true;
+        if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
+            nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
+            (nearbyCarrier.memory.cacheSource as any).receivedEnergyTick = Game.time;
+            delete (nearbyCarrier.memory.cacheSource as any).targetId;
+            delete (nearbyCarrier.memory.cacheSource as any).targetType;
+            return true;
+        }
 
         return false;
     },
