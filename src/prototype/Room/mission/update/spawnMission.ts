@@ -179,7 +179,10 @@ const RoleSpawnCheck = {
         const highMode = isHighLikeMode(mode);
         const earlyRush = isEarlyRushEnabled(room);
         const baseNum = RoleLevelData['upgrader'][lv]['num'];
-        let num = highMode ? Math.min(baseNum * 2, 8) : baseNum;
+        // high/rush 下提高 upgrader 基线：high 稳步增加，rush 采用更激进目标。
+        const highBaseTarget = Math.min(baseNum * 2 + 1, 10);
+        const rushBaseTarget = Math.min(baseNum * 3, 12);
+        let num = highMode ? (mode === 'rush' ? rushBaseTarget : highBaseTarget) : baseNum;
         if (room.memory.defend) return false;
         const state = getEnergyState(room);
         const ttd = room.controller?.ticksToDowngrade || 0;
@@ -191,8 +194,10 @@ const RoleSpawnCheck = {
         num = Math.min(num, slotCap);
 
         if (earlyRush) {
-            if (lv <= 2) num = Math.max(num, 4);
-            else if (lv === 3) num = Math.max(num, 5);
+            // rush 前期冲级时提高最低升级人数，保证 controller 提速。
+            if (lv <= 2) num = Math.max(num, 6);
+            else if (lv === 3) num = Math.max(num, 7);
+            else num = Math.max(num, 6);
 
             const coreSiteCount = getCoreConstructionSiteCount(room);
             if (coreSiteCount > 0) {
@@ -351,7 +356,13 @@ const RoleSpawnCheck = {
         if (!room.extractor) return false;
         if (room.mineral.mineralAmount <= 0) return false;
         const mineralPos = room.mineral.pos;
-        const hasMineralContainer = room.container?.some(c => c.pos.isNearTo(mineralPos));
+        const sources = room.source || room.find(FIND_SOURCES);
+        const hasMineralContainer = room.container?.some((c) => {
+            if (!c.pos.isNearTo(mineralPos)) return false;
+            const isSourceContainer = sources.some((s) => s && c.pos.isNearTo(s.pos));
+            const isControllerContainer = !!room.controller && c.pos.inRangeTo(room.controller.pos, 1);
+            return !isSourceContainer && !isControllerContainer;
+        });
         if (!hasMineralContainer) return false;
         // 检查storage是否有足够空间
         const store = room.storage.store;
