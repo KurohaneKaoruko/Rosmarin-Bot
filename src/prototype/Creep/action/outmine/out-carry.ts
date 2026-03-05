@@ -508,7 +508,6 @@ const outCarry = {
         creep.memory.dontPullMe = false;
         return false;
     },
-
     run: function (creep: Creep) {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
@@ -524,21 +523,37 @@ const outCarry = {
         const free = creep.store.getFreeCapacity();
         const inTargetRoom = creep.room.name === creep.memory.targetRoom;
         const lowHealth = creep.hits < creep.hitsMax * 0.5;
-        const shouldTopUp = inTargetRoom && !lowHealth && used > 0 && free > 0 && used < Math.max(200, Math.floor(creep.store.getCapacity() * 0.8));
+        const sourceCache = creep.memory.cacheSource as any;
 
-        if (used === 0 || shouldTopUp) {
+        // 目标房内优先拿满：只要有空位就继续取货；连续若干 tick 无增量时才允许半仓回程。
+        if (inTargetRoom && !lowHealth && free > 0) {
             const before = used;
             this.withdraw(creep);
             creep.memory.dontPullMe = false;
 
-            // 无缝模式：在目标房间仅在“继续装货成功”时停留，否则立刻进入回程投递。
-            if (shouldTopUp) {
-                const after = creep.store.getUsedCapacity();
-                if (after <= before && after > 0) {
-                    this.carry(creep);
-                    creep.memory.dontPullMe = false;
-                }
+            const after = creep.store.getUsedCapacity();
+            if (after > before) {
+                sourceCache.partialLeaveWait = 0;
+                return;
             }
+
+            const wait = Number(sourceCache.partialLeaveWait || 0) + 1;
+            sourceCache.partialLeaveWait = wait;
+
+            // 空仓始终继续找货；半仓在短时等待后允许回程，避免房间瞬时断流时卡死。
+            if (after === 0) return;
+            if (wait < 18) return;
+
+            delete sourceCache.partialLeaveWait;
+            this.carry(creep);
+            creep.memory.dontPullMe = false;
+            return;
+        }
+
+        sourceCache.partialLeaveWait = 0;
+        if (used === 0) {
+            this.withdraw(creep);
+            creep.memory.dontPullMe = false;
             return;
         }
 
@@ -548,3 +563,4 @@ const outCarry = {
 }
 
 export default outCarry;
+

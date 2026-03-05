@@ -79,15 +79,30 @@ const RepairRampart = function (creep: Creep) {
 }
 
 const BuildRepairWork = function (creep: Creep) {
+    const LOCAL_BUILD_TASK_ID = '__local_build__';
     const cache = getCache(creep)
     let target = null;
     let taskType = null;
     let taskid = null;
+    const sites = (creep.room as any).constructionSite || creep.room.find(FIND_CONSTRUCTION_SITES);
+    const hasBuildTarget = sites.some((s: ConstructionSite) => s && (s as any).my);
 
     if (RepairRampart(creep)) return true;
 
+    // 工地出现时，立即抢占非 build 缓存任务，避免 worker 被 repair 长时间占用。
+    if (hasBuildTarget && cache.task && cache.tasktype !== 'build') {
+        delete cache.task;
+        delete cache.taskid;
+        delete cache.tasktype;
+        delete cache.wallPos;
+        delete cache.targetHits;
+    }
+
     if (!cache.task) {
         let task = creep.room.getBuildMission(creep);
+        if (!task && hasBuildTarget) {
+            task = { type: 'build', id: LOCAL_BUILD_TASK_ID, data: {} as any } as any;
+        }
         if (!task) {
             let allowRepair = true;
             const towers = creep.room.tower;
@@ -136,10 +151,9 @@ const BuildRepairWork = function (creep: Creep) {
             }
 
             if (!roomCache.buildId) {
-                const sites = (creep.room as any).constructionSite || creep.room.find(FIND_CONSTRUCTION_SITES);
-                const mySites = sites.filter((s) => s && (s as any).my);
+                const mySites = sites.filter((s: ConstructionSite) => s && (s as any).my);
                 if (!mySites.length) {
-                    creep.room.deleteMissionFromPool('build', task.id);
+                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool('build', task.id);
                     return true;
                 }
                 let best = null as ConstructionSite | null;
@@ -155,7 +169,7 @@ const BuildRepairWork = function (creep: Creep) {
                     }
                 }
                 if (!best) {
-                    creep.room.deleteMissionFromPool('build', task.id);
+                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool('build', task.id);
                     return true;
                 }
                 roomCache.buildId = best.id;

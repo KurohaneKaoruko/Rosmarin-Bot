@@ -45,7 +45,7 @@ export const RoleData: RoleConfig = {
     }, // 矿工
     'universal': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
-        level: 0, code: 'UNIV', work: 'universal'
+        level: 0, code: 'UNIV', action: 'universal'
     }, // 采集搬运通用机，处理停摆与新房起步
 
     /* 特殊用途 */
