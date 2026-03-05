@@ -3,7 +3,6 @@ import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/feature/externalRoad';
 import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
-import { getQoS, shouldRun } from '@/modules/infra/qos';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
 const OUTMINE_PRIORITY = {
@@ -297,10 +296,10 @@ export default class OutMine extends Room {
             return;
         }
 
-        const qosLevel = getQoS()?.level || 'normal';
+        const qosLevel = global.qos.getQoS()?.level || 'normal';
         if (qosLevel === 'emergency') return;
 
-        if (qosLevel === 'normal' || shouldRun({ every: 5, allowLevels: ['constrained'] })) {
+        if (qosLevel === 'normal' || global.qos.shouldRun({ every: 5, allowLevels: ['constrained'] })) {
             RoadVisual.run();
             HighwayMineVisual.run();
         }
@@ -309,7 +308,7 @@ export default class OutMine extends Room {
     }
 
     EnergyMine() { // 能量矿
-        const qosLevel = getQoS()?.level || 'normal';
+        const qosLevel = global.qos.getQoS()?.level || 'normal';
         const roomMode = getRoomMode(this);
         const interval = qosLevel === 'constrained'
             ? (roomMode === 'rush' ? 10 : roomMode === 'high' ? 20 : 40)
@@ -321,7 +320,7 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
                     scoutSpawn(this, roomName);    // 侦查
                 }
                 continue;
@@ -333,7 +332,7 @@ export default class OutMine extends Room {
 
             // 造路
             if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
-                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
                     RoadBuilder.createRoadSites(this, targetRoom)
                 }
             }
@@ -370,7 +369,7 @@ export default class OutMine extends Room {
             const myUserName = this.controller.owner.username;
             if (controller?.owner && controller.owner.username !== myUserName) continue;
 
-            if (this.level >= 3 && (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] }))) {
+            if (this.level >= 3 && (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] }))) {
                 outReserverSpawn(this, targetRoom);    // 预定
             }
 
@@ -404,7 +403,7 @@ export default class OutMine extends Room {
     }
 
     CenterMine() { // 中央九房
-        const qosLevel = getQoS()?.level || 'normal';
+        const qosLevel = global.qos.getQoS()?.level || 'normal';
         const roomMode = getRoomMode(this);
         const interval = qosLevel === 'constrained'
             ? (roomMode === 'rush' ? 6 : roomMode === 'high' ? 10 : 20)
@@ -416,7 +415,7 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
                     scoutSpawn(this, roomName);    // 侦查
                 }
                 continue;
@@ -426,7 +425,7 @@ export default class OutMine extends Room {
 
             // 造路
             if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
-                if (qosLevel === 'normal' || shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
                     RoadBuilder.createRoadSites(this, targetRoom)
                 }
             }

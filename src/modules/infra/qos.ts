@@ -20,6 +20,13 @@ type ShouldRunOptions = {
     levelAtLeast?: QoSLevel;
 };
 
+export type QoSAPI = {
+    updateQoS: () => QoSState;
+    getQoS: () => QoSState | null;
+    shouldRun: (options?: ShouldRunOptions) => boolean;
+    isTickAligned: (mod: number, offset?: number, tick?: number) => boolean;
+};
+
 const LEVEL_ORDER: Record<QoSLevel, number> = {
     emergency: 0,
     constrained: 1,
@@ -98,4 +105,32 @@ export function shouldRun(options: ShouldRunOptions = {}): boolean {
 export const isTickAligned = (mod: number, offset = 0, tick = Game.time) => {
     const normalized = ((offset % mod) + mod) % mod
     return tick % mod === normalized
+}
+
+const qosApi: QoSAPI = {
+    updateQoS,
+    getQoS,
+    shouldRun,
+    isTickAligned,
+};
+
+/**
+ * 挂载 QoS 全局 API（global.qos）
+ * 说明：仅需在入口 main.ts 引入本模块，即可自动完成挂载。
+ */
+export function mountQoS(): QoSAPI {
+    if (!global.qos) global.qos = qosApi;
+    return global.qos;
+}
+
+// 模块加载即挂载，供全局直接调用 global.qos.xxx
+mountQoS();
+
+declare global {
+    namespace NodeJS {
+        interface Global {
+            qos: QoSAPI;
+            QoS?: QoSState;
+        }
+    }
 }

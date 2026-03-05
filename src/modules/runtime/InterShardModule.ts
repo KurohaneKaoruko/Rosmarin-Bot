@@ -1,4 +1,4 @@
-import { beginInterShardTick, cleanupInterShardLocalRoot, endInterShardTick } from '@/modules/infra/interShard';
+import { beginInterShardTick, cleanupInterShardLocalRoot, endInterShardTick } from '@/modules/feature/interShard';
 
 const InterShardModule = {
     start: function () {

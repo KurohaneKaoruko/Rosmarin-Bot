@@ -1,6 +1,5 @@
 import { compress } from '@/modules/utils/compress';
 import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
-import { isTickAligned } from '@/modules/infra/qos';
 import { getRoomData, getStructData } from '@/modules/utils/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
@@ -284,7 +283,7 @@ export default class TransportMission extends Room {
 
         if (room.level >= 6 && room.lab) {
             // 对能量极低 (<LAB_MIN_ENERGY) 的 Lab 取消频率限制，其他 Lab 保持频率限制
-            const checkAllLabs = isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
+            const checkAllLabs = global.qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
             const labs = room.lab.filter((l: StructureLab) => {
                 if (!l) return false;
                 const freeCap = l.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -318,7 +317,7 @@ export default class TransportMission extends Room {
         if(room.getResAmount(RESOURCE_ENERGY) < THRESHOLDS.ENERGY.SEND_REQUEST_MIN) return;
 
         const centerPos = room.getCenter();
-        if (isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset) && room.level == 8 && room.powerSpawn && storage &&
+        if (global.qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset) && room.level == 8 && room.powerSpawn && storage &&
             (!room.powerSpawn.pos.inRangeTo(centerPos, 1))) {
             const powerSpawn = room.powerSpawn;
             const amount = powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -340,7 +339,7 @@ export default class TransportMission extends Room {
         if(room.level == 8 && room.nuker) {
             const nuker = room.nuker;
             const urgent = urgentNukeEnergy;
-            const shouldFill = urgent ? isTickAligned(10, offset) : isTickAligned(20, offset);
+            const shouldFill = urgent ? global.qos.isTickAligned(10, offset) : global.qos.isTickAligned(20, offset);
             if (!shouldFill) return OK;
 
             const cap = nuker.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -403,7 +402,7 @@ export default class TransportMission extends Room {
      */
     UpdateNukerMission(offset = 0) {
         const room = this;
-        if (!isTickAligned(THRESHOLDS.TICK.NUKER_CHECK, offset)) return;
+        if (!global.qos.isTickAligned(THRESHOLDS.TICK.NUKER_CHECK, offset)) return;
         if(room.level < 8) return;
         if(!room.nuker) return;
         const storage = room.storage;

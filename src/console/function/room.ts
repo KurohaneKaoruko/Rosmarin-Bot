@@ -2,7 +2,7 @@ import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
 import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memory";
-import { parseShardRoomName } from "@/modules/infra/shardRoom";
+import { parseShardRoomName } from "@/modules/utils/shardRoom";
 
 // 房间控制
 export default {

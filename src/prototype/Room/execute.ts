@@ -1,4 +1,3 @@
-import { shouldRun } from '@/modules/infra/qos';
 import { getRoomData, getStructData } from '@/modules/utils/memory';
 
 export default class RoomExecute extends Room {
@@ -30,7 +29,7 @@ export default class RoomExecute extends Room {
             this.PowerSpawnWork();
         }
 
-        if(!shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
+        if(!global.qos.shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
         
         // 自动化处理
         this.autoMarket();       // 自动市场交易

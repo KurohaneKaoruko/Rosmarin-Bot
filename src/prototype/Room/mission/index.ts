@@ -2,7 +2,6 @@
  * 任务更新主模块
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
-import { isTickAligned } from '@/modules/infra/qos';
 import { getRoomData } from '@/modules/utils/memory';
 
 export default class Mission extends Room {    
@@ -41,7 +40,7 @@ export default class Mission extends Room {
         ];
 
         for (const item of schedule) {
-            if (isTickAligned(item.interval, item.offset)) item.run(item.offset);
+            if (global.qos.isTickAligned(item.interval, item.offset)) item.run(item.offset);
         }
     }
 }

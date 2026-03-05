@@ -1,4 +1,4 @@
-import { ackCreepTransfer, cleanupCreepTransfers, getKnownShardNames, readInterShardRemoteRoot, upsertCreepTransfer } from '@/modules/infra/interShard';
+import { ackCreepTransfer, cleanupCreepTransfers, getKnownShardNames, readInterShardRemoteRoot, upsertCreepTransfer } from '@/modules/feature/interShard';
 
 const snapshot = (obj: any) => {
     try { return JSON.parse(JSON.stringify(obj)); } catch { return {}; }

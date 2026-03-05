@@ -12,6 +12,7 @@ import { NukeModule } from '@/modules/runtime/NukeModule';
 import { ExpandModule } from '@/modules/runtime/ExpandModule';
 import { InterShardModule } from '@/modules/runtime/InterShardModule';
 
+import '@/modules/infra/qos';    // QoS 全局挂载
 import '@/modules/infra/moveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
 

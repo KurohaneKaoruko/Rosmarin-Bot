@@ -1,5 +1,3 @@
-import { shouldRun } from "@/modules/infra/qos";
-
 export default class FlagBaseFunction extends Flag {
     // 移动旗帜
     handleSetPositionFlag() {

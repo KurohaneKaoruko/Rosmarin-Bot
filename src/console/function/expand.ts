@@ -1,5 +1,5 @@
-import { parseShardRoomName } from '@/modules/infra/shardRoom';
-import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/infra/interShard';
+import { parseShardRoomName } from '@/modules/utils/shardRoom';
+import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/feature/interShard';
 import { getBotMemory } from '@/modules/utils/memory';
 
 const genId = () => {

@@ -1,7 +1,6 @@
 import { log } from '@/utils.js';
 import { errorMapper } from './errorMapper.js'
 import { BASE_CONFIG } from '@/constant/config.js'
-import { updateQoS } from '@/modules/infra/qos.js';
 import { roomRunner } from './runner/RoomRunner';
 import { creepRunner } from './runner/CreepRunner';
 import { powerCreepRunner } from './runner/PowerCreepRunner';
@@ -85,7 +84,7 @@ export const createApp = () => {
     /** 主要逻辑 */
     const exec = () => {
         // 先更新 QoS（用于后续模块统一降级/节流的判定依据）
-        updateQoS();
+        global.qos.updateQoS();
         runInit();
         runCall('start');
         runners.room();

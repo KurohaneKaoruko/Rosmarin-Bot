@@ -1,9 +1,8 @@
-import { shouldRun } from "@/modules/infra/qos";
 import { getNukerData } from "@/modules/utils/memory";
 
 export const NukeModule = {
     tick: function () {
-        if (!shouldRun({ every: 10, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return;
+        if (!global.qos.shouldRun({ every: 10, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return;
 
         const nukerData = getNukerData();
         if (nukerData.requests.length === 0) return;
