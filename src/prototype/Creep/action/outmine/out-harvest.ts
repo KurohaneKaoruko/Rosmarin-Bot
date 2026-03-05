@@ -157,9 +157,19 @@ const outHarvest = {
 
         if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
             nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
-            (nearbyCarrier.memory.cacheSource as any).receivedEnergyTick = Game.time;
-            delete (nearbyCarrier.memory.cacheSource as any).targetId;
-            delete (nearbyCarrier.memory.cacheSource as any).targetType;
+            const cache = nearbyCarrier.memory.cacheSource as any;
+            cache.receivedEnergyTick = Game.time;
+            delete cache.targetId;
+            delete cache.targetType;
+            const homeRoom = nearbyCarrier.memory.homeRoom;
+            if (homeRoom && nearbyCarrier.room.name !== homeRoom) {
+                const route = Game.map.findRoute(nearbyCarrier.room.name, homeRoom);
+                if (Array.isArray(route) && route.length > 0 && route[0].exit) {
+                    const homeDirection = route[0].exit as DirectionConstant;
+                    cache.receivedMoveDirection = homeDirection;
+                    nearbyCarrier.move(homeDirection);
+                }
+            }
             return true;
         }
 

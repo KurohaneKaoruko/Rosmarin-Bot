@@ -1,11 +1,12 @@
 const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
 const outCarry = {
-    markReceivedEnergy: function (receiver: Creep) {
+    markReceivedEnergy: function (receiver: Creep, homeDirection?: DirectionConstant | null) {
         if (!receiver) return;
         receiver.memory.cacheSource = receiver.memory.cacheSource || {};
         const cache = receiver.memory.cacheSource as any;
         cache.receivedEnergyTick = Game.time;
+        if (homeDirection) cache.receivedMoveDirection = homeDirection;
         // 被接力后立即清空采集目标缓存，下一 tick 优先进入回程流程。
         delete cache.targetId;
         delete cache.targetType;
@@ -64,6 +65,16 @@ const outCarry = {
         }
     },
 
+    getHomeDirection: function (exitDirection: number): DirectionConstant | null {
+        switch (exitDirection) {
+            case FIND_EXIT_TOP: return TOP;
+            case FIND_EXIT_BOTTOM: return BOTTOM;
+            case FIND_EXIT_LEFT: return LEFT;
+            case FIND_EXIT_RIGHT: return RIGHT;
+            default: return null;
+        }
+    },
+
     relayCarryToForward: function (creep: Creep): boolean {
         if (creep.store[RESOURCE_ENERGY] <= 0) return false;
         if (creep.pos.isRoomEdge()) return false;
@@ -114,7 +125,9 @@ const outCarry = {
 
         const ret = creep.transfer(target, RESOURCE_ENERGY);
         if (ret !== OK) return false;
-        this.markReceivedEnergy(target);
+        const homeDirection = this.getHomeDirection(exitDirection);
+        this.markReceivedEnergy(target, homeDirection);
+        if (homeDirection) target.move(homeDirection);
 
         const reverseDirection = this.getOppositeDirection(exitDirection);
         if (reverseDirection) creep.move(reverseDirection);
@@ -525,20 +538,32 @@ const outCarry = {
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         delete creep.memory.working;
 
+        const sourceCache = creep.memory.cacheSource as any;
+        const used = creep.store.getUsedCapacity();
+        const forcedReceivedTick = Number(sourceCache.receivedEnergyTick || 0);
+        const forcedDir = sourceCache.receivedMoveDirection as DirectionConstant | undefined;
+        if (forcedReceivedTick === Game.time && forcedDir && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+            sourceCache.partialLeaveWait = 0;
+            creep.move(forcedDir);
+            creep.memory.dontPullMe = false;
+            return;
+        }
+
         if (this.buildRepair(creep)) {
             creep.memory.dontPullMe = false;
             return;
         }
 
-        const used = creep.store.getUsedCapacity();
         const free = creep.store.getFreeCapacity();
         const inTargetRoom = creep.room.name === creep.memory.targetRoom;
         const lowHealth = creep.hits < creep.hitsMax * 0.5;
-        const sourceCache = creep.memory.cacheSource as any;
         const receivedEnergyTick = Number(sourceCache.receivedEnergyTick || 0);
         const recentlyReceived = receivedEnergyTick >= Game.time - 1;
 
-        if (used === 0) delete sourceCache.receivedEnergyTick;
+        if (used === 0) {
+            delete sourceCache.receivedEnergyTick;
+            delete sourceCache.receivedMoveDirection;
+        }
 
         // 刚被接力到能量时，优先回程，不再继续向前找货。
         if (recentlyReceived && used > 0 && creep.room.name !== creep.memory.homeRoom) {
