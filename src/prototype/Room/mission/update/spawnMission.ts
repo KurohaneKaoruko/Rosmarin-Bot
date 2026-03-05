@@ -58,6 +58,47 @@ const hasMyConstructionSitesCached = (room: Room) => {
     return getMyConstructionSites(room).length > 0;
 }
 
+const getControllerUpgradeSlots = (room: Room) => {
+    const cached = (room as any)._controllerUpgradeSlots;
+    if (typeof cached === 'number') return cached;
+    const controller = room.controller;
+    if (!controller) return 0;
+
+    const terrain = room.getTerrain();
+    const cx = controller.pos.x;
+    const cy = controller.pos.y;
+    let slots = 0;
+
+    for (let x = Math.max(0, cx - 3); x <= Math.min(49, cx + 3); x++) {
+        for (let y = Math.max(0, cy - 3); y <= Math.min(49, cy + 3); y++) {
+            const pos = new RoomPosition(x, y, room.name);
+            if (pos.getRangeTo(controller) > 3) continue;
+            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+            const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
+            const blocked = structures.some((s: any) =>
+                s.structureType !== STRUCTURE_ROAD &&
+                s.structureType !== STRUCTURE_CONTAINER &&
+                !(s.structureType === STRUCTURE_RAMPART && s.my)
+            );
+            if (blocked) continue;
+            slots++;
+        }
+    }
+
+    (room as any)._controllerUpgradeSlots = slots;
+    return slots;
+}
+
+const getStorageDrivenUpgraderTarget = (room: Room, baseNum: number) => {
+    if (!room.storage || room.level >= 8) return baseNum;
+    const storageEnergy = room.storage.store[RESOURCE_ENERGY] || 0;
+    const offset = Math.max(0, room.level - 3.5) * 10000;
+    const linearNeed = Math.floor(Math.max(0, storageEnergy - offset) / 100000);
+    if (linearNeed <= 0) return baseNum;
+    return Math.max(baseNum, Math.min(baseNum + 2, linearNeed));
+}
+
 const getCoreConstructionSiteCount = (room: Room) => {
     let count = 0;
     for (const site of getMyConstructionSites(room)) {
@@ -141,6 +182,14 @@ const RoleSpawnCheck = {
         let num = highMode ? Math.min(baseNum * 2, 8) : baseNum;
         if (room.memory.defend) return false;
         const state = getEnergyState(room);
+        const ttd = room.controller?.ticksToDowngrade || 0;
+        const slotCap = Math.max(1, getControllerUpgradeSlots(room));
+
+        num = Math.max(num, getStorageDrivenUpgraderTarget(room, baseNum));
+        if (ttd < 5000) num = Math.max(num, 1);
+        if (ttd < 1500) num = Math.max(num, Math.min(2, slotCap));
+        num = Math.min(num, slotCap);
+
         if (earlyRush) {
             if (lv <= 2) num = Math.max(num, 4);
             else if (lv === 3) num = Math.max(num, 5);
@@ -150,18 +199,18 @@ const RoleSpawnCheck = {
                 num = Math.max(2, num - 1);
             }
 
+            num = Math.min(num, slotCap);
             if (state === 'CRITICAL' && room.energyAvailable < THRESHOLDS.SPAWN.MIN_ENERGY && current >= 2) {
                 return false;
             }
             return current < num;
         }
-        const ttd = room.controller?.ticksToDowngrade || 0;
         if (highMode) {
-            if (state === 'CRITICAL') return false;
+            if (state === 'CRITICAL' && ttd > 2000) return false;
             if (state === 'LOW' && ttd > 10000 && current >= 1) return false;
 
             const minEnergy = lv >= 8 ? 120e3 : lv >= 6 ? 60e3 : lv >= 5 ? 30e3 : 10e3;
-            if (getTotalEnergy(room) < minEnergy) return false;
+            if (getTotalEnergy(room) < minEnergy && ttd > 3000) return false;
 
             if (!hasControllerEnergyBuffer(room) && lv >= 6) {
                 num = Math.min(num, baseNum + 1);

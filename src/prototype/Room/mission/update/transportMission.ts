@@ -240,6 +240,9 @@ export default class TransportMission extends Room {
         const highMode = roomMode === 'high' || roomMode === 'rush';
         const creepNum = room.getCreepNum() || {};
         const hasUpgradeConsumer = (creepNum['upgrader'] || 0) + (creepNum['aid-upgrade'] || 0) + (creepNum['universal'] || 0) > 0;
+        const ttd = room.controller?.ticksToDowngrade || 0;
+        const upgradeFocus = highMode || ttd < (room.level >= 6 ? 12000 : 7000);
+        const controllerBufferLevel = upgradeFocus ? this.TransportLevel('ext') : this.TransportLevel('controllerBuffer');
         if (state !== 'LOW' && state !== 'CRITICAL' && room.controller && (highMode || hasUpgradeConsumer)) {
             const controller = room.controller;
             const linkTargetEnergy = THRESHOLDS.UNIVERSAL.CONTROLLER_LINK_BUFFER_TARGET;
@@ -251,7 +254,7 @@ export default class TransportMission extends Room {
                 if (lack <= 0 || energy <= 0) continue;
                 const amount = Math.min(lack, energy);
                 energy -= amount;
-                this.addTransportMission(this.TransportLevel('controllerBuffer'), {
+                this.addTransportMission(controllerBufferLevel, {
                     pos: link,
                     source: storageOrTerminal.id,
                     target: link.id,
@@ -269,7 +272,7 @@ export default class TransportMission extends Room {
                 if (lack <= 0 || energy <= 0) continue;
                 const amount = Math.min(lack, energy);
                 energy -= amount;
-                this.addTransportMission(this.TransportLevel('controllerBuffer'), {
+                this.addTransportMission(controllerBufferLevel, {
                     pos: container,
                     source: storageOrTerminal.id,
                     target: container.id,
