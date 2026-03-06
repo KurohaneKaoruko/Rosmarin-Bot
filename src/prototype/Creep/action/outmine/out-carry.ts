@@ -4,6 +4,118 @@ const relayExitCache: Record<string, { tick: number; exit: number | null }> = {}
 const relayQueuePosCache: Record<string, { tick: number; positions: RoomPosition[] }> = {};
 
 const outCarry = {
+    canDirectFeedEnergy: function (receiver: Creep): boolean {
+        if (!receiver || receiver.spawning) return false;
+        const free = receiver.store.getFreeCapacity(RESOURCE_ENERGY);
+        if (free <= 0) return false;
+
+        switch (receiver.memory.role) {
+            case 'worker':
+            case 'upgrader':
+            case 'universal':
+                return true;
+            case 'carrier': {
+                const used = receiver.store.getUsedCapacity();
+                const energyUsed = receiver.store.getUsedCapacity(RESOURCE_ENERGY);
+                return used === energyUsed;
+            }
+            default:
+                return false;
+        }
+    },
+
+    findAdjacentEnergyReceiver: function (creep: Creep): Creep | null {
+        if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) return null;
+
+        const rolePriority: Partial<Record<CreepMemory['role'], number>> = {
+            worker: 4,
+            upgrader: 3,
+            universal: 2,
+            carrier: 1,
+        };
+
+        const nearby = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+            filter: (c: Creep) => c.id !== creep.id && this.canDirectFeedEnergy(c)
+        });
+        if (!nearby || nearby.length <= 0) return null;
+
+        nearby.sort((a, b) => {
+            const roleDiff = (rolePriority[b.memory.role] || 0) - (rolePriority[a.memory.role] || 0);
+            if (roleDiff !== 0) return roleDiff;
+
+            const freeDiff = b.store.getFreeCapacity(RESOURCE_ENERGY) - a.store.getFreeCapacity(RESOURCE_ENERGY);
+            if (freeDiff !== 0) return freeDiff;
+
+            return a.id.localeCompare(b.id);
+        });
+
+        return nearby[0] || null;
+    },
+
+    resolveCarryDepositTarget: function (creep: Creep): StructureTerminal | StructureStorage | null {
+        let target: StructureTerminal | StructureStorage | null = null;
+
+        if (creep.room.terminal &&
+            creep.room.terminal.store[RESOURCE_ENERGY] < 10000) {
+            target = creep.room.terminal;
+        }
+
+        if (!target) {
+            const targets: (StructureTerminal | StructureStorage)[] = [];
+            if (creep.room.terminal &&
+                creep.room.terminal.store.getFreeCapacity() > 50000) {
+                targets.push(creep.room.terminal);
+            }
+            if (creep.room.storage &&
+                creep.room.storage.store.getFreeCapacity() > 10000) {
+                targets.push(creep.room.storage);
+            }
+            target = creep.pos.findClosestByRange(targets);
+        }
+
+        return target;
+    },
+
+    moveCarryAfterDirectFeed: function (creep: Creep): boolean {
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        const cache = creep.memory.cacheTarget as any;
+
+        let target = cache.targetId ? Game.getObjectById(cache.targetId) as StructureTerminal | StructureStorage | null : null;
+        if (!target) {
+            delete cache.targetId;
+            target = this.resolveCarryDepositTarget(creep);
+            if (target) cache.targetId = target.id;
+        }
+
+        if (target) {
+            if (!creep.pos.inRangeTo(target, 1)) {
+                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            }
+            return true;
+        }
+
+        const storage = creep.room.storage;
+        const controller = creep.room.controller;
+        if (storage) {
+            if (!creep.pos.inRangeTo(storage, 1)) {
+                creep.moveTo(storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            }
+            return true;
+        }
+        if (controller && controller.level < 8) {
+            if (!creep.pos.inRangeTo(controller, 1)) {
+                creep.moveTo(controller, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            }
+            return true;
+        }
+
+        const centerPos = creep.room.getCenter();
+        if (centerPos && !creep.pos.inRangeTo(centerPos, 1)) {
+            creep.moveTo(centerPos, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+        }
+        return true;
+    },
+
     markForcedMove: function (creep: Creep, direction?: DirectionConstant | null, keepTicks = 1) {
         if (!creep || !direction) return;
         creep.memory.cacheSource = creep.memory.cacheSource || {};
@@ -663,10 +775,21 @@ const outCarry = {
             return;
         }
 
-        let target: StructureContainer | StructureStorage;
+        const directReceiver = this.findAdjacentEnergyReceiver(creep);
+        if (directReceiver) {
+            const transferResult = creep.transfer(directReceiver, RESOURCE_ENERGY);
+            if (transferResult === OK) {
+                if (creep.store.getUsedCapacity() > 0) {
+                    this.moveCarryAfterDirectFeed(creep);
+                }
+                return;
+            }
+        }
+
+        let target: StructureTerminal | StructureStorage;
     
         if (cache.targetId) {
-            target = Game.getObjectById(cache.targetId) as StructureContainer | StructureStorage;
+            target = Game.getObjectById(cache.targetId) as StructureTerminal | StructureStorage;
             if (target) {
                 if (creep.pos.inRangeTo(target, 1)) {
                     if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 200) {
@@ -683,23 +806,7 @@ const outCarry = {
         }
 
         if(!target) {
-            if (creep.room.terminal &&
-                creep.room.terminal.store[RESOURCE_ENERGY] < 10000) {
-                target = creep.room.terminal;
-            }
-        }
-
-        if(!target) {
-            const targets = [];
-            if (creep.room.terminal &&
-                creep.room.terminal.store.getFreeCapacity() > 50000) {
-                targets.push(creep.room.terminal);
-            }
-            if (creep.room.storage &&
-                creep.room.storage.store.getFreeCapacity() > 10000) {
-                targets.push(creep.room.storage);
-            }
-            target = creep.pos.findClosestByRange(targets);
+            target = this.resolveCarryDepositTarget(creep);
         }
     
         if (target) {

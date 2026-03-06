@@ -10,10 +10,10 @@ const upgrade = function (creep: Creep) {
             maxRooms: 1,
          });
     }
-    if (!link && !creep.pos.inRangeTo(creep.room.controller, 2)) {
+    if (!link && !creep.pos.inRangeTo(creep.room.controller, 3)) {
         creep.moveTo(creep.room.controller.pos, {
             visualizePathStyle: { stroke: '#ffffff' },
-            range: 2,
+            range: 3,
             maxRooms: 1,
         });
     }

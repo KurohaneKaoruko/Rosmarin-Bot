@@ -407,33 +407,22 @@ const aid_build = {
     },
 
     yieldJumpQueue: function (creep: Creep, avoidPos?: RoomPosition): boolean {
-        const sameRole = creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) =>
-                c.id !== creep.id &&
-                c.memory.role === creep.memory.role &&
-                c.memory.spawnFlag === creep.memory.spawnFlag
-        });
-        const sources = creep.room.find(FIND_SOURCES);
-        let bestPos: RoomPosition | null = null;
-        let bestScore = -Infinity;
-
-        for (const pos of creep.pos.nearPos(1)) {
-            if (pos.isRoomEdge()) continue;
-            if (!pos.walkable(true)) continue;
-
-            const nearSameRole = sameRole.filter((c) => pos.inRangeTo(c.pos, 1)).length;
-            const nearSources = sources.filter((source) => pos.inRangeTo(source.pos, 1)).length;
-            const distanceFromAvoid = avoidPos ? pos.getRangeTo(avoidPos) : 0;
-            const score = distanceFromAvoid * 8 - nearSameRole * 10 - nearSources * 6 - creep.pos.getRangeTo(pos);
-
-            if (score > bestScore) {
-                bestScore = score;
-                bestPos = pos;
+        let anchorPos: RoomPosition | null = null;
+        if (avoidPos && avoidPos.roomName === creep.room.name && !avoidPos.isRoomEdge()) {
+            anchorPos = avoidPos;
+        } else {
+            const spawnFlagName = creep.memory.spawnFlag;
+            const spawnFlag = spawnFlagName ? Game.flags[spawnFlagName] : null;
+            if (spawnFlag?.pos.roomName === creep.room.name && !spawnFlag.pos.isRoomEdge()) {
+                anchorPos = spawnFlag.pos;
+            } else if (creep.room.controller && !creep.room.controller.pos.isRoomEdge()) {
+                anchorPos = creep.room.controller.pos;
+            } else {
+                anchorPos = new RoomPosition(25, 25, creep.room.name);
             }
         }
 
-        if (!bestPos) return false;
-        creep.moveTo(bestPos, { range: 0, maxRooms: 1, reusePath: 0 });
+        creep.moveTo(anchorPos, { range: 2, maxRooms: 1, reusePath: 0 });
         return true;
     },
 

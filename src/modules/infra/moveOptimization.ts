@@ -4370,29 +4370,44 @@ function updateDontPullMeForMoveTo(creep) {
     creep.memory.dontPullMe = isEdge;
 }
 
+const YIELDABLE_ACTIONS = new Set([
+    'build',
+    'repair',
+    'upgradeController'
+]);
+const ACTION_OK = 0;
+
+function shouldLockActionPosition(actionName, actionResult) {
+    if (actionResult !== ACTION_OK) return false;
+    if (YIELDABLE_ACTIONS.has(actionName)) return false;
+    return true;
+}
+
 /**
  * 对指定 action 进行 dontPullMe 包装（复用同一套逻辑）
  * @description
  * - 首次包装时保存原方法到 $methodName
- * - 执行 action 前将 dontPullMe 设为 true，避免被对穿打断关键动作
+ * - 执行 action 后按动作类型更新 dontPullMe：
+ *   可远程工作的动作默认允许让位，其余动作保持硬锁
  */
-function wrapActionSetDontPullMeTrue(methodName) {
+function wrapActionSetDontPullMePolicy(methodName) {
     const backupName = `$${methodName}`;
     if (Creep.prototype[backupName]) {
         return;
     }
     wrapProtoMethod(Creep.prototype, methodName, backupName, function (...args) {
-        this.memory.dontPullMe = true;
-        return this[backupName](...args);
+        const result = this[backupName](...args);
+        this.memory.dontPullMe = shouldLockActionPosition(methodName, result);
+        return result;
     });
 }
 
-wrapActionSetDontPullMeTrue('build');
-wrapActionSetDontPullMeTrue('repair');
-wrapActionSetDontPullMeTrue('upgradeController');
-wrapActionSetDontPullMeTrue('dismantle');
-wrapActionSetDontPullMeTrue('harvest');
-wrapActionSetDontPullMeTrue('attack');
+wrapActionSetDontPullMePolicy('build');
+wrapActionSetDontPullMePolicy('repair');
+wrapActionSetDontPullMePolicy('upgradeController');
+wrapActionSetDontPullMePolicy('dismantle');
+wrapActionSetDontPullMePolicy('harvest');
+wrapActionSetDontPullMePolicy('attack');
 
 // wrapActionSetDontPullMeTrue('move');
 // wrapActionSetDontPullMeTrue('withdraw');
