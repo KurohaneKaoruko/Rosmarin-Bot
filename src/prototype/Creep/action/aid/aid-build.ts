@@ -1,5 +1,35 @@
 import { parseShardRoomName } from '@/modules/utils/shardRoom';
 
+type AidBuildSourceCandidate = {
+    id: string;
+    assigned: number;
+    walkable: number;
+    distance: number;
+    current?: boolean;
+};
+
+export function chooseAidBuildSourceId(candidates: AidBuildSourceCandidate[]): string | null {
+    const available = candidates.filter((candidate) => candidate.walkable > 0 && candidate.assigned < candidate.walkable);
+    if (available.length <= 0) return null;
+
+    const current = available.find((candidate) => candidate.current);
+    if (current) {
+        const minAssigned = Math.min(...available.map((candidate) => candidate.assigned));
+        if (current.assigned <= minAssigned + 1) return current.id;
+    }
+
+    available.sort((a, b) => {
+        const aLoad = a.assigned / Math.max(1, a.walkable);
+        const bLoad = b.assigned / Math.max(1, b.walkable);
+        if (aLoad !== bLoad) return aLoad - bLoad;
+        if (a.assigned !== b.assigned) return a.assigned - b.assigned;
+        if (a.walkable !== b.walkable) return b.walkable - a.walkable;
+        return a.distance - b.distance;
+    });
+
+    return available[0]?.id || null;
+}
+
 const aid_build = {
     run: function (creep: Creep) {
         if (!creep.memory.ready) {
@@ -39,6 +69,8 @@ const aid_build = {
 
     harvest: function (creep: Creep) {
         const sourceRoom = creep.memory.sourceRoom || creep.memory.targetRoom;
+        const controller = creep.room.controller;
+        const isJumpMode = !!creep.memory.jumpMode;
         // 兼容仅配置 targetRoom（未配置 sourceRoom）的情况：默认在 targetRoom 获取能量
         if (sourceRoom) {
             const { roomName: localRoom, shard } = parseShardRoomName(sourceRoom);
@@ -86,7 +118,10 @@ const aid_build = {
             creep.memory.action = '';
             return;
         }
-        if (!targetSource) return;
+        if (!targetSource) {
+            if (isJumpMode && !controller?.my) this.yieldJumpQueue(creep);
+            return;
+        }
 
         let result = creep.goHaverst(targetSource);
         if (!result) return;
@@ -271,6 +306,7 @@ const aid_build = {
 
         // stage is a temporary state: re-evaluate each tick to avoid getting stuck.
         const controller = creep.room.controller;
+        const isJumpMode = !!creep.memory.jumpMode;
         const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
         if (creep.store[RESOURCE_ENERGY] > 0) {
             if (!controller?.my && sites.length > 0) {
@@ -341,8 +377,11 @@ const aid_build = {
 
             if (container && !creep.pos.inRangeTo(container, 1)) {
                 // 没有可采目标时，先靠近容器等待机会
-                creep.moveTo(container, { range: 1, maxRooms: 1 });
+                if (isJumpMode && !controller?.my) this.yieldJumpQueue(creep, container.pos);
+                else creep.moveTo(container, { range: 1, maxRooms: 1 });
+                return;
             }
+            if (isJumpMode && !controller?.my) this.yieldJumpQueue(creep);
             return;
         }
 
@@ -367,6 +406,37 @@ const aid_build = {
         creep.drop(RESOURCE_ENERGY);
     },
 
+    yieldJumpQueue: function (creep: Creep, avoidPos?: RoomPosition): boolean {
+        const sameRole = creep.room.find(FIND_MY_CREEPS, {
+            filter: (c) =>
+                c.id !== creep.id &&
+                c.memory.role === creep.memory.role &&
+                c.memory.spawnFlag === creep.memory.spawnFlag
+        });
+        const sources = creep.room.find(FIND_SOURCES);
+        let bestPos: RoomPosition | null = null;
+        let bestScore = -Infinity;
+
+        for (const pos of creep.pos.nearPos(1)) {
+            if (pos.isRoomEdge()) continue;
+            if (!pos.walkable(true)) continue;
+
+            const nearSameRole = sameRole.filter((c) => pos.inRangeTo(c.pos, 1)).length;
+            const nearSources = sources.filter((source) => pos.inRangeTo(source.pos, 1)).length;
+            const distanceFromAvoid = avoidPos ? pos.getRangeTo(avoidPos) : 0;
+            const score = distanceFromAvoid * 8 - nearSameRole * 10 - nearSources * 6 - creep.pos.getRangeTo(pos);
+
+            if (score > bestScore) {
+                bestScore = score;
+                bestPos = pos;
+            }
+        }
+
+        if (!bestPos) return false;
+        creep.moveTo(bestPos, { range: 0, maxRooms: 1, reusePath: 0 });
+        return true;
+    },
+
     getBalancedSource: function (creep: Creep): Source | null {
         const activeSources = [...(creep.room.source || creep.room.find(FIND_SOURCES))]
             .filter((s) => s.energy > 0);
@@ -385,12 +455,47 @@ const aid_build = {
         });
 
         const counts: Record<string, number> = {};
+        const walkableSlots: Record<string, number> = {};
+        const terrain = creep.room.getTerrain();
         for (const s of activeSources) counts[s.id] = 0;
+        for (const source of activeSources) {
+            let walkable = 0;
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue;
+                    const x = source.pos.x + dx;
+                    const y = source.pos.y + dy;
+                    if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                    if (terrain.get(x, y) !== TERRAIN_MASK_WALL) walkable++;
+                }
+            }
+            walkableSlots[source.id] = Math.max(1, walkable);
+        }
         for (const c of sameRole) {
             const sid = c.memory.targetSourceId as Id<Source> | undefined;
             if (!sid || counts[sid] == null) continue;
             counts[sid]++;
         }
+
+        const selectedId = chooseAidBuildSourceId(activeSources.map((source) => ({
+            id: source.id,
+            assigned: counts[source.id] || 0,
+            walkable: walkableSlots[source.id] || 1,
+            distance: creep.pos.getRangeTo(source),
+            current: !!current && current.id === source.id
+        })));
+        if (!selectedId) {
+            delete creep.memory.targetSourceId;
+            return null;
+        }
+
+        const pickedSource = activeSources.find((source) => source.id === selectedId);
+        if (!pickedSource) {
+            delete creep.memory.targetSourceId;
+            return null;
+        }
+        creep.setBoundSourceId(pickedSource.id);
+        return pickedSource;
 
         let minCount = Infinity;
         for (const s of activeSources) {
