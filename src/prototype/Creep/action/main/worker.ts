@@ -340,7 +340,6 @@ const WorkerFunction = {
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
         if(creep.store.getUsedCapacity() === 0) {
-            creep.TakeEnergy();
             return true;
         } else {
             WorkerAction(creep);
@@ -354,7 +353,11 @@ const WorkerFunction = {
             WorkerAction(creep);
             return true;
         } else {
-            creep.TakeEnergy();
+            const fullAfterTake = creep.TakeEnergy();
+            if (fullAfterTake) {
+                WorkerAction(creep);
+                return true;
+            }
             return false;
         }
     }

@@ -42,6 +42,41 @@ const upgrade = function (creep: Creep) {
     }
 }
 
+const moveToEnergyTarget = function (creep: Creep, target: RoomObject) {
+    creep.moveTo(target, {
+        visualizePathStyle: { stroke: '#ffaa00' },
+        range: 1,
+        maxRooms: 1,
+    });
+}
+
+const takeFromTarget = function (
+    creep: Creep,
+    target: StructureLink | StructureContainer,
+    nextTarget?: StructureLink | StructureContainer
+) {
+    if (!target || target.store[RESOURCE_ENERGY] <= 0) return false;
+    if (!creep.pos.isNearTo(target)) {
+        moveToEnergyTarget(creep, target);
+        return false;
+    }
+
+    const freeCapacity = creep.store.getFreeCapacity();
+    const availableEnergy = target.store[RESOURCE_ENERGY];
+    const result = creep.withdraw(target, RESOURCE_ENERGY);
+    if (result === ERR_NOT_IN_RANGE) {
+        moveToEnergyTarget(creep, target);
+        return false;
+    }
+    if (result !== OK) return result === ERR_FULL;
+
+    if (availableEnergy >= freeCapacity) return true;
+    if (nextTarget && nextTarget.id !== target.id && nextTarget.store[RESOURCE_ENERGY] > 0) {
+        moveToEnergyTarget(creep, nextTarget);
+    }
+    return false;
+}
+
 const takeEnergy = function (creep: Creep) {
     const links = creep.room.link.filter(l => l.pos.inRangeTo(creep.room.controller, 2)) || [];
     const link = links.find(l => l.store[RESOURCE_ENERGY] > 0);
@@ -49,14 +84,15 @@ const takeEnergy = function (creep: Creep) {
     const container = containers.find(c => c.store[RESOURCE_ENERGY] > 0);
 
     if (link) {
-        creep.goWithdraw(link, RESOURCE_ENERGY);
+        return takeFromTarget(creep, link, container);
     }
     else if (container) {
-        creep.goWithdraw(container, RESOURCE_ENERGY);
+        return takeFromTarget(creep, container);
     }
     else if (links.length == 0 || creep.room.level < 6) {
-        creep.TakeEnergy()
+        return creep.TakeEnergy();
     }
+    return false;
 }
 
 const Upgrader = {
@@ -70,16 +106,12 @@ const Upgrader = {
         if(!creep.moveHomeRoom()) return;
         if (creep.store.getUsedCapacity() === 0) {
             creep.say('🔄');
-            takeEnergy(creep);
-            if (creep.store.getUsedCapacity() === 0) return true;
-            upgrade(creep);
-            return creep.store.getUsedCapacity() === 0;
+            return true;
         }
         upgrade(creep);
         if (creep.store.getUsedCapacity() === 0) {
             creep.say('🔄');
-            takeEnergy(creep);
-            return creep.store.getUsedCapacity() === 0;
+            return true;
         }
         return false;
     },
@@ -92,8 +124,8 @@ const Upgrader = {
             upgrade(creep);
             return true;
         }
-        takeEnergy(creep);
-        if (creep.store.getFreeCapacity() === 0) {
+        const fullAfterTake = takeEnergy(creep);
+        if (fullAfterTake) {
             creep.say('⚡');
             upgrade(creep);
             return true;

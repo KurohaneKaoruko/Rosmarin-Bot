@@ -15,6 +15,7 @@ const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
 const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
 const WORKER_MIN_SPAWN_ENERGY = BODYPART_COST[WORK] + BODYPART_COST[CARRY] + BODYPART_COST[MOVE] * 2;
 const HARVESTER_MAX_WORK_PER_SOURCE = 8;
+const WORKER_BUILD_REFERENCE_WORK = 3;
 
 const getEnergyState = (room: Room) => {
     return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
@@ -142,6 +143,23 @@ const getWorkPartCount = (body: BodyPartConstant[]) => {
         if (part === WORK) work++;
     }
     return work;
+};
+
+const getGeneratedWorkerWorkPartCount = (room: Room) => {
+    const cached = (room as any)._generatedWorkerWorkPartCount;
+    if (typeof cached === 'number') return cached;
+
+    const workerBodyConfig = room.GetRoleBodys('worker');
+    const workerBody = room.GenerateBodys(workerBodyConfig, 'worker');
+    const workParts = Math.max(1, getWorkPartCount(workerBody));
+    (room as any)._generatedWorkerWorkPartCount = workParts;
+    return workParts;
+};
+
+const scaleWorkerConstructionTarget = (room: Room, baseTarget: number, maxTarget: number) => {
+    const workPerWorker = getGeneratedWorkerWorkPartCount(room);
+    const scaledTarget = Math.ceil(baseTarget * WORKER_BUILD_REFERENCE_WORK / workPerWorker);
+    return Math.max(baseTarget, Math.min(maxTarget, scaledTarget));
 };
 
 const getHarvesterTargetBySource = (room: Room): number => {
@@ -288,9 +306,10 @@ const RoleSpawnCheck = {
         const coreSiteCount = getCoreConstructionSiteCount(room);
         const hasConstruction = siteCount > 0;
         const needBuilder = hasBuildMission || hasConstruction;
+        const minWorkerTarget = scaleWorkerConstructionTarget(room, 1, room.level <= 2 ? 3 : 2);
 
         // 1. 只要有建造需求，就先保证至少 1 个 worker
-        if (needBuilder && current < 1) {
+        if (needBuilder && current < minWorkerTarget) {
             // 条件可以适当放宽：房间当前能量或总能量至少能支撑一个基础体型
             if (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap) {
                 return true;
@@ -303,6 +322,7 @@ const RoleSpawnCheck = {
                 let rushTarget = 5;
                 if (state === 'CRITICAL') rushTarget = 1;
                 if (state === 'LOW') rushTarget = Math.min(rushTarget, room.level <= 2 ? 2 : 3);
+                rushTarget = scaleWorkerConstructionTarget(room, rushTarget, room.level <= 2 ? 6 : 5);
                 if (current < rushTarget &&
                     (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap)) {
                     return true;
@@ -317,19 +337,23 @@ const RoleSpawnCheck = {
                 highTarget = Math.min(highTarget, room.level <= 2 ? 3 : 4);
                 if (state === 'CRITICAL') highTarget = 1;
                 if (state === 'LOW') highTarget = Math.min(highTarget, room.level <= 2 ? 2 : 3);
+                highTarget = scaleWorkerConstructionTarget(room, highTarget, room.level <= 2 ? 5 : 4);
                 if (current < highTarget &&
                     (room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap)) {
                     return true;
                 }
             }
 
-            if ((state === 'SURPLUS' || state === 'NORMAL') && siteCount >= 6 && current < 2) {
+            const normalBuildTarget = scaleWorkerConstructionTarget(room, 2, room.level <= 2 ? 4 : 3);
+            if ((state === 'SURPLUS' || state === 'NORMAL') && siteCount >= 6 && current < normalBuildTarget) {
                 return true;
             }
-            if (state === 'SURPLUS' && siteCount >= 16 && current < 3) {
+            const surplusBuildTarget = scaleWorkerConstructionTarget(room, 3, room.level <= 2 ? 5 : 4);
+            if (state === 'SURPLUS' && siteCount >= 16 && current < surplusBuildTarget) {
                 return true;
             }
-            if (state === 'LOW' && current < 1 && totalEnergy >= Math.max(THRESHOLDS.SPAWN.BODY_REDUCTION_THRESHOLD, cap * 2)) {
+            const lowBuildTarget = Math.min(minWorkerTarget, room.level <= 2 ? 2 : 1);
+            if (state === 'LOW' && current < lowBuildTarget && totalEnergy >= Math.max(THRESHOLDS.SPAWN.BODY_REDUCTION_THRESHOLD, cap * 2)) {
                 return true;
             }
         }

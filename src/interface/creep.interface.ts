@@ -124,8 +124,9 @@ interface Creep {
      * @description 智能获取能量：优先从建筑提取，其次拾取掉落，最后采集source
      * @example creep.TakeEnergy(); // 自动获取能量
      * @example creep.TakeEnergy(false); // 不拾取掉落资源
+     * @returns true 表示本 tick 成功取能后会装满，false 表示仍需继续取能或仅执行了移动
      */
-    TakeEnergy(pickup?: boolean): void;
+    TakeEnergy(pickup?: boolean): boolean;
 
     /** 
      * 根据给定配置boost
