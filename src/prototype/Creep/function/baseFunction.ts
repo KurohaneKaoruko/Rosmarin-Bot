@@ -80,6 +80,9 @@ export default class BaseFunction extends Creep {
      */
     TakeEnergy(pickup: boolean = true) {   // worker、upgrader 的能量获取
         const cache = (this.memory.cache || (this.memory.cache = {} as any)) as any;
+        const clearBoundSource = () => {
+            delete this.memory.targetSourceId;
+        };
 
         const moveToTakeTarget = (target: RoomObject) => {
             this.moveTo(target, {
@@ -128,11 +131,15 @@ export default class BaseFunction extends Creep {
         };
 
         const updateTakeTarget = (excludeId?: Id<any>) => {
-            if (cache.takeTarget && (!excludeId || cache.takeTarget.id !== excludeId)) return true;
+            if (cache.takeTarget && (!excludeId || cache.takeTarget.id !== excludeId)) {
+                clearBoundSource();
+                return true;
+            }
 
             const target = selectTakeTarget(excludeId);
 
             if (target) {
+                clearBoundSource();
                 cache.takeTarget = target;
                 return true;
             }
@@ -141,16 +148,16 @@ export default class BaseFunction extends Creep {
         };
 
         const getHarvestSource = () => {
-            if (!cache.targetSourceId) {
+            if (!this.memory.targetSourceId) {
                 let targetSource = this.room.closestSource(this);
                 if (targetSource) {
-                    cache.targetSourceId = targetSource.id;
+                    this.memory.targetSourceId = targetSource.id;
                 }
             }
 
-            const targetSource = Game.getObjectById(cache.targetSourceId) as Source;
+            const targetSource = Game.getObjectById(this.memory.targetSourceId as Id<Source>) as Source;
             if (!targetSource || targetSource.energy <= 0) {
-                cache.targetSourceId = null;
+                clearBoundSource();
                 return null;
             }
             return targetSource;
@@ -168,6 +175,7 @@ export default class BaseFunction extends Creep {
             if (!cache.takeTarget) return null;
 
             const takeTarget = cache.takeTarget as TakeTarget;
+            clearBoundSource();
             const target = Game.getObjectById(takeTarget.id) as any;
             if (!target) {
                 cache.takeTarget = null;

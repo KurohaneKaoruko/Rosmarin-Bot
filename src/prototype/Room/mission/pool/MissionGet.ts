@@ -4,6 +4,8 @@ import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
 
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
+
 /**
  * 任务获取模块
  */
@@ -231,7 +233,9 @@ export default class MissionGet extends Room {
             // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
             if (!hasFixedBody) {
                 const state = this.memory.energyState || this.updateEnergyState?.(false);
-                const allowBudgetSpawn = state === 'LOW' || state === 'CRITICAL';
+                const allowBudgetSpawn =
+                    (state === 'LOW' || state === 'CRITICAL') &&
+                    EMERGENCY_DOWNSIZE_ROLES.has(role);
                 const budget = allowBudgetSpawn ? energyAvailable : undefined;
                 body = this.GetRoleBodys(role, data.upbody, budget);
                 const bodypart = this.GenerateBodys(body as any[], role);

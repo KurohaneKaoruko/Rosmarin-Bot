@@ -16,6 +16,7 @@ type SourceBoundStats = {
 };
 
 const DEDICATED_SOURCE_ROLES = new Set(['harvester', 'out-harvest']);
+const FLEXIBLE_SOURCE_ROLES = new Set(['universal', 'worker', 'upgrader', 'aid-upgrade']);
 const DEDICATED_SOURCE_WEIGHT = 2;
 
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
@@ -39,14 +40,15 @@ const getSourceBoundStats = (room: Room) => {
         }
 
         const myCreeps = room.find(FIND_MY_CREEPS, {
-            filter: c => !!c.memory.targetSourceId
+            filter: c => !!(c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId)
         }) as Creep[];
 
         for (const c of myCreeps) {
-            const sid = c.memory.targetSourceId as string;
+            const sid = (c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId) as string;
             if (!universal.has(sid)) continue;
 
-            if (c.memory.role === 'universal') {
+            if (FLEXIBLE_SOURCE_ROLES.has(c.memory.role || '')) {
+                if (c.memory.role !== 'universal' && c.memory.working) continue;
                 universal.set(sid, (universal.get(sid) || 0) + 1);
             } else if (DEDICATED_SOURCE_ROLES.has(c.memory.role || '')) {
                 dedicated.set(sid, (dedicated.get(sid) || 0) + 1);

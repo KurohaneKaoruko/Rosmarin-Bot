@@ -100,6 +100,49 @@ const getStorageDrivenUpgraderTarget = (room: Room, baseNum: number) => {
     return Math.max(baseNum, Math.min(baseNum + 2, linearNeed));
 }
 
+const countMyConstructionSitesByType = (room: Room, structureType: StructureConstant) => {
+    let count = 0;
+    for (const site of getMyConstructionSites(room)) {
+        if (site.structureType === structureType) count++;
+    }
+    return count;
+}
+
+const hasIncompletePrimaryStructures = (room: Room) => {
+    const level = room.level;
+    const spawnCount = (room.spawn?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_SPAWN);
+    const extensionCount = (room.extension?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_EXTENSION);
+    if (spawnCount < (CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][level] || 0)) return true;
+    if (extensionCount < (CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][level] || 0)) return true;
+    if (level >= 4) {
+        const storageCount = (room.storage ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_STORAGE);
+        if (storageCount < 1) return true;
+    }
+    if (level >= 6) {
+        const terminalCount = (room.terminal ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_TERMINAL);
+        if (terminalCount < 1) return true;
+    }
+    return false;
+}
+
+const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
+    const state = getEnergyState(room);
+    const lowPhase = room.level <= 6 || state === 'LOW' || state === 'CRITICAL';
+    if (!lowPhase) return false;
+    return hasIncompletePrimaryStructures(room);
+}
+
+const getDowngradeUniversalTarget = (room: Room) => {
+    const controller = room.controller;
+    if (!controller?.my) return 0;
+    const ttd = controller.ticksToDowngrade || 0;
+    const slotCap = Math.max(1, getControllerUpgradeSlots(room));
+    const urgentThreshold = room.level <= 3 ? 5000 : 3000;
+    if (ttd < 1500) return Math.min(2, slotCap);
+    if (ttd < urgentThreshold) return 1;
+    return 0;
+}
+
 const getCoreConstructionSiteCount = (room: Room) => {
     let count = 0;
     for (const site of getMyConstructionSites(room)) {
@@ -202,13 +245,13 @@ const RoleSpawnCheck = {
         const rushBaseTarget = Math.min(baseNum * 3, 12);
         let num = highMode ? (mode === 'rush' ? rushBaseTarget : highBaseTarget) : baseNum;
         if (room.memory.defend) return false;
+        if (getDowngradeUniversalTarget(room) > 0) return false;
+        if (shouldDelayUpgraderForPrimaryBuild(room)) return false;
         const state = getEnergyState(room);
         const ttd = room.controller?.ticksToDowngrade || 0;
         const slotCap = Math.max(1, getControllerUpgradeSlots(room));
 
         num = Math.max(num, getStorageDrivenUpgraderTarget(room, baseNum));
-        if (ttd < 5000) num = Math.max(num, 1);
-        if (ttd < 1500) num = Math.max(num, Math.min(2, slotCap));
         num = Math.min(num, slotCap);
 
         if (earlyRush) {
@@ -402,11 +445,12 @@ const RoleSpawnCheck = {
     },
     'universal': (room: Room, current: number) => {
         const lv = room.level;
-        if (lv >= 3) return false;
-        if (room.container && room.container.length > 0) return false;
+        let target = getDowngradeUniversalTarget(room);
+        if (lv >= 3) return current < target;
+        if (room.container && room.container.length > 0) return current < target;
 
         const mode = getRoomMode(room);
-        let target = 2;
+        target = Math.max(target, 2);
         if (isHighLikeMode(mode)) target = 3;
         if (mode === 'rush') target = 5;
         return current < target;

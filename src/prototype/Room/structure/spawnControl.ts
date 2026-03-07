@@ -10,9 +10,71 @@ const getRoomMode = (room: Room) => {
 
 // 仅这些角色允许在低能量时按当前可用能量降级体型，避免 upgrader/worker 等被误降级。
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
+const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
 
 
 export default class SpawnControl extends Room {
+    private getEmergencyUniversalCap() {
+        const mode = getRoomMode(this);
+        const highMode = mode === 'high' || mode === 'rush';
+        return this.level <= 2
+            ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2)
+            : this.level === 3
+                ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3)
+                : (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P);
+    }
+
+    private getEmergencyRecoveryUniversalBody() {
+        const normalBody = this.GenerateBodys(this.GetRoleBodys('universal'), 'universal');
+        if (normalBody && normalBody.length > 0) {
+            const normalCost = this.CalculateEnergy(normalBody);
+            if (normalCost <= this.energyAvailable) return normalBody;
+        }
+        if (this.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY) {
+            return [...EMERGENCY_RECOVERY_UNIVERSAL_BODY];
+        }
+        return null;
+    }
+
+    private trySpawnEmergencyUniversal(spawn: StructureSpawn, blockedRole = 'recovery', referenceCost = 300) {
+        const universalBody = this.getEmergencyRecoveryUniversalBody();
+        if (!universalBody || universalBody.length <= 0) return false;
+
+        const bodyCost = this.CalculateEnergy(universalBody);
+        if (bodyCost <= 0 || bodyCost > this.energyAvailable) return false;
+
+        const creepNum = this.getCreepNum();
+        const spawnMissionNum = this.getSpawnMissionNum() || {};
+        const transportNum = (creepNum['transport'] || 0) + (spawnMissionNum['transport'] || 0);
+        const carrierNum = (creepNum['carrier'] || 0) + (spawnMissionNum['carrier'] || 0);
+        const harvesterNum = (creepNum['harvester'] || 0) + (spawnMissionNum['harvester'] || 0);
+        const universalNum = creepNum['universal'] || 0;
+        if (universalNum >= this.getEmergencyUniversalCap()) return false;
+
+        const compareCost = Math.max(referenceCost, bodyCost);
+        const storedEnergy =
+            (this.storage?.store[RESOURCE_ENERGY] || 0) +
+            (this.terminal?.store[RESOURCE_ENERGY] || 0);
+        if (storedEnergy > compareCost * 10) {
+            if (transportNum !== 0) return false;
+        } else if ((this[RESOURCE_ENERGY] || 0) + this.energyAvailable > compareCost) {
+            if (carrierNum !== 0) return false;
+        } else {
+            if (harvesterNum !== 0 && carrierNum !== 0) return false;
+        }
+
+        const result = spawn.spawnCreep(
+            universalBody,
+            GenCreepName(RoleData['universal'].code),
+            { memory: { role: 'universal', home: this.name, cache: {} } as CreepMemory }
+        );
+        if (result !== OK) return false;
+
+        creepNum['universal'] = (creepNum['universal'] || 0) + 1;
+        global.log(`房间 ${this.name} 因 ${blockedRole} 卡住或断档，已紧急孵化 universal 进行恢复。`);
+        return true;
+    }
+
     SpawnWork() {
         // 没有spawn时不处理
         if (!this.spawn) return;
@@ -126,7 +188,15 @@ export default class SpawnControl extends Room {
         if (!spawn) return;
 
         const data = this.GetSpawnTaskData();
-        if (!data) return;
+        if (!data) {
+            const controllerDowngradeUrgent =
+                !!this.controller?.my &&
+                (this.controller.ticksToDowngrade || 0) < (this.level <= 3 ? 5000 : 3000);
+            if (this.CheckSpawnAndTower() || controllerDowngradeUrgent) {
+                this.trySpawnEmergencyUniversal(spawn);
+            }
+            return;
+        }
 
         const result = spawn.spawnCreep(data.bodypart, data.name, {memory: data.memory})
         let role = data.memory.role;
@@ -142,7 +212,10 @@ export default class SpawnControl extends Room {
         // 处理停摆
         if (data.cost > this.energyAvailable) {
             const allowEmergencyDownsize = EMERGENCY_DOWNSIZE_ROLES.has(role);
-            if (!allowEmergencyDownsize) return;
+            if (!allowEmergencyDownsize) {
+                this.trySpawnEmergencyUniversal(spawn, role, data.cost);
+                return;
+            }
 
             const state = this.memory.energyState || this.updateEnergyState?.(false);
             if (state === 'LOW' || state === 'CRITICAL') {
@@ -163,47 +236,7 @@ export default class SpawnControl extends Room {
                     }
                 }
             }
-            
-            const creepNum = this.getCreepNum();
-            const T_num = creepNum['transport'] || 0;
-            const C_num = creepNum['carrier'] || 0;
-            const H_num = creepNum['harvester'] || 0;
-            let univ_num = creepNum['universal'] || 0;
-            const spawnMissionNum = this.getSpawnMissionNum() || {};
-
-            if ((this.storage && this.storage.store[RESOURCE_ENERGY] > data.cost * 10) ||
-                (this.terminal && this.terminal.store[RESOURCE_ENERGY] > data.cost * 10)) {
-                if (T_num !== 0) return;
-            } else if (this[RESOURCE_ENERGY] + this.energyAvailable > data.cost) {
-                if (C_num !== 0) return;
-            } else {
-                if (H_num !== 0 && C_num !== 0) return;
-            }
-            
-            univ_num += spawnMissionNum['universal'] || 0;
-            const mode = getRoomMode(this);
-            const highMode = mode === 'high' || mode === 'rush';
-            const emergencyUnivCap = this.level <= 2
-                ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2)
-                : this.level === 3
-                    ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3)
-                    : (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P);
-            const criticalPending =
-                (spawnMissionNum['harvester'] || 0) +
-                (spawnMissionNum['transport'] || 0) +
-                (spawnMissionNum['carrier'] || 0);
-            if (criticalPending > 0 && univ_num > 0) return;
-            if (univ_num >= emergencyUnivCap) return;
-
-            const universalBody = this.GenerateBodys(this.GetRoleBodys('universal'), 'universal');
-            if (!universalBody || universalBody.length <= 0) return;
-            spawn.spawnCreep(
-                universalBody,
-                GenCreepName(RoleData['universal'].code),
-                { memory: { role: 'universal', home: this.name, cache: {} } as CreepMemory }
-            );
-            global.log(`房间 ${this.name} 没有且不足以孵化 ${role}，已紧急孵化 universal。`);
-            
+            this.trySpawnEmergencyUniversal(spawn, role, data.cost);
         }
     }
 }
