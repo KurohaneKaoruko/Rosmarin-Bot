@@ -8,6 +8,21 @@ type AidBuildSourceCandidate = {
     current?: boolean;
 };
 
+type AidBuildOccupantLike = {
+    memory?: {
+        targetSourceId?: Id<Source>;
+        spawnFlag?: string;
+        action?: string;
+    };
+    store?: StoreDefinition;
+};
+
+const AID_BUILD_WAITABLE_STRUCTURES = new Set<StructureConstant>([
+    'road',
+    'container',
+    'rampart',
+]);
+
 export function chooseAidBuildSourceId(candidates: AidBuildSourceCandidate[]): string | null {
     const available = candidates.filter((candidate) => candidate.walkable > 0 && candidate.assigned < candidate.walkable);
     if (available.length <= 0) return null;
@@ -29,6 +44,136 @@ export function chooseAidBuildSourceId(candidates: AidBuildSourceCandidate[]): s
 
     return available[0]?.id || null;
 }
+
+export function shouldReserveAidBuildSource(occupant: AidBuildOccupantLike, focusFlag?: string): boolean {
+    const memory = occupant?.memory;
+    if (!memory?.targetSourceId) return false;
+    if (focusFlag && memory.spawnFlag !== focusFlag) return false;
+
+    const action = memory.action;
+    if (action === 'harvest') return true;
+    if (action !== 'stage') return false;
+
+    const freeCapacity = occupant.store?.getFreeCapacity?.() ?? 0;
+    const usedCapacity = occupant.store?.getUsedCapacity?.() ?? 0;
+    return freeCapacity > 0 || usedCapacity === 0;
+}
+
+export function getAidBuildWaitSlotIndex(waiterNames: string[], creepName: string, slotCount: number): number {
+    if (slotCount <= 0) return -1;
+    const ordered = [...new Set([...waiterNames, creepName])].sort();
+    const index = ordered.indexOf(creepName);
+    return (index >= 0 ? index : 0) % slotCount;
+}
+
+const releaseAidBuildSource = (creep: Creep) => {
+    if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+};
+
+const getAidBuildPosKey = (pos: RoomPosition) => `${pos.x}/${pos.y}/${pos.roomName}`;
+
+const parseAidBuildPosKey = (key?: string): RoomPosition | null => {
+    if (!key) return null;
+    const [xRaw, yRaw, roomName] = key.split('/');
+    const x = Number(xRaw);
+    const y = Number(yRaw);
+    if (!Number.isInteger(x) || !Number.isInteger(y) || !roomName) return null;
+    return new RoomPosition(x, y, roomName);
+};
+
+const isBlockingAidBuildWaitPos = (pos: RoomPosition): boolean => {
+    const structures = pos.lookFor(LOOK_STRUCTURES);
+    if (structures.some((s) => !AID_BUILD_WAITABLE_STRUCTURES.has(s.structureType))) return true;
+
+    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+    if (sites.some((s) => !AID_BUILD_WAITABLE_STRUCTURES.has(s.structureType))) return true;
+
+    return false;
+};
+
+const getAidBuildSpreadCandidates = (
+    room: Room,
+    anchorPos: RoomPosition,
+    ranges: number[],
+    avoidPos?: RoomPosition
+): RoomPosition[] => {
+    const terrain = room.getTerrain();
+    const positions: RoomPosition[] = [];
+
+    for (const range of ranges) {
+        for (let dx = -range; dx <= range; dx++) {
+            for (let dy = -range; dy <= range; dy++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== range) continue;
+                const x = anchorPos.x + dx;
+                const y = anchorPos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                if (avoidPos && avoidPos.roomName === room.name && avoidPos.x === x && avoidPos.y === y) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+                const pos = new RoomPosition(x, y, room.name);
+                if (isBlockingAidBuildWaitPos(pos)) continue;
+                positions.push(pos);
+            }
+        }
+    }
+
+    return positions;
+};
+
+const getAidBuildAssignedTargetPos = (
+    creep: Creep,
+    anchorPos: RoomPosition,
+    ranges: number[],
+    avoidPos?: RoomPosition
+): RoomPosition | null => {
+    const candidates = getAidBuildSpreadCandidates(creep.room, anchorPos, ranges, avoidPos);
+    if (candidates.length <= 0) return null;
+
+    const queueMembers = creep.room.find(FIND_MY_CREEPS, {
+        filter: (c) =>
+            c.memory.role === creep.memory.role &&
+            c.memory.jumpMode === creep.memory.jumpMode &&
+            c.memory.targetRoom === creep.memory.targetRoom &&
+            c.memory.spawnFlag === creep.memory.spawnFlag
+    });
+    const slotIndex = getAidBuildWaitSlotIndex(queueMembers.map((c) => c.name), creep.name, candidates.length);
+
+    for (let offset = 0; offset < candidates.length; offset++) {
+        const candidate = candidates[(slotIndex + offset) % candidates.length];
+        const creeps = candidate.lookFor(LOOK_CREEPS);
+        const powerCreeps = candidate.lookFor(LOOK_POWER_CREEPS);
+        const blockedByOther = creeps.some((c) => c.id !== creep.id) || powerCreeps.length > 0;
+        if (!blockedByOther || creep.pos.isEqualTo(candidate)) return candidate;
+    }
+
+    return candidates[slotIndex] || null;
+};
+
+const getAidBuildWaitTargetPos = (
+    creep: Creep,
+    anchorPos: RoomPosition,
+    preferTight: boolean,
+    avoidPos?: RoomPosition
+) => {
+    return getAidBuildAssignedTargetPos(creep, anchorPos, preferTight ? [1, 2] : [2, 1], avoidPos);
+};
+
+const getAidBuildUpgradeTargetPos = (creep: Creep, controller: StructureController) => {
+    return getAidBuildAssignedTargetPos(creep, controller.pos, [3, 2, 1]);
+};
+
+const getStableAidBuildUpgradeTargetPos = (creep: Creep, controller: StructureController): RoomPosition | null => {
+    const cached = parseAidBuildPosKey((creep.memory.cache as any)?.upgradePos);
+    if (
+        cached &&
+        cached.roomName === creep.room.name &&
+        cached.inRangeTo(controller, 3) &&
+        !isBlockingAidBuildWaitPos(cached)
+    ) {
+        return cached;
+    }
+    return getAidBuildUpgradeTargetPos(creep, controller);
+};
 
 const aid_build = {
     run: function (creep: Creep) {
@@ -82,6 +227,7 @@ const aid_build = {
         }
 
         if (creep.store.getFreeCapacity() === 0) {
+            releaseAidBuildSource(creep);
             creep.memory.action = '';
             return;
         }
@@ -100,6 +246,7 @@ const aid_build = {
             // 检查是否收集完成
             const freeCapacity = creep.store.getFreeCapacity();
             if (freeCapacity === 0) {
+                releaseAidBuildSource(creep);
                 creep.memory.action = '';
             }
             return;
@@ -115,6 +262,7 @@ const aid_build = {
 
         const targetSource = this.getBalancedSource(creep);
         if (!targetSource && creep.store[RESOURCE_ENERGY] > 0) {
+            releaseAidBuildSource(creep);
             creep.memory.action = '';
             return;
         }
@@ -133,10 +281,12 @@ const aid_build = {
             else energy += 2 * (BOOSTS.work[part.boost]['harvest'] || 1);
         }
         if (creep.store.getFreeCapacity() > energy) return;
+        releaseAidBuildSource(creep);
         creep.memory.action = '';
     },
 
     build: function (creep: Creep) {
+        releaseAidBuildSource(creep);
         const controller = creep.room.controller;
         const isJumpMode = !!creep.memory.jumpMode;
         const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
@@ -215,6 +365,7 @@ const aid_build = {
     },
 
     repair: function (creep: Creep) {
+        releaseAidBuildSource(creep);
         const controller = creep.room.controller;
         if (!controller?.my) {
             creep.memory.action = 'stage';
@@ -268,6 +419,7 @@ const aid_build = {
     },
 
     upgrade: function (creep: Creep) {
+        releaseAidBuildSource(creep);
         if (creep.store[RESOURCE_ENERGY] === 0) {
             creep.memory.action = '';
             return;
@@ -280,9 +432,23 @@ const aid_build = {
         }
 
         if (controller.level < 8) {
-            if (creep.upgradeController(controller) == ERR_NOT_IN_RANGE) {
-                creep.moveTo(controller, { maxRooms: 1 });
+            if (!creep.memory.cache) creep.memory.cache = {};
+
+            if (creep.pos.inRangeTo(controller, 3)) {
+                (creep.memory.cache as any).upgradePos = getAidBuildPosKey(creep.pos);
+                creep.upgradeController(controller);
+                return;
             }
+
+            const upgradePos = getStableAidBuildUpgradeTargetPos(creep, controller);
+            if (upgradePos) {
+                (creep.memory.cache as any).upgradePos = getAidBuildPosKey(upgradePos);
+                creep.moveTo(upgradePos, { range: 0, maxRooms: 1, reusePath: 0 });
+                return;
+            }
+
+            delete (creep.memory.cache as any).upgradePos;
+            creep.moveTo(controller, { maxRooms: 1, range: 3 });
             return;
         }
     },
@@ -408,8 +574,10 @@ const aid_build = {
 
     yieldJumpQueue: function (creep: Creep, avoidPos?: RoomPosition): boolean {
         let anchorPos: RoomPosition | null = null;
+        let preferTight = false;
         if (avoidPos && avoidPos.roomName === creep.room.name && !avoidPos.isRoomEdge()) {
             anchorPos = avoidPos;
+            preferTight = true;
         } else {
             const spawnFlagName = creep.memory.spawnFlag;
             const spawnFlag = spawnFlagName ? Game.flags[spawnFlagName] : null;
@@ -420,6 +588,14 @@ const aid_build = {
             } else {
                 anchorPos = new RoomPosition(25, 25, creep.room.name);
             }
+        }
+
+        const queuePos = getAidBuildWaitTargetPos(creep, anchorPos, preferTight, avoidPos);
+        if (queuePos) {
+            if (!creep.pos.isEqualTo(queuePos)) {
+                creep.moveTo(queuePos, { range: 0, maxRooms: 1, reusePath: 0 });
+            }
+            return true;
         }
 
         creep.moveTo(anchorPos, { range: 2, maxRooms: 1, reusePath: 0 });
@@ -461,6 +637,7 @@ const aid_build = {
             walkableSlots[source.id] = Math.max(1, walkable);
         }
         for (const c of sameRole) {
+            if (!shouldReserveAidBuildSource(c as AidBuildOccupantLike, focusFlag)) continue;
             const sid = c.memory.targetSourceId as Id<Source> | undefined;
             if (!sid || counts[sid] == null) continue;
             counts[sid]++;
@@ -539,6 +716,7 @@ const aid_build = {
         }
 
         if (!canUpgrade) {
+            releaseAidBuildSource(creep);
             creep.memory.action = 'build';
             return;
         }
@@ -552,12 +730,14 @@ const aid_build = {
         const shouldForceSpawnFirst = isJumpMode && !hasSpawn && hasSpawnSite;
         if (controller.level < 2) {
             if (!shouldForceSpawnFirst) {
+                releaseAidBuildSource(creep);
                 creep.memory.action = 'upgrade';
                 return;
             }
         }
 
         if (site.length > 0) {
+            releaseAidBuildSource(creep);
             creep.memory.action = 'build';
             return;
         }
@@ -568,12 +748,14 @@ const aid_build = {
                 s.structureType != STRUCTURE_CONTAINER
         })
         if (repair.length > 0) {
+            releaseAidBuildSource(creep);
             creep.memory.action = 'repair';
             const repairTarget = repair.reduce((a, b) => a.hits < b.hits ? a : b);
             creep.memory.cache.repairTarget = repairTarget.id;
             return;
         }
 
+        releaseAidBuildSource(creep);
         creep.memory.action = 'upgrade';
     }
 }

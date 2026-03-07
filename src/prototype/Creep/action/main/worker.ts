@@ -322,14 +322,8 @@ const WorkerAction = function (creep: Creep) {
     if (RepairWallWork(creep)) return;
     
     // 如果没有任务，则升级控制器
-    const controller = creep.room.controller;
-    if (!controller || !controller.my) return;
-    
-    if (creep.pos.inRangeTo(controller, 3)) {
-        creep.upgradeController(controller);
-    } else {
-        creep.moveTo(controller, { maxRooms: 1, range: 3 });
-    }
+    if (!creep.room.controller?.my) return;
+    creep.runControllerUpgrade({ sign: false, pickupDropped: false });
 }
 
 const WorkerFunction = {

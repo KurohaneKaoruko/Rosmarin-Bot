@@ -740,6 +740,21 @@ interface RoomMemory {
      */
     index: number;
 
+    /**
+     * 外矿道路压缩坐标缓存
+     * @description
+     * 记录本房间已经规划/探明的外矿道路位置，元素为 `compress(x, y)` 压缩后的 number。
+     * 该字段主要被外矿 `out-harvest` / `out-carry` 用来：
+     * - 识别哪些格子属于既有外矿道路
+     * - 生成接力排队位置
+     * - 避免采集、搬运 creep 抢占矿点与道路关键格
+     * @example
+     * ```typescript
+     * room.memory.road = [2525, 2526, 2527]
+     * ```
+     */
+    road?: number[];
+
     // ==================== 外矿采集任务 ====================
     
     /**

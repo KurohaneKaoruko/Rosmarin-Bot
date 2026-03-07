@@ -180,6 +180,58 @@ interface Creep {
     switchTaskState(resourceType?: ResourceConstant): 'source' | 'target' | null;
 
 
+    // ==================== 控制器功能 (ControllerFunction) ====================
+    /**
+     * 获取控制器旁的 Link
+     * @param range 搜索范围，默认 2
+     */
+    getControllerLink(range?: number): StructureLink | null;
+
+    /**
+     * 获取控制器旁的 Container
+     * @param range 搜索范围，默认 3
+     */
+    getControllerContainer(range?: number): StructureContainer | null;
+
+    /**
+     * 按需签署控制器
+     * @param text 目标签名文本
+     * @param options.overwrite 是否允许覆盖已有签名
+     */
+    signControllerIfNeeded(text?: string, options?: {
+        overwrite?: boolean;
+        moveOptions?: MoveToOpts;
+    }): boolean;
+
+    /**
+     * 维护房间默认控制器签名
+     */
+    maintainRoomSign(): boolean;
+
+    /**
+     * 从控制器周边缓冲建筑取能
+     * @returns true 表示本 tick 取能后将装满，false 表示仍需继续或仅执行了移动
+     */
+    withdrawControllerEnergy(options?: {
+        linkRange?: number;
+        containerRange?: number;
+        storageRange?: number;
+        terminalRange?: number;
+        minEnergy?: number;
+        fallbackToTakeEnergy?: boolean;
+    }): boolean;
+
+    /**
+     * 执行控制器工作位移动、升级与签名维护
+     */
+    runControllerUpgrade(options?: {
+        linkRange?: number;
+        sign?: boolean;
+        pickupDropped?: boolean;
+        advanceFront?: boolean;
+    }): boolean;
+
+
     // ==================== 工作功能 (WorkFunction) ====================
     /** 
      * 采集资源
