@@ -22,9 +22,32 @@ const getMyCreepsByRoleByRoom = (() => {
     };
 })();
 
-const SHARED_SOURCE_ROLE_SET = new Set(['worker', 'upgrader', 'universal', 'aid-upgrade']);
+const LEGACY_SHARED_SOURCE_ROLE_SET = new Set(['worker', 'upgrader', 'universal', 'aid-upgrade']);
+const SOURCE_PRIORITY_MAP = {
+    harvester: 0,
+    universal: 1,
+    worker: 2,
+    upgrader: 3,
+} as const;
 
-const getMySourceBoundCreepsByRoom = (() => {
+type SourcePriorityRole = keyof typeof SOURCE_PRIORITY_MAP;
+type SourceCompetitor = {
+    creep: Creep;
+    priority: number;
+    isAdjacent: boolean;
+    isBound: boolean;
+    distance: number;
+};
+
+const getSourcePriority = (role?: string): number | null => {
+    if (!role) return null;
+    const priority = SOURCE_PRIORITY_MAP[role as SourcePriorityRole];
+    return priority == null ? null : priority;
+};
+
+const isPrioritySourceRole = (role?: string): role is SourcePriorityRole => getSourcePriority(role) != null;
+
+const getPrioritySourceCreepsByRoom = (() => {
     let cachedTick = -1;
     let cached: Record<string, Creep[]> = {};
     return (room: Room) => {
@@ -35,12 +58,113 @@ const getMySourceBoundCreepsByRoom = (() => {
         const hit = cached[room.name];
         if (hit) return hit;
         const creeps = room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => c && c.ticksToLive > 100 && !!((c.memory as any).targetSourceId || (c.memory as any).cache?.targetSourceId)
+            filter: (c: Creep) =>
+                c &&
+                (c.ticksToLive || 0) > 1 &&
+                isPrioritySourceRole(c.memory.role)
         }) as Creep[];
         cached[room.name] = creeps;
         return creeps;
     };
 })();
+
+const getMyLegacySourceBoundCreepsByRoom = (() => {
+    let cachedTick = -1;
+    let cached: Record<string, Creep[]> = {};
+    return (room: Room) => {
+        if (cachedTick !== Game.time) {
+            cachedTick = Game.time;
+            cached = {};
+        }
+        const hit = cached[room.name];
+        if (hit) return hit;
+        const creeps = room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => c && c.ticksToLive > 100 && !!(c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId)
+        }) as Creep[];
+        cached[room.name] = creeps;
+        return creeps;
+    };
+})();
+
+const getSourceWalkableCount = (room: Room, source: Source) => {
+    if (!room.memory.sourcePosCount) room.memory.sourcePosCount = {};
+    const cached = room.memory.sourcePosCount[source.id];
+    if (cached) return cached;
+
+    const terrain = room.getTerrain();
+    const pos = source.pos;
+    const walkable = [
+        [pos.x - 1, pos.y],
+        [pos.x + 1, pos.y],
+        [pos.x, pos.y - 1],
+        [pos.x, pos.y + 1],
+        [pos.x - 1, pos.y - 1],
+        [pos.x + 1, pos.y + 1],
+        [pos.x - 1, pos.y + 1],
+        [pos.x + 1, pos.y - 1]
+    ].filter((p) =>
+        p[0] > 0 &&
+        p[0] < 49 &&
+        p[1] > 0 &&
+        p[1] < 49 &&
+        terrain.get(p[0], p[1]) !== TERRAIN_MASK_WALL
+    ).length;
+
+    room.memory.sourcePosCount[source.id] = walkable;
+    return walkable;
+};
+
+const sortSourceCompetitors = (a: SourceCompetitor, b: SourceCompetitor) =>
+    a.priority - b.priority ||
+    Number(b.isAdjacent) - Number(a.isAdjacent) ||
+    Number(b.isBound) - Number(a.isBound) ||
+    a.distance - b.distance ||
+    a.creep.name.localeCompare(b.creep.name);
+
+const getSourceCompetitors = (room: Room, source: Source, candidate?: Creep) => {
+    const competitors: SourceCompetitor[] = [];
+    let hasCandidate = false;
+
+    for (const creep of getPrioritySourceCreepsByRoom(room)) {
+        const priority = getSourcePriority(creep.memory.role);
+        if (priority == null) continue;
+
+        const isBound = creep.memory.targetSourceId === source.id;
+        const isAdjacent = creep.pos.inRangeTo(source.pos, 1);
+        if (!isBound && !isAdjacent && (!candidate || creep.id !== candidate.id)) continue;
+
+        if (candidate && creep.id === candidate.id) hasCandidate = true;
+        competitors.push({
+            creep,
+            priority,
+            isAdjacent,
+            isBound,
+            distance: creep.pos.getRangeTo(source.pos),
+        });
+    }
+
+    if (candidate && isPrioritySourceRole(candidate.memory.role) && !hasCandidate) {
+        competitors.push({
+            creep: candidate,
+            priority: getSourcePriority(candidate.memory.role)!,
+            isAdjacent: candidate.pos.inRangeTo(source.pos, 1),
+            isBound: candidate.memory.targetSourceId === source.id,
+            distance: candidate.pos.getRangeTo(source.pos),
+        });
+    }
+
+    competitors.sort(sortSourceCompetitors);
+    return competitors;
+};
+
+const getAllowedSourceCandidate = (room: Room, creep: Creep, source: Source) => {
+    const slots = Math.max(1, getSourceWalkableCount(room, source));
+    const competitors = getSourceCompetitors(room, source, creep);
+    return {
+        competitors,
+        allowed: competitors.slice(0, slots).some(item => item.creep.id === creep.id)
+    };
+};
 
 /**
  * 一些基础的功能
@@ -171,21 +295,46 @@ export default class BaseFunction extends Room {
 
     // 获取绑定最少的能量源
     closestSource(creep: Creep) {
+        const role = creep.memory.role;
+        const availableSources = (this.source || []).filter(source => source && source.energy > 0);
+        if (availableSources.length <= 0) return null;
+
+        if (isPrioritySourceRole(role)) {
+            const currentSource = creep.getBoundSource?.() || null;
+            if (currentSource && currentSource.energy > 0 && getAllowedSourceCandidate(this, creep, currentSource).allowed) {
+                return currentSource;
+            }
+
+            let best: Source | null = null;
+            let bestCrowd = Infinity;
+            let bestDistance = Infinity;
+            for (const source of availableSources) {
+                const { competitors, allowed } = getAllowedSourceCandidate(this, creep, source);
+                if (!allowed) continue;
+                const crowd = competitors.length;
+                const distance = creep.pos.getRangeTo(source.pos);
+                if (crowd < bestCrowd || (crowd === bestCrowd && distance < bestDistance)) {
+                    best = source;
+                    bestCrowd = crowd;
+                    bestDistance = distance;
+                }
+            }
+            return best;
+        }
         // 初始化最少Creep绑定计数
         let minCreepCount = Infinity;
         let leastCrowdedSources = [];
 
         if(!this.memory.sourcePosCount) this.memory.sourcePosCount = {}
         let terrain = null;
-        const role = creep.memory.role;
-        const useSharedCrowd = !!role && SHARED_SOURCE_ROLE_SET.has(role);
+        const useSharedCrowd = !!role && LEGACY_SHARED_SOURCE_ROLE_SET.has(role);
         const creeps = role
-            ? (useSharedCrowd ? getMySourceBoundCreepsByRoom(this) : getMyCreepsByRoleByRoom(this, role)).filter(c => {
+            ? (useSharedCrowd ? getMyLegacySourceBoundCreepsByRoom(this) : getMyCreepsByRoleByRoom(this, role)).filter(c => {
                 if (c.id === creep.id) return false;
                 const otherRole = c.memory.role;
                 if (!otherRole) return false;
                 if (!useSharedCrowd) return otherRole === role;
-                if (!SHARED_SOURCE_ROLE_SET.has(otherRole)) return false;
+                if (!LEGACY_SHARED_SOURCE_ROLE_SET.has(otherRole)) return false;
                 if (otherRole !== 'universal' && c.memory.working) return false;
                 return true;
             })
@@ -200,7 +349,7 @@ export default class BaseFunction extends Room {
             minTtlBySource[sid] = minTtlBySource[sid] == null ? ttl : Math.min(minTtlBySource[sid], ttl);
         }
         // 找到绑定最少的，有位置的采集点
-        this.source.forEach((source: Source) => {
+        availableSources.forEach((source: Source) => {
             let creepCount = boundCounts[source.id] || 0;
             // 该采集点的最大位置
             let maxPosCount: number;
@@ -248,6 +397,18 @@ export default class BaseFunction extends Room {
     }
 
     /* 动态生成角色体型 */
+    canUseSourceByPriority(creep: Creep, source: Source) {
+        if (!source || source.room.name !== this.name) return false;
+        if (!isPrioritySourceRole(creep.memory.role)) return true;
+        return getAllowedSourceCandidate(this, creep, source).allowed;
+    }
+
+    shouldYieldSourceByPriority(creep: Creep, source: Source) {
+        if (!source || source.room.name !== this.name) return false;
+        if (!isPrioritySourceRole(creep.memory.role)) return false;
+        return !this.canUseSourceByPriority(creep, source);
+    }
+
     GetRoleBodys(role: string, upbody?:boolean, energyBudget?: number) {
         let lv = this.level;
         let body: any[];

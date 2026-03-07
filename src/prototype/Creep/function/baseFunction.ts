@@ -155,7 +155,8 @@ export default class BaseFunction extends Creep {
                 }
             }
 
-            const targetSource = Game.getObjectById(this.memory.targetSourceId as Id<Source>) as Source;
+            const currentSource = Game.getObjectById(this.memory.targetSourceId as Id<Source>) as Source | null;
+            const targetSource = this.resolveSourceByPriority(currentSource);
             if (!targetSource || targetSource.energy <= 0) {
                 clearBoundSource();
                 return null;
@@ -266,6 +267,65 @@ export default class BaseFunction extends Creep {
     }
 
     // 是否处于白名单中
+    yieldSourcePosition(source: Source) {
+        if (!this.pos.inRangeTo(source.pos, 1)) return false;
+
+        const terrain = this.room.getTerrain();
+        let bestPos: RoomPosition | null = null;
+        let bestScore = -Infinity;
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = this.pos.x + dx;
+                const y = this.pos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+                const pos = new RoomPosition(x, y, this.room.name);
+                if (pos.inRangeTo(source.pos, 1)) continue;
+                if (pos.lookFor(LOOK_CREEPS).length > 0 || pos.lookFor(LOOK_POWER_CREEPS).length > 0) continue;
+
+                const score = pos.getRangeTo(source.pos);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = pos;
+                }
+            }
+        }
+
+        if (bestPos) {
+            this.moveTo(bestPos, { range: 0, reusePath: 0 });
+            return true;
+        }
+        return false;
+    }
+
+    resolveSourceByPriority(source?: Source | null) {
+        let currentSource = source || this.getBoundSource();
+        if (!currentSource || currentSource.energy <= 0) {
+            delete this.memory.targetSourceId;
+            currentSource = null;
+        }
+
+        if (currentSource && !this.room.shouldYieldSourceByPriority(this, currentSource)) {
+            if (this.memory.targetSourceId !== currentSource.id) {
+                this.memory.targetSourceId = currentSource.id;
+            }
+            return currentSource;
+        }
+
+        if (currentSource) delete this.memory.targetSourceId;
+
+        const rebound = this.room.closestSource(this);
+        if (rebound) {
+            this.memory.targetSourceId = rebound.id;
+            return rebound;
+        }
+
+        if (currentSource) this.yieldSourcePosition(currentSource);
+        return null;
+    }
+
     isWhiteList() {
         return inWhitelist(this.owner.username);
     }

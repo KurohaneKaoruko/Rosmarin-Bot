@@ -333,6 +333,7 @@ const WorkerFunction = {
     target: function (creep: Creep) {   // 建造
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         if(creep.store.getUsedCapacity() === 0) {
             return true;
         } else {
@@ -344,11 +345,13 @@ const WorkerFunction = {
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
         if(creep.store.getFreeCapacity() === 0) {
+            if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
             WorkerAction(creep);
             return true;
         } else {
             const fullAfterTake = creep.TakeEnergy();
             if (fullAfterTake) {
+                if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
                 WorkerAction(creep);
                 return true;
             }

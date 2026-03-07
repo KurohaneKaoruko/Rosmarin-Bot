@@ -7,6 +7,7 @@ const Upgrader = {
     target: function (creep: Creep) {
         if (!creep.memory.ready) return false;
         if (!creep.moveHomeRoom()) return;
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         if (creep.store.getUsedCapacity() === 0) {
             creep.say('🔄');
             return true;
@@ -23,6 +24,7 @@ const Upgrader = {
     source: function (creep: Creep) {
         if (!creep.memory.ready) return false;
         if (!creep.moveHomeRoom()) return;
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         if (creep.store.getFreeCapacity() === 0) {
             creep.say('⚡');
             creep.runControllerUpgrade();
@@ -35,6 +37,7 @@ const Upgrader = {
             fallbackToTakeEnergy: true,
         });
         if (fullAfterTake) {
+            if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
             creep.say('⚡');
             creep.runControllerUpgrade();
             return true;

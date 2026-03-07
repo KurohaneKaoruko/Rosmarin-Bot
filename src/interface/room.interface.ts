@@ -293,7 +293,11 @@ interface Room {
      * @returns 绑定creep最少且有空位的source，或null
      * @description 智能分配source，避免多个creep挤在同一个source
      */
-    closestSource(creep: Creep): Source;
+    closestSource(creep: Creep): Source | null;
+
+    canUseSourceByPriority(creep: Creep, source: Source): boolean;
+
+    shouldYieldSourceByPriority(creep: Creep, source: Source): boolean;
     
     /** 
      * 获取房间内的敌方creep

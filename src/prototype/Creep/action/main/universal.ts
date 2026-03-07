@@ -1,5 +1,3 @@
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
-
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
 
 type UniversalTargetCache = {
@@ -9,15 +7,6 @@ type UniversalTargetCache = {
     lastTargetId?: string;
     lastPosKey?: string;
 };
-
-type SourceBoundStats = {
-    universal: Map<string, number>;
-    dedicated: Map<string, number>;
-};
-
-const DEDICATED_SOURCE_ROLES = new Set(['harvester', 'out-harvest']);
-const FLEXIBLE_SOURCE_ROLES = new Set(['universal', 'worker', 'upgrader', 'aid-upgrade']);
-const DEDICATED_SOURCE_WEIGHT = 2;
 
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
 const hasMyConstructionSites = (room: Room) => room.find(FIND_CONSTRUCTION_SITES).some(site => (site as any).my);
@@ -30,103 +19,27 @@ const shouldForceUpgrade = (room: Room) => {
     return ttd < (room.level <= 3 ? 5000 : 3000);
 };
 
-const getSourceBoundStats = (room: Room) => {
-    return getRoomTickCacheValue(room, 'universal_source_bound_stats', () => {
-        const universal = new Map<string, number>();
-        const dedicated = new Map<string, number>();
-        for (const source of room.source) {
-            universal.set(source.id, 0);
-            dedicated.set(source.id, 0);
-        }
-
-        const myCreeps = room.find(FIND_MY_CREEPS, {
-            filter: c => !!(c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId)
-        }) as Creep[];
-
-        for (const c of myCreeps) {
-            const sid = (c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId) as string;
-            if (!universal.has(sid)) continue;
-
-            if (FLEXIBLE_SOURCE_ROLES.has(c.memory.role || '')) {
-                if (c.memory.role !== 'universal' && c.memory.working) continue;
-                universal.set(sid, (universal.get(sid) || 0) + 1);
-            } else if (DEDICATED_SOURCE_ROLES.has(c.memory.role || '')) {
-                dedicated.set(sid, (dedicated.get(sid) || 0) + 1);
-            }
-        }
-
-        return { universal, dedicated };
-    }) as SourceBoundStats;
-};
+const getSourceBoundStats = () => ({
+    universal: new Map<string, number>(),
+    dedicated: new Map<string, number>(),
+});
 
 const getSourceWalkableMap = (room: Room) => {
-    return getRoomTickCacheValue(room, 'universal_source_walkable', () => {
-        const map = new Map<string, number>();
-        const terrain = room.getTerrain();
-        for (const source of room.source) {
-            let walkable = 0;
-            for (let dx = -1; dx <= 1; dx++) {
-                for (let dy = -1; dy <= 1; dy++) {
-                    if (dx === 0 && dy === 0) continue;
-                    const x = source.pos.x + dx;
-                    const y = source.pos.y + dy;
-                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-                    if (terrain.get(x, y) !== TERRAIN_MASK_WALL) walkable++;
-                }
-            }
-            map.set(source.id, Math.max(1, walkable));
-        }
-        return map;
-    }) as Map<string, number>;
+    const map = new Map<string, number>();
+    for (const source of room.source || []) {
+        map.set(source.id, Math.max(1, room.memory.sourcePosCount?.[source.id] || 1));
+    }
+    return map;
 };
 
-const getDedicatedReservedSlots = (walkable: number, dedicatedBound: number) => {
-    return Math.min(walkable, dedicatedBound * DEDICATED_SOURCE_WEIGHT);
-};
-
-const shouldYieldSourceToDedicated = (creep: Creep, source: Source) => {
-    const boundStats = getSourceBoundStats(creep.room);
-    const walkable = getSourceWalkableMap(creep.room).get(source.id) || 1;
-    const dedicatedBound = boundStats.dedicated.get(source.id) || 0;
-    if (dedicatedBound <= 0) return false;
-
-    const reservedSlots = getDedicatedReservedSlots(walkable, dedicatedBound);
-    return reservedSlots >= walkable;
-};
+const getDedicatedReservedSlots = () => 0;
 
 const stepAsideFromSource = (creep: Creep, source: Source) => {
-    if (!creep.pos.inRangeTo(source.pos, 1)) return;
-
-    const terrain = creep.room.getTerrain();
-    let bestPos: RoomPosition | null = null;
-    let bestScore = -Infinity;
-
-    for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -1; dy <= 1; dy++) {
-            if (dx === 0 && dy === 0) continue;
-            const x = creep.pos.x + dx;
-            const y = creep.pos.y + dy;
-            if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
-            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
-
-            const pos = new RoomPosition(x, y, creep.room.name);
-            if (pos.inRangeTo(source.pos, 1)) continue;
-            if (pos.lookFor(LOOK_CREEPS).length > 0 || pos.lookFor(LOOK_POWER_CREEPS).length > 0) continue;
-
-            const score = pos.getRangeTo(source.pos);
-            if (score > bestScore) {
-                bestScore = score;
-                bestPos = pos;
-            }
-        }
-    }
-
-    if (bestPos) {
-        creep.moveTo(bestPos, { range: 0, reusePath: 0 });
-    }
+    creep.yieldSourcePosition(source);
 };
 
 const selectBestSource = function (creep: Creep): Source | null {
+    return creep.room.closestSource(creep);
     const sources = creep.room.source.filter(s => s.energy > 0);
     if (sources.length === 0) return null;
 
@@ -172,34 +85,17 @@ const getEnergy = function (creep: Creep) {
     }
 
     // 2) 无可回收能源时再转采矿。
-    let sourceId = creep.memory.targetSourceId as Id<Source> | undefined;
-    let source: Source | null = null;
-
-    if (sourceId) {
-        source = Game.getObjectById(sourceId);
-        if (!source || source.energy === 0) {
-            delete creep.memory.targetSourceId;
-            source = null;
-        }
-    }
-
-    if (source && shouldYieldSourceToDedicated(creep, source)) {
-        stepAsideFromSource(creep, source);
-        delete creep.memory.targetSourceId;
-        source = null;
-    }
-
+    const currentSource = creep.getBoundSource();
+    let source = creep.resolveSourceByPriority(currentSource);
     if (!source) {
         source = selectBestSource(creep);
-        if (source) {
-            creep.memory.targetSourceId = source.id;
-        }
     }
 
     if (source) {
         creep.goHaverst(source);
     } else {
         delete creep.memory.targetSourceId;
+        if (currentSource) stepAsideFromSource(creep, currentSource);
     }
 }
 

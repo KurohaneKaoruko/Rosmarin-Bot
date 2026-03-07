@@ -128,6 +128,10 @@ interface Creep {
      */
     TakeEnergy(pickup?: boolean): boolean;
 
+    yieldSourcePosition(source: Source): boolean;
+
+    resolveSourceByPriority(source?: Source | null): Source | null;
+
     /** 
      * 根据给定配置boost
      * @param boostmap - 部件到boost资源的映射；支持单资源或候选列表（按顺序降级）
