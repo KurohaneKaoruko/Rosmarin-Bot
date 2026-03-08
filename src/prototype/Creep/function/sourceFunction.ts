@@ -84,13 +84,6 @@ export default class SourceFunction extends Creep {
     isSourceWorkTilePassable(pos: RoomPosition): boolean {
         if (pos.x <= 0 || pos.x >= 49 || pos.y <= 0 || pos.y >= 49) return false;
         if (this.room.getTerrain().get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
-
-        if (!pos.isEqualTo(this.pos)) {
-            const creepBlocker = pos.lookFor(LOOK_CREEPS).find(c => c.id !== this.id);
-            const powerBlocker = pos.lookFor(LOOK_POWER_CREEPS).find(c => c.id !== this.id);
-            if (creepBlocker || powerBlocker) return false;
-        }
-
         const structures = pos.lookFor(LOOK_STRUCTURES);
         for (const structure of structures) {
             if (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) continue;
@@ -112,7 +105,28 @@ export default class SourceFunction extends Creep {
         return true;
     }
 
-    scoreSourceWorkTile(pos: RoomPosition, source: Source, container: StructureContainer | null, link: StructureLink | null): number {
+    getSourceWorkTileTrafficPenalty(pos: RoomPosition): number | null {
+        if (pos.isEqualTo(this.pos)) return 0;
+
+        const creepBlocker = pos.lookFor(LOOK_CREEPS).find(c => c.id !== this.id);
+        const powerBlocker = pos.lookFor(LOOK_POWER_CREEPS).find(c => c.id !== this.id);
+        const blocker = creepBlocker || powerBlocker;
+        if (!blocker) return 0;
+        if (!blocker.my) return null;
+        if (blocker.memory?.dontPullMe || blocker.spawning || blocker.fatigue > 0) return null;
+        if ('getActiveBodyparts' in blocker && typeof blocker.getActiveBodyparts === 'function' && blocker.getActiveBodyparts(MOVE) <= 0) {
+            return null;
+        }
+        return 3;
+    }
+
+    scoreSourceWorkTile(
+        pos: RoomPosition,
+        source: Source,
+        container: StructureContainer | null,
+        link: StructureLink | null,
+        trafficPenalty: number
+    ): number {
         let score = -this.pos.getRangeTo(pos);
 
         if (this.pos.isEqualTo(pos)) score += 4;
@@ -129,6 +143,7 @@ export default class SourceFunction extends Creep {
         }
 
         if (!pos.inRangeTo(source.pos, 1)) score -= 100;
+        score -= trafficPenalty;
 
         return score;
     }
@@ -146,8 +161,10 @@ export default class SourceFunction extends Creep {
                 if (dx === 0 && dy === 0) continue;
                 const pos = new RoomPosition(source.pos.x + dx, source.pos.y + dy, source.pos.roomName);
                 if (!this.isSourceWorkTilePassable(pos)) continue;
+                const trafficPenalty = this.getSourceWorkTileTrafficPenalty(pos);
+                if (trafficPenalty === null) continue;
 
-                const score = this.scoreSourceWorkTile(pos, source, sourceContainer, sourceLink);
+                const score = this.scoreSourceWorkTile(pos, source, sourceContainer, sourceLink, trafficPenalty);
                 if (score > bestScore) {
                     bestScore = score;
                     bestPos = pos;

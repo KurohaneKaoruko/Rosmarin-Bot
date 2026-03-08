@@ -419,6 +419,19 @@ function getOriginCancelOrderMethod(unit) {
     return isPowerCreepUnit(unit) && originPowerCancelOrder ? originPowerCancelOrder : originCancelOrder;
 }
 
+function canYieldTraffic(unit) {
+    if (!unit || !unit.my || unit.spawning || unit.fatigue > 0) {
+        return false;
+    }
+    if (unit.memory && unit.memory.dontPullMe) {
+        return false;
+    }
+    if (isPowerCreepUnit(unit)) {
+        return true;
+    }
+    return hasActiveBodypart(unit.body, MOVE);
+}
+
 // 统计变量
 let startTime;
 let endTime;
@@ -1969,10 +1982,10 @@ function buildRouteRoomSet(routeList, startRoomName) {
     return roomSet;
 }
 function bypassHostile(creep) {
-    return !creep.my;
+    return !creep.my || !canYieldTraffic(creep);
 }
 function bypassMy(creep) {
-    return false;
+    return creep.my && !canYieldTraffic(creep);
 }
 
 // ----------------------------------------------------------------------------
@@ -2989,7 +3002,7 @@ function defaultCheckTile(tileList) {
         const intent = [];
         const px = creep.pos.x;
         const py = creep.pos.y;
-        if (creep.fatigue) {
+        if (!canYieldTraffic(creep)) {
             intent.push({
                 target: tile,
                 score: activeMoveScore
