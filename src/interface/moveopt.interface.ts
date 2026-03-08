@@ -76,6 +76,9 @@ interface BetterMoveCacheStats {
 interface BetterMoveAPI {
   setChangeMove(bool: boolean): ScreepsReturnCode;
   creepPathCache: Record<string, unknown>;
+  squadMove(squad: Creep[], target?: Array<RoomPosition | { pos: RoomPosition }>): ScreepsReturnCode;
+  squadMoveTo(squad: Creep[], x: number, y: number, opts?: MoveToOpts): ScreepsReturnCode;
+  squadMoveTo(squad: Creep[], target: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts): ScreepsReturnCode;
   setChangeMoveTo(bool: boolean): ScreepsReturnCode;
   setCheckTile(userCheckTile?: (posList: RoomPosition[]) => unknown): ScreepsReturnCode;
   setChangeFindClostestByPath(bool: boolean): ScreepsReturnCode;
