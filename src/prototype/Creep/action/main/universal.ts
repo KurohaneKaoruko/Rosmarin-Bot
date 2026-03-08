@@ -155,7 +155,7 @@ const doWork = function (creep: Creep) {
     const hasBuildSite = hasMyConstructionSites(creep.room);
 
     // 有工地且不处于补能紧急态时，优先建造，避免被控制器缓冲补能长期占用。
-    if (hasBuildSite && !urgent) {
+    if (hasBuildSite && !urgent && !shouldForceUpgrade(creep.room)) {
         const buildPriority = creep.room.level <= 3
             ? [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART]
             : [STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART];

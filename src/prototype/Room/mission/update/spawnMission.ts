@@ -69,6 +69,10 @@ const hasIncompletePrimaryStructures = (room: Room) => {
     const extensionCount = (room.extension?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_EXTENSION);
     if (spawnCount < (CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][level] || 0)) return true;
     if (extensionCount < (CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][level] || 0)) return true;
+    if (level >= 3) {
+        const towerCount = (room.tower?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_TOWER);
+        if (towerCount < (CONTROLLER_STRUCTURES[STRUCTURE_TOWER][level] || 0)) return true;
+    }
     if (level >= 4) {
         const storageCount = (room.storage ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_STORAGE);
         if (storageCount < 1) return true;
@@ -92,7 +96,8 @@ export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
     const tasks = ((room as any).getAllMissionFromPool?.('spawn') || []) as Task[];
     let removed = 0;
     for (const task of tasks) {
-        if ((task as any)?.data?.memory?.role !== 'upgrader') continue;
+        const role = (task as any)?.data?.memory?.role;
+        if (role !== 'upgrader' && role !== 'up-upgrade') continue;
         (room as any).deleteMissionFromPool?.('spawn', task.id);
         removed += 1;
     }
@@ -469,6 +474,8 @@ const RoleSpawnCheck = {
     },
     'up-upgrade': (room: Room, current: number) => {
         if (room.level == 8) return false;
+        if (shouldDelayUpgraderForPrimaryBuild(room)) return false;
+        if (getDowngradeUniversalTarget(room) > 0) return false;
         // 冲级
         let UPFlag = room.find(FIND_FLAGS).find(f => f.name.startsWith(`${room.name}/UP-UPGRADE/`));
         if (!UPFlag) return false;

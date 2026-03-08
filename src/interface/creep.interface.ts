@@ -732,3 +732,13 @@ interface CreepMemory {
      */
     [key: string]: any;
 }
+
+interface PowerCreepMemory {
+    /**
+     * 禁止被对穿/推挤
+     * @description moveopt 在交通调度阶段会读写该标记，保持与 CreepMemory 对齐。
+     */
+    dontPullMe?: boolean;
+
+    [key: string]: any;
+}
