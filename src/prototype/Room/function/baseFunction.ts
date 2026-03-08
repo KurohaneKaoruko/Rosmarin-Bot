@@ -105,7 +105,7 @@ const getMyLegacySourceBoundCreepsByRoom = (() => {
         const hit = cached[room.name];
         if (hit) return hit;
         const creeps = room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => c && c.ticksToLive > 100 && !!(c.memory.targetSourceId || (c.memory as any).cache?.targetSourceId)
+            filter: (c: Creep) => c && c.ticksToLive > 100 && !!c.memory.targetSourceId
         }) as Creep[];
         cached[room.name] = creeps;
         return creeps;
@@ -174,11 +174,11 @@ const getSourceCompetitors = (room: Room, source: Source, candidate?: Creep) => 
 };
 
 const getAllowedSourceCandidate = (room: Room, creep: Creep, source: Source) => {
-    const slots = Math.max(1, getSourceWalkableCount(room, source));
+    const slots = getSourceWalkableCount(room, source);
     const competitors = getSourceCompetitors(room, source, creep);
     return {
         competitors,
-        allowed: competitors.slice(0, slots).some(item => item.creep.id === creep.id)
+        allowed: slots > 0 && competitors.slice(0, slots).some(item => item.creep.id === creep.id)
     };
 };
 
@@ -342,7 +342,6 @@ export default class BaseFunction extends Room {
         let leastCrowdedSources = [];
 
         if(!this.memory.sourcePosCount) this.memory.sourcePosCount = {}
-        let terrain = null;
         const useSharedCrowd = !!role && LEGACY_SHARED_SOURCE_ROLE_SET.has(role);
         const creeps = role
             ? (useSharedCrowd ? getMyLegacySourceBoundCreepsByRoom(this) : getMyCreepsByRoleByRoom(this, role)).filter(c => {
@@ -358,7 +357,7 @@ export default class BaseFunction extends Room {
         const boundCounts: Record<string, number> = {};
         const minTtlBySource: Record<string, number> = {};
         for (const c of creeps) {
-            const sid = (c.memory as any).targetSourceId || (c.memory as any).cache?.targetSourceId;
+            const sid = c.memory.targetSourceId;
             if (!sid) continue;
             boundCounts[sid] = (boundCounts[sid] || 0) + 1;
             const ttl = c.ticksToLive || 0;
@@ -367,21 +366,7 @@ export default class BaseFunction extends Room {
         // 找到绑定最少的，有位置的采集点
         availableSources.forEach((source: Source) => {
             let creepCount = boundCounts[source.id] || 0;
-            // 该采集点的最大位置
-            let maxPosCount: number;
-            if (this.memory.sourcePosCount[source.id]) {
-                maxPosCount = this.memory.sourcePosCount[source.id];
-            } else {
-                if (!terrain) terrain = this.getTerrain();
-                let pos = source.pos;
-                maxPosCount = 
-                [[pos.x - 1, pos.y], [pos.x + 1, pos.y], [pos.x, pos.y - 1], [pos.x, pos.y + 1],
-                [pos.x - 1, pos.y - 1], [pos.x + 1, pos.y + 1], [pos.x - 1, pos.y + 1], [pos.x + 1, pos.y - 1]]
-                .filter((p) => p[0] > 0 && p[0] < 49 && p[1] > 0 && p[1] < 49 &&
-                    terrain.get(p[0], p[1]) !== TERRAIN_MASK_WALL
-                ).length
-                this.memory.sourcePosCount[source.id] = maxPosCount;
-            }
+            const maxPosCount = getSourceWalkableCount(this, source);
             // 绑定满的忽略
             if (creepCount >= maxPosCount) return;
             // 记录绑定数最小的采集点

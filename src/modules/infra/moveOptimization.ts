@@ -21,7 +21,6 @@ let config = {
     enableSquadPath: true, // 是否启用 findSquadPathTo
     enableRouteCache: true, // 是否启用寻路缓存
     routeCacheTTL: 200,     // 寻路缓存过期时间，设为undefined表示不清除缓存
-    routeCacheGCInterval: 20, // legacy compatibility option (no-op after due-queue GC)
     routeCacheMaxEntries: 4000, // 非 bypass route cache 的最大条目数，达到上限后停止新增键
     routeCacheMaxNewPerTick: 200, // 每 tick 最多写入多少个新的非 bypass route cache 键
     enableBypassCostMatReuse: true,  // 是否启用绕过房间的costMatrix缓存

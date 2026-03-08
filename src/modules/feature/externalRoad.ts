@@ -891,17 +891,6 @@ export class RoadBuilder {
     }
 }
 
-/**
- * 创建外矿道路工地
- * @param room 主房间
- * @param targetRoom 目标房间
- * @deprecated 请使用 RoadBuilder.createRoadSites
- */
-export function createRoadSiteNew(room: Room, targetRoom: Room): void {
-    RoadBuilder.createRoadSites(room, targetRoom);
-}
-
-
 // ============================================================
 // 道路维护器
 // ============================================================

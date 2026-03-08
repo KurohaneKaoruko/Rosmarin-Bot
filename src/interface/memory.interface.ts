@@ -751,12 +751,6 @@ interface StatsMemory {
     lastRclProgress?: Record<string, number>;
 
     /**
-     * 上一次房间升级统计时间戳
-     * @deprecated 历史遗留字段，请使用 RoomPrevTimestamp
-     */
-    lastUpgradeTimestamp?: number;
-
-    /**
      * 房间能量储备
      * @description storage + terminal 的总能量，key 为房间名
      */

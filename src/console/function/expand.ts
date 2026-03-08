@@ -15,30 +15,27 @@ const normalizeShardRoom = (spec: string) => {
     return { shard, roomName, full: parsed.shard ? `${parsed.shard}/${roomName}` : roomName };
 };
 
+type ExpandDesiredOptions = {
+    claimer?: number;
+    builder?: number;
+    carry?: number;
+    upgrader?: number;
+};
+
 export default {
     expand: {
-        set(home: string, target: string, opts?: any, legacyC?: any, legacyD?: any) {
-            const finalOpts = (typeof opts === 'object' && opts) ? opts : {};
+        set(home: string, target: string, opts: ExpandDesiredOptions = {}) {
+            const h = normalizeShardRoom(home);
+            const t = normalizeShardRoom(target);
 
-            let homeSpec = home;
-            let targetSpec = target;
-
-            if (typeof opts === 'string' && typeof legacyC === 'string') {
-                homeSpec = `${opts}/${home}`;
-                targetSpec = legacyC.includes('/') ? legacyC : `${legacyD || Game.shard.name}/${legacyC}`;
-            }
-
-            const h = normalizeShardRoom(homeSpec);
-            const t = normalizeShardRoom(targetSpec);
-
-            if (!h.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error(`孵化房间名格式不正确：${homeSpec}`);
-            if (!t.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error(`目标房间名格式不正确：${targetSpec}`);
+            if (!h.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error(`孵化房间名格式不正确：${home}`);
+            if (!t.roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error(`目标房间名格式不正确：${target}`);
 
             const desired = {
-                claimer: typeof finalOpts.claimer === 'number' ? finalOpts.claimer : 1,
-                builder: typeof finalOpts.builder === 'number' ? finalOpts.builder : 1,
-                carry: typeof finalOpts.carry === 'number' ? finalOpts.carry : 0,
-                upgrader: typeof finalOpts.upgrader === 'number' ? finalOpts.upgrader : 0
+                claimer: typeof opts.claimer === 'number' ? opts.claimer : 1,
+                builder: typeof opts.builder === 'number' ? opts.builder : 1,
+                carry: typeof opts.carry === 'number' ? opts.carry : 0,
+                upgrader: typeof opts.upgrader === 'number' ? opts.upgrader : 0
             };
 
             const id = genId();

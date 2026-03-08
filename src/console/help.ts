@@ -167,27 +167,6 @@ const helpTexts: Record<string, string> = {
         line(),
     ].join(br),
 
-    // 兼容旧别名：历史上帮助里写的是 helpOutmine
-    helpOutmine: [
-        title('⛏️', '外矿指令列表'),
-        line(),
-        `${cmd('mine.add(roomName, targetRoom)')}：添加外矿房间`,
-        `- 普通房间：添加到 energy 列表`,
-        `- 过道房间：添加到 highway 监控列表`,
-        `- 中间房间：添加到 centerRoom 采矿列表`,
-        `${cmd('mine.remove(roomName, targetRoom)')}：删除外矿房间`,
-        `${cmd('mine.list(roomName)')}：查看外矿列表`,
-        `${cmd('mine.clearRoad(roomName)')}：清空外矿 Road 缓存`,
-        `${cmd('mine.auto(roomName, type)')}：开关自动采集（type: power / deposit）`,
-        `${cmd('mine.mapShow(homeRoom?)')}：大地图显示过道 power/deposit 配置连线`,
-        `${cmd('mine.mapHide(homeRoom?)')}：关闭大地图过道 power/deposit 配置连线`,
-        `${cmd('mine.power(roomName, targetRoom, num, boostLevel?, prNum?)')}：派出 Power 开采队（boostLevel: 0/1/2）`,
-        `${cmd('mine.deposit(roomName, targetRoom, num)')}：派出 Deposit 开采队`,
-        `${cmd('mine.cancel(roomName, targetRoom, type?)')}：取消开采任务`,
-        `${cmd('road.help()')}：外矿造路规划相关`,
-        line(),
-    ].join(br),
-
     helpRoad: [
         title('🛣️', '外矿道路命令帮助'),
         line(),

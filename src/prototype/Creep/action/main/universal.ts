@@ -19,56 +19,6 @@ const shouldForceUpgrade = (room: Room) => {
     return ttd < (room.level <= 3 ? 5000 : 3000);
 };
 
-const getSourceBoundStats = () => ({
-    universal: new Map<string, number>(),
-    dedicated: new Map<string, number>(),
-});
-
-const getSourceWalkableMap = (room: Room) => {
-    const map = new Map<string, number>();
-    for (const source of room.source || []) {
-        map.set(source.id, Math.max(1, room.memory.sourcePosCount?.[source.id] || 1));
-    }
-    return map;
-};
-
-const getDedicatedReservedSlots = () => 0;
-
-const stepAsideFromSource = (creep: Creep, source: Source) => {
-    creep.yieldSourcePosition(source);
-};
-
-const selectBestSource = function (creep: Creep): Source | null {
-    return creep.room.closestSource(creep);
-    const sources = creep.room.source.filter(s => s.energy > 0);
-    if (sources.length === 0) return null;
-
-    const boundStats = getSourceBoundStats(creep.room);
-    const walkableMap = getSourceWalkableMap(creep.room);
-
-    let best: Source | null = null;
-    let bestScore = -Infinity;
-    for (const source of sources) {
-        const walkable = walkableMap.get(source.id) || 1;
-        const universalBound = boundStats.universal.get(source.id) || 0;
-        const dedicatedBound = boundStats.dedicated.get(source.id) || 0;
-        const reservedSlots = getDedicatedReservedSlots(walkable, dedicatedBound);
-        const freeSpots = Math.max(0, walkable - reservedSlots - universalBound);
-
-        // 专职采集占满后，UNIV不再竞争该 source。
-        if (walkable - reservedSlots <= 0) continue;
-
-        const energyRatio = source.energyCapacity > 0 ? source.energy / source.energyCapacity : 0;
-        const distance = creep.pos.getRangeTo(source.pos);
-        const score = energyRatio * 30 + freeSpots * 12 - universalBound * 18 - dedicatedBound * 24 - distance;
-        if (score > bestScore) {
-            best = source;
-            bestScore = score;
-        }
-    }
-    return best;
-}
-
 const getEnergy = function (creep: Creep) {
     const urgent = isUrgentRefill(creep.room);
     const lowLevel = creep.room.level <= 2;
@@ -86,18 +36,15 @@ const getEnergy = function (creep: Creep) {
 
     // 2) 无可回收能源时再转采矿。
     const currentSource = creep.getBoundSource();
-    let source = creep.resolveSourceByPriority(currentSource);
-    if (!source) {
-        source = selectBestSource(creep);
-    }
+    const source = creep.resolveSourceByPriority(currentSource) || creep.room.closestSource(creep);
 
     if (source) {
         creep.goHaverst(source);
     } else {
         delete creep.memory.targetSourceId;
-        if (currentSource) stepAsideFromSource(creep, currentSource);
+        if (currentSource) creep.yieldSourcePosition(currentSource);
     }
-}
+};
 
 const clearTargetCache = (cache: UniversalTargetCache) => {
     delete cache.targetId;
