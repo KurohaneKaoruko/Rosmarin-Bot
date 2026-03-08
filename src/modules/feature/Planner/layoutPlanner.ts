@@ -924,20 +924,21 @@ export const LayoutPlanner = {
 
         const maxSites = options?.maxSites;
         const cap = typeof maxSites === 'number' ? maxSites : (typeof MAX_CONSTRUCTION_SITES === 'number' ? MAX_CONSTRUCTION_SITES : 100);
+        const keys = only ? [only] : Object.keys(layoutMemory);
+        const coreDepotKeys = keys.filter((structureType) => isCoreDepotStructure(structureType));
+        const regularKeys = keys.filter((structureType) => !isCoreDepotStructure(structureType));
         const budget = Math.max(0, cap - allSite.length);
-        if (budget <= 0) return 0;
 
         let created = 0;
-        const keys = only ? [only] : Object.keys(layoutMemory);
-        for (const s of keys) {
-            if (created >= budget) break;
+        for (const s of coreDepotKeys) {
+            created += handleCoreDepotSite(room, layoutMemory, s);
+        }
+
+        let regularCreated = 0;
+        for (const s of regularKeys) {
+            if (regularCreated >= budget) break;
             const layoutArray = layoutMemory[s];
             if (!layoutArray || !layoutArray.length) continue;
-
-            if (isCoreDepotStructure(s)) {
-                created += handleCoreDepotSite(room, layoutMemory, s);
-                continue;
-            }
 
             const buildMax = (CONTROLLER_STRUCTURES as any)?.[s]?.[room.level] ?? 0;
             if (!buildMax) continue;
@@ -954,7 +955,7 @@ export const LayoutPlanner = {
             const points = getLayoutPointsForRcl(room, s, layoutArray);
             if (!points || points.length == 0) continue;
             for (const p of points) {
-                if (created >= budget) break;
+                if (regularCreated >= budget) break;
                 if (count >= buildMax) break;
                 const [x, y] = decompress(p);
                 if (x < 0 || x > 49 || y < 0 || y > 49) continue;
@@ -965,6 +966,7 @@ export const LayoutPlanner = {
                 const result = room.createConstructionSite(x, y, s as any);
                 if (result === OK) {
                     created++;
+                    regularCreated++;
                     count++;
                 }
                 if (result == ERR_FULL) return created;
