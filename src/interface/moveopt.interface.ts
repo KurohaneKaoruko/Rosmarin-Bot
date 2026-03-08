@@ -45,10 +45,39 @@ interface MoveToOpts {
  * BetterMove 全局 API
  * @description moveOpt 在加载时挂载 global.BetterMove
  */
+interface BetterMoveCacheStats {
+  enabled: boolean;
+  tick: number;
+  route: {
+    lookups: number;
+    hits: number;
+    misses: number;
+    hitRate: number;
+    writes: number;
+    skipByBudget: number;
+    skipByCapacity: number;
+    skipRate: number;
+    evictTTL: number;
+    evictBypass: number;
+    size: number;
+    nonBypassSize: number;
+  };
+  path: {
+    inserts: number;
+    trimRuns: number;
+    trimScans: number;
+    trimDeletes: number;
+    trimHitRate: number;
+    size: number;
+    insertQueueSize: number;
+  };
+}
+
 interface BetterMoveAPI {
   setChangeMove(bool: boolean): ScreepsReturnCode;
   creepPathCache: Record<string, unknown>;
   setChangeMoveTo(bool: boolean): ScreepsReturnCode;
+  setCheckTile(userCheckTile?: (posList: RoomPosition[]) => unknown): ScreepsReturnCode;
   setChangeFindClostestByPath(bool: boolean): ScreepsReturnCode;
   setPathClearDelay(number?: number): ScreepsReturnCode;
   setHostileCostMatrixClearDelay(number?: number): ScreepsReturnCode;
@@ -64,11 +93,14 @@ interface BetterMoveAPI {
   setEnableFlee(bool: boolean): ScreepsReturnCode;
   getConfig(): Record<string, unknown>;
   setConfig(partial: Record<string, unknown>): ScreepsReturnCode;
+  getCacheStats(): BetterMoveCacheStats;
+  resetCacheStats(): ScreepsReturnCode;
   deletePathInRoom(roomName: string): ScreepsReturnCode;
   addAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
   deleteAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
   syncPortals(): { v: number; list: unknown[]; updated: number };
   printPortals(targetShard?: string): unknown[];
+  endTickResolve(userIsWorkTile?: (creep: Creep | PowerCreep, pos: RoomPosition) => boolean): void;
   print(): string;
   clear(options?: {
     clearAvoidRooms?: boolean;

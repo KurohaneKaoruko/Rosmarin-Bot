@@ -1,5 +1,7 @@
 // @ts-nocheck
 
+import moveMatch from '@/modules/utils/moveMatch';
+
 /*
 creep对穿+跨房间寻路+寻路缓存 
 应用此模块会导致creep.moveTo可选参数中这些项失效：
@@ -398,7 +400,24 @@ for (let i = OBSTACLE_OBJECT_TYPES.length; i--;){
 
 const originMove = Creep.prototype.move;
 const originMoveTo = Creep.prototype.moveTo;
+const originCancelOrder = Creep.prototype.cancelOrder;
+const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
+const originPowerMove = powerCreepProto ? powerCreepProto.move : undefined;
+const originPowerMoveTo = powerCreepProto ? powerCreepProto.moveTo : undefined;
+const originPowerCancelOrder = powerCreepProto ? powerCreepProto.cancelOrder : undefined;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
+
+function isPowerCreepUnit(unit) {
+    return !!powerCreepProto && unit instanceof PowerCreep;
+}
+
+function getOriginMoveMethod(unit) {
+    return isPowerCreepUnit(unit) && originPowerMove ? originPowerMove : originMove;
+}
+
+function getOriginCancelOrderMethod(unit) {
+    return isPowerCreepUnit(unit) && originPowerCancelOrder ? originPowerCancelOrder : originCancelOrder;
+}
 
 // 统计变量
 let startTime;
@@ -407,7 +426,8 @@ let startCacheSearch;
 let analyzeCPU = { // 统计相关函数总耗时
     move: { sum: 0, calls: 0 },
     moveTo: { sum: 0, calls: 0 },
-    findClosestByPath: { sum: 0, calls: 0 }
+    findClosestByPath: { sum: 0, calls: 0 },
+    endTickResolve: { sum: 0, calls: 0, moveCount: 0 }
 };
 let pathCounter = 0;
 let testCacheHits = 0;
@@ -421,6 +441,15 @@ let normalLogicalCost = 0;
 let cacheHitCost = 0;
 let cacheMissCost = 0;
 let unWalkableCCost = 255;
+const halfWorldSize = 255 >> 1;
+const activeMoveScore = 32;
+const passiveMoveScore = -4;
+const badMoveScore = -32;
+const IntentTiles = new Uint32Array(Math.max(Object.keys(Game.rooms).length * 64, 4096));
+const Priorities = new Uint8Array(IntentTiles.length);
+const cachedMoveIntents = new Map();
+const checkedTiles = new Map();
+let creepIdx = 1;
 
 // ============================================================================
 // 5) 基础工具函数（坐标、房间名、几何关系等）
@@ -525,6 +554,48 @@ function formalize(pos) {
         }
     } // else 房间名字不是正确格式
     return {}
+}
+
+function formalizeIntentPos(pos) {
+    const parsed = parseRoomName(pos.roomName);
+    if (parsed) {
+        return {
+            x: (parsed.ew === 'W' ? halfWorldSize - parsed.ewNum : halfWorldSize + parsed.ewNum + 1) * 50 + pos.x,
+            y: (parsed.ns === 'S' ? halfWorldSize + parsed.nsNum + 1 : halfWorldSize - parsed.nsNum) * 50 + pos.y
+        };
+    }
+    return {};
+}
+
+function formalizeIntentMovePos(pos) {
+    const formalPos = formalizeIntentPos(pos);
+    if (typeof formalPos.x !== 'number' || typeof formalPos.y !== 'number') {
+        return formalPos;
+    }
+    if (pos.x === 0) {
+        formalPos.x--;
+    } else if (pos.x === 49) {
+        formalPos.x++;
+    } else if (pos.y === 0) {
+        formalPos.y--;
+    } else if (pos.y === 49) {
+        formalPos.y++;
+    }
+    return formalPos;
+}
+
+function packIntentTile(formalPos) {
+    return (formalPos.y << 14) | formalPos.x;
+}
+
+function tile2Pos(tile) {
+    const y = tile >> 14;
+    const x = tile & 0x3fff;
+    const rx = x / 50 | 0;
+    const ry = y / 50 | 0;
+    const roomName = (rx <= halfWorldSize ? 'W' + (halfWorldSize - rx) : 'E' + (rx - halfWorldSize - 1)) +
+        (ry <= halfWorldSize ? 'N' + (halfWorldSize - ry) : 'S' + (ry - halfWorldSize - 1));
+    return new RoomPosition(x % 50, y % 50, roomName);
 }
 
 function getAdjacents(pos) {
@@ -1075,6 +1146,70 @@ function getSameRoomEdgeCostMatrix(roomName, ignoreCondition) {
     return edgeCostMat;
 }
 
+function buildIntentEdgeArray(room) {
+    const terrain = room.getTerrain().getRawBuffer();
+    const edgeArray = new Uint16Array(2500 << 3);
+    const edgeIdx = new Uint8Array(2500);
+    let u;
+    let v;
+    let w;
+
+    for (u = 0; u < 50; u++) {
+        if (terrain[u] & TERRAIN_MASK_WALL) {
+            continue;
+        }
+        v = u - 1;
+        if (v >= 0 && !(terrain[v] & TERRAIN_MASK_WALL)) {
+            edgeArray[(u << 3) + edgeIdx[u]++] = v;
+            edgeArray[(v << 3) + edgeIdx[v]++] = u;
+        }
+    }
+
+    for (let y = 1, idx = 50; y < 50; y++, idx += 50) {
+        if (terrain[idx] & TERRAIN_MASK_WALL) {
+            continue;
+        }
+        v = idx - 50;
+        if (!(terrain[v] & TERRAIN_MASK_WALL)) {
+            edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
+            edgeArray[(v << 3) + edgeIdx[v]++] = idx;
+        }
+    }
+
+    for (let y = 1, y50 = 50; y <= 49; y++, y50 += 50) {
+        for (let x = 1, idx = y50 + 1; x <= 49; x++, idx++) {
+            if (terrain[idx] & TERRAIN_MASK_WALL) {
+                continue;
+            }
+            u = idx - 1;
+            v = idx - 50;
+            w = idx - 51;
+            const uTerrain = terrain[u];
+            const vTerrain = terrain[v];
+            const wTerrain = terrain[w];
+            if (!(uTerrain & TERRAIN_MASK_WALL)) {
+                edgeArray[(idx << 3) + edgeIdx[idx]++] = u;
+                edgeArray[(u << 3) + edgeIdx[u]++] = idx;
+                if (!(vTerrain & TERRAIN_MASK_WALL)) {
+                    edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
+                    edgeArray[(v << 3) + edgeIdx[v]++] = idx;
+                    edgeArray[(v << 3) + edgeIdx[v]++] = u;
+                    edgeArray[(u << 3) + edgeIdx[u]++] = v;
+                }
+            } else if (!(vTerrain & TERRAIN_MASK_WALL)) {
+                edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
+                edgeArray[(v << 3) + edgeIdx[v]++] = idx;
+            }
+            if (!(wTerrain & TERRAIN_MASK_WALL)) {
+                edgeArray[(idx << 3) + edgeIdx[idx]++] = w;
+                edgeArray[(w << 3) + edgeIdx[w]++] = idx;
+            }
+        }
+    }
+
+    return edgeArray;
+}
+
 /**
  *  为房间保存costMatrix，ignoreDestructibleStructures这个参数的两种情况各需要一个costMatrix
  *  设置costMatrix缓存的过期时间
@@ -1168,7 +1303,8 @@ function generateCostMatrix(room, pos) {
     costMatrixCache[roomName] = {
         roomName: roomName,
         true: noStructureCostMat,   // 对应 ignoreDestructibleStructures = true
-        false: structureCostMat     // 对应 ignoreDestructibleStructures = false
+        false: structureCostMat,    // 对应 ignoreDestructibleStructures = false
+        edgeArray: buildIntentEdgeArray(room)
     };
     costMatrixRevision[roomName] = ((costMatrixRevision[roomName] | 0) + 1) | 0;
     delete sameRoomEdgeCostMatCache[roomName];
@@ -1292,22 +1428,13 @@ function checkRoom(room, path, startIdx) {
  * @param {RoomPosition} pos
  * @param {boolean} bypassHostileCreeps
  */
-function trySwap(creep, pos, bypassHostileCreeps, ignoreCreeps) {     // ERR_NOT_FOUND开销0.00063，否则开销0.0066
+function trySwap(creep, pos, bypassHostileCreeps) {     // ERR_NOT_FOUND开销0.00063，否则开销0.0066
     let obstacleCreeps = creep.room.lookForAt(LOOK_CREEPS, pos).concat(creep.room.lookForAt(LOOK_POWER_CREEPS, pos));
     if (obstacleCreeps.length) {
-        if (!ignoreCreeps) {
-            return ERR_INVALID_TARGET;
-        }
-        for (let i = obstacleCreeps.length; i--;) {
+        for (let i = 0; i < obstacleCreeps.length; i++) {
             const c = obstacleCreeps[i];
             if (c.my) {
-                if (c.memory.dontPullMe) {    // 第1种不可穿情况：挡路的creep设置了不对穿
-                    return ERR_INVALID_TARGET;
-                }
-                if (creepMoveCache[c.name] != Game.time && originMove.call(c, getDirection(pos, creep.pos)) == ERR_NO_BODYPART && creep.pull) {
-                    creep.pull(c);
-                    originMove.call(c, creep);
-                }
+                return OK;
             } else if (bypassHostileCreeps && (!c.room.controller || !c.room.controller.my || !c.room.controller.safeMode)) {  // 第二种不可穿情况：希望绕过敌对creep
                 return ERR_INVALID_TARGET;
             }
@@ -1841,10 +1968,10 @@ function buildRouteRoomSet(routeList, startRoomName) {
     return roomSet;
 }
 function bypassHostile(creep) {
-    return !creep.my || creep.memory.dontPullMe;
+    return !creep.my;
 }
 function bypassMy(creep) {
-    return creep.my && creep.memory.dontPullMe;
+    return false;
 }
 
 // ----------------------------------------------------------------------------
@@ -2643,8 +2770,9 @@ function showVisual(creep, toPos, posArray, startIdx, idxStep, visualStyle) {
  * @param {PolyStyle} visualStyle
  * @param {RoomPosition} toPos
  */
-function moveOneStep(creep, visualStyle, toPos) {
+function moveOneStep(creep, ops, toPos) {
     let creepCache = creepPathCache[creep.name];
+    const visualStyle = ops.visualizePathStyle;
     if (visualStyle) {
         showVisual(creep, toPos, creepCache.path.posArray, creepCache.idx, 1, visualStyle);
     }
@@ -2662,8 +2790,8 @@ function moveOneStep(creep, visualStyle, toPos) {
             normalLogicalCost += t;
         }
     }
-    //creep.room.visual.circle(creepCache.path.posArray[creepCache.idx]);
-    return originMove.call(creep, creepCache.path.directionArray[creepCache.idx]);
+    const pos = creepCache.path.posArray[creepCache.idx];
+    return registerMoveIntent(creep, formalizeIntentMovePos(pos), ops.priority);
 }
 
 /**
@@ -2686,8 +2814,9 @@ function computeStartIndex(creepPos, posArray) {
     return idx - 1;
 }
 
-function startRoute(creep, pathCache, visualStyle, toPos, ignoreCreeps) {
+function startRoute(creep, pathCache, ops, toPos, ignoreCreeps) {
     let posArray = pathCache.path.posArray;
+    const visualStyle = ops.visualizePathStyle;
 
     let idx = computeStartIndex(creep.pos, posArray);
     if (idx < 0) {
@@ -2701,10 +2830,7 @@ function startRoute(creep, pathCache, visualStyle, toPos, ignoreCreeps) {
     creepMoveCache[creep.name] = Game.time;
 
     let nextStep = posArray[idx];
-    if (ignoreCreeps && isNear(creep.pos, nextStep)) {
-        trySwap(creep, nextStep, false, true);
-    }
-    return originMove.call(creep, getDirection(creep.pos, nextStep));
+    return registerMoveIntent(creep, formalizeIntentMovePos(nextStep), ops.priority);
 }
 
 /**
@@ -2783,6 +2909,212 @@ function runMoveOptTickMaintenance() {
 /**
  * @param {Function} fn
  */
+function registerMoveIntent(creep, targetFormalPos, priority) {
+    const checkedFormalPos = formalizeIntentPos(creep.pos);
+    if (typeof checkedFormalPos.x !== 'number' || typeof checkedFormalPos.y !== 'number') {
+        return ERR_INVALID_ARGS;
+    }
+    checkedTiles.set(packIntentTile(checkedFormalPos), creep.name);
+    const curFormalPos = formalizeIntentMovePos(creep.pos);
+    if (typeof curFormalPos.x !== 'number' || typeof curFormalPos.y !== 'number' || typeof targetFormalPos.x !== 'number' || typeof targetFormalPos.y !== 'number') {
+        return ERR_INVALID_ARGS;
+    }
+    priority = priority || 0;
+    cachedMoveIntents.set(creep.name, creepIdx);
+    Priorities[creepIdx] = priority;
+    IntentTiles[creepIdx++] = packIntentTile(targetFormalPos);
+    IntentTiles[creepIdx++] = packIntentTile(curFormalPos);
+    return OK;
+}
+
+function wrapCheckTile(checkTileFunc) {
+    return (tileList) => {
+        const posList = [];
+        for (let i = 0; i < tileList.length; i++) {
+            posList.push(tile2Pos(tileList[i]));
+        }
+        return checkTileFunc(posList);
+    };
+}
+
+const defaultIsWorkTile = (creep, pos) => true;
+let isWorkTile = defaultIsWorkTile;
+const yieldMoveScore = 6;
+
+function defaultCheckTile(tileList) {
+    const moveIntents = [];
+    for (let i = 0; i < tileList.length; i++) {
+        const tile = tileList[i];
+        if (checkedTiles.has(tile)) {
+            continue;
+        }
+        const pos = tile2Pos(tile);
+        const roomName = pos.roomName;
+        const room = Game.rooms[roomName];
+        if (!room) {
+            checkedTiles.set(tile, '');
+            continue;
+        }
+        let creep = room.lookForAt('creep', pos.x, pos.y).filter(c => c.my)[0];
+        if (!creep) {
+            creep = room.lookForAt('powerCreep', pos.x, pos.y).filter(c => c.my)[0];
+            if (!creep) {
+                checkedTiles.set(tile, '');
+                continue;
+            }
+        }
+        checkedTiles.set(tile, creep.name);
+        const intent = [];
+        const px = creep.pos.x;
+        const py = creep.pos.y;
+        if (creep.fatigue) {
+            intent.push({
+                target: tile,
+                score: activeMoveScore
+            });
+        } else {
+            intent.push({
+                target: tile,
+                score: 0
+            });
+            if (!(roomName in costMatrixCache)) {
+                generateCostMatrix(room);
+            }
+            const CostMatrix = costMatrixCache[roomName].false;
+            const edgeArray = costMatrixCache[roomName].edgeArray;
+            const terrain = creep.room.getTerrain().getRawBuffer();
+            const startIdx = (py * 50 + px) << 3;
+            for (let idx = startIdx; idx < startIdx + 8; idx++) {
+                const v = edgeArray[idx];
+                if (v === 0) {
+                    break;
+                }
+                const vx = v % 50;
+                const vy = v / 50 | 0;
+                const cost = CostMatrix.get(vx, vy);
+                if (cost === 255) {
+                    continue;
+                }
+                let score;
+                if (isWorkTile(creep, new RoomPosition(vx, vy, roomName))) {
+                    score = yieldMoveScore;
+                } else {
+                    score = badMoveScore;
+                }
+                if (terrain[v] === TERRAIN_MASK_SWAMP && cost !== 1) {
+                    score += passiveMoveScore << 2;
+                }
+                const formalPos = formalizeIntentPos(new RoomPosition(vx, vy, roomName));
+                intent.push({
+                    target: packIntentTile(formalPos),
+                    score
+                });
+            }
+        }
+
+        moveIntents.push({
+            start: creep.name,
+            isSuper: false,
+            targetList: intent
+        });
+    }
+    return moveIntents;
+}
+
+let checkTile = defaultCheckTile;
+
+function resetMoveIntentState() {
+    cachedMoveIntents.clear();
+    checkedTiles.clear();
+    creepIdx = 1;
+}
+
+function betterCancelOrder(methodName) {
+    if (methodName == 'move' || methodName == 'moveTo') {
+        cachedMoveIntents.delete(this.name);
+        const formalCreepPos = formalizeIntentPos(this.pos);
+        if (typeof formalCreepPos.x === 'number' && typeof formalCreepPos.y === 'number') {
+            checkedTiles.delete(packIntentTile(formalCreepPos));
+        }
+    }
+    return getOriginCancelOrderMethod(this).call(this, methodName);
+}
+
+function endTickResolve(userIsWorkTile) {
+    const resolveStartTime = Game.cpu.getUsed();
+    if (userIsWorkTile && typeof userIsWorkTile === 'function') {
+        isWorkTile = userIsWorkTile;
+    } else {
+        isWorkTile = defaultIsWorkTile;
+    }
+
+    const moveIntents = [];
+    try {
+        for (const [creepName, idx] of cachedMoveIntents) {
+            let creep = Game.creeps[creepName];
+            if (!creep) {
+                creep = Game.powerCreeps[creepName];
+            }
+            const targetTile = IntentTiles[idx];
+            const currentTile = IntentTiles[idx + 1];
+            const targetList = [
+                {
+                    target: targetTile,
+                    score: activeMoveScore << Priorities[idx]
+                },
+                {
+                    target: currentTile,
+                    score: 0
+                }
+            ];
+            moveIntents.push({
+                start: creepName,
+                isSuper: false,
+                targetList
+            });
+        }
+
+        if (!moveIntents.length) {
+            return;
+        }
+
+        const result = moveMatch(moveIntents, checkTile);
+        const allCreeps = Game.creeps;
+        const allPowerCreeps = Game.powerCreeps;
+        let moveCount = 0;
+        for (let i = 0; i < result.length; i++) {
+            const { start, target } = result[i];
+            const startIdx = cachedMoveIntents.get(start);
+            if (!startIdx || target === IntentTiles[startIdx + 1]) {
+                continue;
+            }
+            let creep = allCreeps[start];
+            if (!creep) {
+                creep = allPowerCreeps[start];
+            }
+            if (!creep) {
+                continue;
+            }
+            const creepPos = creep.pos;
+            const pos = tile2Pos(target);
+            if (pos.x !== creepPos.x || pos.y !== creepPos.y) {
+                getOriginMoveMethod(creep).call(creep, getDirection(creepPos, pos));
+                moveCount++;
+            }
+        }
+
+        if (isCpuStatsEnabled()) {
+            const bucket = analyzeCPU.endTickResolve || (analyzeCPU.endTickResolve = { sum: 0, calls: 0, moveCount: 0 });
+            bucket.calls++;
+            bucket.moveCount += moveCount;
+            bucket.sum += Game.cpu.getUsed() - resolveStartTime - moveCount * 0.2;
+        }
+    } finally {
+        resetMoveIntentState();
+        isWorkTile = defaultIsWorkTile;
+    }
+}
+
 function wrapFn(fn, name) {
     return function () {
         if (name === 'moveTo') {
@@ -3037,7 +3369,7 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
         found ? cacheHitCost += Game.cpu.getUsed() - startCacheSearch : cacheMissCost += Game.cpu.getUsed() - startCacheSearch;
     }
 
-    return startRoute(creep, creepCache, ops.visualizePathStyle, toPos, ops.ignoreCreeps);
+    return startRoute(creep, creepCache, ops, toPos, ops.ignoreCreeps);
 }
 
 // 14.1 临时绕路重试节流：同一堵点签名下按退避间隔触发 PathFinder
@@ -3116,7 +3448,7 @@ function moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx) {
         showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
     }
     creepMoveCache[creep.name] = Game.time;
-    return originMove.call(creep, getDirection(creep.pos, curStep));
+    return registerMoveIntent(creep, formalizeIntentMovePos(curStep), ops.priority);
 }
 
 /**
@@ -3145,99 +3477,51 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
     const nextStep = posArray[idx + 1];
 
     if (isEqual(creep.pos, curStep)) {    // 正常
-        if ('storage' in creep.room && inRange(creep.room.storage.pos, creep.pos, coreLayoutRange) && ops.ignoreCreeps) {
-            if (isCpuStatsEnabled()) testNearStorageCheck++;
-            if (trySwap(creep, nextStep, false, true) == OK) {
-                if (isCpuStatsEnabled()) testNearStorageSwap++;
-            }
-        }
-        //creep.say('正常');
-        return moveOneStep(creep, ops.visualizePathStyle, toPos);
+        return moveOneStep(creep, ops, toPos);
     }
 
     if (idx + 2 in posArray && isEqual(creep.pos, nextStep)) {  // 跨房了
         creepCache.idx++;
         if (!path.directionArray[idx + 2]) {  // 第一次见到该房则检查房间
             if (checkRoom(creep.room, path, creepCache.idx)) {   // 传creep所在位置的idx
-                //creep.say('新房 可走');
-                //console.log(`${Game.time}: ${creep.name} check room ${creep.pos.roomName} OK`);
-                return moveOneStep(creep, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+                return moveOneStep(creep, ops, toPos);  // 路径正确，继续走
             }   // else 检查中发现房间里有建筑挡路，重新寻路
-            //console.log(`${Game.time}: ${creep.name} check room ${creep.pos.roomName} failed`);
             deletePath(path);
             return null;
         }
-        //creep.say('这个房间见过了');
-        return moveOneStep(creep, ops.visualizePathStyle, toPos);  // 路径正确，继续走
+        return moveOneStep(creep, ops, toPos);  // 路径正确，继续走
     }
 
     if (isNear(creep.pos, curStep)) {  // 堵路了
-        const code = trySwap(creep, curStep, ops.bypassHostileCreeps, ops.ignoreCreeps);  // 检查挡路creep
-        if (code == ERR_INVALID_TARGET) {   // 是被设置了不可对穿的creep或者敌对creep挡路，临时绕路
-            if (isCpuStatsEnabled()) testBypass++;
-            ops.bypassRange = ops.bypassRange || 5; // 默认值
-            if (typeof ops.bypassRange != "number" || typeof ops.range != 'number') {
-                return ERR_INVALID_ARGS;
+        if (Game.time - creepMoveCache[creep.name] >= 5) {
+            if (isObstacleStructure(creep.room, curStep, ops.ignoreDestructibleStructures)) {
+                delete costMatrixCache[creep.pos.roomName];
+                delete costMatrixRevision[creep.pos.roomName];
+                delete sameRoomEdgeCostMatCache[creep.pos.roomName];
+                deletePath(path);
+                return null;
             }
-            const bypassSignature = buildTemporalBypassSignature(path, idx, curStep, toPos, ops);
-            const canAttemptBypass = shouldAttemptTemporalBypass(creepCache, bypassSignature);
-            if (canAttemptBypass) {
-                let bypassOk = findTemporalPath(creep, toPos, ops);
-                let bypassRelaxed = false;
-                // 调用方显式传了 ignoreCreeps=false 时，若首次临时绕路失败，
-                // 兜底放宽一次（仅本次堵路），避免“既不对穿也不绕路”的硬卡死。
-                if (!bypassOk && !ops.ignoreCreeps) {
-                    const relaxedOps = Object.assign({}, ops, {
-                        ignoreCreeps: true,
-                        bypassRange: Math.max(ops.bypassRange || 5, 7)
-                    });
-                    bypassOk = findTemporalPath(creep, toPos, relaxedOps);
-                    bypassRelaxed = bypassOk;
-                }
-                recordTemporalBypassResult(creepCache, bypassSignature, bypassOk);
-                if (bypassOk) { // 有路，creepCache的内容会被这个函数更新
-                    //creep.say('开始绕路');
-                    return startRoute(
-                        creep,
-                        creepCache,
-                        ops.visualizePathStyle,
-                        toPos,
-                        ops.ignoreCreeps || bypassRelaxed
-                    );
-                }
+            if (findTemporalPath(creep, toPos, ops)) {
+                if (isCpuStatsEnabled()) testBypass++;
+                return startRoute(creep, creepCache, ops, toPos);
             }
-            // 若调用方禁用了 ignoreCreeps，默认 trySwap 会直接返回 invalid。
-            // 在堵路分支兜底再尝试一次可对穿交换，能显著降低路口僵持。
-            if (!ops.ignoreCreeps && trySwap(creep, curStep, ops.bypassHostileCreeps, true) == OK) {
-                return moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx);
+            creepMoveCache[creep.name] = Game.time;
+            if (ops.visualizePathStyle) {
+                showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
             }
-            // 绕路冷却窗口内直接沿旧路径尝试推进，避免空转并等待前方creep让路
-            return moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx);
-        }
-
-        if (code == ERR_NOT_FOUND && isObstacleStructure(creep.room, curStep, ops.ignoreDestructibleStructures)) {   // 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
-            //console.log(`${Game.time}: ${creep.name} find obstacles at ${creep.pos}`);
-            delete costMatrixCache[creep.pos.roomName];
-            delete costMatrixRevision[creep.pos.roomName];
-            delete sameRoomEdgeCostMatCache[creep.pos.roomName];
-            deletePath(path);
-            return null;
-        }
-        // else 上tick移动失败但也不是建筑物和creep/pc挡路。有2个情况：1.下一格路本来是穿墙路并碰巧消失了；2.下一格是房间出口，有另一个creep抢路了然后它被传送到隔壁了。不处理第1个情况，按第2个情况对待。
-        //creep.say('对穿' + getDirection(creep.pos, posArray[idx]) + '-' + originMove.call(creep, getDirection(creep.pos, posArray[idx])));
-        return moveTowardCachedStep(creep, curStep, ops, toPos, posArray, idx);  // 有可能是第一步就没走上路or通过略过moveTo的move操作偏离路线，直接call可兼容
-    }
-
-    if (idx - 1 >= 0 && isNear(creep.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
-        //creep.say('偏离一格');
-        if (creep.pos.roomName == posArray[idx - 1].roomName && ops.ignoreCreeps) {    // 不是跨房而是偏离，检查对穿
-            trySwap(creep, posArray[idx - 1], false, true);
+            return registerMoveIntent(creep, formalizeIntentMovePos(curStep), ops.priority);
         }
         if (ops.visualizePathStyle) {
             showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
         }
-        creepMoveCache[creep.name] = Game.time;
-        return originMove.call(creep, getDirection(creep.pos, posArray[idx - 1]));    // 同理兼容略过moveTo的move
+        return registerMoveIntent(creep, formalizeIntentMovePos(curStep), ops.priority);
+    }
+
+    if (idx - 1 >= 0 && isNear(creep.pos, posArray[idx - 1])) {  // 因为堵路而被自动传送反向跨房了
+        if (ops.visualizePathStyle) {
+            showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
+        }
+        return registerMoveIntent(creep, formalizeIntentMovePos(posArray[idx - 1]), ops.priority);
     }
 
     return null; // 彻底偏离，重新寻路
@@ -3262,6 +3546,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
     const args = resolveMoveToArgs(this, firstArg, secondArg, opts);
     let toPos = args.toPos;
     const ops = normalizeMoveToOpts(args.ops);
+    findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
 
     const parsedTarget = parseShardRoomName(toPos.roomName);
     if (parsedTarget.shard && parsedTarget.shard === Game.shard.name) {
@@ -3385,16 +3670,13 @@ function betterMoveTo(firstArg, secondArg, opts) {
         if (isEqual(toPos, this.pos) || ops.range) {  // 已到达
             return OK;
         } // else 走一步
-        if (this.pos.roomName == toPos.roomName && ops.ignoreCreeps) {    // 同房间考虑一下对穿
-            trySwap(this, toPos, false, true);
-        }
         creepMoveCache[this.name] = Game.time;      // 用于防止自己移动后被误对穿
         if (isCpuStatsEnabled()) {
             testNormal++;
             let t = Game.cpu.getUsed() - startTime;
             normalLogicalCost += t > 0.2 ? t - 0.2 : t;
         }
-        return originMove.call(this, getDirection(this.pos, toPos));
+        return registerMoveIntent(this, formalizeIntentPos(toPos), ops.priority);
     }
     if (ops.range === undefined) ops.range = 1;
 
@@ -3426,19 +3708,36 @@ function betterMoveTo(firstArg, secondArg, opts) {
  * @param {DirectionConstant | Creep} target
  */
 function betterMove(target) {
-    if (typeof target == "number") {
-        const nextPos = direction2Pos(this.pos, target);
-        if (nextPos) {
-            trySwap(this, nextPos, false, true);
+    if (!this.my) {
+        return ERR_NOT_OWNER;
+    }
+    if (this.spawning) {
+        return ERR_BUSY;
+    }
+
+    if (target && ((target instanceof Creep) || (powerCreepProto && target instanceof PowerCreep))) {
+        if (!target.pos.isNearTo(this.pos)) {
+            return ERR_NOT_IN_RANGE;
         }
-        creepMoveCache[this.name] = Game.time;
-        return originMove.call(this, target);
+        registerMoveIntent(this, formalizeIntentPos(target.pos));
+        return OK;
     }
-    if (target && typeof target == 'object' && 'pos' in target) { // pull 机制
-        creepMoveCache[this.name] = Game.time;
-        return originMove.call(this, target);
+
+    if (this.fatigue > 0) {
+        return ERR_TIRED;
     }
-    return ERR_INVALID_ARGS;
+    if (!hasActiveBodypart(this.body, MOVE)) {
+        return ERR_NO_BODYPART;
+    }
+    let direction = +target;
+    if (!direction || direction < 1 || direction > 8) {
+        return ERR_INVALID_ARGS;
+    }
+    const nextPos = direction2Pos(this.pos, direction);
+    if (nextPos && Game.rooms[nextPos.roomName].getTerrain().get(nextPos.x, nextPos.y) !== TERRAIN_MASK_WALL) {
+        registerMoveIntent(this, formalizeIntentPos(nextPos));
+    }
+    return OK;
 }
 
 /**
@@ -3815,15 +4114,19 @@ function bmDeletePathInRoom(roomName) {
 
 function bmSetChangeMoveTo(bool) {
     config.changeMoveTo = !!bool;
-    const core = bool ? betterMoveTo : originMoveTo;
-    const impl = wrapFn(function (...args) {
+    const creepCore = bool ? betterMoveTo : originMoveTo;
+    const creepImpl = wrapFn(function (...args) {
         updateDontPullMeForMoveTo(this);
-        return core.apply(this, args);
+        return creepCore.apply(this, args);
     }, 'moveTo');
-    if (Creep.prototype.$moveTo) {
-        Creep.prototype.$moveTo = impl;
-    } else {
-        Creep.prototype.moveTo = impl;
+    wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
+    if (powerCreepProto) {
+        const powerCore = bool ? betterMoveTo : (originPowerMoveTo || originMoveTo);
+        const powerImpl = wrapFn(function (...args) {
+            updateDontPullMeForMoveTo(this);
+            return powerCore.apply(this, args);
+        }, 'moveTo');
+        wrapProtoMethod(powerCreepProto, 'moveTo', '$moveTo', powerImpl);
     }
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
     testCacheHits = 0;
@@ -3934,13 +4237,16 @@ function bmPrint() {
 function bmSetChangeMove(bool) {
     config.changeMove = !!bool;
     if (bool) {
-        if (!Creep.prototype.$move) {
-            Creep.prototype.$move = Creep.prototype.move;
+        wrapProtoMethod(Creep.prototype, 'move', '$move', wrapFn(betterMove, 'move'));
+        if (powerCreepProto) {
+            wrapProtoMethod(powerCreepProto, 'move', '$move', wrapFn(betterMove, 'move'));
         }
-        Creep.prototype.move = wrapFn(betterMove, 'move');
     } else if (bool === false) {
         if (Creep.prototype.$move) {
             Creep.prototype.move = Creep.prototype.$move;
+        }
+        if (powerCreepProto && powerCreepProto.$move) {
+            powerCreepProto.move = powerCreepProto.$move;
         }
     }
     analyzeCPU.move = { sum: 0, calls: 0 };
@@ -4097,6 +4403,7 @@ function resetMoveOptStats() {
     for (let fn in analyzeCPU) {
         analyzeCPU[fn] = { sum: 0, calls: 0 };
     }
+    analyzeCPU.endTickResolve = { sum: 0, calls: 0, moveCount: 0 };
     pathCounter = 0;
     testCacheHits = 0;
     testCacheMiss = 0;
@@ -4160,6 +4467,9 @@ function bmClear(opts) {
     clearObjectKeys(shardRoomNameParseCache);
     squadDerivedMatCacheTick = -1;
     clearObjectKeys(squadDerivedMatCache);
+    resetMoveIntentState();
+    isWorkTile = defaultIsWorkTile;
+    checkTile = defaultCheckTile;
 
     observers.length = 0;
     clearObjectKeys(obTimer);
@@ -4263,6 +4573,17 @@ global.BetterMove = {
     setChangeMove: bmSetChangeMove,
     creepPathCache:creepPathCache,
     setChangeMoveTo: bmSetChangeMoveTo,
+    setCheckTile(userCheckTile) {
+        if (userCheckTile === undefined) {
+            checkTile = defaultCheckTile;
+            return OK;
+        }
+        if (typeof userCheckTile !== 'function') {
+            return ERR_INVALID_ARGS;
+        }
+        checkTile = wrapCheckTile(userCheckTile);
+        return OK;
+    },
     setChangeFindClostestByPath: bmSetChangeFindClostestByPath,
     setPathClearDelay: bmSetPathClearDelay,
     setHostileCostMatrixClearDelay: bmSetHostileCostMatrixClearDelay,
@@ -4321,6 +4642,7 @@ global.BetterMove = {
         }
         return filtered;
     },
+    endTickResolve,
     print: bmPrint,
     clear: bmClear
 }
@@ -4344,6 +4666,11 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
         proto[backupName] = proto[originalName];
     }
     proto[originalName] = wrap;
+}
+
+wrapProtoMethod(Creep.prototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
+if (powerCreepProto) {
+    wrapProtoMethod(powerCreepProto, 'cancelOrder', '$cancelOrder', betterCancelOrder);
 }
 
 /**
