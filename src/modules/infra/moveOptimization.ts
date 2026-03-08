@@ -723,45 +723,29 @@ function getClosestExitPos(fromPos, toRoomName) {
  * @param {RoomPosition} toPos
  */
 function getDirection(fromPos, toPos) {
-    if (fromPos.roomName == toPos.roomName) {
-        if (toPos.x > fromPos.x) {    // 下一步在右边
-            if (toPos.y > fromPos.y) {    // 下一步在下面
-                return BOTTOM_RIGHT;
-            } else if (toPos.y == fromPos.y) { // 下一步在正右
-                return RIGHT;
-            }
-            return TOP_RIGHT;   // 下一步在上面
-        } else if (toPos.x == fromPos.x) { // 横向相等
-            if (toPos.y > fromPos.y) {    // 下一步在下面
-                return BOTTOM;
-            } else if (toPos.y < fromPos.y) {
-                return TOP;
-            }
-        } else {  // 下一步在左边
-            if (toPos.y > fromPos.y) {    // 下一步在下面
-                return BOTTOM_LEFT;
-            } else if (toPos.y == fromPos.y) {
-                return LEFT;
-            }
-            return TOP_LEFT;
-        }
-    } else {  // 房间边界点
-        if (fromPos.x == 0 || fromPos.x == 49) {  // 左右相邻的房间，只需上下移动（左右边界会自动弹过去）
-            if (toPos.y > fromPos.y) {   // 下一步在下面
-                return BOTTOM;
-            } else if (toPos.y < fromPos.y) { // 下一步在上
-                return TOP
-            } // else 正左正右
-            return fromPos.x ? RIGHT : LEFT;
-        } else if (fromPos.y == 0 || fromPos.y == 49) {    // 上下相邻的房间，只需左右移动（上下边界会自动弹过去）
-            if (toPos.x > fromPos.x) {    // 下一步在右边
-                return RIGHT;
-            } else if (toPos.x < fromPos.x) {
-                return LEFT;
-            }// else 正上正下
-            return fromPos.y ? BOTTOM : TOP;
-        }
+    const from = formalizeIntentPos(fromPos);
+    const to = formalizeIntentPos(toPos);
+    if (typeof from.x !== 'number' || typeof from.y !== 'number' || typeof to.x !== 'number' || typeof to.y !== 'number') {
+        return;
     }
+
+    const deltaX = Math.sign(to.x - from.x);
+    const deltaY = Math.sign(to.y - from.y);
+
+    if (deltaX > 0) {
+        if (deltaY > 0) return BOTTOM_RIGHT;
+        if (deltaY < 0) return TOP_RIGHT;
+        return RIGHT;
+    }
+
+    if (deltaX < 0) {
+        if (deltaY > 0) return BOTTOM_LEFT;
+        if (deltaY < 0) return TOP_LEFT;
+        return LEFT;
+    }
+
+    if (deltaY > 0) return BOTTOM;
+    if (deltaY < 0) return TOP;
 }
 
 // let reg2 = /^[WE]([0-9]+)[NS]([0-9]+)$/;    // parse得到['E28N7','28','7']
@@ -4333,6 +4317,9 @@ function betterMove(target) {
         return ERR_INVALID_ARGS;
     }
     const nextPos = direction2Pos(this.pos, direction);
+    if (!nextPos) {
+        return originMove.call(this, direction);
+    }
     if (nextPos && Game.rooms[nextPos.roomName].getTerrain().get(nextPos.x, nextPos.y) !== TERRAIN_MASK_WALL) {
         registerMoveIntent(this, formalizeIntentPos(nextPos));
     }
