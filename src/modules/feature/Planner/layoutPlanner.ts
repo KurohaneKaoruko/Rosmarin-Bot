@@ -5,6 +5,7 @@ import { autoPlanner } from '@/modules/feature/Planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/feature/Planner/dynamic/63Planner';
 import { scorpiorPlanner } from '@/modules/feature/Planner/dynamic/ScorpiorPlanner';
 import * as StaticPlanner from '@/modules/feature/Planner/static';
+import { getCoreDepotPointFromLayout } from '@/modules/utils/coreDepot';
 import { getLayoutData, getRoomData } from '@/modules/utils/memory';
 
 /**
@@ -192,6 +193,50 @@ function shouldSkipBuildAtPos(
             break;
     }
     return false;
+}
+
+function isCoreDepotStructure(structureType: string): structureType is 'storage' | 'terminal' {
+    return structureType === STRUCTURE_STORAGE || structureType === STRUCTURE_TERMINAL;
+}
+
+function handleCoreDepotSite(
+    room: Room,
+    layoutMemory: LayoutMemoryMap,
+    structureType: 'storage' | 'terminal'
+): number {
+    const point = getCoreDepotPointFromLayout(layoutMemory, room.name, structureType);
+    if (!point) return 0;
+
+    const buildMax = (CONTROLLER_STRUCTURES as any)?.[structureType]?.[room.level] ?? 0;
+    const existingStructure = structureType === 'storage' ? room.storage : room.terminal;
+    const allSites = room.find(FIND_CONSTRUCTION_SITES);
+    const hasRealSite = allSites.some((site) => site && site.structureType === structureType);
+    if (existingStructure || hasRealSite) return 0;
+
+    const pos = new RoomPosition(point.x, point.y, room.name);
+    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES) as ConstructionSite[];
+    const structures = pos.lookFor(LOOK_STRUCTURES) as Structure<StructureConstant>[];
+
+    if (buildMax > 0) {
+        const containerSite = sites.find((site) => site.structureType === STRUCTURE_CONTAINER);
+        if (containerSite) containerSite.remove();
+
+        const placeholder = structures.find((structure) => structure.structureType === STRUCTURE_CONTAINER) as StructureContainer | undefined;
+        if (placeholder) placeholder.destroy();
+
+        const nextSites = pos.lookFor(LOOK_CONSTRUCTION_SITES) as ConstructionSite[];
+        const nextStructures = pos.lookFor(LOOK_STRUCTURES) as Structure<StructureConstant>[];
+        if (nextSites.length > 0) return 0;
+        if (shouldSkipBuildAtPos(room, structureType, nextStructures, pos)) return 0;
+
+        return room.createConstructionSite(point.x, point.y, structureType) === OK ? 1 : 0;
+    }
+
+    if (sites.some((site) => site.structureType === STRUCTURE_CONTAINER)) return 0;
+    if (structures.some((structure) => structure.structureType === STRUCTURE_CONTAINER)) return 0;
+    if (shouldSkipBuildAtPos(room, STRUCTURE_CONTAINER, structures, pos)) return 0;
+
+    return room.createConstructionSite(point.x, point.y, STRUCTURE_CONTAINER) === OK ? 1 : 0;
 }
 
 /**
@@ -888,6 +933,11 @@ export const LayoutPlanner = {
             if (created >= budget) break;
             const layoutArray = layoutMemory[s];
             if (!layoutArray || !layoutArray.length) continue;
+
+            if (isCoreDepotStructure(s)) {
+                created += handleCoreDepotSite(room, layoutMemory, s);
+                continue;
+            }
 
             const buildMax = (CONTROLLER_STRUCTURES as any)?.[s]?.[room.level] ?? 0;
             if (!buildMax) continue;

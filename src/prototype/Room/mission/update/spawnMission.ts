@@ -47,12 +47,56 @@ const hasControllerEnergyBuffer = (room: Room) => {
     return !!room.container?.some(container => container.pos.inRangeTo(room.controller!.pos, 3));
 }
 
-const getMyConstructionSites = (room: Room) => {
+export const getMyConstructionSites = (room: Room) => {
     const cachedSites = (room as any).constructionSite as ConstructionSite[] | undefined;
     const sites = (cachedSites && cachedSites.length > 0)
         ? cachedSites
         : room.find(FIND_CONSTRUCTION_SITES);
-    return sites.filter((s) => s && (s as any).my);
+    return sites.filter((site) => site && (site as any).my);
+}
+
+const countMyConstructionSitesByType = (room: Room, structureType: StructureConstant) => {
+    let count = 0;
+    for (const site of getMyConstructionSites(room)) {
+        if (site.structureType === structureType) count++;
+    }
+    return count;
+}
+
+const hasIncompletePrimaryStructures = (room: Room) => {
+    const level = room.level;
+    const spawnCount = (room.spawn?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_SPAWN);
+    const extensionCount = (room.extension?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_EXTENSION);
+    if (spawnCount < (CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][level] || 0)) return true;
+    if (extensionCount < (CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][level] || 0)) return true;
+    if (level >= 4) {
+        const storageCount = (room.storage ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_STORAGE);
+        if (storageCount < 1) return true;
+    }
+    if (level >= 6) {
+        const terminalCount = (room.terminal ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_TERMINAL);
+        if (terminalCount < 1) return true;
+    }
+    return false;
+}
+
+export const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
+    const state = getEnergyState(room);
+    const lowPhase = room.level <= 6 || state === 'LOW' || state === 'CRITICAL';
+    if (!lowPhase) return false;
+    return hasIncompletePrimaryStructures(room);
+}
+
+export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
+    if (!shouldDelayUpgraderForPrimaryBuild(room)) return 0;
+    const tasks = ((room as any).getAllMissionFromPool?.('spawn') || []) as Task[];
+    let removed = 0;
+    for (const task of tasks) {
+        if ((task as any)?.data?.memory?.role !== 'upgrader') continue;
+        (room as any).deleteMissionFromPool?.('spawn', task.id);
+        removed += 1;
+    }
+    return removed;
 }
 
 const hasMyConstructionSitesCached = (room: Room) => {
@@ -98,38 +142,6 @@ const getStorageDrivenUpgraderTarget = (room: Room, baseNum: number) => {
     const linearNeed = Math.floor(Math.max(0, storageEnergy - offset) / 100000);
     if (linearNeed <= 0) return baseNum;
     return Math.max(baseNum, Math.min(baseNum + 2, linearNeed));
-}
-
-const countMyConstructionSitesByType = (room: Room, structureType: StructureConstant) => {
-    let count = 0;
-    for (const site of getMyConstructionSites(room)) {
-        if (site.structureType === structureType) count++;
-    }
-    return count;
-}
-
-const hasIncompletePrimaryStructures = (room: Room) => {
-    const level = room.level;
-    const spawnCount = (room.spawn?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_SPAWN);
-    const extensionCount = (room.extension?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_EXTENSION);
-    if (spawnCount < (CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][level] || 0)) return true;
-    if (extensionCount < (CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][level] || 0)) return true;
-    if (level >= 4) {
-        const storageCount = (room.storage ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_STORAGE);
-        if (storageCount < 1) return true;
-    }
-    if (level >= 6) {
-        const terminalCount = (room.terminal ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_TERMINAL);
-        if (terminalCount < 1) return true;
-    }
-    return false;
-}
-
-const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
-    const state = getEnergyState(room);
-    const lowPhase = room.level <= 6 || state === 'LOW' || state === 'CRITICAL';
-    if (!lowPhase) return false;
-    return hasIncompletePrimaryStructures(room);
 }
 
 const getDowngradeUniversalTarget = (room: Room) => {
@@ -494,6 +506,7 @@ export default class SpawnMission extends Room {
      */
     UpdateSpawnMission(offset = 0) {
         if (!this.spawn) return false;
+        pruneDelayedUpgraderSpawnMissions(this);
         
         const CreepNum = this.getCreepNum();
         const SpawnMissionNum = this.getSpawnMissionNum();

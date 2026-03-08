@@ -1,4 +1,5 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { getCoreDepotContainer, getCoreDepotTarget, hasCoreDepotTarget, isCoreDepotContainer } from '@/modules/utils/coreDepot';
 
 type CarrierLockEntry = {
     name: string;
@@ -96,7 +97,7 @@ const getPositiveStoreTypes = (store: StoreDefinition): ResourceConstant[] => {
 
 const canCarryResourceSafely = (creep: Creep, resourceType: ResourceConstant): boolean => {
     if (resourceType === RESOURCE_ENERGY) return true;
-    if (!creep.room.storage && !creep.room.terminal) return false;
+    if (!hasCoreDepotTarget(creep.room)) return false;
     return !!creep.findBestStoreTarget(resourceType);
 };
 
@@ -147,7 +148,9 @@ const pickBestWithdrawTypeFromStore = (
 // 获取 storage 或 terminal 作为能量来源
 const getStorageOrTerminal = (creep: Creep) => {
     const { storage, terminal, container, link, controller } = creep.room as any;
-    if (!storage && !terminal) return null;
+    const storageFallback = storage || getCoreDepotContainer(creep.room, 'storage');
+    const terminalFallback = terminal || getCoreDepotContainer(creep.room, 'terminal');
+    if (!storageFallback && !terminalFallback) return null;
     
     const controllerContainer = container?.find((c: StructureContainer) => c.pos.inRangeTo(controller, 1));
     const controllerLink = link?.find((l: StructureLink) => l.pos.inRangeTo(controller, 2));
@@ -155,22 +158,24 @@ const getStorageOrTerminal = (creep: Creep) => {
     const needEnergy = creep.room.CheckSpawnAndTower() ||
                        (!controllerLink && controllerContainer?.store.getFreeCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.CONTAINER_MIN);
     
-    const storageEnergy = storage?.store[RESOURCE_ENERGY] || 0;
-    const terminalEnergy = terminal?.store[RESOURCE_ENERGY] || 0;
+    const storageEnergy = storageFallback?.store[RESOURCE_ENERGY] || 0;
+    const terminalEnergy = terminalFallback?.store[RESOURCE_ENERGY] || 0;
+    const getMinEnergy = (target: AnyStoreStructure | null) =>
+        target?.structureType === STRUCTURE_CONTAINER ? THRESHOLDS.ENERGY.CONTAINER_MIN : THRESHOLDS.ENERGY.STORAGE_MIN;
     
     if (needEnergy) {
         // 优先从能量更多的结构取
-        if (storageEnergy > THRESHOLDS.ENERGY.STORAGE_MIN && terminalEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) {
-            return storageEnergy < terminalEnergy ? terminal : storage;
+        if (storageEnergy > getMinEnergy(storageFallback) && terminalEnergy > getMinEnergy(terminalFallback)) {
+            return storageEnergy < terminalEnergy ? terminalFallback : storageFallback;
         }
-        if (storageEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) return storage;
-        if (terminalEnergy > THRESHOLDS.ENERGY.STORAGE_MIN) return terminal;
+        if (storageEnergy > getMinEnergy(storageFallback)) return storageFallback;
+        if (terminalEnergy > getMinEnergy(terminalFallback)) return terminalFallback;
     }
 
     // 平衡 terminal 和 storage 的能量
-    if (terminal && storage && terminalEnergy > THRESHOLDS.TRANSPORT.MIN_AMOUNT &&
-        storage.store.getFreeCapacity() > THRESHOLDS.TRANSPORT.MIN_AMOUNT && terminalEnergy > storageEnergy) {
-        return terminal;
+    if (terminalFallback && storageFallback && terminalEnergy > THRESHOLDS.TRANSPORT.MIN_AMOUNT &&
+        storageFallback.store.getFreeCapacity() > THRESHOLDS.TRANSPORT.MIN_AMOUNT && terminalEnergy > storageEnergy) {
+        return terminalFallback;
     }
     
     return null;
@@ -260,7 +265,7 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     const claimed = getClaimedTargetIdsByCarrier(room.name);
 
     const urgentEnergy = room.CheckSpawnAndTower();
-    const hasStorage = !!room.storage || !!room.terminal;
+    const hasStorage = hasCoreDepotTarget(room);
     const freeCap = store.getFreeCapacity();
 
     const candidates: { score: number; plan: WithdrawPlan }[] = [];
@@ -345,6 +350,7 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     for (const c of containers) {
         if (excludeId && c.id === excludeId) continue;
         if (isNoPath(room.name, c.id)) continue;
+        if (isCoreDepotContainer(room, c)) continue;
         if (controller && c.pos.inRangeTo(controller, 1) && (urgentEnergy || !hasStorage)) continue;
         if (claimed.has(c.id) || isLockedByOtherCarrier(room.name, c.id, creep.name)) continue;
 
@@ -364,12 +370,13 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
 
     // 优先级4：从 storage/terminal 取能量（仅用于补能模式的兜底）
     if (urgentEnergy && freeCap > 0) {
-        const source = getStorageOrTerminal(creep) as (StructureStorage | StructureTerminal | null);
-        if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.STORAGE_MIN) {
+        const source = getStorageOrTerminal(creep) as AnyStoreStructure | null;
+        const minAmount = source?.structureType === STRUCTURE_CONTAINER ? THRESHOLDS.ENERGY.CONTAINER_MIN : THRESHOLDS.ENERGY.STORAGE_MIN;
+        if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > minAmount) {
             if ((!excludeId || source.id !== excludeId) && !isNoPath(room.name, source.id)) {
             candidates.push({
                 score: 20 + Math.min(20, Math.floor(source.store.getUsedCapacity(RESOURCE_ENERGY) / 1000)) + scoreByRange(pos.getRangeTo(source)),
-                plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : 'storage', resourceType: RESOURCE_ENERGY, lockTtl: 1 }
+                plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : source.structureType === STRUCTURE_STORAGE ? 'storage' : 'container', resourceType: RESOURCE_ENERGY, lockTtl: 1 }
             });
             }
         }
@@ -489,7 +496,7 @@ const moveToNextCarryTarget = (creep: Creep) => {
         const dropType = carryTypes.find(t => creep.store[t] > 0);
         if (!dropType) return false;
 
-        const anchor = room.storage || room.terminal || pos.findClosestByRange(roomAny.spawn || []);
+        const anchor = getCoreDepotTarget(room, 'storage') || getCoreDepotTarget(room, 'terminal') || pos.findClosestByRange(roomAny.spawn || []);
         if (anchor && pos.getRangeTo(anchor) > 2) {
             creep.moveTo(anchor, { visualizePathStyle: { stroke: '#ffffff' } });
             return true;
@@ -604,7 +611,7 @@ const carry = (creep: Creep) => {
         const dropType = carryTypes.find(t => store[t] > 0);
         if (!dropType) return true;
 
-        const anchor = room.storage || room.terminal || pos.findClosestByRange(roomAny.spawn || []);
+        const anchor = getCoreDepotTarget(room, 'storage') || getCoreDepotTarget(room, 'terminal') || pos.findClosestByRange(roomAny.spawn || []);
         if (anchor && pos.getRangeTo(anchor) > 2) {
             creep.moveTo(anchor, { visualizePathStyle: { stroke: '#ffffff' } });
             return;
@@ -690,3 +697,5 @@ const CarrierFunction = {
 };
 
 export default CarrierFunction;
+
+export { getStorageOrTerminal, selectWithdrawPlan };

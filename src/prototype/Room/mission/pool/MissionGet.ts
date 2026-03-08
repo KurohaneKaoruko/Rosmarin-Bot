@@ -3,6 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
+import { pruneDelayedUpgraderSpawnMissions } from '../update/spawnMission';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
 
@@ -220,6 +221,7 @@ export default class MissionGet extends Room {
     }
     // 获取孵化任务
     getSpawnMission() {
+        pruneDelayedUpgraderSpawnMissions(this);
         const energyAvailable = this.energyAvailable;
         const filter = (task: Task) => {
             const data = task.data as SpawnTask;
