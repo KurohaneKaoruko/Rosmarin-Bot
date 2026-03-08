@@ -748,6 +748,21 @@ function getDirection(fromPos, toPos) {
     if (deltaY < 0) return TOP;
 }
 
+function isNearExitDirection(pos, exitDir, range = 1) {
+    switch (exitDir) {
+        case FIND_EXIT_TOP:
+            return pos.y <= range;
+        case FIND_EXIT_RIGHT:
+            return pos.x >= 49 - range;
+        case FIND_EXIT_BOTTOM:
+            return pos.y >= 49 - range;
+        case FIND_EXIT_LEFT:
+            return pos.x <= range;
+        default:
+            return false;
+    }
+}
+
 // let reg2 = /^[WE]([0-9]+)[NS]([0-9]+)$/;    // parse得到['E28N7','28','7']
 // let isHighWay = config.地图房号最大数字超过100 ?
 //     (roomName) => {
@@ -2070,6 +2085,14 @@ function checkTemporalAvoidExit(pos, room, costMat, targetRoomName) {    // 用�
 
     const neighbors = Game.map.describeExits(room.name);
     const refine = !!config.enableTemporalBypassRefine;
+
+    if (targetRoomName) {
+        const preferredExitDir = room.findExitTo(targetRoomName);
+        if (isNearExitDirection(pos, preferredExitDir, 2)) {
+            temporalAvoidExitCache[cacheKey] = '';
+            return;
+        }
+    }
 
     if (!refine) {
         for (let direction in neighbors) {
