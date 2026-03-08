@@ -168,7 +168,15 @@ const HarvesterAction = {
         }
 
         // 尝试维护或建造
-        if (creep.maintainSourceContainer()) {
+        const maintainResult = creep.maintainSourceContainer();
+        if (maintainResult === 'acted') {
+            return;
+        }
+        if (maintainResult === 'blocked') {
+            if (!stayAndBuildNearby(creep)) {
+                creep.drop(RESOURCE_ENERGY);
+            }
+            this.chooseNextAction(creep);
             return;
         }
         

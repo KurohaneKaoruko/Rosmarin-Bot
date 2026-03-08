@@ -98,23 +98,23 @@ export default class SourceFunction extends Creep {
 
     /**
      * 维护 Source 旁的 Container (建造/修理)
-     * @returns 是否进行了动作
+     * @returns `acted` 表示本 tick 已处理；`blocked` 表示想建但当前建不出来；`idle` 表示当前无需处理
      */
-    maintainSourceContainer(): boolean {
-        if (this.store[RESOURCE_ENERGY] === 0) return false;
+    maintainSourceContainer(): 'acted' | 'blocked' | 'idle' {
+        if (this.store[RESOURCE_ENERGY] === 0) return 'idle';
         
         const container = this.getNearbySourceContainer(1);
         if (container) {
             if (container.hits < container.hitsMax * 0.8) {
                 this.repair(container);
-                return true;
+                return 'acted';
             }
-            return false;
+            return 'idle';
         }
 
         // 寻找或创建工地
         const source = this.getBoundSource();
-        if (!source) return false;
+        if (!source) return 'idle';
         
         let site = source.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
             filter: s => s.structureType === STRUCTURE_CONTAINER
@@ -123,17 +123,18 @@ export default class SourceFunction extends Creep {
         if (!site) {
             // 如果附近有 Link，则不建造 Container (视逻辑而定，这里参考 harvester.ts)
             if (source.pos.findInRange(FIND_STRUCTURES, 2, { filter: s => s.structureType === STRUCTURE_LINK }).length > 0) {
-                return false;
+                return 'idle';
             }
             // 在当前位置创建（需确保在范围内）
             if (this.pos.inRangeTo(source, 1)) {
-                this.pos.createConstructionSite(STRUCTURE_CONTAINER);
+                const result = this.pos.createConstructionSite(STRUCTURE_CONTAINER);
+                return result === OK ? 'acted' : 'blocked';
             }
-            return false; // 下一 tick 才能建造
+            return 'idle'; // 下一 tick 靠近后再建造
         }
         
         this.build(site);
-        return true;
+        return 'acted';
     }
 
     /**

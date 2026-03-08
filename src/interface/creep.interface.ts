@@ -340,9 +340,9 @@ interface Creep {
 
     /**
      * 维护 Source 旁的 Container (建造/修理)
-     * @returns 是否进行了动作
+     * @returns `acted` 表示本 tick 已处理；`blocked` 表示想建但当前建不出来；`idle` 表示当前无需处理
      */
-    maintainSourceContainer(): boolean;
+    maintainSourceContainer(): 'acted' | 'blocked' | 'idle';
 
     /**
      * 将能量转移到 Source 旁的 Link 或 Container
