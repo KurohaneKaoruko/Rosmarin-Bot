@@ -57,6 +57,64 @@ const OUTMINE_ROAD_BODY_MIN_COVERAGE = 0.75;
 const OUTMINE_SOURCE_TARGET_WORK = 5;
 const OUTMINE_MAX_HARVESTERS_PER_SOURCE = 3;
 
+const OUTMINE_WALKABLE_SOURCE_STRUCTURE_SET = new Set<StructureConstant>([
+    STRUCTURE_CONTAINER,
+    STRUCTURE_ROAD,
+    STRUCTURE_RAMPART,
+]);
+
+const isStandableOutmineSourcePos = (room: Room, x: number, y: number): boolean => {
+    const terrain = room.getTerrain();
+    if (x <= 0 || x >= 49 || y <= 0 || y >= 49) return false;
+    if (terrain.get(x, y) === TERRAIN_MASK_WALL) return false;
+
+    const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
+    if (structures.some(structure => {
+        if (structure.structureType === STRUCTURE_RAMPART) {
+            const rampart = structure as StructureRampart;
+            return !rampart.my && !rampart.isPublic;
+        }
+        return !OUTMINE_WALKABLE_SOURCE_STRUCTURE_SET.has(structure.structureType);
+    })) return false;
+
+    const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y) as ConstructionSite[];
+    if (sites.some(site => !OUTMINE_WALKABLE_SOURCE_STRUCTURE_SET.has(site.structureType))) return false;
+
+    return true;
+}
+
+const getOutmineSourceStandableCount = (room: Room, source: Source): number => {
+    if (!room.memory.sourcePosCount) room.memory.sourcePosCount = {};
+    const cached = room.memory.sourcePosCount[source.id];
+    if (typeof cached === 'number') return cached;
+
+    const pos = source.pos;
+    const walkable = [
+        [pos.x - 1, pos.y],
+        [pos.x + 1, pos.y],
+        [pos.x, pos.y - 1],
+        [pos.x, pos.y + 1],
+        [pos.x - 1, pos.y - 1],
+        [pos.x + 1, pos.y + 1],
+        [pos.x - 1, pos.y + 1],
+        [pos.x + 1, pos.y - 1]
+    ].filter(([px, py]) => isStandableOutmineSourcePos(room, px, py)).length;
+
+    room.memory.sourcePosCount[source.id] = walkable;
+    return walkable;
+}
+
+const getOutHarvesterSlotCap = (targetRoom: Room): number => {
+    const sources = (targetRoom.source || targetRoom.find(FIND_SOURCES) || []) as Source[];
+    if (sources.length <= 0) return 0;
+
+    let totalSlots = 0;
+    for (const source of sources) {
+        totalSlots += getOutmineSourceStandableCount(targetRoom, source);
+    }
+    return totalSlots;
+}
+
 const getSpawnRoleNum = (homeRoom: Room, role: string): number => {
     // 读取指定角色在孵化队列中的数量
     return homeRoom.getSpawnMissionNum()?.[role] || 0;
@@ -234,11 +292,14 @@ const getOutHarvesterWorkParts = (homeRoom: Room, upbody?: boolean): number => {
     return Math.max(1, workParts);
 }
 
-const calcOutHarvesterTargetNum = (homeRoom: Room, sourceNum: number, upbody?: boolean): number => {
+const calcOutHarvesterTargetNum = (homeRoom: Room, sourceNum: number, upbody?: boolean, slotCap?: number): number => {
+    if (sourceNum <= 0) return 0;
     const workParts = getOutHarvesterWorkParts(homeRoom, upbody);
     const perSource = Math.ceil(OUTMINE_SOURCE_TARGET_WORK / workParts);
     const cappedPerSource = Math.min(OUTMINE_MAX_HARVESTERS_PER_SOURCE, Math.max(1, perSource));
-    return Math.max(sourceNum, sourceNum * cappedPerSource);
+    const targetNum = sourceNum * cappedPerSource;
+    if (typeof slotCap === 'number') return Math.max(0, Math.min(slotCap, targetNum));
+    return targetNum;
 }
 
 const getSmallCarryBody = (homeRoom: Room, targetRoomName: string): string => {
@@ -610,7 +671,9 @@ const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum:
     const outerHarvesters = (CreepByTargetRoom['out-harvest'] || [])
         .filter((c: any) => c.homeRoom === homeRoom.name).length;
     const spawnNum = getSpawnRoleNumByTarget(homeRoom, 'out-harvest', targetRoom.name);
-    const targetNum = calcOutHarvesterTargetNum(homeRoom, sourceNum, upbody);
+    const slotCap = getOutHarvesterSlotCap(targetRoom);
+    const targetNum = calcOutHarvesterTargetNum(homeRoom, sourceNum, upbody, slotCap);
+    if (targetNum <= 0) return false;
     if (outerHarvesters + spawnNum >= targetNum) return false;
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
