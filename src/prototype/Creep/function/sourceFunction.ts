@@ -81,33 +81,94 @@ export default class SourceFunction extends Creep {
      * 移动并重合到能量源附近的容器上
      * @returns true 表示已到达或无需移动，false 表示正在移动中
      */
-    sitOnSourceContainer(): boolean {
+    isSourceWorkTilePassable(pos: RoomPosition): boolean {
+        if (pos.x <= 0 || pos.x >= 49 || pos.y <= 0 || pos.y >= 49) return false;
+        if (this.room.getTerrain().get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
+
+        if (!pos.isEqualTo(this.pos)) {
+            const creepBlocker = pos.lookFor(LOOK_CREEPS).find(c => c.id !== this.id);
+            const powerBlocker = pos.lookFor(LOOK_POWER_CREEPS).find(c => c.id !== this.id);
+            if (creepBlocker || powerBlocker) return false;
+        }
+
+        const structures = pos.lookFor(LOOK_STRUCTURES);
+        for (const structure of structures) {
+            if (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) continue;
+            if (structure.structureType === STRUCTURE_RAMPART) {
+                const rampart = structure as StructureRampart;
+                if (rampart.my || rampart.isPublic) continue;
+            }
+            return false;
+        }
+
+        const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+        for (const site of sites) {
+            if (site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER || site.structureType === STRUCTURE_RAMPART) {
+                continue;
+            }
+            return false;
+        }
+
+        return true;
+    }
+
+    scoreSourceWorkTile(pos: RoomPosition, source: Source, container: StructureContainer | null, link: StructureLink | null): number {
+        let score = -this.pos.getRangeTo(pos);
+
+        if (this.pos.isEqualTo(pos)) score += 4;
+
+        if (container) {
+            if (pos.inRangeTo(container.pos, 1)) score += 8;
+            if (pos.isEqualTo(container.pos)) score -= 6;
+        }
+
+        if (link && pos.inRangeTo(link.pos, 1)) score += 10;
+
+        if (pos.lookFor(LOOK_STRUCTURES).some((structure) => structure.structureType === STRUCTURE_ROAD)) {
+            score += 1;
+        }
+
+        if (!pos.inRangeTo(source.pos, 1)) score -= 100;
+
+        return score;
+    }
+
+    moveToSourceWorkTile(source: Source | null = this.getBoundSource()): boolean {
+        if (!source) return false;
+
         const sourceContainer = this.getNearbySourceContainer(1);
-        if (!sourceContainer) return true;
-        const source = this.getBoundSource();
-        if (source && this.pos.inRangeTo(source, 1)) {
-            const sourceLinks = (this.room.link || []).filter(
-                link => source.pos.inRangeTo(link, 2) &&
-                    link.store.getFreeCapacity(RESOURCE_ENERGY) > 0 &&
-                    this.pos.isNearTo(link)
-            );
-            if (sourceLinks.length > 0) {
-                return true;
-            }
-            if (this.pos.inRangeTo(sourceContainer, 1)) {
-                return true;
+        const sourceLink = this.getNearbySourceLink(2);
+        let bestPos: RoomPosition | null = null;
+        let bestScore = -Infinity;
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const pos = new RoomPosition(source.pos.x + dx, source.pos.y + dy, source.pos.roomName);
+                if (!this.isSourceWorkTilePassable(pos)) continue;
+
+                const score = this.scoreSourceWorkTile(pos, source, sourceContainer, sourceLink);
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestPos = pos;
+                }
             }
         }
-        const creepsOnContainer = sourceContainer.pos.lookFor(LOOK_CREEPS);
-        const powerCreepsOnContainer = sourceContainer.pos.lookFor(LOOK_POWER_CREEPS);
-        if (
-            creepsOnContainer.length > 0 ||
-            powerCreepsOnContainer.length > 0
-        ) {
-            return true;
+
+        if (bestPos) {
+            if (this.pos.isEqualTo(bestPos)) return true;
+            this.moveTo(bestPos, { range: 0, maxRooms: 1, reusePath: 0 });
+            return false;
         }
-        this.moveTo(sourceContainer, { range: 0 });
+
+        if (this.pos.inRangeTo(source.pos, 1)) return true;
+
+        this.moveTo(source, { range: 1, maxRooms: 1 });
         return false;
+    }
+
+    sitOnSourceContainer(): boolean {
+        return this.moveToSourceWorkTile();
     }
 
     /**
@@ -161,25 +222,31 @@ export default class SourceFunction extends Creep {
         const source = this.getBoundSource();
         if (!source) return false;
 
+        const transferOrMove = (target: StructureLink | StructureContainer): boolean => {
+            const ret = this.transfer(target, RESOURCE_ENERGY);
+            if (ret === OK) return true;
+            if (ret === ERR_NOT_IN_RANGE) {
+                this.moveTo(target, { maxRooms: 1, range: 1 });
+                return true;
+            }
+            return false;
+        };
+
         const links = this.room.link;
         const linkCandidates = (links || []).filter(
             (l) => source.pos.inRangeTo(l, 2) && l.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         );
-        const inRangeLinks = linkCandidates.filter(link => this.pos.isNearTo(link));
-        if (inRangeLinks.length > 0) {
-            const link = this.pos.findClosestByRange(inRangeLinks) as StructureLink | null;
-            if (link) return this.transfer(link, RESOURCE_ENERGY) === OK;
-        }
+        const link = linkCandidates.length > 0 ? (this.pos.findClosestByRange(linkCandidates) as StructureLink | null) : null;
+        if (link && transferOrMove(link)) return true;
 
         const containers = this.room.container;
         const containerCandidates = (containers || []).filter(
             (c) => source.pos.inRangeTo(c, 2) && c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         );
-        const inRangeContainers = containerCandidates.filter(container => this.pos.isNearTo(container));
-        if (inRangeContainers.length > 0) {
-            const container = this.pos.findClosestByRange(inRangeContainers) as StructureContainer | null;
-            if (container) return this.transfer(container, RESOURCE_ENERGY) === OK;
-        }
+        const container = containerCandidates.length > 0
+            ? (this.pos.findClosestByRange(containerCandidates) as StructureContainer | null)
+            : null;
+        if (container && transferOrMove(container)) return true;
         
         return false;
     }

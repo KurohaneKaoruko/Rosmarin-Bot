@@ -331,6 +331,7 @@ interface Creep {
      * @returns 附近的 StructureLink 或 null（RCL < 5 时也返回 null）
      */
     getNearbySourceLink(range?: number): StructureLink | null;
+    moveToSourceWorkTile(source?: Source | null): boolean;
     
     /**
      * 移动并重合到能量源附近的容器上

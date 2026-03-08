@@ -445,6 +445,7 @@ const halfWorldSize = 255 >> 1;
 const activeMoveScore = 32;
 const passiveMoveScore = -4;
 const badMoveScore = -32;
+const activeYieldScore = 1;
 const IntentTiles = new Uint32Array(Math.max(Object.keys(Game.rooms).length * 64, 4096));
 const Priorities = new Uint8Array(IntentTiles.length);
 const cachedMoveIntents = new Map();
@@ -3042,6 +3043,93 @@ function defaultCheckTile(tileList) {
     return moveIntents;
 }
 
+function findFriendlyOccupantByTile(tile, creepName) {
+    const checkedName = checkedTiles.get(tile);
+    if (checkedName && checkedName !== creepName) {
+        return checkedName;
+    }
+
+    const pos = tile2Pos(tile);
+    const room = Game.rooms[pos.roomName];
+    if (!room) {
+        return '';
+    }
+    let blocker = room.lookForAt('creep', pos.x, pos.y).find((c) => c.my && c.name !== creepName);
+    if (!blocker) {
+        blocker = room.lookForAt('powerCreep', pos.x, pos.y).find((c) => c.my && c.name !== creepName);
+    }
+    return blocker ? blocker.name : '';
+}
+
+function appendActiveYieldTargets(creep, targetTile, currentTile, targetList) {
+    if (!creep) {
+        return;
+    }
+    const occupiedBy = findFriendlyOccupantByTile(targetTile, creep.name);
+    if (!occupiedBy || targetTile === currentTile || creep.fatigue) {
+        return;
+    }
+
+    const room = Game.rooms[creep.pos.roomName];
+    if (!room) {
+        return;
+    }
+    if (!(room.name in costMatrixCache)) {
+        generateCostMatrix(room);
+    }
+    const roomCache = costMatrixCache[room.name];
+    if (!roomCache) {
+        return;
+    }
+
+    const costMatrix = roomCache.false;
+    const edgeArray = roomCache.edgeArray;
+    const terrain = room.getTerrain().getRawBuffer();
+    const seenTargets = new Set();
+    for (let i = 0; i < targetList.length; i++) {
+        seenTargets.add(targetList[i].target);
+    }
+
+    const px = creep.pos.x;
+    const py = creep.pos.y;
+    const startIdx = (py * 50 + px) << 3;
+    for (let idx = startIdx; idx < startIdx + 8; idx++) {
+        const v = edgeArray[idx];
+        if (v === 0) {
+            break;
+        }
+        const vx = v % 50;
+        const vy = v / 50 | 0;
+        const cost = costMatrix.get(vx, vy);
+        if (cost === 255) {
+            continue;
+        }
+        const pos = new RoomPosition(vx, vy, room.name);
+        const formalPos = formalizeIntentPos(pos);
+        if (typeof formalPos.x !== 'number' || typeof formalPos.y !== 'number') {
+            continue;
+        }
+        const packedTarget = packIntentTile(formalPos);
+        if (seenTargets.has(packedTarget)) {
+            continue;
+        }
+        let score;
+        if (isWorkTile(creep, pos)) {
+            score = yieldMoveScore;
+        } else {
+            score = activeYieldScore;
+        }
+        if (terrain[v] === TERRAIN_MASK_SWAMP && cost !== 1) {
+            score += passiveMoveScore << 2;
+        }
+        targetList.push({
+            target: packedTarget,
+            score
+        });
+        seenTargets.add(packedTarget);
+    }
+}
+
 let checkTile = defaultCheckTile;
 
 function resetMoveIntentState() {
@@ -3088,6 +3176,7 @@ function endTickResolve(userIsWorkTile) {
                     score: 0
                 }
             ];
+            appendActiveYieldTargets(creep, targetTile, currentTile, targetList);
             moveIntents.push({
                 start: creepName,
                 isSuper: false,

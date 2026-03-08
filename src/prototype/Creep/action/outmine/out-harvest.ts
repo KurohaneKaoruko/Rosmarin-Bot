@@ -115,8 +115,7 @@ const outHarvest = {
     handleNoContainer: function(creep: Creep) {
         // 建造容器前确保在采集点附近
         const source = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        if (!creep.pos.inRangeTo(source, 1)) {
-            creep.moveTo(source, { visualizePathStyle: { stroke: '#ffaa00' } });
+        if (!creep.moveToSourceWorkTile(source)) {
             return;
         }
 
@@ -125,6 +124,10 @@ const outHarvest = {
     },
 
     handleWithContainer: function(creep, container) {
+        const source = Game.getObjectById(creep.memory.targetSourceId as Id<Source>) as Source | null;
+        if (source && !creep.moveToSourceWorkTile(source)) {
+            return;
+        }
         // 修理容器
         if (container.hits < container.hitsMax * 0.8) {
             this.repairContainer(creep, container);
@@ -137,8 +140,13 @@ const outHarvest = {
             if (result == ERR_FULL) {
                 this.handleFullContainer(creep, container);
             }
+        } else if (creep.pos.inRangeTo(container, 1)) {
+            let result = creep.transfer(container, RESOURCE_ENERGY);
+            if (result == ERR_FULL) {
+                this.handleFullContainer(creep, container);
+            }
         } else {
-            creep.moveTo(container, { reusePath: 50, visualizePathStyle: { stroke: '#ffaa00' } });
+            creep.moveTo(container, { range: 1, reusePath: 0, visualizePathStyle: { stroke: '#ffaa00' } });
         }
     },
 
@@ -247,6 +255,7 @@ const outHarvest = {
 
         // 如果离采集点过远，则移动过去
         if (creep.pos.isNear(targetSource.pos)) {
+            if (!creep.moveToSourceWorkTile(targetSource)) return;
             // source 枯竭时不能提前 return，否则会跳过“满载切换 target”判定。
             if (targetSource.energy > 0) creep.harvest(targetSource);
         } else {
@@ -258,7 +267,7 @@ const outHarvest = {
                 }) as Creep[]
             );
             if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource.pos, 3))) return;
-            creep.moveTo(targetSource, {range: 1, maxRooms: 1, plainCost: 2, swampCost: 10});
+            creep.moveToSourceWorkTile(targetSource);
         }
 
         // let container = creep.room.container.find((c) => c.pos.isNearTo(targetSource.pos));
