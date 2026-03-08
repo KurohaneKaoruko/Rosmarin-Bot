@@ -68,6 +68,32 @@ const getPrioritySourceCreepsByRoom = (() => {
     };
 })();
 
+const WALKABLE_SOURCE_STRUCTURE_SET = new Set<StructureConstant>([
+    STRUCTURE_CONTAINER,
+    STRUCTURE_ROAD,
+    STRUCTURE_RAMPART,
+]);
+
+const isStandableSourcePos = (room: Room, x: number, y: number) => {
+    const terrain = room.getTerrain();
+    if (x <= 0 || x >= 49 || y <= 0 || y >= 49) return false;
+    if (terrain.get(x, y) === TERRAIN_MASK_WALL) return false;
+
+    const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
+    if (structures.some(structure => {
+        if (structure.structureType === STRUCTURE_RAMPART) {
+            const rampart = structure as StructureRampart;
+            return !rampart.my && !rampart.isPublic;
+        }
+        return !WALKABLE_SOURCE_STRUCTURE_SET.has(structure.structureType);
+    })) return false;
+
+    const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y) as ConstructionSite[];
+    if (sites.some(site => !WALKABLE_SOURCE_STRUCTURE_SET.has(site.structureType))) return false;
+
+    return true;
+};
+
 const getMyLegacySourceBoundCreepsByRoom = (() => {
     let cachedTick = -1;
     let cached: Record<string, Creep[]> = {};
@@ -88,10 +114,6 @@ const getMyLegacySourceBoundCreepsByRoom = (() => {
 
 const getSourceWalkableCount = (room: Room, source: Source) => {
     if (!room.memory.sourcePosCount) room.memory.sourcePosCount = {};
-    const cached = room.memory.sourcePosCount[source.id];
-    if (cached) return cached;
-
-    const terrain = room.getTerrain();
     const pos = source.pos;
     const walkable = [
         [pos.x - 1, pos.y],
@@ -102,13 +124,7 @@ const getSourceWalkableCount = (room: Room, source: Source) => {
         [pos.x + 1, pos.y + 1],
         [pos.x - 1, pos.y + 1],
         [pos.x + 1, pos.y - 1]
-    ].filter((p) =>
-        p[0] > 0 &&
-        p[0] < 49 &&
-        p[1] > 0 &&
-        p[1] < 49 &&
-        terrain.get(p[0], p[1]) !== TERRAIN_MASK_WALL
-    ).length;
+    ].filter((p) => isStandableSourcePos(room, p[0], p[1])).length;
 
     room.memory.sourcePosCount[source.id] = walkable;
     return walkable;

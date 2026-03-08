@@ -600,7 +600,7 @@ interface CreepMemory {
      */
     working?: boolean;
 
-    /** 
+    /**
      * 是否已完成准备流程
      * @description 常用于 action 模式角色（如 harvester）的一次性初始化标记
      */

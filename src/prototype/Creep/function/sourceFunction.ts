@@ -24,6 +24,7 @@ export default class SourceFunction extends Creep {
     getBoundSource(): Source | null {
         const targetSourceId = this.memory.targetSourceId as Id<Source> | null | undefined;
         if (!targetSourceId) return null;
+
         const source = Game.getObjectById(targetSourceId);
         if (!source) {
             delete this.memory.targetSourceId;

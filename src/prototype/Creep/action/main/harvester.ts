@@ -98,6 +98,11 @@ const HarvesterAction = {
      */
     prepare: function (creep: Creep) {
         if (!creep.room.source || creep.room.source.length === 0) return false;
+        const boundSource = creep.getBoundSource();
+        if (boundSource) {
+            creep.setBoundSourceId(boundSource.id);
+            return true;
+        }
         const targetSource = creep.room.closestSource(creep);
         if (!targetSource) return false;
         creep.setBoundSourceId(targetSource.id);
@@ -112,7 +117,7 @@ const HarvesterAction = {
             this.chooseNextAction(creep);
             return;
         }
-        const targetSource = creep.resolveSourceByPriority(creep.getBoundSource());
+        const targetSource = creep.getBoundSource();
         if (!targetSource) {
             creep.memory.ready = false;
             return;
@@ -192,7 +197,7 @@ const HarvesterAction = {
             }
             return;
         } else {
-            const source = creep.resolveSourceByPriority(creep.getBoundSource());
+            const source = creep.getBoundSource();
             if (!source) {
                 creep.memory.ready = false;
                 return;
