@@ -2115,6 +2115,7 @@ function bypassRoomCallbackWithRoute(roomName) {
  */
 function findTemporalPath(creep, toPos, ops) {
     ensureAvoidRoomsUpToDate();
+    ops.bypassRange = typeof ops.bypassRange === 'number' ? ops.bypassRange : 5;
     let nearbyCreeps;
     if (ops.ignoreCreeps) { // 有ignoreCreep，只绕过无法对穿的creep
         nearbyCreeps = creep.pos.findInRange(FIND_CREEPS, ops.bypassRange, {
@@ -2182,9 +2183,29 @@ function findTemporalPath(creep, toPos, ops) {
             PathFinderOpts.roomCallback = bypassRoomCallback;
         }
 
-        let result = PathFinder.search(creep.pos, { pos: toPos, range: ops.range }, PathFinderOpts).path;
+        const searchResult = PathFinder.search(creep.pos, { pos: toPos, range: ops.range }, PathFinderOpts);
+        if (searchResult.incomplete && searchResult.path.length <= 1) {
+            return false;
+        }
+        let result = searchResult.path;
         if (result.length) {
             let creepCache = creepPathCache[creep.name];
+            const posArray = creepCache.path.posArray;
+            const resultFinalPos = result[result.length - 1];
+            if (resultFinalPos && resultFinalPos.getRangeTo(toPos) > ops.range) {  // 是寻到旧路上
+                let appendIdx = -1;
+                for (let idx = creepCache.idx + 2; idx < posArray.length; idx++) {
+                    if (posArray[idx].getRangeTo(resultFinalPos) === 0) {
+                        appendIdx = idx + 1;
+                        break;
+                    }
+                }
+                if (appendIdx >= 0) {
+                    while (appendIdx < posArray.length) {
+                        result.push(posArray[appendIdx++]);
+                    }
+                }
+            }
             creepCache.path = {     // 弄个新的自己走，不修改公用的缓存路，只会用于正向走所以也不需要start属性，idx属性会在startRoute中设置
                 end: formalize(result[result.length - 1]),
                 posArray: result,
@@ -3252,6 +3273,9 @@ function resolveMoveToArgs(creep, firstArg, secondArg, opts) {
 function normalizeMoveToOpts(ops) {
     ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
     ops.ignoreCreeps = ops.ignoreCreeps === undefined || ops.ignoreCreeps;
+    if (typeof ops.bypassRange !== 'number') {
+        ops.bypassRange = 5;
+    }
     return ops;
 }
 
@@ -3464,7 +3488,7 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
     const path = creepCache.path;
     const idx = creepCache.idx;
 
-    if (!path || !(idx in path.posArray) || path.ignoreStructures != !!ops.ignoreDestructibleStructures) {
+    if (!path || !path.posArray || idx >= path.posArray.length || path.ignoreStructures != !!ops.ignoreDestructibleStructures) {
         return null;
     }
 
@@ -3477,7 +3501,10 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
     const nextStep = posArray[idx + 1];
 
     if (isEqual(creep.pos, curStep)) {    // 正常
-        return moveOneStep(creep, ops, toPos);
+        if (idx < posArray.length - 1) {
+            return moveOneStep(creep, ops, toPos);
+        }
+        return null;
     }
 
     if (idx + 2 in posArray && isEqual(creep.pos, nextStep)) {  // 跨房了
