@@ -77,11 +77,11 @@ export default {
             if (!['main', 'stop', 'low', 'high', 'rush'].includes(mode)) return Error('仅支持main、stop、low、high、rush模式。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms =  getRoomData();
-            if(!room || !room.my || !BotMemRooms[roomName]) {
-                return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
+            if(!room || !room.my) {
+                return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
-            BotMemRooms[roomName]['mode'] = mode;
+            const roomMem = ensureRoomData(roomName) as any;
+            roomMem['mode'] = mode;
             global.log(`已设置 ${roomName} 的运行模式为 ${mode}。`);
             return OK;
         },

@@ -1,3 +1,5 @@
+import { THRESHOLDS } from '@/constant/Thresholds';
+
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
 
 type UniversalTargetCache = {
@@ -11,12 +13,12 @@ type UniversalTargetCache = {
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
 const hasMyConstructionSites = (room: Room) => room.find(FIND_CONSTRUCTION_SITES).some(site => (site as any).my);
 
-const shouldForceUpgrade = (room: Room) => {
+export const shouldForceUpgrade = (room: Room) => {
     const controller = room.controller;
     if (!controller?.my) return false;
     if (room.level < 2) return true;
     const ttd = controller.ticksToDowngrade || 0;
-    return ttd < (room.level <= 3 ? 5000 : 3000);
+    return ttd < THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TTD;
 };
 
 const getEnergy = function (creep: Creep) {
@@ -152,10 +154,18 @@ const doWork = function (creep: Creep) {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {};
     const cache = creep.memory.cacheTarget as UniversalTargetCache;
     const urgent = isUrgentRefill(creep.room);
+    const forceUpgrade = shouldForceUpgrade(creep.room);
+
+    if (forceUpgrade) {
+        clearTargetCache(cache);
+        creep.goUpgrade();
+        return;
+    }
+
     const hasBuildSite = hasMyConstructionSites(creep.room);
 
     // 有工地且不处于补能紧急态时，优先建造，避免被控制器缓冲补能长期占用。
-    if (hasBuildSite && !urgent && !shouldForceUpgrade(creep.room)) {
+    if (hasBuildSite && !urgent) {
         const buildPriority = creep.room.level <= 3
             ? [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART]
             : [STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART];
@@ -166,11 +176,6 @@ const doWork = function (creep: Creep) {
     if (transferTask) {
         creep.goTransfer(transferTask.target, RESOURCE_ENERGY);
         trackAndHandleTargetStall(creep, cache);
-        return;
-    }
-
-    if (shouldForceUpgrade(creep.room)) {
-        creep.goUpgrade();
         return;
     }
 
@@ -200,8 +205,11 @@ const UniversalFunction = {
         const free = creep.store.getFreeCapacity();
         const cap = creep.store.getCapacity();
         const urgentRefill = isUrgentRefill(creep.room);
+        const forceUpgrade = shouldForceUpgrade(creep.room);
         // 非紧急补能场景必须采满再干活；仅在 spawn/tower 紧急补能时允许半仓回流。
-        const minWorkPayload = urgentRefill
+        const minWorkPayload = forceUpgrade
+            ? 1
+            : urgentRefill
             ? Math.min(cap, Math.max(50, Math.floor(cap * 0.5)))
             : cap;
 

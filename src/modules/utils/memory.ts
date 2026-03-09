@@ -18,9 +18,9 @@ export function getBotMemory(): BotMemory {
  * 获取房间控制内存（RoomData）。
  * @param roomName 可选；传入则仅返回该房间条目（不创建）。
  * @remarks
- * - RoomData 同时承担“房间是否受控”的判定：`getRoomData()[roomName]` 是否存在。\n
+ * - RoomData 用于保存房间的显式配置；缺失时运行逻辑会回退到默认 `main` 模式。\n
  * - 因此 **禁止** 通过读取接口隐式创建房间条目。\n
- * - 若需要把房间加入控制列表，请使用 {@link ensureRoomData}。
+ * - 若需要为房间写入显式配置，请使用 {@link ensureRoomData}。
  */
 export function getRoomData(): BotMemory['RoomData'];
 export function getRoomData(roomName: string): RoomControlMemory | undefined;
@@ -32,7 +32,7 @@ export function getRoomData(roomName?: string) {
 }
 
 /**
- * 确保指定房间的 RoomData 条目存在（用于“加入控制列表”）。
+ * 确保指定房间的 RoomData 条目存在（用于写入房间显式配置）。
  * @remarks 这是唯一允许创建 `RoomData[roomName]` 的入口。
  */
 export function ensureRoomData(roomName: string): RoomControlMemory {

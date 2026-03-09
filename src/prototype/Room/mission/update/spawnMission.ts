@@ -149,15 +149,18 @@ const getStorageDrivenUpgraderTarget = (room: Room, baseNum: number) => {
     return Math.max(baseNum, Math.min(baseNum + 2, linearNeed));
 }
 
-const getDowngradeUniversalTarget = (room: Room) => {
+export const getDowngradeUniversalTarget = (room: Room) => {
     const controller = room.controller;
     if (!controller?.my) return 0;
     const ttd = controller.ticksToDowngrade || 0;
-    const slotCap = Math.max(1, getControllerUpgradeSlots(room));
-    const urgentThreshold = room.level <= 3 ? 5000 : 3000;
-    if (ttd < 1500) return Math.min(2, slotCap);
-    if (ttd < urgentThreshold) return 1;
+    if (ttd < THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TTD) {
+        return THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TARGET;
+    }
     return 0;
+}
+
+export const getDowngradeUniversalSpawnMissing = (room: Room, current: number) => {
+    return Math.max(0, getDowngradeUniversalTarget(room) - current);
 }
 
 const getCoreConstructionSiteCount = (room: Room) => {
@@ -526,6 +529,21 @@ export default class SpawnMission extends Room {
         for (const role in RoleSpawnCheck) {
             const current = (CreepNum[role] || 0) + (SpawnMissionNum[role] || 0);
             const adjusted = shouldRecover ? Math.max(0, current - (downgradedCount[role] || 0)) : current;
+            if (role === 'universal') {
+                const rescueMissing = getDowngradeUniversalSpawnMissing(this, adjusted);
+                if (rescueMissing > 0) {
+                    for (let i = 0; i < rescueMissing; i++) {
+                        this.SpawnMissionAdd(
+                            RoleData[role].code,
+                            '',
+                            RoleData[role]['level'],
+                            role,
+                            { home: this.name } as CreepMemory
+                        );
+                    }
+                    continue;
+                }
+            }
             if (RoleSpawnCheck[role](this, adjusted)) {
                 this.SpawnMissionAdd(
                     RoleData[role].code,

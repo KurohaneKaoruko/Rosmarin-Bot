@@ -9,10 +9,9 @@ export const roomRunner = function (room: Room) {
 
     // 只运行自己的房间
     if (!room || !room.controller?.my) return;
-    // 不运行未加入控制列表的房间
+    // 默认按 main 运行，只有显式 stop 才停止
     const roomMem = getRoomData(room.name);
-    if (!roomMem) return;
-    if ((roomMem as any).mode === 'stop') return;
+    if ((roomMem as any)?.mode === 'stop') return;
 
     if (Game.time % 100 == 0) {
         room.memory['index'] = Math.floor(Math.random() * 100); // 0-99

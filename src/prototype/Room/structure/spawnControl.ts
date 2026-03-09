@@ -191,7 +191,7 @@ export default class SpawnControl extends Room {
         if (!data) {
             const controllerDowngradeUrgent =
                 !!this.controller?.my &&
-                (this.controller.ticksToDowngrade || 0) < (this.level <= 3 ? 5000 : 3000);
+                (this.controller.ticksToDowngrade || 0) < THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TTD;
             if (this.CheckSpawnAndTower() || controllerDowngradeUrgent) {
                 this.trySpawnEmergencyUniversal(spawn);
             }

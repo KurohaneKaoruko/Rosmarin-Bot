@@ -491,6 +491,32 @@ export default class AidSpawnFunction extends Flag {
         };
     }
 
+    private getClaimFlagClaimerState(spawnRoom: Room, flagName: string, targetRoom: string) {
+        let live = 0;
+        let queued = 0;
+        const queuedTaskIds: string[] = [];
+
+        for (const name in Game.creeps) {
+            const creep = Game.creeps[name];
+            if (creep.memory?.role !== 'claimer') continue;
+            if (creep.memory?.targetRoom !== targetRoom) continue;
+            live++;
+        }
+
+        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+        for (const task of tasks as any[]) {
+            const memory = task?.data?.memory as any;
+            if (!memory) continue;
+            if (memory.role !== 'claimer') continue;
+            if (memory.targetRoom !== targetRoom) continue;
+
+            queued++;
+            if (memory.spawnFlag === flagName) queuedTaskIds.push(task.id);
+        }
+
+        return { live, queued, queuedTaskIds };
+    }
+
     private handleClaimFlag(flagName: string): boolean {
         if (!flagName.startsWith('CLAIM/')) return false;
 
@@ -507,6 +533,21 @@ export default class AidSpawnFunction extends Flag {
 
         const targetRoomObj = Game.rooms[targetRoom];
 
+        const claimerState = this.getClaimFlagClaimerState(room, flagName, targetRoom);
+        let queuedClaimers = claimerState.queued;
+
+        // CLAIM 旗帜历史上可能已经堆出多条 claimer 任务；上线后自动压回到合理数量。
+        const redundantTaskIds = targetRoomObj?.my
+            ? claimerState.queuedTaskIds
+            : claimerState.queuedTaskIds.slice(1);
+        if (redundantTaskIds.length > 0) {
+            for (const taskId of redundantTaskIds) {
+                room.deleteMissionFromPool('spawn', taskId);
+                queuedClaimers--;
+            }
+            log('CLAIM', `${room.name} 清理了 ${redundantTaskIds.length} 个重复 claimer 任务 -> ${targetRoom}`);
+        }
+
         // 已经完成“起房”：有 spawn 且没有工地 -> 自动关闭，避免后续误触发继续孵化
         if (targetRoomObj?.my) {
             const hasSpawn = targetRoomObj.find(FIND_MY_STRUCTURES, {
@@ -520,17 +561,8 @@ export default class AidSpawnFunction extends Flag {
             }
         }
 
-        // 避免重复孵化 claimer
-        let hasClaimer = false;
-        for (const name in Game.creeps) {
-            const creep = Game.creeps[name];
-            if (creep.memory?.role !== 'claimer') continue;
-            if (creep.memory?.targetRoom !== targetRoom) continue;
-            hasClaimer = true;
-            break;
-        }
-
         // 目标房间未被占领时，确保有 claimer 在路上
+        const hasClaimer = claimerState.live + queuedClaimers > 0;
         if (!hasClaimer && (!targetRoomObj || !targetRoomObj.my)) {
             room.SpawnMissionAdd('', '', -1, 'claimer', { targetRoom, spawnFlag: flagName } as any);
             log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
