@@ -5,6 +5,7 @@ import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle
 
 // Spawn mission uses smaller level as higher priority; 0 is highest practical priority.
 const JUMP_SPAWN_PRIORITY = 0;
+const CLAIM_SPAWN_PRIORITY = 0;
 
 export default class AidSpawnFunction extends Flag {
     // 旗帜触发的孵化控制
@@ -493,7 +494,6 @@ export default class AidSpawnFunction extends Flag {
 
     private getClaimFlagClaimerState(spawnRoom: Room, flagName: string, targetRoom: string) {
         let live = 0;
-        let queued = 0;
         const queuedTaskIds: string[] = [];
 
         for (const name in Game.creeps) {
@@ -510,11 +510,10 @@ export default class AidSpawnFunction extends Flag {
             if (memory.role !== 'claimer') continue;
             if (memory.targetRoom !== targetRoom) continue;
 
-            queued++;
             if (memory.spawnFlag === flagName) queuedTaskIds.push(task.id);
         }
 
-        return { live, queued, queuedTaskIds };
+        return { live, queuedTaskIds };
     }
 
     private handleClaimFlag(flagName: string): boolean {
@@ -534,7 +533,7 @@ export default class AidSpawnFunction extends Flag {
         const targetRoomObj = Game.rooms[targetRoom];
 
         const claimerState = this.getClaimFlagClaimerState(room, flagName, targetRoom);
-        let queuedClaimers = claimerState.queued;
+        let queuedClaimers = claimerState.queuedTaskIds.length;
 
         // CLAIM 旗帜历史上可能已经堆出多条 claimer 任务；上线后自动压回到合理数量。
         const redundantTaskIds = targetRoomObj?.my
@@ -562,10 +561,14 @@ export default class AidSpawnFunction extends Flag {
         }
 
         // 目标房间未被占领时，确保有 claimer 在路上
-        const hasClaimer = claimerState.live + queuedClaimers > 0;
+        const hasClaimer = claimerState.live > 0 || queuedClaimers > 0;
         if (!hasClaimer && (!targetRoomObj || !targetRoomObj.my)) {
-            room.SpawnMissionAdd('', '', -1, 'claimer', { targetRoom, spawnFlag: flagName } as any);
-            log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
+            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { targetRoom, spawnFlag: flagName } as any);
+            if (ret === OK) {
+                log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
+            } else {
+                log('CLAIM', `${room.name} 为 ${targetRoom} 下发 claimer 失败 ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
+            }
         }
 
         // 同步孵化 aid-build 援助建造（不影响单独 AID 旗帜：只统计/控制本 CLAIM 旗帜派生的 builder）
