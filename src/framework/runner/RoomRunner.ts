@@ -1,7 +1,7 @@
 /**
  * 房间控制
  */
-import { getMissionPools, getRoomData } from '@/modules/utils/memory';
+import { ensureRoomData, getMissionPools } from '@/modules/utils/memory';
 
 export const roomRunner = function (room: Room) {
     // 定期更新建筑缓存
@@ -10,8 +10,15 @@ export const roomRunner = function (room: Room) {
     // 只运行自己的房间
     if (!room || !room.controller?.my) return;
     // 默认按 main 运行，只有显式 stop 才停止
-    const roomMem = getRoomData(room.name);
-    if ((roomMem as any)?.mode === 'stop') return;
+    const roomMem = ensureRoomData(room.name) as any;
+    if (!(roomMem?.mode)) roomMem.mode = 'main';
+    if (roomMem.mode === 'stop') return;
+
+    const roomMemory = room.memory as any;
+    if (!roomMemory._init) {
+        room.init();
+        roomMemory._init = true;
+    }
 
     if (Game.time % 100 == 0) {
         room.memory['index'] = Math.floor(Math.random() * 100); // 0-99

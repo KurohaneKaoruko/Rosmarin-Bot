@@ -10,13 +10,13 @@ export default {
         // 快速开始
         start(roomName: string, layout?: string) {
             // 添加房间
-            if (!layout) global.room.add(roomName);
+            if (!layout) global.room.set(roomName);
             else {
                 const centerPos = Game.flags['centerPos']?.pos;
                 if (!centerPos || centerPos.roomName !== roomName) {
                     return Error('未设置中心, 请将centerPos放置到需要设置的布局中心位置。')
                 } else {
-                    global.room.add(roomName, layout);
+                    global.room.set(roomName, layout);
                 }
             }
             // 构建布局
@@ -26,7 +26,7 @@ export default {
             return OK;
         },
         // 添加房间
-        add(roomName: string, layout?: string, x?: number, y?: number) {
+        set(roomName: string, layout?: string, x?: number, y?: number) {
             if (!roomName) return Error('请输入房间名。');
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
@@ -91,11 +91,11 @@ export default {
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms = getRoomData();
-            if(!room || !room.my || !BotMemRooms[roomName]) {
-                return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
+            if(!room || !room.my) {
+                return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
-            BotMemRooms[roomName].center = { x, y };
+            const roomMem = ensureRoomData(roomName) as any;
+            roomMem['center'] = { x, y };
             global.log(`已设置 ${roomName} 的布局中心为 (${x},${y})。`);
             return OK;
         },
@@ -104,11 +104,11 @@ export default {
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
             const room = Game.rooms[roomName];
-            const BotMemRooms = getRoomData();
-            if(!room || !room.my || !BotMemRooms[roomName]) {
-                return Error(`房间 ${roomName} 不存在、未拥有或未添加。`);
+            if(!room || !room.my) {
+                return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
-            BotMemRooms[roomName]['defend_mode'] = mode;
+            const roomMem = ensureRoomData(roomName) as any;
+            roomMem['defend_mode'] = mode;
             global.log(`已设置 ${roomName} 的防御模式为 ${mode}。`);
             return OK;
         },
@@ -121,11 +121,7 @@ export default {
             if(!room || !room.my) {
                 return Error(`房间 ${roomName} 不存在或未拥有。`);
             }
-            const rooms = getRoomData();
-            if (!rooms[roomName]) {
-                return Error(`房间 ${roomName} 未添加到控制列表。`);
-            }
-            const botMem = rooms[roomName] as any;
+            const botMem = ensureRoomData(roomName) as any;
             botMem['sign'] = text ?? signConstant[Math.floor(Math.random() * signConstant.length)];
             global.log(`已设置 ${roomName} 的房间签名为:\n ${text}`);
             return OK;
