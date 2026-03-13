@@ -1,6 +1,9 @@
 import { BASE_CONFIG } from '@/constant/config';
 import { log } from '@/utils';
 import { getMissionPools, getStructData } from "@/modules/utils/memory";
+import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';
+
+const MISSION_POOL_NAME_SET = new Set<MissionPoolName>(['transport', 'build', 'repair', 'terminal', 'spawn', 'mine', 'boost']);
 
 // 基础与杂项
 const Base = {
@@ -62,8 +65,8 @@ const Base = {
         }
     },
 
-    clear: {
-        site(roomName: string) {
+        clear: {
+            site(roomName: string) {
             const room = Game.rooms[roomName];
             if(!room) {
                 return Error(`无房间视野`);
@@ -92,14 +95,16 @@ const Base = {
                 }
                 return OK;
             }
-        },
-        mission(roomName: string, type: string) {
-            const pools = getMissionPools();
-            if (!pools[roomName]) return Error(`房间 ${roomName} 任务池不存在`);
-            pools[roomName][type] = [];
-            log('', `已清空房间 ${roomName} 的 ${type} 任务`);
-            return OK;
-        },
+            },
+            mission(roomName: string, type: string) {
+                const pools = getMissionPools();
+                if (!pools[roomName]) return Error(`房间 ${roomName} 任务池不存在`);
+                sanitizeMissionPoolMemory(pools[roomName]);
+                if (!MISSION_POOL_NAME_SET.has(type as MissionPoolName)) return Error(`任务池 ${type} 不存在`);
+                pools[roomName][type as MissionPoolName] = [];
+                log('', `已清空房间 ${roomName} 的 ${type} 任务`);
+                return OK;
+            },
         boostTask(roomName: string) {
             const boostmem = getStructData(roomName);
             if (boostmem?.boostLabs) {

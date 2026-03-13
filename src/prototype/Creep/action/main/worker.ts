@@ -82,7 +82,7 @@ const BuildRepairWork = function (creep: Creep) {
     const LOCAL_BUILD_TASK_ID = '__local_build__';
     const cache = getCache(creep)
     let target = null;
-    let taskType = null;
+    let taskType: 'build' | 'repair' | null = null;
     let taskid = null;
     const sites = (creep.room as any).constructionSite || creep.room.find(FIND_CONSTRUCTION_SITES);
     const hasBuildTarget = sites.some((s: ConstructionSite) => s && (s as any).my);
@@ -125,12 +125,13 @@ const BuildRepairWork = function (creep: Creep) {
         const taskdata = task.data as any;
         if (taskdata && taskdata.target) {
             const target = Game.getObjectById(taskdata.target) as any;
+            const taskPoolName = task.type === 'build' ? 'build' : 'repair';
             if (task.type == 'build' && target?.structureType == 'rampart') {
                 cache.buildRampart = true;
                 cache.posInfo = taskdata.pos;
             }
             if (!target || (task.type !== 'build' && target.hits >= taskdata.hits)){
-                creep.room.deleteMissionFromPool(task.type, task.id);
+                creep.room.deleteMissionFromPool(taskPoolName, task.id);
                 delete cache.task;
                 delete cache.taskid;
                 delete cache.tasktype;

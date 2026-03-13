@@ -13,10 +13,8 @@ const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', '
 export default class MissionGet extends Room {
     // 获取运输任务
     getTransportMission(creep: Creep) {
-        if(!this.checkMissionInPool('transport')) return null;
-
         const posInfo = compress(creep.pos.x, creep.pos.y);
-        const task = this.getMissionFromPool('transport', posInfo);
+        const task = this.getMissionFromPool('transport', posInfo, (task) => task.type === 'transport');
         if(!task) return null;
 
         const data = task.data as TransportTask;

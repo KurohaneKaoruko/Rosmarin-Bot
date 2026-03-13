@@ -2,6 +2,8 @@
  * 任务系统接口定义
  * @description 定义房间任务池相关的所有接口和类型
  */
+type MissionPoolName = 'transport' | 'build' | 'repair' | 'terminal' | 'spawn' | 'mine' | 'boost';
+type MissionTaskType = 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit' | 'boost';
 
 interface Room {
     // ==================== 任务池基础操作 ====================
@@ -22,7 +24,7 @@ interface Room {
      * @returns OK表示添加成功，void表示失败
      * @example room.addMissionToPool('transport', 'transport', 0, { source: sourceId, target: targetId, resourceType: RESOURCE_ENERGY, amount: 1000 });
      */
-    addMissionToPool(PoolName: string, type: Task["type"], level: Task["level"], data: Task["data"]): OK | void;
+    addMissionToPool(PoolName: MissionPoolName, type: Task["type"], level: Task["level"], data: Task["data"]): OK | void;
 
     /**
      * 从任务池获取任务
@@ -32,7 +34,7 @@ interface Room {
      * @returns 符合条件的任务对象，未找到返回null
      * @example const task = room.getMissionFromPool('transport', 0, (t) => t.data.resourceType === RESOURCE_ENERGY);
      */
-    getMissionFromPool(PoolName: string, pos?: number, checkFunc?: (task: Task) => boolean): Task | null;
+    getMissionFromPool(PoolName: MissionPoolName, pos?: number, checkFunc?: (task: Task) => boolean): Task | null;
 
     /**
      * 获取任务池中的第一个任务
@@ -41,7 +43,7 @@ interface Room {
      * @returns 第一个符合条件的任务，未找到返回null或undefined
      * @example const task = room.getMissionFromPoolFirst('spawn');
      */
-    getMissionFromPoolFirst(PoolName: string, checkFunc?: (task: Task) => boolean): Task | null | undefined;
+    getMissionFromPoolFirst(PoolName: MissionPoolName, checkFunc?: (task: Task) => boolean): Task | null | undefined;
 
     /**
      * 获取任务池中的随机一个任务
@@ -49,7 +51,7 @@ interface Room {
      * @returns 随机选取的任务，池为空返回null或undefined
      * @example const task = room.getMissionFromPoolRandom('repair');
      */
-    getMissionFromPoolRandom(PoolName: string): Task | null | undefined;
+    getMissionFromPoolRandom(PoolName: MissionPoolName): Task | null | undefined;
 
     /**
      * 获取任务池中的所有任务
@@ -57,7 +59,7 @@ interface Room {
      * @returns 任务数组，池不存在返回null
      * @example const tasks = room.getAllMissionFromPool('build');
      */
-    getAllMissionFromPool(PoolName: string): Task[] | null;
+    getAllMissionFromPool(PoolName: MissionPoolName): Task[] | null;
 
     /**
      * 通过ID获取任务池中的任务
@@ -66,7 +68,7 @@ interface Room {
      * @returns 对应的任务对象，未找到返回null或undefined
      * @example const task = room.getMissionFromPoolById('transport', 'task_123456');
      */
-    getMissionFromPoolById(PoolName: string, id: Task["id"]): Task | null | undefined;
+    getMissionFromPoolById(PoolName: MissionPoolName, id: Task["id"]): Task | null | undefined;
 
     /**
      * 检查任务池中是否存在相同任务
@@ -75,9 +77,9 @@ interface Room {
      * @param data - 用于比较的任务数据（部分字段）
      * @returns 相同任务的ID，不存在返回null或undefined
      * @description 根据任务类型和关键数据字段判断是否为相同任务
-     * @example const existId = room.checkSameMissionInPool('manage', 'manage', { source: 'storage', target: 'terminal', resourceType: RESOURCE_ENERGY });
+     * @example const existId = room.checkSameMissionInPool('transport', 'manage', { source: 'storage', target: 'terminal', resourceType: RESOURCE_ENERGY });
      */
-    checkSameMissionInPool(PoolName: string, type: Task["type"], data: Task["data"]): Task['id'] | null | undefined;
+    checkSameMissionInPool(PoolName: MissionPoolName, type: Task["type"], data: Task["data"]): Task['id'] | null | undefined;
 
     /**
      * 检查任务池中是否存在任务
@@ -85,7 +87,7 @@ interface Room {
      * @returns true表示存在任务，false表示为空
      * @example if (room.checkMissionInPool('spawn')) { console.log('有孵化任务'); }
      */
-    checkMissionInPool(PoolName: string): boolean;
+    checkMissionInPool(PoolName: MissionPoolName): boolean;
 
     /**
      * 获取任务池中的任务数量
@@ -93,7 +95,7 @@ interface Room {
      * @returns 任务数量，池不存在返回0
      * @example const count = room.getMissionNumInPool('transport');
      */
-    getMissionNumInPool(PoolName: string): number;
+    getMissionNumInPool(PoolName: MissionPoolName): number;
 
     /**
      * 锁定任务池中的任务
@@ -104,7 +106,7 @@ interface Room {
      * @description 锁定后其他creep无法获取该任务
      * @example room.lockMissionInPool('transport', 'task_123', creep.id);
      */
-    lockMissionInPool(PoolName: string, id: Task["id"], creepid: Id<Creep>): OK | void;
+    lockMissionInPool(PoolName: MissionPoolName, id: Task["id"], creepid: Id<Creep>): OK | void;
 
     /**
      * 解锁任务池中的任务
@@ -113,7 +115,7 @@ interface Room {
      * @returns OK表示解锁成功
      * @example room.unlockMissionInPool('transport', 'task_123');
      */
-    unlockMissionInPool(PoolName: string, id: Task["id"]): OK | void;
+    unlockMissionInPool(PoolName: MissionPoolName, id: Task["id"]): OK | void;
 
     /**
      * 更新任务池中的任务
@@ -126,7 +128,7 @@ interface Room {
      * @returns OK表示更新成功
      * @example room.updateMissionPool('transport', 'task_123', { level: 1, data: { amount: 500 } });
      */
-    updateMissionPool(PoolName: string, id: Task["id"], 
+    updateMissionPool(PoolName: MissionPoolName, id: Task["id"], 
         options: {level?: Task["level"], data?: Task["data"], lock?: Task["lock"]}): OK | void;
 
     /**
@@ -136,7 +138,7 @@ interface Room {
      * @returns OK表示删除成功
      * @example room.deleteMissionFromPool('build', 'task_123');
      */
-    deleteMissionFromPool(PoolName: string, id: Task["id"]): OK | void;
+    deleteMissionFromPool(PoolName: MissionPoolName, id: Task["id"]): OK | void;
 
     /**
      * 检查并清理任务池中已完成、过期或失效的任务
@@ -145,7 +147,7 @@ interface Room {
      * @returns OK表示检查完成
      * @example room.checkMissionPool('build', (t) => !!Game.getObjectById(t.data.target));
      */
-    checkMissionPool(PoolName: string, checkFunc: (t: Task) => boolean): OK | void;
+    checkMissionPool(PoolName: MissionPoolName, checkFunc: (t: Task) => boolean): OK | void;
 
     /**
      * 提交任务完成信息
@@ -156,7 +158,7 @@ interface Room {
      * @returns OK表示提交成功
      * @example room.submitMission('transport', 'task_123', { amount: 100 }, (t) => t.amount <= 0);
      */
-    submitMission(PoolName: string, id: Task["id"], data: Task["data"], deleteFunc: (t: any) => boolean): OK | void;
+    submitMission(PoolName: MissionPoolName, id: Task["id"], data: Task["data"], deleteFunc: (t: any) => boolean): OK | void;
 
     // ==================== 任务添加方法 ====================
     /**
@@ -400,7 +402,7 @@ interface Task {
      * 任务类型
      * @description 用于区分不同类型的任务处理逻辑
      */
-    type: 'transport' | 'manage' | 'build' | 'repair' | 'send' | 'spawn' | 'power' | 'deposit' | 'boost';
+    type: MissionTaskType;
     
     /**
      * 任务数据

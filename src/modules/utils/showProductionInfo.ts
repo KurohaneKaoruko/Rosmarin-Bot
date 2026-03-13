@@ -1,5 +1,6 @@
 import { LAB_T1_PRIORITY, LabMap, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant';
 import { resolveLabFromMem } from '@/modules/utils/labReservations';
+import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';
 
 const COLORS = {
     theme: '#D0CAE0',
@@ -95,9 +96,10 @@ type ManageMove = { source: string; target: string; res: string; amount: number;
 
 const listManageMoves = (roomName: string, onlyResources?: Set<string>) => {
     const pools = peekMissionPools() || {};
-    const tasks = pools?.[roomName]?.manage;
+    const roomPools = pools?.[roomName];
+    if (roomPools) sanitizeMissionPoolMemory(roomPools);
+    const tasks = Array.isArray(roomPools?.transport) ? roomPools.transport : [];
     const moves: ManageMove[] = [];
-    if (!Array.isArray(tasks)) return moves;
     for (const t of tasks) {
         if (!t || t.type !== 'manage') continue;
         const d = t.data as any;
