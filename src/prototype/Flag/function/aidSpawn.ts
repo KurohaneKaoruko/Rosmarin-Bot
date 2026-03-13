@@ -7,6 +7,48 @@ import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle
 const JUMP_SPAWN_PRIORITY = 0;
 const CLAIM_SPAWN_PRIORITY = 0;
 
+type SpawnMemoryMatcher = (memory: any) => boolean;
+
+const matchesFlagSpawnMemory = (
+    memory: any,
+    flagName: string,
+    role: string,
+    legacyMatch: SpawnMemoryMatcher
+) => {
+    if (!memory || memory.role !== role) return false;
+    if (memory.spawnFlag) return memory.spawnFlag === flagName;
+    return legacyMatch(memory);
+};
+
+const getFlagSpawnLoad = (
+    spawnRoom: Room,
+    flagName: string,
+    role: string,
+    legacyMatch: SpawnMemoryMatcher
+) => {
+    let live = 0;
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
+        if (matchesFlagSpawnMemory(creep?.memory, flagName, role, legacyMatch)) {
+            live++;
+        }
+    }
+
+    let queued = 0;
+    const tasks = spawnRoom.getAllMissionFromPool?.('spawn') || [];
+    for (const task of tasks as any[]) {
+        if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
+            queued++;
+        }
+    }
+
+    return {
+        live,
+        queued,
+        total: live + queued,
+    };
+};
+
 export default class AidSpawnFunction extends Flag {
     // 旗帜触发的孵化控制
     handleAidSpawnFlag(): boolean {
@@ -37,9 +79,16 @@ export default class AidSpawnFunction extends Flag {
 
         const targetRoom = this.pos.roomName;
         const sourceRoom = flagName.match(/\/S-([EW]\d+[NS]\d+)/)?.[1] || targetRoom;
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'aid-build',
+            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === sourceRoom
+        );
+        if (spawnLoad.total >= 1) return true;
 
         let bodys: any[] = [];
-        const memory = { sourceRoom, targetRoom } as CreepMemory;
+        const memory = { sourceRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
@@ -75,9 +124,16 @@ export default class AidSpawnFunction extends Flag {
         if (!room) return true;
 
         const targetRoom = this.pos.roomName;
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'aid-upgrade',
+            (memory) => memory.targetRoom === targetRoom && (memory.home || targetRoom) === targetRoom
+        );
+        if (spawnLoad.total >= 1) return true;
 
         let bodys: any[] = [];
-        const memory = { home: targetRoom, targetRoom } as CreepMemory;
+        const memory = { home: targetRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
@@ -113,7 +169,15 @@ export default class AidSpawnFunction extends Flag {
         if (!room) return true;
 
         const targetRoom = this.pos.roomName;
-        room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { home: targetRoom } as CreepMemory);
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'up-upgrade',
+            (memory) => (memory.home || '') === targetRoom
+        );
+        if (spawnLoad.total >= 1) return true;
+
+        room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { home: targetRoom, spawnFlag: flagName } as CreepMemory);
         return true;
     }
 
@@ -129,12 +193,23 @@ export default class AidSpawnFunction extends Flag {
         if (!room) return true;
 
         const targetRoom = this.pos.roomName;
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'aid-carry',
+            (memory) =>
+                memory.targetRoom === targetRoom &&
+                memory.sourceRoom === room.name &&
+                memory.resource === RESOURCE_ENERGY
+        );
+        if (spawnLoad.total >= 1) return true;
 
         let bodys: any[] = [];
         const memory = {
             sourceRoom: room.name,
             targetRoom: targetRoom,
             resource: RESOURCE_ENERGY,
+            spawnFlag: flagName,
         } as any;
 
         // 是否BOOST
@@ -572,14 +647,13 @@ export default class AidSpawnFunction extends Flag {
         }
 
         // 同步孵化 aid-build 援助建造（不影响单独 AID 旗帜：只统计/控制本 CLAIM 旗帜派生的 builder）
-        let claimAidNum = 0;
-        for (const name in Game.creeps) {
-            const creep = Game.creeps[name];
-            if (creep.memory?.role !== 'aid-build') continue;
-            if (creep.memory?.targetRoom !== targetRoom) continue;
-            if (creep.memory?.spawnFlag !== flagName) continue;
-            claimAidNum++;
-        }
+        const claimAidLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'aid-build',
+            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === targetRoom
+        );
+        const claimAidNum = claimAidLoad.total;
 
         const desiredAidNum = 1;
         const claimMemory = this.memory as any;
@@ -604,7 +678,15 @@ export default class AidSpawnFunction extends Flag {
         const room = this.getSpawnRoomFromName();
         if (!room) return true;
         const targetRoom = this.pos.roomName;
-        room.SpawnMissionAdd('', '', -1, 'reserver', { targetRoom });
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'reserver',
+            (memory) => memory.targetRoom === targetRoom
+        );
+        if (spawnLoad.total >= 1) return true;
+
+        room.SpawnMissionAdd('', '', -1, 'reserver', { targetRoom, spawnFlag: flagName });
         return true;
     }
 

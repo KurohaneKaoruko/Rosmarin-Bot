@@ -23,6 +23,7 @@ const getMyCreepsByRoleByRoom = (() => {
 })();
 
 const LEGACY_SHARED_SOURCE_ROLE_SET = new Set(['worker', 'upgrader', 'universal', 'aid-upgrade']);
+const STRICT_SOURCE_ROLE_SET = new Set(['harvester', 'out-harvest']);
 const SOURCE_PRIORITY_MAP = {
     harvester: 0,
     universal: 1,
@@ -46,6 +47,33 @@ const getSourcePriority = (role?: string): number | null => {
 };
 
 const isPrioritySourceRole = (role?: string): role is SourcePriorityRole => getSourcePriority(role) != null;
+
+const getSourceReservationsByRoom = (() => {
+    let cachedTick = -1;
+    let cached: Record<string, Record<string, Set<string>>> = {};
+    return (room: Room) => {
+        if (cachedTick !== Game.time) {
+            cachedTick = Game.time;
+            cached = {};
+        }
+        if (!cached[room.name]) cached[room.name] = {};
+        return cached[room.name];
+    };
+})();
+
+const reserveSourceForCreep = (room: Room, sourceId: Id<Source>, creepName: string) => {
+    const roomCache = getSourceReservationsByRoom(room);
+    const set = roomCache[sourceId] || (roomCache[sourceId] = new Set());
+    set.add(creepName);
+};
+
+const getReservedSourceCountForCreep = (room: Room, sourceId: Id<Source>, creepName: string) => {
+    const roomCache = getSourceReservationsByRoom(room);
+    const set = roomCache[sourceId];
+    if (!set) return 0;
+    if (set.has(creepName)) return Math.max(0, set.size - 1);
+    return set.size;
+};
 
 const getPrioritySourceCreepsByRoom = (() => {
     let cachedTick = -1;
@@ -312,8 +340,57 @@ export default class BaseFunction extends Room {
     // 获取绑定最少的能量源
     closestSource(creep: Creep) {
         const role = creep.memory.role;
-        const availableSources = (this.source || []).filter(source => source && source.energy > 0);
+        const isStrictRole = !!role && STRICT_SOURCE_ROLE_SET.has(role);
+        const availableSources = (this.source || []).filter(
+            source => source && (isStrictRole ? true : source.energy > 0)
+        );
         if (availableSources.length <= 0) return null;
+
+        if (isStrictRole) {
+            const currentSource = creep.getBoundSource?.() || null;
+            if (currentSource) return currentSource;
+
+            const creeps = role ? getMyCreepsByRoleByRoom(this, role) : [];
+            const boundCounts: Record<string, number> = {};
+            const minTtlBySource: Record<string, number> = {};
+            for (const c of creeps) {
+                if (c.id === creep.id) continue;
+                const sid = c.memory.targetSourceId;
+                if (!sid) continue;
+                boundCounts[sid] = (boundCounts[sid] || 0) + 1;
+                const ttl = c.ticksToLive || 0;
+                minTtlBySource[sid] = minTtlBySource[sid] == null
+                    ? ttl
+                    : Math.min(minTtlBySource[sid], ttl);
+            }
+
+            let best: Source | null = null;
+            let bestCount = Infinity;
+            let bestMinTtl = Infinity;
+            let bestDistance = Infinity;
+
+            for (const source of availableSources) {
+                const slots = getSourceWalkableCount(this, source);
+                if (slots <= 0) continue;
+                const count = (boundCounts[source.id] || 0) +
+                    getReservedSourceCountForCreep(this, source.id, creep.name);
+                const minTtl = minTtlBySource[source.id] ?? Infinity;
+                const distance = creep.pos.getRangeTo(source.pos);
+                if (
+                    count < bestCount ||
+                    (count === bestCount && minTtl < bestMinTtl) ||
+                    (count === bestCount && minTtl === bestMinTtl && distance < bestDistance)
+                ) {
+                    best = source;
+                    bestCount = count;
+                    bestMinTtl = minTtl;
+                    bestDistance = distance;
+                }
+            }
+
+            if (best) reserveSourceForCreep(this, best.id, creep.name);
+            return best;
+        }
 
         if (isPrioritySourceRole(role)) {
             const currentSource = creep.getBoundSource?.() || null;

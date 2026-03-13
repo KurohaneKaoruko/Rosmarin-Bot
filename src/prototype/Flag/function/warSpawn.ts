@@ -3,6 +3,48 @@ import { log } from "@/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./spawnConfig";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
+type SpawnMemoryMatcher = (memory: any) => boolean;
+
+const matchesFlagSpawnMemory = (
+    memory: any,
+    flagName: string,
+    role: string,
+    legacyMatch: SpawnMemoryMatcher
+) => {
+    if (!memory || memory.role !== role) return false;
+    if (memory.spawnFlag) return memory.spawnFlag === flagName;
+    return legacyMatch(memory);
+};
+
+const getFlagSpawnLoad = (
+    spawnRoom: Room,
+    flagName: string,
+    role: string,
+    legacyMatch: SpawnMemoryMatcher
+) => {
+    let live = 0;
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
+        if (matchesFlagSpawnMemory(creep?.memory, flagName, role, legacyMatch)) {
+            live++;
+        }
+    }
+
+    let queued = 0;
+    const tasks = spawnRoom.getAllMissionFromPool?.('spawn') || [];
+    for (const task of tasks as any[]) {
+        if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
+            queued++;
+        }
+    }
+
+    return {
+        live,
+        queued,
+        total: live + queued,
+    };
+};
+
 export default class WarSpawnFunction extends Flag {
     handleWarSpawnFlag(): boolean {
         const flagName = this.name
@@ -21,6 +63,13 @@ export default class WarSpawnFunction extends Flag {
         const room = getSpawnRoomOrRemove(this)
         if (!room) return true
         const targetRoom = this.pos.roomName
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'aio',
+            (memory) => memory.targetRoom === targetRoom
+        )
+        if (spawnLoad.total > 0) return true
 
         let bodys: [BodyPartConstant, number][] = []
         let boostmap: BoostMap = (RoleData['aio'].boostmap || {}) as BoostMap
@@ -38,21 +87,29 @@ export default class WarSpawnFunction extends Flag {
             return true
         }
 
+        const flagMemory = this.memory as any
+        const spawnLimit = parseFlagNumber(flagName, 'N', 0)
+        const maxSpawnCount = spawnLimit > 0 ? spawnLimit : 1
+        if ((flagMemory['spawnCount'] || 0) >= maxSpawnCount) {
+            console.log(flagName, '孵化数量已满')
+            this.remove()
+            return true
+        }
+
         const boostOwnerId = `${flagName}:${Game.time}`
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'aio', {
             targetRoom: targetRoom,
             boostmap: boostmap,
             boostOwnerId,
+            spawnFlag: flagName,
         } as any)
         if (spawnRet !== OK) return true
         room.AssignBoostTaskByBody(boostBody, boostmap, boostOwnerId)
 
-        const flagMemory = this.memory as any
         flagMemory['spawnCount'] = (flagMemory['spawnCount'] || 0) + 1
         console.log(flagName, '已添加孵化任务.')
 
-        let spawnCount = parseFlagNumber(flagName, 'N', 0)
-        if (flagMemory['spawnCount'] >= spawnCount) {
+        if (flagMemory['spawnCount'] >= maxSpawnCount) {
             console.log(flagName, '孵化数量已满')
             this.remove()
         }
@@ -67,8 +124,15 @@ export default class WarSpawnFunction extends Flag {
         const room = getSpawnRoomOrRemove(this)
         if (!room) return true
         const targetRoom = this.pos.roomName
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'cleaner',
+            (memory) => memory.targetRoom === targetRoom && memory.dismantleMode === 'clean'
+        )
+        if (spawnLoad.total >= 1) return true
         // 拆除策略由 creep.memory.dismantleMode 驱动，便于后续扩展与精细控制
-        room.SpawnMissionAdd('', '', -1, 'cleaner', { targetRoom, dismantleMode: 'clean' } as any)
+        room.SpawnMissionAdd('', '', -1, 'cleaner', { targetRoom, dismantleMode: 'clean', spawnFlag: flagName } as any)
         return true
     }
 
@@ -81,10 +145,19 @@ export default class WarSpawnFunction extends Flag {
 
         const targetRoom = this.pos.roomName
         const num = parseFlagNumber(flagName, 'N', 1)
-        for (let i = 0; i < num; i++) {
-            room.SpawnMissionAdd('', '', num, 'attack-claimer', { targetRoom, num })
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'attack-claimer',
+            (memory) => memory.targetRoom === targetRoom
+        )
+        const missing = Math.max(0, num - spawnLoad.total)
+        for (let i = 0; i < missing; i++) {
+            room.SpawnMissionAdd('', '', num, 'attack-claimer', { targetRoom, num, spawnFlag: flagName })
         }
-        log('CLAIM', `${room.name} 孵化了 ${num} 个 attack-claimer 来攻击 ${targetRoom}`)
+        if (missing > 0) {
+            log('CLAIM', `${room.name} 补充了 ${missing} 个 attack-claimer 来攻击 ${targetRoom}`)
+        }
         return true
     }
 
@@ -96,11 +169,27 @@ export default class WarSpawnFunction extends Flag {
         if (!room) return true
 
         const targetRoom = this.pos.roomName
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'dismantle',
+            (memory) => memory.targetRoom === targetRoom && memory.dismantleMode === 'route'
+        )
+        if (spawnLoad.total > 0) return true
         const bodys = RoleData['dismantle'].bodypart as any
         const boostmap = (RoleData['dismantle'].boostmap || {}) as BoostMap
 
         if (boostmap && !room.CheckBoostRes(bodys, boostmap)) {
             console.log(flagName, '没有足够的boost资源')
+            this.remove()
+            return true
+        }
+
+        const flagMemory = this.memory as any
+        const spawnCount = parseFlagNumber(flagName, 'N', 0)
+        const maxSpawnCount = spawnCount > 0 ? spawnCount : 1
+        if ((flagMemory['spawnCount'] || 0) >= maxSpawnCount) {
+            console.log(flagName, '孵化数量已满')
             this.remove()
             return true
         }
@@ -112,16 +201,15 @@ export default class WarSpawnFunction extends Flag {
             boostmap,
             boostOwnerId,
             dismantleMode: 'route',
+            spawnFlag: flagName,
         } as any)
         if (spawnRet !== OK) return true
         room.AssignBoostTaskByBody(bodys, boostmap, boostOwnerId)
 
-        const flagMemory = this.memory as any
         flagMemory['spawnCount'] = (flagMemory['spawnCount'] || 0) + 1
         console.log(flagName, '已添加孵化任务.')
 
-        const spawnCount = parseFlagNumber(flagName, 'N', 0)
-        if (flagMemory['spawnCount'] >= spawnCount) {
+        if (flagMemory['spawnCount'] >= maxSpawnCount) {
             console.log(flagName, '孵化数量已满')
             this.remove()
         }
@@ -145,6 +233,13 @@ export default class WarSpawnFunction extends Flag {
             return true
         }
         const targetRoom = room.name
+        const spawnLoad = getFlagSpawnLoad(
+            room,
+            flagName,
+            'logistic',
+            (memory) => memory.sourceRoom === sourceRoom && memory.targetRoom === targetRoom
+        )
+        if (spawnLoad.total >= 1) return true
         const bodys = config.bodypart as any
 
         if (config.boostmap && !room.CheckBoostRes(bodys, config.boostmap)) {
@@ -157,6 +252,7 @@ export default class WarSpawnFunction extends Flag {
             sourceRoom,
             targetRoom,
             boostmap: config.boostmap,
+            spawnFlag: flagName,
         } as any)
         if (spawnRet !== OK) return true
 
