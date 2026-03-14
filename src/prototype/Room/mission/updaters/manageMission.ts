@@ -33,6 +33,65 @@ const MANAGE_BALANCE = {
     TERMINAL_RES_LIMIT: 10000
 }
 
+const MANAGE_STRUCTURE_ALIASES = {
+    s: 'storage',
+    t: 'terminal',
+    l: 'link',
+    f: 'factory',
+    p: 'powerSpawn',
+} as const;
+
+const createTerminalThresholds = () => {
+    const thresholds = {
+        source: {
+            [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.SOURCE.ENERGY,
+            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.SOURCE.POWER,
+            default: MANAGE_BALANCE.THRESHOLD.SOURCE.DEFAULT,
+        } as Record<string, number>,
+        target: {
+            [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.TARGET.ENERGY,
+            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.TARGET.POWER,
+            default: MANAGE_BALANCE.THRESHOLD.TARGET.DEFAULT,
+        } as Record<string, number>,
+    };
+
+    const initThresholds = (list: string[], sourceValue: number, targetValue: number) => {
+        for (const resourceType of list) {
+            thresholds.source[resourceType] = sourceValue;
+            thresholds.target[resourceType] = targetValue;
+        }
+    };
+
+    initThresholds(Object.keys(LabMap), MANAGE_BALANCE.THRESHOLD.SOURCE.LAB, MANAGE_BALANCE.THRESHOLD.TARGET.LAB);
+    initThresholds(BarList, MANAGE_BALANCE.THRESHOLD.SOURCE.BAR, MANAGE_BALANCE.THRESHOLD.TARGET.BAR);
+    initThresholds(Goods, MANAGE_BALANCE.THRESHOLD.SOURCE.GOODS, MANAGE_BALANCE.THRESHOLD.TARGET.GOODS);
+
+    return thresholds;
+};
+
+const normalizeManageResourceType = (resourceType: string | ResourceConstant) => {
+    const alias = BASE_CONFIG.RESOURCE_ABBREVIATIONS[resourceType];
+    return (alias || resourceType) as ResourceConstant;
+};
+
+const normalizeManageStructureKey = (structure: string) => {
+    return (MANAGE_STRUCTURE_ALIASES[structure as keyof typeof MANAGE_STRUCTURE_ALIASES] || structure) as string;
+};
+
+const getThresholdAmount = (thresholdMap: Record<string, number>, resourceType: string) => {
+    return thresholdMap[resourceType] ?? thresholdMap.default ?? 0;
+};
+
+const resolveManageStructure = (room: Room, structure: string) => {
+    const resolvedKey = normalizeManageStructureKey(structure);
+    const value = (room as any)[resolvedKey] as AnyStoreStructure | AnyStoreStructure[] | null;
+    if (!value || Array.isArray(value)) return null;
+    return {
+        key: resolvedKey,
+        structure: value,
+    };
+};
+
 
 
 // 检查终端资源, 自动调度资源
@@ -42,44 +101,21 @@ function CheckTerminalResAmount(room: Room) {
 
     // 发送任务资源数
     const sendTotal = room.getSendMissionTotalAmount();
-    // 自动调度资源阈值
-    const THRESHOLD = {
-        source: {
-            [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.SOURCE.ENERGY,
-            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.SOURCE.POWER,
-            default: MANAGE_BALANCE.THRESHOLD.SOURCE.DEFAULT
-        },
-        target: {
-            [RESOURCE_ENERGY]: MANAGE_BALANCE.THRESHOLD.TARGET.ENERGY,
-            [RESOURCE_POWER]: MANAGE_BALANCE.THRESHOLD.TARGET.POWER,
-            default: MANAGE_BALANCE.THRESHOLD.TARGET.DEFAULT
-        }
-    }
-    
-    // 初始化阈值
-    const initThresholds = (list: string[], srcVal: number, tgtVal: number) => {
-        list.forEach((r) => { 
-            THRESHOLD.source[r] = srcVal; 
-            THRESHOLD.target[r] = tgtVal; 
-        });
-    };
-
-    initThresholds(Object.keys(LabMap), MANAGE_BALANCE.THRESHOLD.SOURCE.LAB, MANAGE_BALANCE.THRESHOLD.TARGET.LAB);
-    initThresholds(BarList, MANAGE_BALANCE.THRESHOLD.SOURCE.BAR, MANAGE_BALANCE.THRESHOLD.TARGET.BAR);
-    initThresholds(Goods, MANAGE_BALANCE.THRESHOLD.SOURCE.GOODS, MANAGE_BALANCE.THRESHOLD.TARGET.GOODS);
+    const thresholds = createTerminalThresholds();
+    const totalRequestedAmount = Object.values(sendTotal).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
 
     // 存在该旗帜时, 清空终端
-    let TerminalClearFlag = Game.flags[`${room.name}_terminal_clear`];
+    const terminalClearFlag = Game.flags[`${room.name}_terminal_clear`];
 
     // 检查终端自动转入
     for (const resourceType in room.storage.store) {
         let amount = 0;
-        if(resourceType === RESOURCE_ENERGY && Object.keys(sendTotal).length > 0) {
+        if (resourceType === RESOURCE_ENERGY && totalRequestedAmount > 0) {
             amount = Math.min(
                 room.storage.store[resourceType],
-                Object.values(sendTotal).reduce((a, b) => (a + b) || 0, 0) - room.terminal.store[resourceType],
+                totalRequestedAmount - room.terminal.store[resourceType],
                 MANAGE_BALANCE.TERMINAL_ENERGY_LIMIT - room.terminal.store[resourceType],
-            )
+            );
         }
         // 有发送任务时，根据总量来定
         else if (sendTotal[resourceType]) {
@@ -87,11 +123,11 @@ function CheckTerminalResAmount(room: Room) {
                 room.storage.store[resourceType],
                 sendTotal[resourceType] - room.terminal.store[resourceType],
                 MANAGE_BALANCE.TERMINAL_RES_LIMIT - room.terminal.store[resourceType]
-            )
+            );
         } else {
-            if (TerminalClearFlag) break;
+            if (terminalClearFlag) break;
             // 当终端资源不足时，将storage资源补充到终端
-            const threshold = THRESHOLD.target[resourceType] || THRESHOLD.target.default;
+            const threshold = getThresholdAmount(thresholds.target, resourceType);
             if (room.terminal.store[resourceType] >= threshold) continue;
             amount = Math.min(
                 room.storage.store[resourceType],
@@ -104,13 +140,15 @@ function CheckTerminalResAmount(room: Room) {
 
     // 检查终端自动转出
     for (const resourceType in room.terminal.store) {
-        if(sendTotal[resourceType]) continue;
+        if (sendTotal[resourceType]) continue;
         // 当终端资源过多，且storage有空间时，将终端多余资源转入storage
-        const threshold = TerminalClearFlag ? 0 : THRESHOLD.source[resourceType] || THRESHOLD.source.default;
-        if(room.terminal.store[resourceType] <= threshold) continue;
+        const threshold = terminalClearFlag
+            ? 0
+            : getThresholdAmount(thresholds.source, resourceType);
+        if (room.terminal.store[resourceType] <= threshold) continue;
 
         const amount = room.terminal.store[resourceType] - threshold;
-        if(amount <= 0) continue;
+        if (amount <= 0) continue;
         room.ManageMissionAdd('t', 's', resourceType as ResourceConstant, amount);
     }
 }
@@ -203,6 +241,7 @@ export default class ManageMission extends Room {
      * @description 检查终端、工厂、powerSpawn 的资源状态并生成调度任务
      */
     UpdateManageMission(offset = 0) {
+        void offset;
         // 检查终端资源预留数量，不足则补充，超过则搬出
         CheckTerminalResAmount(this);
         // 检查工厂资源数量，补充或搬出
@@ -219,32 +258,26 @@ export default class ManageMission extends Room {
      * @param amount - 搬运数量（>0）
      */
     ManageMissionAdd(source: string, target: string, resourceType: ResourceConstant, amount: number) {
-        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
-        const structures = {
-            s: 'storage',
-            t: 'terminal',
-            l: 'link',
-            f: 'factory',
-            p: 'powerSpawn'
-        }
-        if(source in structures) source = structures[source];
-        if(target in structures) target = structures[target];
+        const normalizedResourceType = normalizeManageResourceType(resourceType);
+        const resolvedSource = resolveManageStructure(this, source);
+        const resolvedTarget = resolveManageStructure(this, target);
+        if (!resolvedSource || !resolvedTarget) return false;
+        if (typeof amount !== 'number' || amount <= 0) return false;
 
-        if(!source || !target || !resourceType || !amount) return false;
-        if(typeof amount !== 'number' || amount <= 0) return false;
-
-        const sourceObj = (this as any)[source] as AnyStoreStructure | AnyStoreStructure[] | null;
-        const targetObj = (this as any)[target] as AnyStoreStructure | AnyStoreStructure[] | null;
-        if (!sourceObj || !targetObj) return false;
-        if (Array.isArray(sourceObj) || Array.isArray(targetObj)) return false;
-
-        const sourceAmount = sourceObj.store?.[resourceType] || 0;
+        const sourceKey = resolvedSource.key;
+        const targetKey = resolvedTarget.key;
+        const sourceObj = resolvedSource.structure;
+        const targetObj = resolvedTarget.structure;
+        const sourceAmount = sourceObj.store?.[normalizedResourceType] || 0;
         if (sourceAmount <= 0) return false;
 
-        const free = targetObj.store?.getFreeCapacity(resourceType) || 0;
+        const free = targetObj.store?.getFreeCapacity(normalizedResourceType) || 0;
         if (free <= 0) {
-            const existingTaskId = this.checkSameMissionInPool('transport', 'manage', {source, target, resourceType} as ManageTask);
+            const existingTaskId = this.checkSameMissionInPool('transport', 'manage', {
+                source: sourceKey,
+                target: targetKey,
+                resourceType: normalizedResourceType,
+            } as ManageTask);
             if (existingTaskId) this.deleteMissionFromPool('transport', existingTaskId);
             return false;
         }
@@ -252,13 +285,22 @@ export default class ManageMission extends Room {
         amount = Math.min(amount, free, sourceAmount);
         if (amount <= 0) return false;
 
-        let existingTaskId = this.checkSameMissionInPool('transport', 'manage', {source, target, resourceType} as ManageTask);
+        const taskData = {
+            source: sourceKey,
+            target: targetKey,
+            resourceType: normalizedResourceType,
+            amount,
+        } as ManageTask;
+        const existingTaskId = this.checkSameMissionInPool('transport', 'manage', {
+            source: sourceKey,
+            target: targetKey,
+            resourceType: normalizedResourceType,
+        } as ManageTask);
         if (existingTaskId) {
             return this.updateMissionPool('transport', existingTaskId,
-                {data:{source, target, resourceType, amount} as ManageTask});
+                { data: taskData });
         } else {
-            return this.addMissionToPool('transport', 'manage', 0, 
-                {source, target, resourceType, amount} as ManageTask);
+            return this.addMissionToPool('transport', 'manage', 0, taskData);
         }
     }
 
@@ -269,15 +311,17 @@ export default class ManageMission extends Room {
      * @param amount - 发送数量（>0）
      */
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
-        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-        if(RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
-        let existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
+        const normalizedResourceType = normalizeManageResourceType(resourceType);
+        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {
+            targetRoom,
+            resourceType: normalizedResourceType,
+        } as SendTask);
         if (existingTaskId) {
             return this.updateMissionPool('terminal', existingTaskId,
-                {data:{targetRoom, resourceType, amount} as SendTask});
+                { data: { targetRoom, resourceType: normalizedResourceType, amount } as SendTask });
         } else {
             return this.addMissionToPool('terminal', 'send', 0, 
-                {targetRoom, resourceType, amount} as SendTask);
+                { targetRoom, resourceType: normalizedResourceType, amount } as SendTask);
         }
     }
 
@@ -290,11 +334,13 @@ export default class ManageMission extends Room {
      * @param maxAmount - 可选上限（防止一次性排队过多）
      */
     SendMissionUpsertMax(targetRoom: string, resourceType: string | ResourceConstant, amount: number, maxAmount?: number) {
-        const RES = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
-        if (RES[resourceType]) resourceType = RES[resourceType] as ResourceConstant;
+        const normalizedResourceType = normalizeManageResourceType(resourceType);
         if (!amount || typeof amount !== 'number' || amount <= 0) return false;
 
-        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {targetRoom, resourceType} as SendTask);
+        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {
+            targetRoom,
+            resourceType: normalizedResourceType,
+        } as SendTask);
         if (existingTaskId) {
             const task = this.getMissionFromPoolById('terminal', existingTaskId);
             const currentAmount = (task?.data as SendTask | undefined)?.amount ?? 0;
@@ -306,6 +352,10 @@ export default class ManageMission extends Room {
 
         let nextAmount = amount;
         if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
-        return this.addMissionToPool('terminal', 'send', 0, {targetRoom, resourceType, amount: nextAmount} as SendTask);
+        return this.addMissionToPool('terminal', 'send', 0, {
+            targetRoom,
+            resourceType: normalizedResourceType,
+            amount: nextAmount,
+        } as SendTask);
     }
 }

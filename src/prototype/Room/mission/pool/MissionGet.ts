@@ -3,7 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
-import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../update/spawnMission';
+import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMissionConditions';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
 
@@ -11,53 +11,52 @@ const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', '
  * 任务获取模块
  */
 export default class MissionGet extends Room {
-    // 获取运输任务
-    getTransportMission(creep: Creep) {
-        const posInfo = compress(creep.pos.x, creep.pos.y);
-        const task = this.getMissionFromPool('transport', posInfo, (task) => task.type === 'transport');
-        if(!task) return null;
+    private getCreepPosInfo(creep: Creep) {
+        return compress(creep.pos.x, creep.pos.y);
+    }
 
+    /**
+     * transport 任务在取出前再做一次校验。
+     * 这样能及时清理 source/target 已失效的陈旧任务，避免 creep 卡在递归重试里。
+     */
+    private isTransportTaskValid(task: Task) {
         const data = task.data as TransportTask;
         const source = Game.getObjectById(data.source);
         const target = Game.getObjectById(data.target);
-        const resourceType = data.resourceType;
-        const amount = data.amount;
-        
-        // 任务无效则删除, 重新获取
-        if(!source || !target || !resourceType || !amount ||
-            (source as any).store[resourceType] == 0 ||
-            (target as any).store.getFreeCapacity(resourceType) == 0) {
-            this.deleteMissionFromPool('transport',task.id);
-            return this.getTransportMission(creep);
-        }
-
-        this.lockMissionInPool('transport', task.id, creep.id);
-
-        return task;
+        if (!source || !target || !data.resourceType || !data.amount) return false;
+        if ((source as any).store[data.resourceType] <= 0) return false;
+        return (target as any).store.getFreeCapacity(data.resourceType) > 0;
     }
+
+    private getPlaceholderMission(poolName: 'build' | 'repair', creep: Creep) {
+        if (!this.checkMissionInPool(poolName)) return null;
+        return this.getMissionFromPool(poolName, this.getCreepPosInfo(creep));
+    }
+
+    // 获取运输任务
+    getTransportMission(creep: Creep) {
+        const posInfo = this.getCreepPosInfo(creep);
+        while (true) {
+            const task = this.getMissionFromPool('transport', posInfo, (transportTask) => transportTask.type === 'transport');
+            if (!task) return null;
+            if (!this.isTransportTaskValid(task)) {
+                this.deleteMissionFromPool('transport', task.id);
+                continue;
+            }
+
+            this.lockMissionInPool('transport', task.id, creep.id);
+            return task;
+        }
+    }
+
     // 获取建造任务
     getBuildMission(creep: Creep) {
-        const posInfo = compress(creep.pos.x, creep.pos.y);
-        if(this.checkMissionInPool('build')){
-            const task = this.getMissionFromPool('build', posInfo);
-            if(!task) return null;
-
-            return task;
-        }
-        
-        return null;
+        return this.getPlaceholderMission('build', creep);
     }
+
     // 获取维修任务
     getRepairMission(creep: Creep) {
-        const posInfo = compress(creep.pos.x, creep.pos.y);
-        if(this.checkMissionInPool('repair')){
-            const task = this.getMissionFromPool('repair', posInfo);
-            if(!task) return null;
-
-            return task;
-        }
-
-        return null;
+        return this.getPlaceholderMission('repair', creep);
     }
 
     // 获取刷墙任务

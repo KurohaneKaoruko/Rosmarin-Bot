@@ -126,7 +126,7 @@ export default class MissionPools extends Room {
 
     // 添加任务到任务池
     public addMissionToPool(PoolName: MissionPoolName, type: Task["type"], level: Task["level"], data: Task["data"]) {
-        const poolName = TASK_TYPE_TO_POOL[type];
+        const poolName = TASK_TYPE_TO_POOL[type] || PoolName;
 
         const id = `${type.toUpperCase()}-${this.generateId()}`;
         const task: Task = { id, type, level, data };

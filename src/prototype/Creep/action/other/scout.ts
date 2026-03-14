@@ -83,7 +83,7 @@ const Scout = {
                 moveOptions: { plainCost: 1, swampCost: 1, maxRooms: 1, range: 1 }
             });
         } else {
-            creep.moveTo(new RoomPosition(25, 25, creep.room.name), { plainCost: 1, swampCost: 1 });
+            creep.moveTo(new RoomPosition(25, 25, creep.room.name), { plainCost: 1, swampCost: 1, range: 10 });
         }
         
         return false;

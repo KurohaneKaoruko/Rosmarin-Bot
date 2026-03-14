@@ -683,7 +683,16 @@ const CarrierFunction = {
             return true
         }
         if (goGenerateSafeMode(creep)) return;
-        return withdraw(creep);
+        const result = withdraw(creep);
+        if (result) return true;
+
+        // 源侧暂时断流时，允许带着半仓资源先回去交付，避免卡在 source 态空转。
+        if (creep.store.getUsedCapacity() > 0 && !getCarrierSourceCache(creep).sourceId) {
+            carry(creep);
+            return true;
+        }
+
+        return result;
     },
     target: (creep: Creep) => {
         if (!creep.moveHomeRoom()) return;
