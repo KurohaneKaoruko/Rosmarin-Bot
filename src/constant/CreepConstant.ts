@@ -328,7 +328,7 @@ export const RoleLevelData = {
     "claimer": {
         1: { bodypart: [], num: 0 },
         2: { bodypart: [], num: 0 },
-        3: { bodypart: [], num: 0 },
+        3: { bodypart: [[MOVE, 1], [CLAIM, 1]], num: 0 },
         4: { bodypart: [[MOVE, 1], [CLAIM, 1]], num: 0 },
         5: { bodypart: [[MOVE, 1], [CLAIM, 1]], num: 0 },
         6: { bodypart: [[MOVE, 1], [CLAIM, 1]], num: 0 },
