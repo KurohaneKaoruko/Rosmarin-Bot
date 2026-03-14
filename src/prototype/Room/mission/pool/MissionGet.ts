@@ -3,7 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
-import { pruneDelayedUpgraderSpawnMissions } from '../update/spawnMission';
+import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../update/spawnMission';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
 
@@ -234,8 +234,9 @@ export default class MissionGet extends Room {
             if (!hasFixedBody) {
                 const state = this.memory.energyState || this.updateEnergyState?.(false);
                 const allowBudgetSpawn =
-                    (state === 'LOW' || state === 'CRITICAL') &&
-                    EMERGENCY_DOWNSIZE_ROLES.has(role);
+                    ((state === 'LOW' || state === 'CRITICAL') &&
+                    EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
+                    (role === 'worker' && getMyConstructionSites(this).length > 0);
                 const budget = allowBudgetSpawn ? energyAvailable : undefined;
                 body = this.GetRoleBodys(role, data.upbody, budget);
                 const bodypart = this.GenerateBodys(body as any[], role);

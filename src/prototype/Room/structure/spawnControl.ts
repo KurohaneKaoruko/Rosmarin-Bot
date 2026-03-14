@@ -3,12 +3,14 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/modules/utils/compress';
 import { getRoomData } from '@/modules/utils/memory';
+import { getMyConstructionSites } from '../mission/update/spawnMission';
 
 const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 };
 
-// 仅这些角色允许在低能量时按当前可用能量降级体型，避免 upgrader/worker 等被误降级。
+// 仅这些角色允许在低能量时按当前可用能量降级体型。
+// worker 的预算体型单独由“存在建造需求”控制。
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
 const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
 
@@ -126,8 +128,9 @@ export default class SpawnControl extends Room {
         } else if (!body || !Array.isArray(body) || body.length == 0) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
             const allowBudgetSpawn =
-                (state === 'LOW' || state === 'CRITICAL') &&
-                EMERGENCY_DOWNSIZE_ROLES.has(role);
+                ((state === 'LOW' || state === 'CRITICAL') &&
+                EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
+                (role === 'worker' && getMyConstructionSites(this).length > 0);
             const budget = allowBudgetSpawn ? this.energyAvailable : undefined;
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);

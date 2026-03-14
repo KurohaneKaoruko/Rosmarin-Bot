@@ -15,24 +15,6 @@ const OUTMINE_PRIORITY = {
 } as const;
 
 const DOUBLE_DEFEND_MIN_LEVEL = 7;
-const LOCAL_CORE_SPAWN_ROLES = new Set([
-    'harvester',
-    'transport',
-    'carrier',
-    'manager',
-    'worker',
-    'upgrader',
-    'universal',
-]);
-const OUTMINE_ECONOMIC_ROLES = [
-    'scout',
-    'reserver',
-    'out-harvest',
-    'out-car',
-    'out-carry',
-    'out-build',
-    'out-mineral',
-];
 const OUTMINE_ROLE_PRIORITY_BY_ROLE: Record<string, number> = {
     scout: OUTMINE_PRIORITY.scout,
     reserver: OUTMINE_PRIORITY.reserver,
@@ -115,12 +97,7 @@ const getOutHarvesterSlotCap = (targetRoom: Room): number => {
     return totalSlots;
 }
 
-const getSpawnRoleNum = (homeRoom: Room, role: string): number => {
-    // 读取指定角色在孵化队列中的数量
-    return homeRoom.getSpawnMissionNum()?.[role] || 0;
-}
-
-const getSpawnRoleNumByTarget = (homeRoom: Room, role: string, targetRoomName: string): number => {
+const getQueuedSpawnRoleNumByTarget = (homeRoom: Room, role: string, targetRoomName: string): number => {
     const roomAny = homeRoom as any;
     if (roomAny._spawnRoleTargetCacheTick !== Game.time) {
         const cache: Record<string, number> = {};
@@ -235,31 +212,6 @@ const getRoomMode = (room: Room): string => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 }
 
-const getEnergyState = (room: Room): string => {
-    return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
-}
-
-const hasLocalCoreSpawnBacklog = (room: Room): boolean => {
-    const tasks = room.getAllMissionFromPool('spawn') || [];
-    for (const task of tasks) {
-        const role = (task as any)?.data?.memory?.role;
-        if (!role) continue;
-        if (LOCAL_CORE_SPAWN_ROLES.has(role)) return true;
-    }
-    return false;
-}
-
-const shouldPauseOutMineEconomy = (room: Room): boolean => {
-    const state = getEnergyState(room);
-    if (state === 'LOW' || state === 'CRITICAL') return true;
-    if (hasLocalCoreSpawnBacklog(room)) return true;
-    return false;
-}
-
-const clearOutMineEconomicSpawnMissions = (room: Room): void => {
-    room.deleteSpawnMissionsByRole(OUTMINE_ECONOMIC_ROLES);
-}
-
 const normalizeOutMineEconomicPriority = (room: Room): void => {
     const tasks = room.getAllMissionFromPool('spawn') || [];
     for (const task of tasks) {
@@ -352,10 +304,6 @@ export default class OutMine extends Room {
         if (Memory['warmode']) return;
         pruneInvalidOutCarrySpawnMissions(this);
         normalizeOutMineEconomicPriority(this);
-        if (shouldPauseOutMineEconomy(this)) {
-            clearOutMineEconomicSpawnMissions(this);
-            return;
-        }
 
         const qosLevel = global.qos.getQoS()?.level || 'normal';
         if (qosLevel === 'emergency') return;
@@ -371,6 +319,8 @@ export default class OutMine extends Room {
     EnergyMine() { // 能量矿
         const qosLevel = global.qos.getQoS()?.level || 'normal';
         const roomMode = getRoomMode(this);
+        const canRunSecondaryAction =
+            qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] });
         const interval = qosLevel === 'constrained'
             ? (roomMode === 'rush' ? 10 : roomMode === 'high' ? 20 : 40)
             : (roomMode === 'rush' ? 5 : roomMode === 'high' ? 10 : 20);
@@ -381,23 +331,19 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (canRunSecondaryAction) {
                     scoutSpawn(this, roomName);    // 侦查
                 }
                 continue;
             }
 
-            // 没有房间视野不孵化
-            if (!targetRoom) continue;
-
-
             // 造路
-            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
-                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 &&
+                this.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL) {
+                if (canRunSecondaryAction) {
                     RoadBuilder.createRoadSites(this, targetRoom)
                 }
             }
-
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum == 0) continue;
@@ -412,11 +358,13 @@ export default class OutMine extends Room {
                 )
             });
 
-            if (hostiles.some(c => {
+            const hasPlayerThreat = hostiles.some(c => {
                 if (c.owner.username === 'Invader') return false;
                 if (c.owner.username === 'Source Keeper') return false;
                 return true;
-            })) {
+            });
+
+            if (hasPlayerThreat) {
                 // 二人小队防御
                 outDoubleDefendSpawn(this, targetRoom, hostiles)
             } else {
@@ -430,7 +378,7 @@ export default class OutMine extends Room {
             const myUserName = this.controller.owner.username;
             if (controller?.owner && controller.owner.username !== myUserName) continue;
 
-            if (this.level >= 3 && (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] }))) {
+            if (this.level >= 3 && canRunSecondaryAction) {
                 outReserverSpawn(this, targetRoom);    // 预定
             }
 
@@ -466,6 +414,8 @@ export default class OutMine extends Room {
     CenterMine() { // 中央九房
         const qosLevel = global.qos.getQoS()?.level || 'normal';
         const roomMode = getRoomMode(this);
+        const canRunSecondaryAction =
+            qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] });
         const interval = qosLevel === 'constrained'
             ? (roomMode === 'rush' ? 6 : roomMode === 'high' ? 10 : 20)
             : (roomMode === 'rush' ? 4 : roomMode === 'high' ? 5 : 10);
@@ -476,17 +426,16 @@ export default class OutMine extends Room {
             const targetRoom = Game.rooms[roomName];
             // 如果没有视野, 尝试侦查
             if (!targetRoom) {
-                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+                if (canRunSecondaryAction) {
                     scoutSpawn(this, roomName);    // 侦查
                 }
                 continue;
             }
-            // 没有房间视野不孵化
-            if (!targetRoom) continue;
 
             // 造路
-            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 && this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
-                if (qosLevel === 'normal' || global.qos.shouldRun({ every: 2, allowLevels: ['constrained'] })) {
+            if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL == 0 &&
+                this.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL) {
+                if (canRunSecondaryAction) {
                     RoadBuilder.createRoadSites(this, targetRoom)
                 }
             }
@@ -550,7 +499,7 @@ export default class OutMine extends Room {
 const scoutSpawn = function (homeRoom: Room, targetRoomName: string) {
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoomName);
     const scouts = (CreepByTargetRoom['scout'] || []).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'scout');
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'scout', targetRoomName);
     if (scouts + spawnNum > 0) return false;
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoomName } as CreepMemory;
@@ -561,9 +510,10 @@ const scoutSpawn = function (homeRoom: Room, targetRoomName: string) {
 // 中九房攻击者
 const outAttackSpawn = function (homeRoom: Room, targetRoom: Room) {
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-    const outerAttackers = (CreepByTargetRoom['out-attack']||[]).filter((c: any) => c.ticksToLive > 300 || c.spawning);
-    const creepNum = (outerAttackers||[]).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'out-attack');
+    const outerAttackers = (CreepByTargetRoom['out-attack'] || [])
+        .filter((c: any) => c.ticksToLive > 300 || c.spawning);
+    const creepNum = outerAttackers.length;
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-attack', targetRoom.name);
     if (creepNum + spawnNum >= 1) return false; 
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
@@ -574,9 +524,10 @@ const outAttackSpawn = function (homeRoom: Room, targetRoom: Room) {
 // 中九房防御
 const outRangedSpawn = function (homeRoom: Room, targetRoom: Room) {
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-    const outerRanged = (CreepByTargetRoom['out-ranged']||[]).filter((c: any) => c.ticksToLive > 300 || c.spawning);
-    const creepNum = (outerRanged||[]).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'out-ranged');
+    const outerRanged = (CreepByTargetRoom['out-ranged'] || [])
+        .filter((c: any) => c.ticksToLive > 300 || c.spawning);
+    const creepNum = outerRanged.length;
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-ranged', targetRoom.name);
     if (creepNum + spawnNum >= 1) return false;
     
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
@@ -589,7 +540,7 @@ const outMineSpawn = function (homeRoom: Room, targetRoom: Room) {
     if (homeRoom.level < 6) return false;
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerMiners = (CreepByTargetRoom['out-mineral'] || []).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'out-mineral');
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-mineral', targetRoom.name);
     if (outerMiners + spawnNum >= 1) return false;
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
@@ -613,8 +564,8 @@ const outDefendSpawn = function (homeRoom: Room, targetRoom: Room, hostiles: Cre
     let memory: any;
     let name: string;
 
-    if(hostiles.length > 0) {
-        const spawnNum = getSpawnRoleNum(homeRoom, 'out-defend');
+    if (hostiles.length > 0) {
+        const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-defend', targetRoom.name);
         let maxNum = 1;
         if (homeRoom.level < 4) maxNum = 3;
         else if (homeRoom.level < 6) maxNum = 2;
@@ -622,12 +573,12 @@ const outDefendSpawn = function (homeRoom: Room, targetRoom: Room, hostiles: Cre
         role = 'out-defend';
         memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name };
         name = 'OD';
-        if(!memory) return false;
+        if (!memory) return false;
         homeRoom.SpawnMissionAdd(name, [], -1, role, memory);
         return true;
     }
-    if(invaderCore.length > 0) {
-        const spawnNum = getSpawnRoleNum(homeRoom, 'out-invader');
+    if (invaderCore.length > 0) {
+        const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-invader', targetRoom.name);
         let maxNum = 1;
         if (homeRoom.level < 4) maxNum = 4;
         else if (homeRoom.level < 6) maxNum = 3;
@@ -636,7 +587,7 @@ const outDefendSpawn = function (homeRoom: Room, targetRoom: Room, hostiles: Cre
         role = 'out-invader';
         memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name };
         name = 'OI';
-        if(!memory) return false;
+        if (!memory) return false;
         homeRoom.SpawnMissionAdd(name, [], -1, role, memory);
         return true;
     }
@@ -654,10 +605,10 @@ const outDoubleDefendSpawn = function (homeRoom: Room, targetRoom: Room, hostile
 
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const out2Attack = (CreepByTargetRoom['out-2attack'] || []).length || 0;
-    const out2AttackSpawnNum = getSpawnRoleNum(homeRoom, 'out-2attack');
+    const out2AttackSpawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-2attack', targetRoom.name);
     if (out2Attack + out2AttackSpawnNum >= 1) return false;
     const out2Heal = (CreepByTargetRoom['out-2heal'] || []).length;
-    const out2HealSpawnNum = getSpawnRoleNum(homeRoom, 'out-2heal');
+    const out2HealSpawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-2heal', targetRoom.name);
     if (out2Heal + out2HealSpawnNum >= 1) return false;
 
     homeRoom.SpawnMissionAdd('', [], -1, 'out-2attack', { targetRoom: targetRoom.name } as any);
@@ -670,7 +621,7 @@ const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum:
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerHarvesters = (CreepByTargetRoom['out-harvest'] || [])
         .filter((c: any) => c.homeRoom === homeRoom.name).length;
-    const spawnNum = getSpawnRoleNumByTarget(homeRoom, 'out-harvest', targetRoom.name);
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-harvest', targetRoom.name);
     const slotCap = getOutHarvesterSlotCap(targetRoom);
     const targetNum = calcOutHarvesterTargetNum(homeRoom, sourceNum, upbody, slotCap);
     if (targetNum <= 0) return false;
@@ -678,7 +629,7 @@ const outHarvesterSpawn = function (homeRoom: Room, targetRoom: Room, sourceNum:
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
     if (upbody) {
-        homeRoom.SpawnMissionAdd('OH', [[WORK, 16],[CARRY, 6],[MOVE, 8]], OUTMINE_PRIORITY.harvest, 'out-harvest', memory);
+        homeRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], OUTMINE_PRIORITY.harvest, 'out-harvest', memory);
     } else {
         homeRoom.SpawnMissionAdd('OH', [], OUTMINE_PRIORITY.harvest, 'out-harvest', memory);
     }
@@ -709,8 +660,8 @@ const outCarrySpawn = function (
     const outerCar = (CreepByTargetRoom['out-car'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;
     
-    const spawnCarryNum = getSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
-    const spawnCarNum = getSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
+    const spawnCarryNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
+    const spawnCarNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
 
     if (!allowWorkCarry) {
         const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
@@ -763,8 +714,8 @@ const outCarry2Spawn = function (
     const outerCar = (CreepByTargetRoom['out-car'] || [])
                         .filter((c: any) => c.homeRoom == homeRoom.name).length;
     
-    const spawnCarryNum = getSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
-    const spawnCarNum = getSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
+    const spawnCarryNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-carry', targetRoom.name);
+    const spawnCarNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
 
     if (preferSmall) {
         const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
@@ -815,7 +766,7 @@ const outCarry2Spawn = function (
 // 预定
 const outReserverSpawn = function (homeRoom: Room, targetRoom: Room) {
     if (!targetRoom.controller || targetRoom.controller.my) return false;
-    if(homeRoom.controller.level < 3) return false;
+    if (homeRoom.controller.level < 3) return false;
 
     if (targetRoom.controller.reservation &&
         targetRoom.controller.reservation.username == homeRoom.controller.owner.username &&
@@ -824,7 +775,7 @@ const outReserverSpawn = function (homeRoom: Room, targetRoom: Room) {
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerReservers = (CreepByTargetRoom['reserver'] || []).length;
 
-    const spawnNum = getSpawnRoleNum(homeRoom, 'reserver');
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'reserver', targetRoom.name);
     if (outerReservers + spawnNum >= 1) return false;
 
     const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name } as CreepMemory;
@@ -841,7 +792,7 @@ const outBuilderSpawn = function (homeRoom: Room, targetRoom: Room) {
 
     const CreepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
     const outerBuilder = (CreepByTargetRoom['out-build'] || []).length;
-    const spawnNum = getSpawnRoleNum(homeRoom, 'out-build');
+    const spawnNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-build', targetRoom.name);
 
     let num = 1;
     if (constructionSite.length > 10) num = 2;

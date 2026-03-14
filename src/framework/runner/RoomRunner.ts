@@ -13,7 +13,7 @@ export const roomRunner = function (room: Room) {
 
     let roomMem = getRoomData(room.name) as any;
     if (!roomMem) {
-        const roomAutoStart = (getAutoData() as any).RoomAutoStart as AutoDataMemory['RoomAutoStart'] | undefined;
+        const roomAutoStart = getAutoData().RoomAutoStart;
         if (!roomAutoStart) return;
 
         roomConsole.room.add(room.name, roomAutoStart.layout);

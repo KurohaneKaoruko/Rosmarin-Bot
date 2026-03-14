@@ -15,7 +15,7 @@ const getMyCreepsByRoleByRoom = (() => {
         const hit = cached[room.name][role];
         if (hit) return hit;
         const creeps = room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => c && c.ticksToLive > 100 && c.memory.role === role
+            filter: (c: Creep) => c && (c.ticksToLive || 0) > 0 && c.memory.role === role
         }) as Creep[];
         cached[room.name][role] = creeps;
         return creeps;
@@ -133,7 +133,7 @@ const getMyLegacySourceBoundCreepsByRoom = (() => {
         const hit = cached[room.name];
         if (hit) return hit;
         const creeps = room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => c && c.ticksToLive > 100 && !!c.memory.targetSourceId
+            filter: (c: Creep) => c && (c.ticksToLive || 0) > 0 && !!c.memory.targetSourceId
         }) as Creep[];
         cached[room.name] = creeps;
         return creeps;
@@ -374,6 +374,7 @@ export default class BaseFunction extends Room {
                 if (slots <= 0) continue;
                 const count = (boundCounts[source.id] || 0) +
                     getReservedSourceCountForCreep(this, source.id, creep.name);
+                if (count >= slots) continue;
                 const minTtl = minTtlBySource[source.id] ?? Infinity;
                 const distance = creep.pos.getRangeTo(source.pos);
                 if (
