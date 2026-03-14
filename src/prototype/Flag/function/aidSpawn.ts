@@ -1,4 +1,5 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
+import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
 import { AidBodys } from "./spawnConfig";
 import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle } from "../utils";
@@ -97,13 +98,13 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === sourceRoom,
+            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === sourceRoom,
             isActiveAidBuildFlagCreep
         );
         if (spawnLoad.total >= MANUAL_AID_BUILD_TARGET_COUNT) return true;
 
         let bodys: any[] = [];
-        const memory = { sourceRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
+        const memory = { homeRoom: room.name, sourceRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
@@ -148,12 +149,12 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'aid-upgrade',
-            (memory) => memory.targetRoom === targetRoom && (memory.home || targetRoom) === targetRoom
+            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
         let bodys: any[] = [];
-        const memory = { home: targetRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
+        const memory = { homeRoom: room.name, targetRoom, spawnFlag: flagName } as CreepMemory;
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
@@ -193,11 +194,11 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'up-upgrade',
-            (memory) => (memory.home || '') === targetRoom
+            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
-        room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { home: targetRoom, spawnFlag: flagName } as CreepMemory);
+        room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { homeRoom: room.name, targetRoom, spawnFlag: flagName } as CreepMemory);
         return true;
     }
 
@@ -219,13 +220,14 @@ export default class AidSpawnFunction extends Flag {
             'aid-carry',
             (memory) =>
                 memory.targetRoom === targetRoom &&
-                memory.sourceRoom === room.name &&
+                getCreepSourceRoom(memory) === room.name &&
                 memory.resource === RESOURCE_ENERGY
         );
         if (spawnLoad.total >= 1) return true;
 
         let bodys: any[] = [];
         const memory = {
+            homeRoom: room.name,
             sourceRoom: room.name,
             targetRoom: targetRoom,
             resource: RESOURCE_ENERGY,
@@ -313,7 +315,7 @@ export default class AidSpawnFunction extends Flag {
             && counts.carryAtTarget >= minCarryAtTarget;
 
         if (readyForClaim && counts.claimer < 1) {
-            const memory = { targetRoom, spawnFlag: flagName, jumpMode: true } as any;
+            const memory = { homeRoom: room.name, targetRoom, spawnFlag: flagName, jumpMode: true } as any;
             const ret = room.SpawnMissionAdd('', compressBodyConfig([[MOVE, 1], [CLAIM, 1]]), JUMP_SPAWN_PRIORITY, 'claimer', memory);
             if (ret === OK) {
                 log('JUMP', `${room.name} -> ${targetRoom} ready, spawn claimer`);
@@ -327,6 +329,7 @@ export default class AidSpawnFunction extends Flag {
         if (counts.builder < desiredBuilder) {
             const body = this.getJumpBuilderBody(room);
             const memory = {
+                homeRoom: room.name,
                 sourceRoom: targetRoom,
                 targetRoom,
                 spawnFlag: flagName,
@@ -658,7 +661,7 @@ export default class AidSpawnFunction extends Flag {
         // 目标房间未被占领时，确保有 claimer 在路上
         const hasClaimer = claimerState.live > 0 || queuedClaimers > 0;
         if (!hasClaimer && (!targetRoomObj || !targetRoomObj.my)) {
-            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { targetRoom, spawnFlag: flagName } as any);
+            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { homeRoom: room.name, targetRoom, spawnFlag: flagName } as any);
             if (ret === OK) {
                 log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
             } else {
@@ -671,7 +674,7 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === targetRoom
+            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === targetRoom
         );
         const claimAidNum = claimAidLoad.total;
 
@@ -680,7 +683,7 @@ export default class AidSpawnFunction extends Flag {
         const aidInterval = 200;
         const lastAidTime = typeof claimMemory['lastAidBuildTime'] === 'number' ? claimMemory['lastAidBuildTime'] : 0;
         if (claimAidNum < desiredAidNum && Game.time - lastAidTime >= aidInterval) {
-            const memory = { sourceRoom: targetRoom, targetRoom: targetRoom, spawnFlag: flagName } as any;
+            const memory = { homeRoom: room.name, sourceRoom: targetRoom, targetRoom: targetRoom, spawnFlag: flagName } as any;
             room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'aid-build', memory);
             claimMemory['lastAidBuildTime'] = Game.time;
             log('CLAIM', `${room.name} 派出了一个 aid-build 援助建造 ${targetRoom}`);
@@ -702,11 +705,11 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'reserver',
-            (memory) => memory.targetRoom === targetRoom
+            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
-        room.SpawnMissionAdd('', '', -1, 'reserver', { targetRoom, spawnFlag: flagName });
+        room.SpawnMissionAdd('', '', -1, 'reserver', { homeRoom: room.name, targetRoom, spawnFlag: flagName });
         return true;
     }
 

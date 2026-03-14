@@ -211,25 +211,25 @@ const runOnePlanInRoom = (mem: LocalExpandMemory, room: Room, plan: LocalExpandP
 
     if (needClaimer > 0) {
         const spawnName = `EXP-CLAIM#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'claimer', { targetRoom: plan.targetRoom, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'claimer', { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needBuilder > 0) {
         const spawnName = `EXP-BUILD#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-build', { sourceRoom: plan.targetRoom, targetRoom: plan.targetRoom, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-build', { homeRoom: room.name, sourceRoom: plan.targetRoom, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needCarry > 0) {
         const spawnName = `EXP-CARRY#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-carry', { sourceRoom: room.name, targetRoom: plan.targetRoom, resource: RESOURCE_ENERGY, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-carry', { homeRoom: room.name, sourceRoom: room.name, targetRoom: plan.targetRoom, resource: RESOURCE_ENERGY, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needUpgrader > 0) {
         const spawnName = `EXP-UPGRADE#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-upgrade', { targetRoom: plan.targetRoom, expandId: plan.id, home: plan.targetRoom } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-upgrade', { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
@@ -278,4 +278,3 @@ export const ExpandController = {
         }
     }
 };
-

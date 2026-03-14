@@ -191,7 +191,7 @@ export default {
             global.log(`[任务模块] 在房间 ${room.name} 添加了发送任务: ${amount} ${type} -> ${targetRoom} `);
             return OK;
         },
-        // 迁移房间归属：将属于 roomName 的 creep home/homeRoom 修改为 targetRoom
+        // 迁移房间归属：将属于 roomName 的 creep home/homeRoom/sourceRoom 修改为 targetRoom
         jump(roomName: string, targetRoom: string) {
             if (!roomName) return Error('请输入源房间名。');
             if (!targetRoom) return Error('请输入目标房间名。');
@@ -208,11 +208,19 @@ export default {
                 const mem = creep.memory as any;
                 const localHome = mem.home ? parseShardRoomName(mem.home).roomName : undefined;
                 const localHomeRoom = mem.homeRoom ? parseShardRoomName(mem.homeRoom).roomName : undefined;
-                if (localHome !== fromSpec.roomName && localHomeRoom !== fromSpec.roomName) continue;
+                const localSourceRoom = mem.sourceRoom ? parseShardRoomName(mem.sourceRoom).roomName : undefined;
+                if (localHome !== fromSpec.roomName && localHomeRoom !== fromSpec.roomName && localSourceRoom !== fromSpec.roomName) continue;
 
                 matched++;
-                mem.home = targetRoom;
-                mem.homeRoom = toSpec.roomName;
+                if (localHome === fromSpec.roomName) {
+                    mem.home = targetRoom;
+                }
+                if (localHomeRoom === fromSpec.roomName) {
+                    mem.homeRoom = toSpec.roomName;
+                }
+                if (localSourceRoom === fromSpec.roomName) {
+                    mem.sourceRoom = toSpec.roomName;
+                }
                 // clear stale source lock after room migration
                 delete mem.targetSourceId;
                 if (mem.cache && typeof mem.cache === 'object') delete mem.cache.targetSourceId;

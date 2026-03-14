@@ -1,7 +1,7 @@
 import { RoleLevelData } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/utils/memory';
-import { getDowngradedLogisticsCountByHomeRoom, hasSoonDeadCreepByHomeRoomRole } from '@/modules/utils/creepTickIndex';
+import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/utils/creepTickIndex';
 
 const REPAIR_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN * 2;
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
@@ -273,7 +273,7 @@ const shouldSpawnHarvester: SpawnRoleCheck = (context, current) => {
     let target = getHarvesterTargetBySource(room);
     if (target <= 0) return false;
 
-    if (highLikeMode && hasSoonDeadCreepByHomeRoomRole(room.name, 'harvester', 10)) {
+    if (highLikeMode && hasSoonDeadCreepByAssignedRoomRole(room.name, 'harvester', 10)) {
         target += 1;
     }
     return current < target;
@@ -549,7 +549,7 @@ export const createSpawnCheckContext = (
         creepNum,
         spawnMissionNum,
         downgradedCountByRole: shouldRecover
-            ? getDowngradedLogisticsCountByHomeRoom(room.name)
+            ? getDowngradedLogisticsCountByAssignedRoom(room.name)
             : {},
     };
 };

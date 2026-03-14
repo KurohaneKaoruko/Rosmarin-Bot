@@ -156,26 +156,26 @@ export class RoadMemory {
 
     /**
      * 获取指定目标房间的路线组
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 路线组数据或 undefined
      */
-    static getRouteGroup(homeRoom: string, targetRoom: string): OutMineRoadRouteGroup | undefined {
-        const mem = this.getMemory(homeRoom);
+    static getRouteGroup(sourceRoom: string, targetRoom: string): OutMineRoadRouteGroup | undefined {
+        const mem = this.getMemory(sourceRoom);
         if (!mem?.routes) return undefined;
         return mem.routes[targetRoom] as OutMineRoadRouteGroup;
     }
 
     /**
      * 设置指定目标的路径数据
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @param targetPos 目标位置 "x:y"
      * @param positions 道路位置数组（按顺序）
      */
-    static setPath(homeRoom: string, targetRoom: string, targetPos: string, positions: RoomPosition[]): void {
-        this.ensureMemory(homeRoom);
-        const mem = getOutMineData(homeRoom).RoadData!;
+    static setPath(sourceRoom: string, targetRoom: string, targetPos: string, positions: RoomPosition[]): void {
+        this.ensureMemory(sourceRoom);
+        const mem = getOutMineData(sourceRoom).RoadData!;
         
         if (!mem.routes[targetRoom]) {
             mem.routes[targetRoom] = {
@@ -196,18 +196,18 @@ export class RoadMemory {
         };
         
         mem.lastUpdate = Game.time;
-        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
+        delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
     }
 
     /**
      * 批量设置多个目标的路径
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @param pathsMap 路径映射 { "x:y": positions[] }
      */
-    static setPaths(homeRoom: string, targetRoom: string, pathsMap: Map<string, RoomPosition[]>): void {
-        this.ensureMemory(homeRoom);
-        const mem = getOutMineData(homeRoom).RoadData!;
+    static setPaths(sourceRoom: string, targetRoom: string, pathsMap: Map<string, RoomPosition[]>): void {
+        this.ensureMemory(sourceRoom);
+        const mem = getOutMineData(sourceRoom).RoadData!;
         
         mem.routes[targetRoom] = {
             paths: {},
@@ -226,18 +226,18 @@ export class RoadMemory {
         }
         
         mem.lastUpdate = Game.time;
-        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
+        delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
     }
 
     /**
      * 获取指定目标的路径
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @param targetPos 目标位置 "x:y"
      * @returns RoomPosition 数组（按顺序）
      */
-    static getPath(homeRoom: string, targetRoom: string, targetPos: string): RoomPosition[] | undefined {
-        const group = this.getRouteGroup(homeRoom, targetRoom);
+    static getPath(sourceRoom: string, targetRoom: string, targetPos: string): RoomPosition[] | undefined {
+        const group = this.getRouteGroup(sourceRoom, targetRoom);
         if (!group?.paths?.[targetPos]) return undefined;
 
         const pathData = group.paths[targetPos];
@@ -249,13 +249,13 @@ export class RoadMemory {
 
     /**
      * 获取目标房间内所有目标的路径
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 路径映射 { "x:y": positions[] }
      */
-    static getAllPaths(homeRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
+    static getAllPaths(sourceRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
         const result = new Map<string, RoomPosition[]>();
-        const group = this.getRouteGroup(homeRoom, targetRoom);
+        const group = this.getRouteGroup(sourceRoom, targetRoom);
         if (!group?.paths) return result;
 
         for (const targetPos in group.paths) {
@@ -272,17 +272,17 @@ export class RoadMemory {
 
     /**
      * 获取指定路线组的所有唯一道路位置
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 唯一道路位置数组
      */
-    static getGroupPositions(homeRoom: string, targetRoom: string): RoomPosition[] {
-        const mem = this.getMemory(homeRoom);
-        const group = this.getRouteGroup(homeRoom, targetRoom);
+    static getGroupPositions(sourceRoom: string, targetRoom: string): RoomPosition[] {
+        const mem = this.getMemory(sourceRoom);
+        const group = this.getRouteGroup(sourceRoom, targetRoom);
         if (!group?.paths) return [];
 
         if (mem?.lastUpdate !== undefined) {
-            const cacheKey = `${homeRoom}:${targetRoom}`;
+            const cacheKey = `${sourceRoom}:${targetRoom}`;
             const cached = this.groupPositionsCache[cacheKey];
             if (cached && cached.lastUpdate === mem.lastUpdate) {
                 return cached.positions;
@@ -304,7 +304,7 @@ export class RoadMemory {
             }
         }
         if (mem?.lastUpdate !== undefined) {
-            this.groupPositionsCache[`${homeRoom}:${targetRoom}`] = {
+            this.groupPositionsCache[`${sourceRoom}:${targetRoom}`] = {
                 lastUpdate: mem.lastUpdate,
                 positions,
             };
@@ -314,42 +314,42 @@ export class RoadMemory {
 
     /**
      * 删除指定路线
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 是否删除成功
      */
-    static deleteRoute(homeRoom: string, targetRoom: string): boolean {
-        const mem = this.getMemory(homeRoom);
+    static deleteRoute(sourceRoom: string, targetRoom: string): boolean {
+        const mem = this.getMemory(sourceRoom);
         if (!mem?.routes?.[targetRoom]) return false;
         delete mem.routes[targetRoom];
         mem.lastUpdate = Game.time;
-        delete this.groupPositionsCache[`${homeRoom}:${targetRoom}`];
+        delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
         return true;
     }
 
     /**
      * 获取所有路线的目标房间列表
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 目标房间名数组
      */
-    static getRouteTargets(homeRoom: string): string[] {
-        const mem = this.getMemory(homeRoom);
+    static getRouteTargets(sourceRoom: string): string[] {
+        const mem = this.getMemory(sourceRoom);
         if (!mem?.routes) return [];
         return Object.keys(mem.routes);
     }
 
     /**
      * 获取统计信息
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 统计信息
      */
-    static getStats(homeRoom: string): {
+    static getStats(sourceRoom: string): {
         routeCount: number;
         pathCount: number;
         totalLength: number;
         roomCount: number;
     } {
-        const mem = this.getMemory(homeRoom);
+        const mem = this.getMemory(sourceRoom);
         
         let totalLength = 0;
         let pathCount = 0;
@@ -381,15 +381,15 @@ export class RoadMemory {
 
     /**
      * 验证数据完整性
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 验证结果
      */
-    static validate(homeRoom: string): {
+    static validate(sourceRoom: string): {
         valid: boolean;
         errors: string[];
     } {
         const errors: string[] = [];
-        const mem = this.getMemory(homeRoom);
+        const mem = this.getMemory(sourceRoom);
 
         if (!mem) {
             return { valid: true, errors: [] };
@@ -434,12 +434,12 @@ export class RoadMemory {
 
     /**
      * 更新路线状态
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @param status 新状态
      */
-    static updateStatus(homeRoom: string, targetRoom: string, status: 'active' | 'pending' | 'damaged'): void {
-        const group = this.getRouteGroup(homeRoom, targetRoom);
+    static updateStatus(sourceRoom: string, targetRoom: string, status: 'active' | 'pending' | 'damaged'): void {
+        const group = this.getRouteGroup(sourceRoom, targetRoom);
         if (group) {
             group.status = status;
             group.lastCheck = Game.time;
@@ -449,18 +449,18 @@ export class RoadMemory {
     /**
      * 获取道路内存
      */
-    private static getMemory(homeRoom: string): OutMineRoadMemory | undefined {
-        return getOutMineData()?.[homeRoom]?.RoadData;
+    private static getMemory(sourceRoom: string): OutMineRoadMemory | undefined {
+        return getOutMineData()?.[sourceRoom]?.RoadData;
     }
 
     /**
      * 确保内存结构存在
      */
-    private static ensureMemory(homeRoom: string): void {
+    private static ensureMemory(sourceRoom: string): void {
         const outMineData = getOutMineData();
-        if (!outMineData[homeRoom]) outMineData[homeRoom] = {} as any;
-        if (!outMineData[homeRoom].RoadData) {
-            outMineData[homeRoom].RoadData = {
+        if (!outMineData[sourceRoom]) outMineData[sourceRoom] = {} as any;
+        if (!outMineData[sourceRoom].RoadData) {
+            outMineData[sourceRoom].RoadData = {
                 routes: {},
             };
         }
@@ -484,17 +484,17 @@ export class PathPlanner {
 
     /**
      * 计算单个目标的路径
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param target 目标位置
      * @returns 路径位置数组，或 undefined（如果计算失败或 CPU 不足）
      */
-    static planPath(homeRoom: string, target: RoomPosition): RoomPosition[] | undefined {
+    static planPath(sourceRoom: string, target: RoomPosition): RoomPosition[] | undefined {
         // CPU 保护检查
         if (!this.canPlanPath()) {
             return undefined;
         }
 
-        const room = Game.rooms[homeRoom];
+        const room = Game.rooms[sourceRoom];
         if (!room) return undefined;
 
         const startPos = room.getCenter();
@@ -517,24 +517,24 @@ export class PathPlanner {
 
     /**
      * 批量计算多个目标的路径（按距离排序，复用已计算路径）
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targets 目标位置数组
      * @returns 路径结果映射 { targetKey: positions[] }，targetKey 格式为 "roomName:x:y"
      */
-    static planPaths(homeRoom: string, targets: RoomPosition[]): Map<string, RoomPosition[]> {
+    static planPaths(sourceRoom: string, targets: RoomPosition[]): Map<string, RoomPosition[]> {
         const results = new Map<string, RoomPosition[]>();
         
         if (targets.length === 0) return results;
 
-        const room = Game.rooms[homeRoom];
+        const room = Game.rooms[sourceRoom];
         if (!room) return results;
 
         const startPos = room.getCenter();
 
         // 按距离排序（近的先计算）
         const sortedTargets = [...targets].sort((a, b) => {
-            const distA = Game.map.getRoomLinearDistance(homeRoom, a.roomName);
-            const distB = Game.map.getRoomLinearDistance(homeRoom, b.roomName);
+            const distA = Game.map.getRoomLinearDistance(sourceRoom, a.roomName);
+            const distB = Game.map.getRoomLinearDistance(sourceRoom, b.roomName);
             return distA - distB;
         });
 
@@ -714,27 +714,27 @@ export class PathPlanner {
 export class RoadBuilder {
     /**
      * 为目标房间创建道路建造工地
-     * @param homeRoom 主房间
+     * @param sourceRoom 源头房间
      * @param targetRoom 目标房间
      * @returns 创建的工地数量
      */
-    static createRoadSites(homeRoom: Room, targetRoom: Room): number {
-        const homeRoomName = homeRoom.name;
+    static createRoadSites(sourceRoom: Room, targetRoom: Room): number {
+        const sourceRoomName = sourceRoom.name;
         const targetRoomName = targetRoom.name;
 
         // 检查是否已有路线数据
-        const existingPaths = RoadMemory.getAllPaths(homeRoomName, targetRoomName);
+        const existingPaths = RoadMemory.getAllPaths(sourceRoomName, targetRoomName);
         
         if (existingPaths.size > 0) {
             // 使用已有路线数据创建工地
-            return this.createSitesFromPaths(homeRoomName, existingPaths);
+            return this.createSitesFromPaths(sourceRoomName, existingPaths);
         }
 
         // 计算新路径
         const targets = this.getTargetPositions(targetRoom);
         if (targets.length === 0) return 0;
 
-        const pathResults = PathPlanner.planPaths(homeRoomName, targets);
+        const pathResults = PathPlanner.planPaths(sourceRoomName, targets);
         if (pathResults.size === 0) return 0;
 
         // 转换 key 格式：从 "roomName:x:y" 到 "x:y"
@@ -749,19 +749,19 @@ export class RoadBuilder {
         if (pathsToSave.size === 0) return 0;
 
         // 保存到内存（按目标分别存储）
-        RoadMemory.setPaths(homeRoomName, targetRoomName, pathsToSave);
+        RoadMemory.setPaths(sourceRoomName, targetRoomName, pathsToSave);
 
         // 创建工地
-        return this.createSitesFromPaths(homeRoomName, pathsToSave);
+        return this.createSitesFromPaths(sourceRoomName, pathsToSave);
     }
 
     /**
      * 从多条路径创建建造工地
-     * @param homeRoomName 主房间名
+     * @param sourceRoomName 源头房间名
      * @param paths 路径映射
      * @returns 创建的工地数量
      */
-    private static createSitesFromPaths(homeRoomName: string, paths: Map<string, RoomPosition[]>): number {
+    private static createSitesFromPaths(sourceRoomName: string, paths: Map<string, RoomPosition[]>): number {
         let created = 0;
         const processedPositions = new Set<string>();
 
@@ -831,18 +831,18 @@ export class RoadBuilder {
 
     /**
      * 重新计算指定路线
-     * @param homeRoomName 主房间名
+     * @param sourceRoomName 源头房间名
      * @param targetRoomName 目标房间名
      * @returns 是否成功
      */
-    static recalculateRoute(homeRoomName: string, targetRoomName: string): boolean {
-        const homeRoom = Game.rooms[homeRoomName];
+    static recalculateRoute(sourceRoomName: string, targetRoomName: string): boolean {
+        const sourceRoom = Game.rooms[sourceRoomName];
         const targetRoom = Game.rooms[targetRoomName];
         
-        if (!homeRoom || !targetRoom) return false;
+        if (!sourceRoom || !targetRoom) return false;
 
         // 删除旧路线
-        RoadMemory.deleteRoute(homeRoomName, targetRoomName);
+        RoadMemory.deleteRoute(sourceRoomName, targetRoomName);
         
         // 使缓存失效
         CostMatrixCache.clear();
@@ -851,7 +851,7 @@ export class RoadBuilder {
         const targets = this.getTargetPositions(targetRoom);
         if (targets.length === 0) return false;
 
-        const pathResults = PathPlanner.planPaths(homeRoomName, targets);
+        const pathResults = PathPlanner.planPaths(sourceRoomName, targets);
         if (pathResults.size === 0) return false;
 
         // 转换 key 格式：从 "roomName:x:y" 到 "x:y"
@@ -865,22 +865,22 @@ export class RoadBuilder {
         if (pathsToSave.size === 0) return false;
 
         // 保存到内存
-        RoadMemory.setPaths(homeRoomName, targetRoomName, pathsToSave);
+        RoadMemory.setPaths(sourceRoomName, targetRoomName, pathsToSave);
 
         // 创建工地
-        this.createSitesFromPaths(homeRoomName, pathsToSave);
+        this.createSitesFromPaths(sourceRoomName, pathsToSave);
         
         return true;
     }
 
     /**
      * 检查是否应该建造道路
-     * @param homeRoom 主房间
+     * @param sourceRoom 源头房间
      * @param targetRoomName 目标房间名
      * @returns 是否应该建造
      */
-    static shouldBuildRoad(homeRoom: Room, targetRoomName: string): boolean {
-        const level = homeRoom.controller?.level || 0;
+    static shouldBuildRoad(sourceRoom: Room, targetRoomName: string): boolean {
+        const level = sourceRoom.controller?.level || 0;
         const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoomName);
 
         if (isCenterRoom) {
@@ -905,11 +905,11 @@ export class RoadMaintain {
 
     /**
      * 检查指定路线的道路健康状态
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 健康检查结果
      */
-    static checkHealth(homeRoom: string, targetRoom: string): {
+    static checkHealth(sourceRoom: string, targetRoom: string): {
         total: number;
         built: number;
         damaged: number;
@@ -917,7 +917,7 @@ export class RoadMaintain {
         noVision: number;
         healthPercent: number;
     } {
-        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+        const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
         if (positions.length === 0) {
             return { total: 0, built: 0, damaged: 0, missing: 0, noVision: 0, healthPercent: 100 };
         }
@@ -957,9 +957,9 @@ export class RoadMaintain {
 
         // 更新路线状态
         if (damaged > 0 || missing > 0) {
-            RoadMemory.updateStatus(homeRoom, targetRoom, 'damaged');
+            RoadMemory.updateStatus(sourceRoom, targetRoom, 'damaged');
         } else if (built === total) {
-            RoadMemory.updateStatus(homeRoom, targetRoom, 'active');
+            RoadMemory.updateStatus(sourceRoom, targetRoom, 'active');
         }
 
         return { total, built, damaged, missing, noVision, healthPercent };
@@ -967,15 +967,15 @@ export class RoadMaintain {
 
     /**
      * 获取需要修复的道路队列
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 需要修复的道路位置数组（按优先级排序）
      */
-    static getRepairQueue(homeRoom: string): RoomPosition[] {
+    static getRepairQueue(sourceRoom: string): RoomPosition[] {
         const repairQueue: { pos: RoomPosition; priority: number }[] = [];
-        const targets = RoadMemory.getRouteTargets(homeRoom);
+        const targets = RoadMemory.getRouteTargets(sourceRoom);
 
         for (const targetRoom of targets) {
-            const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+            const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
             if (positions.length === 0) continue;
 
             for (const pos of positions) {
@@ -1000,12 +1000,12 @@ export class RoadMaintain {
 
     /**
      * 检查被摧毁的道路并创建建造工地
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 创建的工地数量
      */
-    static checkDestroyed(homeRoom: string, targetRoom: string): number {
-        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+    static checkDestroyed(sourceRoom: string, targetRoom: string): number {
+        const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
         if (positions.length === 0) return 0;
 
         let created = 0;
@@ -1042,15 +1042,15 @@ export class RoadMaintain {
 
     /**
      * 执行定期维护检查
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 维护结果
      */
-    static runMaintenance(homeRoom: string): {
+    static runMaintenance(sourceRoom: string): {
         checked: number;
         sitesCreated: number;
         needsRepair: number;
     } {
-        const cacheKey = homeRoom;
+        const cacheKey = sourceRoom;
         const lastCheck = this.lastCheckTime[cacheKey] || 0;
 
         // 检查是否需要执行维护（默认每 500 ticks）
@@ -1060,17 +1060,17 @@ export class RoadMaintain {
 
         this.lastCheckTime[cacheKey] = Game.time;
 
-        const targets = RoadMemory.getRouteTargets(homeRoom);
+        const targets = RoadMemory.getRouteTargets(sourceRoom);
         let sitesCreated = 0;
         let needsRepair = 0;
 
         for (const targetRoom of targets) {
-            const health = this.checkHealth(homeRoom, targetRoom);
+            const health = this.checkHealth(sourceRoom, targetRoom);
             needsRepair += health.damaged;
 
             // 检查缺失道路并补建工地
             if (health.missing > 0) {
-                sitesCreated += this.checkDestroyed(homeRoom, targetRoom);
+                sitesCreated += this.checkDestroyed(sourceRoom, targetRoom);
             }
         }
 
@@ -1079,10 +1079,10 @@ export class RoadMaintain {
 
     /**
      * 获取所有路线的健康摘要
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 健康摘要
      */
-    static getHealthSummary(homeRoom: string): {
+    static getHealthSummary(sourceRoom: string): {
         routes: { [targetRoom: string]: ReturnType<typeof RoadMaintain.checkHealth> };
         totalBuilt: number;
         totalDamaged: number;
@@ -1090,7 +1090,7 @@ export class RoadMaintain {
         overallHealth: number;
     } {
         const routes: { [targetRoom: string]: ReturnType<typeof RoadMaintain.checkHealth> } = {};
-        const targets = RoadMemory.getRouteTargets(homeRoom);
+        const targets = RoadMemory.getRouteTargets(sourceRoom);
         
         let totalBuilt = 0;
         let totalDamaged = 0;
@@ -1098,7 +1098,7 @@ export class RoadMaintain {
         let totalRoads = 0;
 
         for (const targetRoom of targets) {
-            const health = this.checkHealth(homeRoom, targetRoom);
+            const health = this.checkHealth(sourceRoom, targetRoom);
             routes[targetRoom] = health;
             totalBuilt += health.built;
             totalDamaged += health.damaged;
@@ -1113,11 +1113,11 @@ export class RoadMaintain {
 
     /**
      * 重置检查时间缓存
-     * @param homeRoom 可选，指定房间；不指定则清除所有
+     * @param sourceRoom 可选，指定房间；不指定则清除所有
      */
-    static resetCheckTime(homeRoom?: string): void {
-        if (homeRoom) {
-            delete this.lastCheckTime[homeRoom];
+    static resetCheckTime(sourceRoom?: string): void {
+        if (sourceRoom) {
+            delete this.lastCheckTime[sourceRoom];
         } else {
             this.lastCheckTime = {};
         }
@@ -1150,14 +1150,14 @@ export class RoadVisual {
     };
 
     /** 可视化开关状态 */
-    private static enabled: { [homeRoom: string]: boolean } = {};
+    private static enabled: { [sourceRoom: string]: boolean } = {};
 
     private static readonly DRAW_INTERVAL = 1;
     private static readonly MAP_DRAW_INTERVAL = 1;
     private static readonly MAX_ROOM_POSITIONS_FOR_LINES = 220;
 
-    private static lastDrawTickByHome: { [homeRoom: string]: number } = {};
-    private static lastMapDrawTickByHome: { [homeRoom: string]: number } = {};
+    private static lastDrawTickBySource: { [sourceRoom: string]: number } = {};
+    private static lastMapDrawTickBySource: { [sourceRoom: string]: number } = {};
 
     private static roomStateCache: {
         [roomName: string]: {
@@ -1173,22 +1173,22 @@ export class RoadVisual {
 
     /**
      * 可视化指定路线
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      */
-    static visualize(homeRoom: string, targetRoom: string): void {
-        const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+    static visualize(sourceRoom: string, targetRoom: string): void {
+        const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
         if (positions.length === 0) return;
 
-        this.drawPositions(positions, homeRoom);
+        this.drawPositions(positions, sourceRoom);
     }
 
     /**
      * 可视化所有路线
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      */
-    static visualizeAll(homeRoom: string): void {
-        const targets = RoadMemory.getRouteTargets(homeRoom);
+    static visualizeAll(sourceRoom: string): void {
+        const targets = RoadMemory.getRouteTargets(sourceRoom);
         if (targets.length === 0) return;
 
         const sharedCount: { [key: string]: number } = {};
@@ -1196,7 +1196,7 @@ export class RoadVisual {
         const seenByRoom: { [roomName: string]: Set<string> } = {};
 
         for (const targetRoom of targets) {
-            const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+            const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
             if (positions.length === 0) continue;
 
             for (const pos of positions) {
@@ -1219,7 +1219,7 @@ export class RoadVisual {
         }
     }
 
-    private static drawPositions(positions: RoomPosition[], homeRoom: string, sharedCount?: { [key: string]: number }): void {
+    private static drawPositions(positions: RoomPosition[], sourceRoom: string, sharedCount?: { [key: string]: number }): void {
         const byRoom: { [roomName: string]: RoomPosition[] } = {};
         const seenByRoom: { [roomName: string]: Set<string> } = {};
 
@@ -1337,37 +1337,37 @@ export class RoadVisual {
 
     /**
      * 启用可视化
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      */
-    static enable(homeRoom: string): void {
-        this.enabled[homeRoom] = true;
+    static enable(sourceRoom: string): void {
+        this.enabled[sourceRoom] = true;
     }
 
     /**
      * 禁用可视化
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      */
-    static disable(homeRoom: string): void {
-        this.enabled[homeRoom] = false;
+    static disable(sourceRoom: string): void {
+        this.enabled[sourceRoom] = false;
     }
 
     /**
      * 切换可视化状态
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 新状态
      */
-    static toggle(homeRoom: string): boolean {
-        this.enabled[homeRoom] = !this.enabled[homeRoom];
-        return this.enabled[homeRoom];
+    static toggle(sourceRoom: string): boolean {
+        this.enabled[sourceRoom] = !this.enabled[sourceRoom];
+        return this.enabled[sourceRoom];
     }
 
     /**
      * 检查是否启用可视化
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @returns 是否启用
      */
-    static isEnabled(homeRoom: string): boolean {
-        return this.enabled[homeRoom] || false;
+    static isEnabled(sourceRoom: string): boolean {
+        return this.enabled[sourceRoom] || false;
     }
 
     /**
@@ -1375,39 +1375,39 @@ export class RoadVisual {
      * @description 检查 Flag 触发和启用状态，自动绘制房间内和世界地图可视化
      */
     static run(): void {
-        const homeRoomsToDraw = new Set<string>();
+        const sourceRoomsToDraw = new Set<string>();
 
         if (Game.flags['ALL/roadVisual']) {
             const outMineData = getOutMineData();
-            for (const homeRoom in outMineData) {
-                const data = outMineData[homeRoom];
+            for (const sourceRoom in outMineData) {
+                const data = outMineData[sourceRoom];
                 if ((data.energy && data.energy.length > 0) || (data.centerRoom && data.centerRoom.length > 0)) {
-                    homeRoomsToDraw.add(homeRoom);
+                    sourceRoomsToDraw.add(sourceRoom);
                 }
             }
         }
 
         for (const flagName in Game.flags) {
             const match = flagName.match(/^(.+)\/roadVisual$/);
-            if (match) homeRoomsToDraw.add(match[1]);
+            if (match) sourceRoomsToDraw.add(match[1]);
         }
 
         // 检查启用状态
-        for (const homeRoom in this.enabled) {
-            if (this.enabled[homeRoom]) homeRoomsToDraw.add(homeRoom);
+        for (const sourceRoom in this.enabled) {
+            if (this.enabled[sourceRoom]) sourceRoomsToDraw.add(sourceRoom);
         }
 
-        for (const homeRoom of homeRoomsToDraw) {
-            const lastDraw = this.lastDrawTickByHome[homeRoom] ?? -Infinity;
+        for (const sourceRoom of sourceRoomsToDraw) {
+            const lastDraw = this.lastDrawTickBySource[sourceRoom] ?? -Infinity;
             if (Game.time - lastDraw >= this.DRAW_INTERVAL) {
-                this.lastDrawTickByHome[homeRoom] = Game.time;
-                this.visualizeAll(homeRoom);
+                this.lastDrawTickBySource[sourceRoom] = Game.time;
+                this.visualizeAll(sourceRoom);
             }
 
-            const lastMap = this.lastMapDrawTickByHome[homeRoom] ?? -Infinity;
+            const lastMap = this.lastMapDrawTickBySource[sourceRoom] ?? -Infinity;
             if (Game.time - lastMap >= this.MAP_DRAW_INTERVAL) {
-                this.lastMapDrawTickByHome[homeRoom] = Game.time;
-                this.visualizeOnMap(homeRoom);
+                this.lastMapDrawTickBySource[sourceRoom] = Game.time;
+                this.visualizeOnMap(sourceRoom);
             }
         }
     }
@@ -1467,11 +1467,11 @@ export class RoadVisual {
 
     /**
      * 在世界地图上可视化道路路径
-     * @param homeRoom 主房间名
+     * @param sourceRoom 源头房间名
      * @param targetRoom 可选，指定目标房间
      */
-    static visualizeOnMap(homeRoom: string, targetRoom?: string): void {
-        const targets = targetRoom ? [targetRoom] : RoadMemory.getRouteTargets(homeRoom);
+    static visualizeOnMap(sourceRoom: string, targetRoom?: string): void {
+        const targets = targetRoom ? [targetRoom] : RoadMemory.getRouteTargets(sourceRoom);
         
         if (targets.length === 0) {
             return;
@@ -1479,7 +1479,7 @@ export class RoadVisual {
 
         let colorIndex = 0;
         for (const target of targets) {
-            const paths = this.getAllPathsCached(homeRoom, target);
+            const paths = this.getAllPathsCached(sourceRoom, target);
             
             if (paths.size === 0) continue;
 
@@ -1533,17 +1533,18 @@ export class RoadVisual {
         });
     }
 
-    private static getAllPathsCached(homeRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
-        const lastUpdate = getOutMineData()?.[homeRoom]?.RoadData?.lastUpdate;
-        const cacheKey = `${homeRoom}:${targetRoom}`;
+    private static getAllPathsCached(sourceRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
+        const lastUpdate = getOutMineData()?.[sourceRoom]?.RoadData?.lastUpdate;
+        const cacheKey = `${sourceRoom}:${targetRoom}`;
         const cached = this.mapPathsCache[cacheKey];
         if (lastUpdate !== undefined && cached && cached.lastUpdate === lastUpdate) {
             return cached.paths;
         }
-        const paths = RoadMemory.getAllPaths(homeRoom, targetRoom);
+        const paths = RoadMemory.getAllPaths(sourceRoom, targetRoom);
         if (lastUpdate !== undefined) {
             this.mapPathsCache[cacheKey] = { lastUpdate, paths };
         }
         return paths;
     }
 }
+

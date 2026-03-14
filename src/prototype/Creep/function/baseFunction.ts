@@ -75,6 +75,12 @@ const getEnergyPickupSnapshot = (() => {
 })();
 
 export default class BaseFunction extends Creep {
+    disableAttackNotificationsOnce(): void {
+        if (this.memory.notified) return;
+        this.notifyWhenAttacked(false);
+        this.memory.notified = true;
+    }
+
     /**
      * 获取能量
      */

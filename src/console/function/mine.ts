@@ -5,9 +5,9 @@ import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 // 外矿设置
 export default {
     mine: {
-        add(roomName: string, targetRoom: string) {
-            if (!roomName || !targetRoom) return -1;
-            const Mem = getOutMineData(roomName) as any;
+        add(sourceRoom: string, targetRoom: string) {
+            if (!sourceRoom || !targetRoom) return -1;
+            const Mem = getOutMineData(sourceRoom) as any;
             const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
             const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom); // 非过道房间
             // 普通房间
@@ -15,10 +15,10 @@ export default {
                 if (!Mem['energy']) Mem['energy'] = [];
                 if (Mem['energy'].indexOf(targetRoom) === -1) {
                     Mem['energy'].push(targetRoom);
-                    console.log(`房间 ${targetRoom} 已添加到 ${roomName} 的外矿列表。 `);
+                    console.log(`房间 ${targetRoom} 已添加到 ${sourceRoom} 的外矿列表。 `);
                     return OK;
                 } else {
-                    console.log(`房间 ${targetRoom} 已存在于 ${roomName} 的外矿列表中。 `);
+                    console.log(`房间 ${targetRoom} 已存在于 ${sourceRoom} 的外矿列表中。 `);
                     return OK;
                 }
             }
@@ -27,10 +27,10 @@ export default {
                 if (!Mem['highway']) Mem['highway'] = [];
                 if (Mem['highway'].indexOf(targetRoom) === -1) {
                     Mem['highway'].push(targetRoom);
-                    console.log(`过道房间 ${targetRoom} 已添加到 ${roomName} 的监控列表`);
+                    console.log(`过道房间 ${targetRoom} 已添加到 ${sourceRoom} 的监控列表`);
                     return OK;
                 } else {
-                    console.log(`过道房间 ${targetRoom} 已存在于 ${roomName} 的监控列表中。`);
+                    console.log(`过道房间 ${targetRoom} 已存在于 ${sourceRoom} 的监控列表中。`);
                     return OK;
                 }
             }
@@ -39,30 +39,30 @@ export default {
                 if (!Mem['centerRoom']) Mem['centerRoom'] = [];
                 if (Mem['centerRoom'].indexOf(targetRoom) === -1) {
                     Mem['centerRoom'].push(targetRoom);
-                    console.log(`中间房间 ${targetRoom} 已添加到 ${roomName} 的采矿列表`);
+                    console.log(`中间房间 ${targetRoom} 已添加到 ${sourceRoom} 的采矿列表`);
                     return OK;
                 } else {
-                    console.log(`中间房间 ${targetRoom} 已存在于 ${roomName} 的采矿列表中。`);
+                    console.log(`中间房间 ${targetRoom} 已存在于 ${sourceRoom} 的采矿列表中。`);
                     return OK;
                 }
             }
         },
         // 删除外矿
-        remove(roomName: string, targetRoom: string) {
-            if (!roomName || !targetRoom) return -1;
+        remove(sourceRoom: string, targetRoom: string) {
+            if (!sourceRoom || !targetRoom) return -1;
             const BotMem = getOutMineData();
-            if (!BotMem[roomName]) return ERR_NOT_FOUND;
-            const Mem = BotMem[roomName];
+            if (!BotMem[sourceRoom]) return ERR_NOT_FOUND;
+            const Mem = BotMem[sourceRoom];
             const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
             const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom); // 非过道房间
             // 普通房间
             if(!isCenterRoom && isNotHighway) {
                 if (!Mem['energy']) return ERR_NOT_FOUND;
-                if (Mem['energy'].indexOf(targetRoom) === -1) return Error(`房间 ${targetRoom} 不存在于 ${roomName} 的外矿列表中。`);
+                if (Mem['energy'].indexOf(targetRoom) === -1) return Error(`房间 ${targetRoom} 不存在于 ${sourceRoom} 的外矿列表中。`);
                 else {
                     Mem['energy'].splice(Mem['energy'].indexOf(targetRoom), 1);
                     delete Memory.rooms[targetRoom]?.['road'];
-                    console.log(`房间 ${targetRoom} 从 ${roomName} 的外矿列表中删除。`);
+                    console.log(`房间 ${targetRoom} 从 ${sourceRoom} 的外矿列表中删除。`);
                     return OK;
                 }
             }
@@ -72,7 +72,7 @@ export default {
                 if (Mem['highway'].indexOf(targetRoom) === -1) return ERR_NOT_FOUND;
                 else {
                     Mem['highway'].splice(Mem['highway'].indexOf(targetRoom), 1);
-                    console.log(`过道房间 ${targetRoom} 从 ${roomName} 的监控列表中删除。`);
+                    console.log(`过道房间 ${targetRoom} 从 ${sourceRoom} 的监控列表中删除。`);
                     return OK;
                 }
             }
@@ -82,19 +82,19 @@ export default {
                 if (Mem['centerRoom'].indexOf(targetRoom) === -1) return ERR_NOT_FOUND;
                 else {
                     Mem['centerRoom'].splice(Mem['centerRoom'].indexOf(targetRoom), 1);
-                    console.log(`中间房间 ${targetRoom} 从 ${roomName} 的外矿列表中删除。`);
+                    console.log(`中间房间 ${targetRoom} 从 ${sourceRoom} 的外矿列表中删除。`);
                     return OK;
                 }
             }
         },
         // 获取外矿列表
-        list(roomName: string) {
-            if (!roomName) return -1;
+        list(sourceRoom: string) {
+            if (!sourceRoom) return -1;
             const BotMem = getOutMineData();
-            if (!BotMem[roomName]) return '该房间没有外矿数据';
-            return `energy: ${BotMem[roomName]['energy'] || []}\n` +
-                   `highway: ${BotMem[roomName]['highway'] || []}\n` +
-                   `centerRoom: ${BotMem[roomName]['centerRoom'] || []}`;
+            if (!BotMem[sourceRoom]) return '该房间没有外矿数据';
+            return `energy: ${BotMem[sourceRoom]['energy'] || []}\n` +
+                   `highway: ${BotMem[sourceRoom]['highway'] || []}\n` +
+                   `centerRoom: ${BotMem[sourceRoom]['centerRoom'] || []}`;
         },
         // 清空外矿road缓存
         clearRoad(roomName: string) {
@@ -102,24 +102,24 @@ export default {
             console.log(`外矿房间 ${roomName} 的Road缓存已清空。`);
             return OK;
         },
-        auto(roomName: string, type: 'power' | 'deposit') {
-            const BotMem = getRoomData()[roomName];
+        auto(sourceRoom: string, type: 'power' | 'deposit') {
+            const BotMem = getRoomData()[sourceRoom];
             if (!BotMem) return ERR_NOT_FOUND;
             if (type === 'power') {
                 BotMem['outminePower'] = !BotMem['outminePower'];
-                console.log(`房间 ${roomName} 的自动采集Power已设置为 ${BotMem['outminePower']}。`);
+                console.log(`房间 ${sourceRoom} 的自动采集Power已设置为 ${BotMem['outminePower']}。`);
             } else if (type === 'deposit') {
                 BotMem['outmineDeposit'] = !BotMem['outmineDeposit'];
-                console.log(`房间 ${roomName} 的自动采集Deposit已设置为 ${BotMem['outmineDeposit']}。`);
+                console.log(`房间 ${sourceRoom} 的自动采集Deposit已设置为 ${BotMem['outmineDeposit']}。`);
             }
             return OK;
         },
-        mapShow(homeRoom?: string) {
-            if (homeRoom) {
-                HighwayMineVisual.enable(homeRoom);
-                HighwayMineVisual.visualizeOnMap(homeRoom);
-                console.log(`✓ 已启用 ${homeRoom} 的 power/deposit 大地图可视化`);
-                console.log(`  提示: 也可以创建 Flag "${homeRoom}/mineMapVisual" 来触发可视化`);
+        mapShow(sourceRoom?: string) {
+            if (sourceRoom) {
+                HighwayMineVisual.enable(sourceRoom);
+                HighwayMineVisual.visualizeOnMap(sourceRoom);
+                console.log(`✓ 已启用 ${sourceRoom} 的 power/deposit 大地图可视化`);
+                console.log(`  提示: 也可以创建 Flag "${sourceRoom}/mineMapVisual" 来触发可视化`);
                 return OK;
             }
 
@@ -129,10 +129,10 @@ export default {
             console.log('  提示: 也可以创建 Flag "ALL/mineMapVisual" 来触发可视化');
             return OK;
         },
-        mapHide(homeRoom?: string) {
-            if (homeRoom) {
-                HighwayMineVisual.disable(homeRoom);
-                console.log(`✓ 已禁用 ${homeRoom} 的 power/deposit 大地图可视化`);
+        mapHide(sourceRoom?: string) {
+            if (sourceRoom) {
+                HighwayMineVisual.disable(sourceRoom);
+                console.log(`✓ 已禁用 ${sourceRoom} 的 power/deposit 大地图可视化`);
                 return OK;
             }
 
@@ -141,9 +141,9 @@ export default {
             return OK;
         },
         // 立即开始到指定房间开采power
-        power(roomName: string, targetRoom: string, num: number, boostLevel: number=0, prNum?: number) {
-            if (!roomName || !targetRoom || !num) return -1;
-            const room = Game.rooms[roomName];
+        power(sourceRoom: string, targetRoom: string, num: number, boostLevel: number=0, prNum?: number) {
+            if (!sourceRoom || !targetRoom || !num) return -1;
+            const room = Game.rooms[sourceRoom];
             if (!room) return;
             
             // 使用新任务池方法
@@ -153,7 +153,7 @@ export default {
                 const UH_Amount = stores.reduce((a, b) => a + (b?.store['UH']||0), 0);
                 const LO_Amount = stores.reduce((a, b) => a + (b?.store['LO']||0), 0);
                 if (GO_Amount < 3000 || UH_Amount < 3000 || LO_Amount < 3000) {
-                    console.log(`房间 ${roomName} 的仓库中GO/UH/LO数量不足，无法孵化T1 power开采队。`);
+                    console.log(`房间 ${sourceRoom} 的仓库中GO/UH/LO数量不足，无法孵化T1 power开采队。`);
                     return -1;
                 }
             } else if (boostLevel == 2) {
@@ -162,7 +162,7 @@ export default {
                 const UH2O_Amount = stores.reduce((a, b) => a + (b?.store['UH2O']||0), 0);
                 const LO_Amount = stores.reduce((a, b) => a + (b?.store['LO']||0), 0);
                 if (GHO2_Amount < 3000 || UH2O_Amount < 3000 || LO_Amount < 3000) {
-                    console.log(`房间 ${roomName} 的仓库中GHO2/UH2O/LO数量不足，无法孵化T2 power开采队。`);
+                    console.log(`房间 ${sourceRoom} 的仓库中GHO2/UH2O/LO数量不足，无法孵化T2 power开采队。`);
                     return -1;
                 }
             }
@@ -181,13 +181,13 @@ export default {
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'power', 1, data);
-            console.log(`房间 ${roomName} 即将向 ${targetRoom} 派出 ${num} 数量的T${boostLevel} Power开采队。`);
+            console.log(`房间 ${sourceRoom} 即将向 ${targetRoom} 派出 ${num} 数量的T${boostLevel} Power开采队。`);
             return OK;
         },
         // 立即开始到指定房间开采deposit
-        deposit(roomName: string, targetRoom: string, num: number) {
-            if (!roomName || !targetRoom || !num) return -1;
-            const room = Game.rooms[roomName];
+        deposit(sourceRoom: string, targetRoom: string, num: number) {
+            if (!sourceRoom || !targetRoom || !num) return -1;
+            const room = Game.rooms[sourceRoom];
             if (!room) return;
             
             const data: DepositMineTask = {
@@ -201,12 +201,12 @@ export default {
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'deposit', 1, data);
-            console.log(`房间 ${roomName} 即将向 ${targetRoom} 派出 ${num} 数量的Deposit开采队。`);
+            console.log(`房间 ${sourceRoom} 即将向 ${targetRoom} 派出 ${num} 数量的Deposit开采队。`);
             return OK;
         },
         // 取消指定房间的开采
-        cancel(roomName: string, targetRoom: string, type: 'power' | 'deposit') {
-            const room = Game.rooms[roomName];
+        cancel(sourceRoom: string, targetRoom: string, type: 'power' | 'deposit') {
+            const room = Game.rooms[sourceRoom];
             if (!room) return;
             
             // 删除任务池中的任务
@@ -234,7 +234,7 @@ export default {
                     room.deleteMissionFromPool('spawn', mission.id);
                 }
             }
-            console.log(`房间 ${roomName} 的 ${targetRoom} 开采已取消。`);
+            console.log(`房间 ${sourceRoom} 的 ${targetRoom} 开采已取消。`);
             return OK;
         }
     },
@@ -242,27 +242,27 @@ export default {
     road: {
         /**
          * 重新计算指定路线
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          * @param targetRoom 目标房间名
          */
-        recalc(homeRoom: string, targetRoom: string) {
-            if (!homeRoom || !targetRoom) {
-                console.log('用法: road.recalc(homeRoom, targetRoom)');
+        recalc(sourceRoom: string, targetRoom: string) {
+            if (!sourceRoom || !targetRoom) {
+                console.log('用法: road.recalc(sourceRoom, targetRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const home = Game.rooms[homeRoom];
+            const home = Game.rooms[sourceRoom];
             const target = Game.rooms[targetRoom];
             if (!home) {
-                console.log(`错误: 无法访问主房间 ${homeRoom}`);
+                console.log(`错误: 无法访问源头房间 ${sourceRoom}`);
                 return ERR_NOT_FOUND;
             }
             if (!target) {
                 console.log(`错误: 无法访问目标房间 ${targetRoom}，请确保有视野`);
                 return ERR_NOT_FOUND;
             }
-            const success = RoadBuilder.recalculateRoute(homeRoom, targetRoom);
+            const success = RoadBuilder.recalculateRoute(sourceRoom, targetRoom);
             if (success) {
-                console.log(`✓ 路线 ${homeRoom} -> ${targetRoom} 已重新计算`);
+                console.log(`✓ 路线 ${sourceRoom} -> ${targetRoom} 已重新计算`);
                 return OK;
             } else {
                 console.log(`✗ 路线重新计算失败`);
@@ -271,15 +271,15 @@ export default {
         },
 
         /**
-         * 重新计算主房间的所有外矿路线
-         * @param homeRoom 主房间名
+         * 重新计算源头房间的所有外矿路线
+         * @param sourceRoom 源头房间名
          */
-        recalcAll(homeRoom?: string) {
+        recalcAll(sourceRoom?: string) {
             // 如果没有指定房间，获取所有有外矿配置的房间
-            const homeRooms: string[] = [];
+            const sourceRooms: string[] = [];
             
-            if (homeRoom) {
-                homeRooms.push(homeRoom);
+            if (sourceRoom) {
+                sourceRooms.push(sourceRoom);
             } else {
                 // 从 Memory 获取所有有外矿配置的房间
                 const outMineData = getOutMineData();
@@ -292,31 +292,31 @@ export default {
                     // 只处理有外矿目标的房间
                     if ((data.energy && data.energy.length > 0) || 
                         (data.centerRoom && data.centerRoom.length > 0)) {
-                        homeRooms.push(room);
+                        sourceRooms.push(room);
                     }
                 }
-                if (homeRooms.length === 0) {
+                if (sourceRooms.length === 0) {
                     console.log('没有找到配置了外矿目标的房间');
                     return OK;
                 }
-                console.log(`\n找到 ${homeRooms.length} 个有外矿配置的房间: ${homeRooms.join(', ')}\n`);
+                console.log(`\n找到 ${sourceRooms.length} 个有外矿配置的房间: ${sourceRooms.join(', ')}\n`);
             }
 
             let totalSuccess = 0;
             let totalFailed = 0;
             let totalNoVision = 0;
 
-            for (const currentHomeRoom of homeRooms) {
-                const home = Game.rooms[currentHomeRoom];
+            for (const currentSourceRoom of sourceRooms) {
+                const home = Game.rooms[currentSourceRoom];
                 if (!home) {
-                    console.log(`[${currentHomeRoom}] 跳过 - 无法访问主房间`);
+                    console.log(`[${currentSourceRoom}] 跳过 - 无法访问源头房间`);
                     continue;
                 }
 
                 // 从 Memory 获取所有目标房间
-                const outMineData = getOutMineData()?.[currentHomeRoom];
+                const outMineData = getOutMineData()?.[currentSourceRoom];
                 if (!outMineData) {
-                    console.log(`[${currentHomeRoom}] 跳过 - 没有外矿配置`);
+                    console.log(`[${currentSourceRoom}] 跳过 - 没有外矿配置`);
                     continue;
                 }
 
@@ -337,16 +337,16 @@ export default {
                 }
 
                 if (targetRooms.size === 0) {
-                    console.log(`[${currentHomeRoom}] 跳过 - 没有配置外矿目标`);
+                    console.log(`[${currentSourceRoom}] 跳过 - 没有配置外矿目标`);
                     continue;
                 }
 
-                console.log(`\n========== 重新计算外矿道路 [${currentHomeRoom}] ==========`);
+                console.log(`\n========== 重新计算外矿道路 [${currentSourceRoom}] ==========`);
                 console.log(`目标房间: ${[...targetRooms].join(', ')}`);
                 
                 // 先清除所有旧路线和缓存
                 for (const targetRoom of targetRooms) {
-                    RoadMemory.deleteRoute(currentHomeRoom, targetRoom);
+                    RoadMemory.deleteRoute(currentSourceRoom, targetRoom);
                 }
                 CostMatrixCache.clear();
                 
@@ -371,7 +371,7 @@ export default {
                     }
 
                     // 计算路径
-                    const pathResults = PathPlanner.planPaths(currentHomeRoom, targets);
+                    const pathResults = PathPlanner.planPaths(currentSourceRoom, targets);
                     if (pathResults.size === 0) {
                         console.log(`  [${targetRoom}] ✗ 失败 - 寻路失败(CPU:${Game.cpu.getUsed().toFixed(1)})`);
                         failed++;
@@ -386,7 +386,7 @@ export default {
                         pathsToSave.set(posKey, positions);
                     }
 
-                    RoadMemory.setPaths(currentHomeRoom, targetRoom, pathsToSave);
+                    RoadMemory.setPaths(currentSourceRoom, targetRoom, pathsToSave);
                     console.log(`  [${targetRoom}] ✓ 成功 - ${pathsToSave.size}条路径`);
                     success++;
                 }
@@ -397,7 +397,7 @@ export default {
                 totalNoVision += noVision;
             }
 
-            if (homeRooms.length > 1) {
+            if (sourceRooms.length > 1) {
                 console.log(`\n========== 总计 ==========`);
                 console.log(`成功 ${totalSuccess}, 失败 ${totalFailed}, 无视野 ${totalNoVision}`);
             }
@@ -407,17 +407,17 @@ export default {
 
         /**
          * 清除指定路线
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          * @param targetRoom 目标房间名
          */
-        clear(homeRoom: string, targetRoom: string) {
-            if (!homeRoom || !targetRoom) {
-                console.log('用法: road.clear(homeRoom, targetRoom)');
+        clear(sourceRoom: string, targetRoom: string) {
+            if (!sourceRoom || !targetRoom) {
+                console.log('用法: road.clear(sourceRoom, targetRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const success = RoadMemory.deleteRoute(homeRoom, targetRoom);
+            const success = RoadMemory.deleteRoute(sourceRoom, targetRoom);
             if (success) {
-                console.log(`✓ 路线 ${homeRoom} -> ${targetRoom} 已清除`);
+                console.log(`✓ 路线 ${sourceRoom} -> ${targetRoom} 已清除`);
                 return OK;
             } else {
                 console.log(`✗ 路线不存在`);
@@ -426,43 +426,43 @@ export default {
         },
 
         /**
-         * 清除主房间的所有路线
-         * @param homeRoom 主房间名
+         * 清除源头房间的所有路线
+         * @param sourceRoom 源头房间名
          */
-        clearAll(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.clearAll(homeRoom)');
+        clearAll(sourceRoom: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.clearAll(sourceRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const targets = RoadMemory.getRouteTargets(homeRoom);
+            const targets = RoadMemory.getRouteTargets(sourceRoom);
             if (targets.length === 0) {
-                console.log(`房间 ${homeRoom} 没有道路数据`);
+                console.log(`房间 ${sourceRoom} 没有道路数据`);
                 return OK;
             }
             let count = 0;
             for (const target of targets) {
-                if (RoadMemory.deleteRoute(homeRoom, target)) {
+                if (RoadMemory.deleteRoute(sourceRoom, target)) {
                     count++;
                 }
             }
-            console.log(`✓ 已清除 ${homeRoom} 的 ${count} 条路线`);
+            console.log(`✓ 已清除 ${sourceRoom} 的 ${count} 条路线`);
             return OK;
         },
 
         /**
          * 显示统计信息
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          */
-        stats(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.stats(homeRoom)');
+        stats(sourceRoom: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.stats(sourceRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const stats = RoadMemory.getStats(homeRoom);
+            const stats = RoadMemory.getStats(sourceRoom);
             const cacheStats = CostMatrixCache.getStats();
             const plannerStats = PathPlanner.getStats();
 
-            console.log(`\n========== 外矿道路统计 [${homeRoom}] ==========`);
+            console.log(`\n========== 外矿道路统计 [${sourceRoom}] ==========`);
             console.log(`目标房间: ${stats.routeCount}`);
             console.log(`独立路径: ${stats.pathCount}`);
             console.log(`道路总长: ${stats.totalLength}`);
@@ -481,14 +481,14 @@ export default {
 
         /**
          * 验证数据完整性
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          */
-        validate(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.validate(homeRoom)');
+        validate(sourceRoom: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.validate(sourceRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const result = RoadMemory.validate(homeRoom);
+            const result = RoadMemory.validate(sourceRoom);
             if (result.valid) {
                 console.log(`✓ 数据验证通过`);
             } else {
@@ -511,25 +511,25 @@ export default {
 
         /**
          * 检查道路健康状态
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          */
-        health(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.health(homeRoom)');
+        health(sourceRoom: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.health(sourceRoom)');
                 return ERR_INVALID_ARGS;
             }
-            const targets = RoadMemory.getRouteTargets(homeRoom);
+            const targets = RoadMemory.getRouteTargets(sourceRoom);
             if (targets.length === 0) {
-                console.log(`房间 ${homeRoom} 没有道路数据`);
+                console.log(`房间 ${sourceRoom} 没有道路数据`);
                 return OK;
             }
 
-            console.log(`\n========== 道路健康检查 [${homeRoom}] ==========`);
+            console.log(`\n========== 道路健康检查 [${sourceRoom}] ==========`);
             for (const targetRoom of targets) {
-                const group = RoadMemory.getRouteGroup(homeRoom, targetRoom);
+                const group = RoadMemory.getRouteGroup(sourceRoom, targetRoom);
                 if (!group) continue;
 
-                const positions = RoadMemory.getGroupPositions(homeRoom, targetRoom);
+                const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
                 let built = 0;
                 let damaged = 0;
                 let missing = 0;
@@ -570,37 +570,37 @@ export default {
 
         /**
          * 显示道路可视化
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          * @param targetRoom 可选，指定目标房间
          */
-        show(homeRoom: string, targetRoom?: string) {
-            if (!homeRoom) {
-                console.log('用法: road.show(homeRoom, [targetRoom])');
+        show(sourceRoom: string, targetRoom?: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.show(sourceRoom, [targetRoom])');
                 return ERR_INVALID_ARGS;
             }
             if (targetRoom) {
-                RoadVisual.visualize(homeRoom, targetRoom);
-                console.log(`✓ 已显示 ${homeRoom} -> ${targetRoom} 的道路可视化（单次）`);
+                RoadVisual.visualize(sourceRoom, targetRoom);
+                console.log(`✓ 已显示 ${sourceRoom} -> ${targetRoom} 的道路可视化（单次）`);
             } else {
-                RoadVisual.enable(homeRoom);
-                RoadVisual.visualizeAll(homeRoom);
-                console.log(`✓ 已启用 ${homeRoom} 的道路可视化`);
-                console.log(`  提示: 也可以创建 Flag "${homeRoom}/roadVisual" 来触发可视化`);
+                RoadVisual.enable(sourceRoom);
+                RoadVisual.visualizeAll(sourceRoom);
+                console.log(`✓ 已启用 ${sourceRoom} 的道路可视化`);
+                console.log(`  提示: 也可以创建 Flag "${sourceRoom}/roadVisual" 来触发可视化`);
             }
             return OK;
         },
 
         /**
          * 隐藏道路可视化
-         * @param homeRoom 主房间名
+         * @param sourceRoom 源头房间名
          */
-        hide(homeRoom: string) {
-            if (!homeRoom) {
-                console.log('用法: road.hide(homeRoom)');
+        hide(sourceRoom: string) {
+            if (!sourceRoom) {
+                console.log('用法: road.hide(sourceRoom)');
                 return ERR_INVALID_ARGS;
             }
-            RoadVisual.disable(homeRoom);
-            console.log(`✓ 已禁用 ${homeRoom} 的道路可视化`);
+            RoadVisual.disable(sourceRoom);
+            console.log(`✓ 已禁用 ${sourceRoom} 的道路可视化`);
             return OK;
         },
 

@@ -68,7 +68,7 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
         
         for (let i = Math.min(panum, phnum); i < P_num; i++) {
             const boostOwnerId = `Mine-${room.name}-${targetRoom}-${Game.time}-${mineData.count}`;
-            const memory = { homeRoom: room.name, targetRoom: targetRoom, boostLevel: mineData.boostLevel, boostOwnerId } as CreepMemory;
+            const memory = { sourceRoom: room.name, targetRoom: targetRoom, boostLevel: mineData.boostLevel, boostOwnerId } as CreepMemory;
 
             const paRet = room.SpawnMissionAdd('PA', [], -1, 'power-attack', memory);
             const phRet = room.SpawnMissionAdd('PH', [], -1, 'power-heal', memory);
@@ -100,7 +100,7 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
         let needUpdate = false;
         
         for (let i = prnum; i < mineData.prNum; i++) {
-            const memory = { homeRoom: room.name, targetRoom: targetRoom } as CreepMemory;
+            const memory = { sourceRoom: room.name, targetRoom: targetRoom } as CreepMemory;
             room.SpawnMissionAdd('PR', [], -1, 'power-ranged', memory);
             mineData.prCount = mineData.prCount + 1;
             needUpdate = true;
@@ -126,7 +126,7 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, SpawnM
 
         const pcnum = pc + (SpawnMissionNum['power-carry']||0);
         for (let i = pcnum; i < maxPc; i++) {
-            const memory = { homeRoom: room.name, targetRoom: targetRoom } as CreepMemory;
+            const memory = { sourceRoom: room.name, targetRoom: targetRoom } as CreepMemory;
             room.SpawnMissionAdd('PC', [], -1, 'power-carry', memory);
         }
     }
@@ -163,14 +163,14 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, Sp
     const dh = countActiveCreeps(CreepByTargetRoom['deposit-harvest'], 200);
     const dhnum = dh + (SpawnMissionNum['deposit-harvest']||0)
     if(dhnum < D_num) {
-        const memory = { homeRoom: room.name, targetRoom: targetRoom } as any;
+        const memory = { sourceRoom: room.name, targetRoom: targetRoom } as any;
         room.SpawnMissionAdd('DH', [], -1, 'deposit-harvest', memory);
     }
 
     const dt = countActiveCreeps(CreepByTargetRoom['deposit-transfer'], 150);
     const dtnum = dt + (SpawnMissionNum['deposit-transfer']||0)
     if(dtnum < D_num / 2) {
-        const memory = { homeRoom: room.name, targetRoom: targetRoom } as any;
+        const memory = { sourceRoom: room.name, targetRoom: targetRoom } as any;
         room.SpawnMissionAdd('DT', [], -1, 'deposit-transfer', memory);
     }
 }

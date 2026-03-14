@@ -477,7 +477,7 @@ interface OutMineRoadCache {
      * @description 临时缓存，用于同一 tick 内复用
      */
     pathCache?: {
-        [key: string]: RoomPosition[];  // key: `${homeRoom}-${targetRoom}`
+        [key: string]: RoomPosition[];  // key: `${sourceRoom}-${targetRoom}`
     };
 
     /**
@@ -485,7 +485,7 @@ interface OutMineRoadCache {
      * @description 需要修复的道路位置
      */
     repairQueue?: {
-        [homeRoom: string]: Array<{
+        [sourceRoom: string]: Array<{
             pos: RoomPosition;
             priority: number;
         }>;

@@ -8,7 +8,7 @@ const aid_upgrade = {
 
     target: function (creep: Creep) {
         if (!creep.memory.ready) return false;
-        if (!creep.moveHomeRoom()) return;
+        if (!creep.moveToTargetRoom()) return;
 
         creep.runControllerUpgrade();
         if (creep.store.getUsedCapacity() === 0) {
@@ -20,7 +20,7 @@ const aid_upgrade = {
     
     source: function (creep: Creep) {
         if (!creep.memory.ready) return false;
-        if (!creep.moveHomeRoom()) return;
+        if (!creep.moveToTargetRoom()) return;
 
         creep.withdrawControllerEnergy({
             linkRange: 2,

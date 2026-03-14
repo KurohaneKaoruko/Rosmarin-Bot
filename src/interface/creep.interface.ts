@@ -35,7 +35,7 @@ interface Creep {
     /** 
      * 移动到所属房间 (home)
      * @returns true表示已到达，false表示正在移动
-     * @description 移动到creep.memory.home或homeRoom指定的房间
+     * @description 移动到creep.memory.home指定的房间
      */
     moveHomeRoom(): boolean;
     
@@ -127,6 +127,12 @@ interface Creep {
      * @returns true 表示本 tick 成功取能后会装满，false 表示仍需继续取能或仅执行了移动
      */
     TakeEnergy(pickup?: boolean): boolean;
+
+    /**
+     * 仅在首次调用时关闭被攻击通知。
+     * @description 将 notifyWhenAttacked(false) 与 memory.notified 的样板逻辑下沉到通用层。
+     */
+    disableAttackNotificationsOnce(): void;
 
     yieldSourcePosition(source: Source): boolean;
 
@@ -556,7 +562,7 @@ interface Creep {
  * // 完整初始化
  * const memory: CreepMemory = { role: 'harvester', home: 'W1N1' };
  * // 部分初始化（用于孵化任务）
- * const memory = { homeRoom: 'W1N1', targetRoom: 'W2N2' } as CreepMemory;
+ * const memory = { sourceRoom: 'W1N1', targetRoom: 'W2N2' } as CreepMemory;
  */
 interface CreepMemory {
     /** 
@@ -566,14 +572,14 @@ interface CreepMemory {
     role?: string;
     
     /** 
-     * 所属房间名（简写）
-     * @description creep的归属房间，用于返回和资源分配
+     * 固定工作房间名（简写）
+     * @description 仅用于出生房=工作房的主力 creep；约定上不与 homeRoom/sourceRoom 共存。
      */
     home?: string;
 
-    /** 
-     * 所属房间名（完整写法）
-     * @description creep的归属房间，与home功能相同，部分代码使用此属性
+    /**
+     * 孵化房和归属房
+     * @description 用于 aid/战争/占领等外派 creep 的孵化房与归属房；约定上不与 home 共存，可与 sourceRoom 并存。
      */
     homeRoom?: string;
     
@@ -583,9 +589,9 @@ interface CreepMemory {
      */
     targetRoom?: string;
     
-    /** 
-     * 资源房间名
-     * @description creep获取资源的房间
+    /**
+     * 跨房任务的源头房
+     * @description 外矿/过道等需要反复来回的 creep 用它表示出发房、回收房或补给源头房；约定上不与 home 共存，可与 homeRoom 并存。
      */
     sourceRoom?: string;
     

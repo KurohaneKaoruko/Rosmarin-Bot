@@ -1,4 +1,5 @@
 import { decompress } from '@/modules/utils/compress';
+import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 
 const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
 const relayQueuePosCache: Record<string, { tick: number; positions: RoomPosition[] }> = {};
@@ -86,7 +87,7 @@ const outCarry = {
     },
 
     getRelayExitDirection: function (creep: Creep): number | null {
-        return this.getRouteExitDirection(creep, creep.memory.homeRoom);
+        return this.getRouteExitDirection(creep, getCreepSourceRoom(creep.memory));
     },
 
     getExitProgress: function (pos: RoomPosition, exitDirection: number): number {
@@ -234,6 +235,8 @@ const outCarry = {
     } | null {
         if (creep.room.name !== creep.memory.targetRoom) return null;
         if (creep.pos.isRoomEdge()) return null;
+        const sourceRoom = getCreepSourceRoom(creep.memory);
+        if (!sourceRoom) return null;
 
         const exitDirection = this.getRelayExitDirection(creep);
         if (!exitDirection) return null;
@@ -245,7 +248,7 @@ const outCarry = {
             filter: (c: Creep) =>
                 !c.spawning &&
                 (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                c.memory.homeRoom === creep.memory.homeRoom &&
+                getCreepSourceRoom(c.memory) === sourceRoom &&
                 c.memory.targetRoom === creep.memory.targetRoom &&
                 c.store.getFreeCapacity() > 0
         }) as Creep[];
@@ -264,7 +267,7 @@ const outCarry = {
         const feeders = creep.room.find(FIND_MY_CREEPS, {
             filter: (c: Creep) =>
                 !c.spawning &&
-                c.memory.homeRoom === creep.memory.homeRoom &&
+                getCreepSourceRoom(c.memory) === sourceRoom &&
                 (c.memory.role === 'out-harvest' || c.memory.role === 'out-mineral')
         }) as Creep[];
         const feederCount = Math.max(1, feeders.length);
@@ -312,6 +315,8 @@ const outCarry = {
     relayCarryToForward: function (creep: Creep): boolean {
         if (creep.store[RESOURCE_ENERGY] <= 0) return false;
         if (creep.pos.isRoomEdge()) return false;
+        const sourceRoom = getCreepSourceRoom(creep.memory);
+        if (!sourceRoom) return false;
 
         const exitDirection = this.getRelayExitDirection(creep);
         if (!exitDirection) return false;
@@ -323,7 +328,7 @@ const outCarry = {
                 !c.spawning &&
                 !c.pos.isRoomEdge() &&
                 (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                c.memory.homeRoom === creep.memory.homeRoom &&
+                getCreepSourceRoom(c.memory) === sourceRoom &&
                 c.memory.targetRoom === creep.memory.targetRoom
         });
         if (teammates.length === 0) return false;
@@ -406,8 +411,9 @@ const outCarry = {
 
     findBestWithdrawTarget: function (creep: Creep): { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null {
         const room = creep.room;
-        const homeRoom = Game.rooms[creep.memory.homeRoom];
-        const canStoreMinerals = !!(homeRoom?.storage || homeRoom?.terminal);
+        const sourceRoomName = getCreepSourceRoom(creep.memory);
+        const sourceRoom = sourceRoomName ? Game.rooms[sourceRoomName] : undefined;
+        const canStoreMinerals = !!(sourceRoom?.storage || sourceRoom?.terminal);
 
         const dangerousHostiles = room.find(FIND_HOSTILE_CREEPS, {
             filter: (c: Creep) =>
@@ -422,7 +428,7 @@ const outCarry = {
             const other = Game.creeps[name];
             if (!other || other.id === creep.id || other.spawning) continue;
             if (other.memory.role !== 'out-carry' && other.memory.role !== 'out-car') continue;
-            if (other.memory.homeRoom !== creep.memory.homeRoom) continue;
+            if (getCreepSourceRoom(other.memory) !== sourceRoomName) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
             if (!this.isLikelyCollecting(other)) continue;
             const targetId = other.memory.cacheSource?.targetId;
@@ -572,7 +578,8 @@ const outCarry = {
 
                 const nonEnergyResource = Object.keys(target.store).find((res) => res !== RESOURCE_ENERGY && target.store[res] > 0) as ResourceConstant;
                 const energyAmount = target.store[RESOURCE_ENERGY] || 0;
-                const canStoreMinerals = !!(Game.rooms[creep.memory.homeRoom]?.storage || Game.rooms[creep.memory.homeRoom]?.terminal);
+                const sourceRoom = getCreepSourceRoom(creep.memory);
+                const canStoreMinerals = !!(sourceRoom && (Game.rooms[sourceRoom]?.storage || Game.rooms[sourceRoom]?.terminal));
                 const resourceType = (canStoreMinerals && nonEnergyResource)
                     ? nonEnergyResource
                     : (energyAmount > 0 ? RESOURCE_ENERGY : (Object.keys(target.store)[0] as ResourceConstant));
@@ -686,12 +693,14 @@ const outCarry = {
     carry: function(creep: any) {
         creep.memory.cacheTarget = creep.memory.cacheTarget || {}
         const cache = creep.memory.cacheTarget as any
-        if (creep.room.name != creep.memory.homeRoom || creep.pos.isRoomEdge()) {
-            if (creep.room.name != creep.memory.homeRoom && !creep.pos.isRoomEdge()) {
+        const sourceRoom = getCreepSourceRoom(creep.memory);
+        if (!sourceRoom) return;
+        if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
+            if (creep.room.name != sourceRoom && !creep.pos.isRoomEdge()) {
                 if (this.relayCarryToForward(creep)) return;
-                if (this.moveAlongRouteExit(creep, creep.memory.homeRoom)) return;
+                if (this.moveAlongRouteExit(creep, sourceRoom)) return;
             }
-            creep.moveToRoom(creep.memory.homeRoom, { plainCost: 2, swampCost: 10 });
+            creep.moveToRoom(sourceRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
 
@@ -701,7 +710,7 @@ const outCarry = {
             target = Game.getObjectById(cache.targetId) as StructureTerminal | StructureStorage;
             if (target) {
                 if (creep.pos.inRangeTo(target, 1)) {
-                    // 已经回到 homeRoom 时，优先把能量落到终端/仓库。
+                    // 已经回到 sourceRoom 时，优先把能量落到终端/仓库。
                     // 不能再像路上接力那样把能量递给相邻 creep，否则会在目的地来回传能卡住。
                     if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 200) {
                         creep.transfer(target, Object.keys(creep.store)[0]);
@@ -759,7 +768,8 @@ const outCarry = {
     },
 
     buildRepair: function(creep: Creep) {
-        if(creep.room.name == creep.memory.homeRoom) return false;
+        const sourceRoom = getCreepSourceRoom(creep.memory);
+        if (sourceRoom && creep.room.name == sourceRoom) return false;
         if(creep.memory.role !== 'out-car') return false;
         if(creep.store[RESOURCE_ENERGY] == 0) return false;
 
@@ -822,7 +832,8 @@ const outCarry = {
         const forcedReceivedTick = Number(sourceCache.receivedEnergyTick || 0);
         const retreatUntil = Number(sourceCache.receivedRetreatUntil || 0);
         const forcedDir = sourceCache.receivedMoveDirection as DirectionConstant | undefined;
-        if (!forcedMoveDir && forcedReceivedTick === Game.time && forcedDir && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+        const sourceRoom = getCreepSourceRoom(creep.memory);
+        if (!forcedMoveDir && forcedReceivedTick === Game.time && forcedDir && used > 0 && sourceRoom && creep.room.name !== sourceRoom) {
             sourceCache.partialLeaveWait = 0;
             this.markForcedMove(creep, forcedDir, 1);
             this.tryForceLineMove(creep, forcedDir, false);
@@ -849,7 +860,7 @@ const outCarry = {
         }
 
         // 刚被接力到能量时，优先回程，不再继续向前找货。
-        if (inRetreatWindow && used > 0 && creep.room.name !== creep.memory.homeRoom) {
+        if (inRetreatWindow && used > 0 && sourceRoom && creep.room.name !== sourceRoom) {
             sourceCache.partialLeaveWait = 0;
             this.carry(creep);
             creep.memory.dontPullMe = false;

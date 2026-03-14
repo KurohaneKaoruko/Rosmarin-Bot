@@ -1,7 +1,7 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
 import { inWhitelist } from '@/modules/utils/whitelist';
 import { getRoomData, getStructData } from '@/modules/utils/memory';
-import { getCreepNumByHomeRoom } from '@/modules/utils/creepTickIndex';
+import { getCreepNumByAssignedRoom } from '@/modules/utils/creepTickIndex';
 
 const getMyCreepsByRoleByRoom = (() => {
     let cachedTick = -1;
@@ -237,7 +237,7 @@ export default class BaseFunction extends Room {
 
     // 获取属于该房间的creep数量
     getCreepNum() {
-        return getCreepNumByHomeRoom(this.name);
+        return getCreepNumByAssignedRoom(this.name);
     }
 
     // 获取当前房间的有效等级，根据可用能量判断

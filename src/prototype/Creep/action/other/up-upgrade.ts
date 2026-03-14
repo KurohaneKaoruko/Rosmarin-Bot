@@ -178,7 +178,7 @@ const UpUpgradeFunction = {
 
     source: function (creep: Creep) {   // 获取能量
         if(!creep.memory.ready) return false;
-        if(!creep.moveHomeRoom()) return;
+        if(!creep.moveToTargetRoom()) return;
         if(!creep.memory.boosted) {
             const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
             creep.memory.boosted = result === OK;

@@ -1,4 +1,5 @@
 import { parseShardRoomName } from '@/modules/utils/shardRoom';
+import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type AidBuildSourceCandidate = {
@@ -277,7 +278,7 @@ const aid_build = {
     },
 
     harvest: function (creep: Creep) {
-        const sourceRoom = creep.memory.sourceRoom || creep.memory.targetRoom;
+        const sourceRoom = getCreepSourceRoom(creep.memory) || creep.memory.targetRoom;
         const controller = creep.room.controller;
         const isJumpMode = !!creep.memory.jumpMode;
         // 兼容仅配置 targetRoom（未配置 sourceRoom）的情况：默认在 targetRoom 获取能量

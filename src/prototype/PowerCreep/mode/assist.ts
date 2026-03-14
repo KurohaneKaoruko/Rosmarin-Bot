@@ -167,7 +167,7 @@ export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
                     if (room.CheckBoostRes(boostBody, boostmap)) {
                         const ret = room.SpawnMissionAdd(`PCH-${pc.name}`, [], -1, 'pc-heal', {
                             targetPcName: pc.name,
-                            homeRoom: idleRoom,
+                            home: idleRoom,
                             boostmap,
                             boostOwnerId,
                             mustBoost: true,

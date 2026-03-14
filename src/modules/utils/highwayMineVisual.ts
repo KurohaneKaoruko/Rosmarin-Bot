@@ -24,14 +24,14 @@ export class HighwayMineVisual {
     private static enabled: Record<string, boolean> = {};
     private static globalEnabled = false;
     private static lastRunTick = -1;
-    private static lastMapDrawTickByHome: Record<string, number> = {};
+    private static lastMapDrawTickBySource: Record<string, number> = {};
 
-    static enable(homeRoom: string): void {
-        this.enabled[homeRoom] = true;
+    static enable(sourceRoom: string): void {
+        this.enabled[sourceRoom] = true;
     }
 
-    static disable(homeRoom: string): void {
-        delete this.enabled[homeRoom];
+    static disable(sourceRoom: string): void {
+        delete this.enabled[sourceRoom];
     }
 
     static enableAll(): void {
@@ -43,53 +43,53 @@ export class HighwayMineVisual {
         this.enabled = {};
     }
 
-    static toggle(homeRoom: string): boolean {
-        this.enabled[homeRoom] = !this.enabled[homeRoom];
-        return this.enabled[homeRoom] || false;
+    static toggle(sourceRoom: string): boolean {
+        this.enabled[sourceRoom] = !this.enabled[sourceRoom];
+        return this.enabled[sourceRoom] || false;
     }
 
     static run(): void {
         if (this.lastRunTick === Game.time) return;
         this.lastRunTick = Game.time;
 
-        const homeRoomsToDraw = new Set<string>();
+        const sourceRoomsToDraw = new Set<string>();
 
         if (this.globalEnabled || Game.flags['ALL/mineMapVisual']) {
             const outMineData = getOutMineData();
-            for (const homeRoom in outMineData) {
-                const highway = outMineData[homeRoom]?.highway;
-                if (highway && highway.length > 0) homeRoomsToDraw.add(homeRoom);
+            for (const sourceRoom in outMineData) {
+                const highway = outMineData[sourceRoom]?.highway;
+                if (highway && highway.length > 0) sourceRoomsToDraw.add(sourceRoom);
             }
         }
 
         for (const flagName in Game.flags) {
             const match = flagName.match(/^(.+)\/mineMapVisual$/);
-            if (match) homeRoomsToDraw.add(match[1]);
+            if (match) sourceRoomsToDraw.add(match[1]);
         }
 
-        for (const homeRoom in this.enabled) {
-            if (this.enabled[homeRoom]) homeRoomsToDraw.add(homeRoom);
+        for (const sourceRoom in this.enabled) {
+            if (this.enabled[sourceRoom]) sourceRoomsToDraw.add(sourceRoom);
         }
 
-        for (const homeRoom of homeRoomsToDraw) {
-            const lastMap = this.lastMapDrawTickByHome[homeRoom] ?? -Infinity;
+        for (const sourceRoom of sourceRoomsToDraw) {
+            const lastMap = this.lastMapDrawTickBySource[sourceRoom] ?? -Infinity;
             if (Game.time - lastMap >= this.MAP_DRAW_INTERVAL) {
-                this.lastMapDrawTickByHome[homeRoom] = Game.time;
-                this.visualizeOnMap(homeRoom);
+                this.lastMapDrawTickBySource[sourceRoom] = Game.time;
+                this.visualizeOnMap(sourceRoom);
             }
         }
     }
 
-    static visualizeOnMap(homeRoom: string): void {
-        const powerEnabled = !!getRoomData()?.[homeRoom]?.outminePower;
-        const depositEnabled = !!getRoomData()?.[homeRoom]?.outmineDeposit;
+    static visualizeOnMap(sourceRoom: string): void {
+        const powerEnabled = !!getRoomData()?.[sourceRoom]?.outminePower;
+        const depositEnabled = !!getRoomData()?.[sourceRoom]?.outmineDeposit;
         if (!powerEnabled && !depositEnabled) return;
 
-        const highway = getOutMineData()?.[homeRoom]?.highway || [];
+        const highway = getOutMineData()?.[sourceRoom]?.highway || [];
         if (highway.length === 0) return;
 
-        const homeCenter = new RoomPosition(25, 25, homeRoom);
-        Game.map.visual.circle(homeCenter, {
+        const sourceCenter = new RoomPosition(25, 25, sourceRoom);
+        Game.map.visual.circle(sourceCenter, {
             radius: 1,
             fill: '#ffffff',
             opacity: 0.25,
@@ -104,7 +104,7 @@ export class HighwayMineVisual {
         for (const targetRoom of highway) {
             const targetCenter = new RoomPosition(25, 25, targetRoom);
 
-            Game.map.visual.poly([homeCenter, targetCenter], lineStyle);
+            Game.map.visual.poly([sourceCenter, targetCenter], lineStyle);
 
             Game.map.visual.circle(targetCenter, {
                 radius: 1.2,
@@ -116,3 +116,4 @@ export class HighwayMineVisual {
         }
     }
 }
+

@@ -1,4 +1,5 @@
 import { RoleData } from "@/constant/CreepConstant";
+import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./spawnConfig";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
@@ -98,6 +99,7 @@ export default class WarSpawnFunction extends Flag {
 
         const boostOwnerId = `${flagName}:${Game.time}`
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'aio', {
+            homeRoom: room.name,
             targetRoom: targetRoom,
             boostmap: boostmap,
             boostOwnerId,
@@ -132,7 +134,7 @@ export default class WarSpawnFunction extends Flag {
         )
         if (spawnLoad.total >= 1) return true
         // 拆除策略由 creep.memory.dismantleMode 驱动，便于后续扩展与精细控制
-        room.SpawnMissionAdd('', '', -1, 'cleaner', { targetRoom, dismantleMode: 'clean', spawnFlag: flagName } as any)
+        room.SpawnMissionAdd('', '', -1, 'cleaner', { homeRoom: room.name, targetRoom, dismantleMode: 'clean', spawnFlag: flagName } as any)
         return true
     }
 
@@ -153,7 +155,7 @@ export default class WarSpawnFunction extends Flag {
         )
         const missing = Math.max(0, num - spawnLoad.total)
         for (let i = 0; i < missing; i++) {
-            room.SpawnMissionAdd('', '', num, 'attack-claimer', { targetRoom, num, spawnFlag: flagName })
+            room.SpawnMissionAdd('', '', num, 'attack-claimer', { homeRoom: room.name, targetRoom, num, spawnFlag: flagName })
         }
         if (missing > 0) {
             log('CLAIM', `${room.name} 补充了 ${missing} 个 attack-claimer 来攻击 ${targetRoom}`)
@@ -197,6 +199,7 @@ export default class WarSpawnFunction extends Flag {
         const boostOwnerId = `${flagName}:${Game.time}`
         // 拆除策略由 creep.memory.dismantleMode 驱动，避免仅靠 role 绑定策略导致歧义
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'dismantle', {
+            homeRoom: room.name,
             targetRoom,
             boostmap,
             boostOwnerId,
@@ -216,7 +219,7 @@ export default class WarSpawnFunction extends Flag {
         return true
     }
 
-    // 把旗帜所在房间当作 sourceRoom，把孵化房当作 targetRoom：用于战后/拆迁后的资源回收
+    // 把旗帜所在房间当作 sourceRoom，把孵化房记到 homeRoom，再把资源送回 targetRoom
     private handleLootFlag(flagName: string): boolean {
         const spawnInterval = parseFlagNumber(flagName, 'T', 500)
         if (!tickThrottle(this, spawnInterval)) return true
@@ -237,7 +240,7 @@ export default class WarSpawnFunction extends Flag {
             room,
             flagName,
             'logistic',
-            (memory) => memory.sourceRoom === sourceRoom && memory.targetRoom === targetRoom
+            (memory) => getCreepSourceRoom(memory) === sourceRoom && memory.targetRoom === targetRoom
         )
         if (spawnLoad.total >= 1) return true
         const bodys = config.bodypart as any
@@ -249,6 +252,7 @@ export default class WarSpawnFunction extends Flag {
         }
 
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'logistic', {
+            homeRoom: room.name,
             sourceRoom,
             targetRoom,
             boostmap: config.boostmap,

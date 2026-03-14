@@ -1,3 +1,4 @@
+import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { parseShardRoomName } from '@/modules/utils/shardRoom';
 
 const isRoomEdgePosition = (pos: { x: number; y: number }): boolean => (
@@ -176,7 +177,7 @@ export default class MoveFunction extends Creep {
     /**
      * 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞幘椤︻偊姊洪悷鏉挎Щ闁活剙銈告俊鍫曨敃閿濆洨鐦堥悷婊冮叄瀹曟繈寮介鐐存К閻熸粍鏌ㄩ～?     * @param options 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞枤閸斿灚绻濋姀锝呯厫闁告梹鍨块崺鈧?     * @returns boolean - true 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸擄箓宕崨瀛樼厵缂備焦锚缁楁帡鏌ｉ幘鍐测偓鍨嚕閸洖閱囬柣鏃堫棑椤︺劎绱撴担椋庤窗闁稿瀚伴崺鐐哄礃椤旇偐鐤€濡炪倖鎸鹃崑鐔煎矗閸曨垱鈷掗柛灞捐壘閳ь剝宕甸幑銏犫攽閸垻鐣堕梺鍝勭Р閸斿酣鍩㈤弮鍌楀亾楠炲灝鍔氶柟鍐茬箻閻擃剟顢楅崟顐ら獓闂佸壊鍋呯换鍐嫻閿涘嫮纾煎Σ灞剧墪瀵噣鏌℃担鍝バら柍褜鍓濋～澶娾攦娣囩e 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔筋焾濞夋稓鈧艾顦伴妵鍕疀閹炬剚浠奸梺缁樻尭閸婂灝顕?     */
     moveToSourceRoom(options?: MoveToOpts): boolean {
-        const sourceRoom = this.memory.sourceRoom;
+        const sourceRoom = getCreepSourceRoom(this.memory);
         if (!sourceRoom) { return true; }
         
         const { roomName: localSource, shard } = parseShardRoomName(sourceRoom);

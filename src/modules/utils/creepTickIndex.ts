@@ -1,7 +1,9 @@
+import { getCreepAssignedRoom, getCreepSourceRoom } from './creepMemory'
+
 type TargetRoomCreepInfo = {
     ticksToLive: number | undefined
     spawning: boolean
-    homeRoom: string | undefined
+    sourceRoom: string | undefined
 }
 
 type TargetRoomRoleMap = Record<string, TargetRoomCreepInfo[]>
@@ -14,10 +16,10 @@ type CreepTickIndexCache = {
     byTargetRoom: Record<string, TargetRoomRoleMap>
     teamCreeps: Creep[]
     allRoleCounts: RoleCountMap
-    byHomeRoom: Record<string, RoleCountMap>
-    downgradedLogisticsByHomeRoom: Record<string, RoleCountMap>
+    byAssignedRoom: Record<string, RoleCountMap>
+    downgradedLogisticsByAssignedRoom: Record<string, RoleCountMap>
     byExpandPlan: ExpandRoleCountMap
-    minRespawnGapByHomeRoomRole: Record<string, MinRespawnGapMap>
+    minRespawnGapByAssignedRoomRole: Record<string, MinRespawnGapMap>
 }
 
 const EMPTY_TARGET_ROOM_ROLE_MAP: TargetRoomRoleMap = Object.freeze({}) as TargetRoomRoleMap
@@ -31,10 +33,10 @@ function buildCache(): CreepTickIndexCache {
     const byTargetRoom: Record<string, TargetRoomRoleMap> = {}
     const teamCreeps: Creep[] = []
     const allRoleCounts: RoleCountMap = {}
-    const byHomeRoom: Record<string, RoleCountMap> = {}
-    const downgradedLogisticsByHomeRoom: Record<string, RoleCountMap> = {}
+    const byAssignedRoom: Record<string, RoleCountMap> = {}
+    const downgradedLogisticsByAssignedRoom: Record<string, RoleCountMap> = {}
     const byExpandPlan: ExpandRoleCountMap = {}
-    const minRespawnGapByHomeRoomRole: Record<string, MinRespawnGapMap> = {}
+    const minRespawnGapByAssignedRoomRole: Record<string, MinRespawnGapMap> = {}
 
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName]
@@ -59,7 +61,7 @@ function buildCache(): CreepTickIndexCache {
             byTargetRoom[targetRoom][role].push({
                 ticksToLive: creep.ticksToLive,
                 spawning: creep.spawning,
-                homeRoom: creep.memory.homeRoom || creep.memory.home,
+                sourceRoom: getCreepSourceRoom(creep.memory),
             })
         }
 
@@ -71,33 +73,33 @@ function buildCache(): CreepTickIndexCache {
             byExpandPlan[expandId][role] = (byExpandPlan[expandId][role] || 0) + 1
         }
 
-        const homeRoom = creep.memory.home || creep.memory.homeRoom || creep.room.name
-        if (homeRoom && typeof creep.ticksToLive === 'number') {
-            if (!minRespawnGapByHomeRoomRole[homeRoom]) {
-                minRespawnGapByHomeRoomRole[homeRoom] = {}
+        const assignedRoom = getCreepAssignedRoom(creep.memory) || creep.room.name
+        if (assignedRoom && typeof creep.ticksToLive === 'number') {
+            if (!minRespawnGapByAssignedRoomRole[assignedRoom]) {
+                minRespawnGapByAssignedRoomRole[assignedRoom] = {}
             }
             const respawnGap = creep.ticksToLive - creep.body.length * 4
-            const minRespawnGap = minRespawnGapByHomeRoomRole[homeRoom][role]
+            const minRespawnGap = minRespawnGapByAssignedRoomRole[assignedRoom][role]
             if (minRespawnGap == null || respawnGap < minRespawnGap) {
-                minRespawnGapByHomeRoomRole[homeRoom][role] = respawnGap
+                minRespawnGapByAssignedRoomRole[assignedRoom][role] = respawnGap
             }
         }
 
         const ttl = creep.ticksToLive
         if (typeof ttl === 'number' && ttl < creep.body.length * 3) continue
 
-        if (homeRoom) {
-            if (!byHomeRoom[homeRoom]) {
-                byHomeRoom[homeRoom] = {}
+        if (assignedRoom) {
+            if (!byAssignedRoom[assignedRoom]) {
+                byAssignedRoom[assignedRoom] = {}
             }
-            byHomeRoom[homeRoom][role] = (byHomeRoom[homeRoom][role] || 0) + 1
+            byAssignedRoom[assignedRoom][role] = (byAssignedRoom[assignedRoom][role] || 0) + 1
 
             if (creep.memory.downgraded && DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) {
-                if (!downgradedLogisticsByHomeRoom[homeRoom]) {
-                    downgradedLogisticsByHomeRoom[homeRoom] = {}
+                if (!downgradedLogisticsByAssignedRoom[assignedRoom]) {
+                    downgradedLogisticsByAssignedRoom[assignedRoom] = {}
                 }
-                downgradedLogisticsByHomeRoom[homeRoom][role] =
-                    (downgradedLogisticsByHomeRoom[homeRoom][role] || 0) + 1
+                downgradedLogisticsByAssignedRoom[assignedRoom][role] =
+                    (downgradedLogisticsByAssignedRoom[assignedRoom][role] || 0) + 1
             }
         }
     }
@@ -107,10 +109,10 @@ function buildCache(): CreepTickIndexCache {
         byTargetRoom,
         teamCreeps,
         allRoleCounts,
-        byHomeRoom,
-        downgradedLogisticsByHomeRoom,
+        byAssignedRoom,
+        downgradedLogisticsByAssignedRoom,
         byExpandPlan,
-        minRespawnGapByHomeRoomRole,
+        minRespawnGapByAssignedRoomRole,
     }
 }
 
@@ -134,16 +136,16 @@ export function getCreepRoleCountsAll(): RoleCountMap {
     return getCache().allRoleCounts
 }
 
-export function getCreepNumByHomeRoom(homeRoom: string): RoleCountMap {
+export function getCreepNumByAssignedRoom(assignedRoom: string): RoleCountMap {
     const cache = getCache()
-    if (!cache.byHomeRoom[homeRoom]) {
-        cache.byHomeRoom[homeRoom] = {}
+    if (!cache.byAssignedRoom[assignedRoom]) {
+        cache.byAssignedRoom[assignedRoom] = {}
     }
-    return cache.byHomeRoom[homeRoom]
+    return cache.byAssignedRoom[assignedRoom]
 }
 
-export function getDowngradedLogisticsCountByHomeRoom(homeRoom: string): RoleCountMap {
-    return getCache().downgradedLogisticsByHomeRoom[homeRoom] || EMPTY_ROLE_COUNT_MAP
+export function getDowngradedLogisticsCountByAssignedRoom(assignedRoom: string): RoleCountMap {
+    return getCache().downgradedLogisticsByAssignedRoom[assignedRoom] || EMPTY_ROLE_COUNT_MAP
 }
 
 export function getExpandCreepCountsByPlan(planId: string): RoleCountMap {
@@ -154,7 +156,7 @@ export function getExpandCreepCountsAll(): ExpandRoleCountMap {
     return getCache().byExpandPlan
 }
 
-export function hasSoonDeadCreepByHomeRoomRole(homeRoom: string, role: string, bufferTick = 10): boolean {
-    const minRespawnGap = getCache().minRespawnGapByHomeRoomRole[homeRoom]?.[role]
+export function hasSoonDeadCreepByAssignedRoomRole(assignedRoom: string, role: string, bufferTick = 10): boolean {
+    const minRespawnGap = getCache().minRespawnGapByAssignedRoomRole[assignedRoom]?.[role]
     return typeof minRespawnGap === 'number' && minRespawnGap <= bufferTick
 }

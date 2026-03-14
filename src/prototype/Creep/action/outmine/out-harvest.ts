@@ -1,10 +1,14 @@
 import { compress } from '@/modules/utils/compress';
+import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 
 
 
 const createSite = function(creep: any) {
-    if (Game.rooms[creep.memory.homeRoom].controller.level < 4) return;
+    const sourceRoom = getCreepSourceRoom(creep.memory);
+    if (!sourceRoom) return;
+    const sourceRoomObj = Game.rooms[sourceRoom];
+    if (!sourceRoomObj?.controller || sourceRoomObj.controller.level < 4) return;
 
     if (!creep.room.my && creep.fatigue > 0 &&
         !(creep.room.memory.road?.includes(compress(creep.pos.x, creep.pos.y)))
@@ -169,13 +173,13 @@ const outHarvest = {
             cache.receivedEnergyTick = Game.time;
             delete cache.targetId;
             delete cache.targetType;
-            const homeRoom = nearbyCarrier.memory.homeRoom;
-            if (homeRoom && nearbyCarrier.room.name !== homeRoom) {
-                const route = Game.map.findRoute(nearbyCarrier.room.name, homeRoom);
+            const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
+            if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
+                const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
                 if (Array.isArray(route) && route.length > 0 && route[0].exit) {
-                    const homeDirection = route[0].exit as DirectionConstant;
-                    cache.receivedMoveDirection = homeDirection;
-                    nearbyCarrier.move(homeDirection);
+                    const sourceDirection = route[0].exit as DirectionConstant;
+                    cache.receivedMoveDirection = sourceDirection;
+                    nearbyCarrier.move(sourceDirection);
                 }
             }
             return true;
