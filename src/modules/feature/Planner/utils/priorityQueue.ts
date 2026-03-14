@@ -5,8 +5,23 @@ type QueueNode<T = unknown> = {
 	v?: T;
 };
 
-type WasmQueueExports = WebAssembly.Exports & {
-	memory: WebAssembly.Memory;
+type WasmMemoryLike = {
+	buffer: ArrayBufferLike;
+};
+
+type WasmModuleLike = object;
+
+type WasmInstanceLike = {
+	exports: unknown;
+};
+
+declare const WebAssembly: {
+	Module: new (bytes: ArrayBuffer | ArrayBufferView) => WasmModuleLike;
+	Instance: new (module: WasmModuleLike, imports?: Record<string, unknown>) => WasmInstanceLike;
+};
+
+type WasmQueueExports = Record<string, unknown> & {
+	memory: WasmMemoryLike;
 	init(is_min: number): void;
 	push(priority: number, id: number): void;
 	pop(): void;
@@ -89,7 +104,7 @@ const getWasmBinary = (): Uint8Array => {
 	throw new Error('未找到 algo_wasm_priorityqueue WASM 模块');
 };
 
-const getWasModule = (): WebAssembly.Module => {
+const getWasModule = (): WasmModuleLike => {
 	const bytes = getWasmBinary();
 	if (!validateWasmHeader(bytes)) {
 		const head = Array.from(bytes.slice(0, 8)).map((n) => n.toString(16).padStart(2, '0')).join(' ');

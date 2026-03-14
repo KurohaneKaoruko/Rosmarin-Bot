@@ -18,7 +18,8 @@ export function getBotMemory(): BotMemory {
  * 获取房间控制内存（RoomData）。
  * @param roomName 可选；传入则仅返回该房间条目（不创建）。
  * @remarks
- * - RoomData 用于保存房间的显式配置；缺失时运行逻辑会回退到默认 `main` 模式。\n
+ * - RoomData 用于保存房间的显式配置；默认只有 `room.add` 后才会存在。\n
+ * - 若开启房间自动托管，则新占领房间会在首次运行时自动创建条目并写入默认配置。\n
  * - 因此 **禁止** 通过读取接口隐式创建房间条目。\n
  * - 若需要为房间写入显式配置，请使用 {@link ensureRoomData}。
  */

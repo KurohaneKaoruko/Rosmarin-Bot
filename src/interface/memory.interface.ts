@@ -502,6 +502,23 @@ interface OutMineRoadCache {
  */
 interface AutoDataMemory {
     /**
+     * 新占领房间自动托管配置
+     * @description 开启后，首次拥有的房间会按该默认配置自动加入控制列表
+     */
+    RoomAutoStart?: {
+        /**
+         * 默认运行模式
+         */
+        mode: 'main' | 'low' | 'high' | 'rush';
+
+        /**
+         * 自动托管允许的布局类型
+         * @description 仅允许自动布局，避免静态布局在无人介入时误构建
+         */
+        layout: 'auto' | '63auto' | 'scorpior';
+    };
+
+    /**
      * 自动交易配置
      * @description 每个房间的自动市场交易任务列表
      */

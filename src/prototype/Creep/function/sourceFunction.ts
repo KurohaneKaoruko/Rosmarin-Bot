@@ -58,6 +58,7 @@ export default class SourceFunction extends Creep {
         if (!containers) return null;
         const candidates = containers.filter(c => source.pos.inRangeTo(c, range));
         if (candidates.length === 0) return null;
+        if (candidates.length === 1) return candidates[0];
         return this.pos.findClosestByRange(candidates) ?? null;
     }
 
@@ -74,7 +75,10 @@ export default class SourceFunction extends Creep {
         if (!links) return null;
         const candidates = links.filter(l => source.pos.inRangeTo(l, range));
         if (candidates.length === 0) return null;
-        return this.pos.findClosestByRange(candidates) ?? null;
+        if (typeof this.pos.findClosestByRange === 'function') {
+            return this.pos.findClosestByRange(candidates) ?? null;
+        }
+        return candidates[0] ?? null;
     }
 
     /**
@@ -108,12 +112,14 @@ export default class SourceFunction extends Creep {
     getSourceWorkTileTrafficPenalty(pos: RoomPosition): number | null {
         if (pos.isEqualTo(this.pos)) return 0;
 
-        const creepBlocker = pos.lookFor(LOOK_CREEPS).find(c => c.id !== this.id);
-        const powerBlocker = pos.lookFor(LOOK_POWER_CREEPS).find(c => c.id !== this.id);
+        const creepBlocker = pos.lookFor(LOOK_CREEPS).find(c => String(c.id) !== String(this.id));
+        const powerBlocker = pos.lookFor(LOOK_POWER_CREEPS).find(c => String(c.id) !== String(this.id));
         const blocker = creepBlocker || powerBlocker;
         if (!blocker) return 0;
         if (!blocker.my) return null;
-        if (blocker.memory?.dontPullMe || blocker.spawning || blocker.fatigue > 0) return null;
+        const isCreepBlocker = 'spawning' in blocker;
+        if (blocker.memory?.dontPullMe) return null;
+        if (isCreepBlocker && (blocker.spawning || blocker.fatigue > 0)) return null;
         if ('getActiveBodyparts' in blocker && typeof blocker.getActiveBodyparts === 'function' && blocker.getActiveBodyparts(MOVE) <= 0) {
             return null;
         }
@@ -151,15 +157,31 @@ export default class SourceFunction extends Creep {
     moveToSourceWorkTile(source: Source | null = this.getBoundSource()): boolean {
         if (!source) return false;
 
-        const sourceContainer = this.getNearbySourceContainer(1);
-        const sourceLink = this.getNearbySourceLink(2);
+        const getNearbySourceContainer = typeof this.getNearbySourceContainer === 'function'
+            ? this.getNearbySourceContainer
+            : SourceFunction.prototype.getNearbySourceContainer;
+        const getNearbySourceLink = typeof this.getNearbySourceLink === 'function'
+            ? this.getNearbySourceLink
+            : SourceFunction.prototype.getNearbySourceLink;
+        const isSourceWorkTilePassable = typeof this.isSourceWorkTilePassable === 'function'
+            ? this.isSourceWorkTilePassable
+            : SourceFunction.prototype.isSourceWorkTilePassable;
+        const getSourceWorkTileTrafficPenalty = typeof this.getSourceWorkTileTrafficPenalty === 'function'
+            ? this.getSourceWorkTileTrafficPenalty
+            : SourceFunction.prototype.getSourceWorkTileTrafficPenalty;
+        const scoreSourceWorkTile = typeof this.scoreSourceWorkTile === 'function'
+            ? this.scoreSourceWorkTile
+            : SourceFunction.prototype.scoreSourceWorkTile;
+
+        const sourceContainer = getNearbySourceContainer.call(this, 1);
+        const sourceLink = getNearbySourceLink.call(this, 2);
 
         // Once already standing on a valid harvest tile, avoid lateral churn.
-        if (this.pos.inRangeTo(source.pos, 1)) {
-            if (sourceLink && this.pos.inRangeTo(sourceLink.pos, 1) && sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        if (this.pos.inRangeTo(source, 1)) {
+            if (sourceLink && this.pos.isNearTo(sourceLink) && sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                 return true;
             }
-            if (sourceContainer && this.pos.inRangeTo(sourceContainer.pos, 1)) {
+            if (sourceContainer && this.pos.inRangeTo(sourceContainer, 1)) {
                 return true;
             }
         }
@@ -171,11 +193,11 @@ export default class SourceFunction extends Creep {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
                 const pos = new RoomPosition(source.pos.x + dx, source.pos.y + dy, source.pos.roomName);
-                if (!this.isSourceWorkTilePassable(pos)) continue;
-                const trafficPenalty = this.getSourceWorkTileTrafficPenalty(pos);
+                if (!isSourceWorkTilePassable.call(this, pos)) continue;
+                const trafficPenalty = getSourceWorkTileTrafficPenalty.call(this, pos);
                 if (trafficPenalty === null) continue;
 
-                const score = this.scoreSourceWorkTile(pos, source, sourceContainer, sourceLink, trafficPenalty);
+                const score = scoreSourceWorkTile.call(this, pos, source, sourceContainer, sourceLink, trafficPenalty);
                 if (score > bestScore) {
                     bestScore = score;
                     bestPos = pos;
@@ -189,14 +211,14 @@ export default class SourceFunction extends Creep {
             return false;
         }
 
-        if (this.pos.inRangeTo(source.pos, 1)) return true;
+        if (this.pos.inRangeTo(source, 1)) return true;
 
         this.moveTo(source, { range: 1, maxRooms: 1 });
         return false;
     }
 
     sitOnSourceContainer(): boolean {
-        return this.moveToSourceWorkTile();
+        return SourceFunction.prototype.moveToSourceWorkTile.call(this);
     }
 
     /**

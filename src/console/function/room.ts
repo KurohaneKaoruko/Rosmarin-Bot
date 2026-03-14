@@ -1,7 +1,7 @@
 import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory } from "@/modules/utils/roomMemory";
-import { ensureRoomData, getRoomData, getStructData } from "@/modules/utils/memory";
+import { ensureRoomData, getAutoData, getRoomData, getStructData } from "@/modules/utils/memory";
 import { parseShardRoomName } from "@/modules/utils/shardRoom";
 
 // 房间控制
@@ -9,14 +9,14 @@ export default {
     room: {
         // 快速开始
         start(roomName: string, layout?: string) {
-            // 添加房间
-            if (!layout) global.room.set(roomName);
+            // 添加房间到控制列表
+            if (!layout) global.room.add(roomName);
             else {
                 const centerPos = Game.flags['centerPos']?.pos;
                 if (!centerPos || centerPos.roomName !== roomName) {
                     return Error('未设置中心, 请将centerPos放置到需要设置的布局中心位置。')
                 } else {
-                    global.room.set(roomName, layout);
+                    global.room.add(roomName, layout);
                 }
             }
             // 构建布局
@@ -25,8 +25,8 @@ export default {
             global.layout.auto(roomName, true);
             return OK;
         },
-        // 添加房间
-        set(roomName: string, layout?: string, x?: number, y?: number) {
+        // 添加房间到控制列表
+        add(roomName: string, layout?: string, x?: number, y?: number) {
             if (!roomName) return Error('请输入房间名。');
             if (!roomName.match(/^[EW][0-9]+[NS][0-9]+$/)) return Error('房间名格式不正确。');
 
@@ -34,7 +34,7 @@ export default {
             if(!roomMem['mode']) {
                 roomMem['mode'] = 'main';
             }
-            global.log(`已添加房间${roomName}。`);
+            global.log(`已将房间 ${roomName} 加入控制列表。`);
             if(layout) {
                 roomMem['layout'] = layout;
                 global.log(`已设置 ${roomName} 的布局为 ${layout}。`);
@@ -49,7 +49,37 @@ export default {
                     global.log(`已设置 ${roomName} 的布局中心为 (${PosFlag.pos.x},${PosFlag.pos.y})。`);
                 }
             }
-            Game.rooms[roomName].init();
+            const room = Game.rooms[roomName];
+            if (room?.my && typeof room.init === 'function') {
+                room.init();
+                (room.memory as any)._init = true;
+            }
+            return OK;
+        },
+        // 开关新占领房间自动接管
+        auto(
+            enable: boolean = true,
+            mode: 'main' | 'low' | 'high' | 'rush' = 'main',
+            layout: 'auto' | '63auto' | 'scorpior' = 'auto'
+        ) {
+            const auto = getAutoData() as any;
+            if (!enable) {
+                delete auto.RoomAutoStart;
+                global.log(`已关闭新占领房间自动托管。`);
+                return OK;
+            }
+            if (!['main', 'low', 'high', 'rush'].includes(mode)) {
+                return Error('自动托管默认模式仅支持 main、low、high、rush。');
+            }
+            if (!['auto', '63auto', 'scorpior'].includes(layout)) {
+                return Error('自动托管仅支持 auto、63auto、scorpior 三种自动布局。');
+            }
+
+            auto.RoomAutoStart = {
+                mode,
+                layout,
+            };
+            global.log(`已开启新占领房间自动托管：mode=${mode} layout=${layout}`);
             return OK;
         },
         // 删除房间
