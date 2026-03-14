@@ -242,6 +242,13 @@ type WithdrawPlan = {
     lockTtl?: number;
 };
 
+type WithdrawCandidate = {
+    priority: number;
+    range: number;
+    amount: number;
+    plan: WithdrawPlan;
+};
+
 const clearCarrierSourceCache = (cache: CarrierCache) => {
     cache.sourceId = undefined;
     cache.sourceKind = undefined;
@@ -253,7 +260,11 @@ const clearCarrierTargetCache = (cache: CarrierCache) => {
     cache.resourceType = undefined;
 };
 
-const scoreByRange = (range: number) => Math.max(0, 30 - range * 2);
+const compareWithdrawCandidate = (a: WithdrawCandidate, b: WithdrawCandidate) => {
+    if (a.priority !== b.priority) return b.priority - a.priority;
+    if (a.range !== b.range) return a.range - b.range;
+    return b.amount - a.amount;
+};
 
 const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | null => {
     const { room, pos, store } = creep;
@@ -268,7 +279,7 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     const hasStorage = hasCoreDepotTarget(room);
     const freeCap = store.getFreeCapacity();
 
-    const candidates: { score: number; plan: WithdrawPlan }[] = [];
+    const candidates: WithdrawCandidate[] = [];
 
     // 优先级1：掉落资源（能量随时可收；非能量需要中心仓保障可存放）
     const dropped = room.find(FIND_DROPPED_RESOURCES, {
@@ -281,15 +292,15 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         if (isNoPath(room.name, r.id)) continue;
         if (claimed.has(r.id) || isLockedByOtherCarrier(room.name, r.id, creep.name)) continue;
 
-        const base = r.resourceType === RESOURCE_ENERGY ? 50 : 80;
-        const amountScore = Math.min(30, Math.floor(r.amount / 100));
-        const rangeScore = scoreByRange(pos.getRangeTo(r));
+        const priority = r.resourceType === RESOURCE_ENERGY ? 50 : 80;
 
         // 能量掉落只有在数量较大时才抢占优先级，避免反复捡小堆
         if (r.resourceType === RESOURCE_ENERGY && r.amount < THRESHOLDS.ENERGY.PICKUP_THRESHOLD * 2) continue;
 
         candidates.push({
-            score: base + amountScore + rangeScore,
+            priority,
+            range: pos.getRangeTo(r),
+            amount: r.amount,
             plan: { id: r.id, kind: 'dropped', resourceType: r.resourceType, lockTtl: 3 }
         });
     }
@@ -308,7 +319,9 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         if (type === RESOURCE_ENERGY && amount < 100) continue;
 
         candidates.push({
-            score: 75 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(t)),
+            priority: 75,
+            range: pos.getRangeTo(t),
+            amount,
             plan: { id: t.id, kind: 'tombstone', resourceType: type, lockTtl: 5 }
         });
     }
@@ -326,7 +339,9 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         if (type === RESOURCE_ENERGY && amount < 100) continue;
 
         candidates.push({
-            score: 70 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(r)),
+            priority: 70,
+            range: pos.getRangeTo(r),
+            amount,
             plan: { id: r.id, kind: 'ruin', resourceType: type, lockTtl: 5 }
         });
     }
@@ -340,7 +355,9 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
             if (isNoPath(room.name, l.id)) continue;
             if (claimed.has(l.id) || isLockedByOtherCarrier(room.name, l.id, creep.name)) continue;
             candidates.push({
-                score: 55 + Math.min(35, Math.floor((l.store[RESOURCE_ENERGY] || 0) / 100)) + scoreByRange(pos.getRangeTo(l)),
+                priority: 55,
+                range: pos.getRangeTo(l),
+                amount: l.store[RESOURCE_ENERGY] || 0,
                 plan: { id: l.id, kind: 'link', resourceType: RESOURCE_ENERGY, lockTtl: 2 }
             });
         }
@@ -363,7 +380,9 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         if (amount < Math.min(min, type === RESOURCE_ENERGY ? THRESHOLDS.ENERGY.CONTAINER_MIN * 0.3 : THRESHOLDS.ENERGY.PICKUP_THRESHOLD * 0.5)) continue;
 
         candidates.push({
-            score: 45 + Math.min(35, Math.floor(amount / 100)) + scoreByRange(pos.getRangeTo(c)),
+            priority: 45,
+            range: pos.getRangeTo(c),
+            amount,
             plan: { id: c.id, kind: 'container', resourceType: type, lockTtl: 3 }
         });
     }
@@ -375,7 +394,9 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > minAmount) {
             if ((!excludeId || source.id !== excludeId) && !isNoPath(room.name, source.id)) {
             candidates.push({
-                score: 20 + Math.min(20, Math.floor(source.store.getUsedCapacity(RESOURCE_ENERGY) / 1000)) + scoreByRange(pos.getRangeTo(source)),
+                priority: 20,
+                range: pos.getRangeTo(source),
+                amount: source.store.getUsedCapacity(RESOURCE_ENERGY),
                 plan: { id: source.id, kind: source.structureType === STRUCTURE_TERMINAL ? 'terminal' : source.structureType === STRUCTURE_STORAGE ? 'storage' : 'container', resourceType: RESOURCE_ENERGY, lockTtl: 1 }
             });
             }
@@ -383,7 +404,7 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     }
 
     if (candidates.length === 0) return null;
-    candidates.sort((a, b) => b.score - a.score);
+    candidates.sort(compareWithdrawCandidate);
     return candidates[0].plan;
 };
 

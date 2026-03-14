@@ -13,6 +13,12 @@
  */
 interface MoveToOpts {
   /**
+   * 移动优先级
+   * @description 0~2，值越高越不容易在拥堵解算中让位
+   */
+  priority?: number;
+
+  /**
    * 无视 swamp 与 road 的移动力损耗差异
    * @description 主要用于 power creep / 观察者等单位，默认 false
    */
@@ -35,6 +41,26 @@ interface MoveToOpts {
    * @description 默认 10（由 moveOpt 内部控制）
    */
   noPathDelay?: number;
+
+  /**
+   * 额外避让房间
+   * @description 仅对本次 moveTo 生效
+   */
+  avoidRooms?: Set<string>;
+
+  /**
+   * 额外避让出口
+   * @description 仅对本次 moveTo 生效，格式为 fromRoom -> toRoom 集合
+   */
+  avoidExits?: Map<string, Set<string>>;
+}
+
+interface SquadMoveToOpts extends MoveToOpts {
+  /**
+   * 小队移动时是否允许自动 pull
+   * @description 默认 true，仅对 squadMoveTo 生效
+   */
+  enableAutoPull?: boolean;
 }
 
 // ============================================================
@@ -76,9 +102,10 @@ interface BetterMoveCacheStats {
 interface BetterMoveAPI {
   setChangeMove(bool: boolean): ScreepsReturnCode;
   creepPathCache: Record<string, unknown>;
+  preTickBetterMove(): void;
   squadMove(squad: Creep[], target?: Array<RoomPosition | { pos: RoomPosition }>): ScreepsReturnCode;
-  squadMoveTo(squad: Creep[], x: number, y: number, opts?: MoveToOpts): ScreepsReturnCode;
-  squadMoveTo(squad: Creep[], target: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts): ScreepsReturnCode;
+  squadMoveTo(squad: Creep[], x: number, y: number, opts?: SquadMoveToOpts): ScreepsReturnCode;
+  squadMoveTo(squad: Creep[], target: RoomPosition | { pos: RoomPosition }, opts?: SquadMoveToOpts): ScreepsReturnCode;
   setChangeMoveTo(bool: boolean): ScreepsReturnCode;
   setCheckTile(userCheckTile?: (posList: RoomPosition[]) => unknown): ScreepsReturnCode;
   setChangeFindClostestByPath(bool: boolean): ScreepsReturnCode;
@@ -112,6 +139,10 @@ interface BetterMoveAPI {
     rediscoverObservers?: boolean;
     resetStats?: boolean;
   }): ScreepsReturnCode;
+}
+
+interface RoomPosition {
+  findSquadPathTo(toPos: RoomPosition, opts?: PathFinderOpts): PathFinderPath | ERR_NO_PATH | ERR_INVALID_TARGET;
 }
 
 /**

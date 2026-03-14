@@ -1,7 +1,7 @@
 import { OUTMINE_CONFIG, EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/feature/externalRoad';
-import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
+import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 

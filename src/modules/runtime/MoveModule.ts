@@ -156,6 +156,9 @@ function isProjectWorkTile(creep: Creep | PowerCreep, pos: RoomPosition): boolea
 }
 
 const MoveModule: RuntimeModule = {
+    start: () => {
+        global.BetterMove?.preTickBetterMove?.();
+    },
     end: () => {
         global.BetterMove?.endTickResolve?.(isProjectWorkTile);
     }

@@ -1,5 +1,5 @@
 import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/feature/externalRoad';
-import { HighwayMineVisual } from '@/modules/feature/highwayMineVisual';
+import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
 // 外矿设置

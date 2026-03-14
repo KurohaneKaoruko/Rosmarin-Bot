@@ -55,7 +55,7 @@ const MODULE_NAME = "MoveMatch";
 
 
 // 根据房间数量和 creep 总数初始化数组长度
-const NUM_NODE = Math.max(64 * Object.keys(Game.rooms).length, 16 * Object.keys(Game.creeps).length, 512);
+let NUM_NODE = Math.max(64 * Object.keys(Game.rooms).length, 16 * Object.keys(Game.creeps).length, 512);
 const MAX_NUM_SQUAD = 128;  // 同一 shard 小队最大数量，注意 puller+pullee 也算一队
 
 /** 最高位 1 为有容量，0 为已匹配， & 0x7fff 为边另一端的顶点 idx，& 0x8000 取最高位 */
@@ -283,6 +283,27 @@ function moveMatch(startList, checkNewSource) {
         } else {
             break;
         }
+    }
+
+    // 图规模超过初始预估时，立即扩容并安全返回。
+    // 否则在极端拥堵或大规模 squad 场景下会出现数组越界。
+    if (startIdx >= NUM_NODE || superTargetIdx >= NUM_NODE || targetIdx >= NUM_NODE) {
+        console.log(`Error: out of range ${NUM_NODE}: startIdx=${startIdx}, superTargetIdx=${superTargetIdx}, targetIdx=${targetIdx}`);
+        NUM_NODE = ((Math.max(startIdx, superTargetIdx, targetIdx) >> 6) + 3) << 6;
+        edgeArray = new Uint16Array((NUM_NODE << 3) + NUM_NODE);
+        weightArray = new Int16Array((NUM_NODE << 3) + NUM_NODE);
+        targetBestStart = new Uint16Array(NUM_NODE >> 1);
+        targetBestScore = new Int16Array(NUM_NODE >> 1);
+        targetBestEdge = new Uint16Array(NUM_NODE >> 1);
+        occupiedEdgeIdx = new Uint16Array(NUM_NODE);
+        stack = new Uint16Array(NUM_NODE >> 1);
+        spfaQueue = new Uint16Array(NUM_NODE);
+        spfaDist = new Int16Array(NUM_NODE);
+        spfaPrev = new Uint16Array(NUM_NODE);
+        spfaInQue = new Uint8Array(NUM_NODE);
+        greedyStack = new Uint16Array(Math.max(MAX_NUM_SQUAD, NUM_NODE >> 2));
+        idxToObject = new Array(NUM_NODE);
+        return [];
     }
 
     /* ================================================================
