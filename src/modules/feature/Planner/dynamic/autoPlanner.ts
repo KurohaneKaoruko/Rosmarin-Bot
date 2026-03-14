@@ -58,6 +58,14 @@ let objects: PlannerPoint[] = [];
 let fastVisitStamp = new Uint16Array(2500);
 let fastManorStamp = new Uint16Array(2500);
 let fastQueue = new Int16Array(2500);
+let fastQueueDist = new Int16Array(2500);
+let fastFrontierA = new Int16Array(2500);
+let fastFrontierB = new Int16Array(2500);
+let fastKernelManorMask = new Uint8Array(2500);
+let fastMergeCellStamp = new Uint16Array(2500);
+let fastMergeRootStamp = new Uint16Array(2500);
+let fastMergeRootCount = new Int16Array(2500);
+let fastMergeRootList = new Int16Array(2500);
 let fastStampToken = 1;
 let nearMinCostCache = new Uint16Array(2500);
 const DIR4 = [
@@ -128,7 +136,7 @@ const BORDER_INDEXES = (() => {
 	return out;
 })();
 
-const kernelFind = (parent: Int32Array, x: number): number => {
+const kernelFind = (parent: number[] | Int32Array, x: number): number => {
 	let root = x;
 	while (parent[root] !== root) root = parent[root];
 	let cur = x;
@@ -140,7 +148,7 @@ const kernelFind = (parent: Int32Array, x: number): number => {
 	return root;
 };
 
-const kernelUnion = (parent: Int32Array, a: number, b: number): number => {
+const kernelUnion = (parent: number[] | Int32Array, a: number, b: number): number => {
 	const ra = kernelFind(parent, a);
 	const rb = kernelFind(parent, b);
 	if (ra === rb) return ra;
@@ -177,93 +185,182 @@ const forEach8Index = (idx: number, fn: (nidx: number) => void) => {
 	}
 };
 
-const blockPutAbleCountKernel = (
-	parent: Int32Array,
+const nextFastStamp = (): number => {
+	fastStampToken += 1;
+	if (fastStampToken >= 65530) {
+		fastStampToken = 1;
+		fastVisitStamp.fill(0);
+		fastManorStamp.fill(0);
+	}
+	return fastStampToken;
+};
+
+const buildKernelManorMask = (
+	parent: number[] | Int32Array,
 	root: number,
-	walkable: Uint8Array,
-	cache: Int16Array
-): number => {
-	const rootId = kernelFind(parent, root);
-	if (cache[rootId] >= 0) return cache[rootId];
-
-	const roomManor = new Uint8Array(2500);
-	for (let i = 0; i < 2500; i++) {
-		roomManor[i] = kernelFind(parent, i) === rootId ? 1 : 0;
-	}
-
-	for (let i = 0; i < 2500; i++) {
-		if (!roomManor[i]) continue;
-		let manorCnt = 0;
-		let wallCnt = 0;
-		forEach4Index(i, (n) => {
-			if (roomManor[n]) manorCnt += 1;
-			if (!walkable[n]) wallCnt += 1;
-		});
-		if (manorCnt === 1 && wallCnt === 0) roomManor[i] = 0;
-	}
-
-	const stack = new Int16Array(2500);
-	for (let start = 0; start < 2500; start++) {
-		let top = 0;
-		stack[top++] = start;
-		while (top > 0) {
-			const idx = stack[--top];
-			if (roomManor[idx] || !walkable[idx]) continue;
+	walkable: ArrayLike<number>,
+	manorMask: Uint8Array,
+	memberList?: number[]
+) => {
+	manorMask.fill(0);
+	if (memberList && memberList.length > 0) {
+		for (let i = 0; i < memberList.length; i++) {
+			manorMask[memberList[i]] = 1;
+		}
+		for (let i = 0; i < memberList.length; i++) {
+			const idx = memberList[i];
+			if (!manorMask[idx]) continue;
 			let manorCnt = 0;
 			let wallCnt = 0;
 			forEach4Index(idx, (n) => {
-				if (roomManor[n]) manorCnt += 1;
+				if (manorMask[n]) manorCnt += 1;
 				if (!walkable[n]) wallCnt += 1;
 			});
-			if (manorCnt >= 2 || (manorCnt === 1 && wallCnt >= 2)) {
-				roomManor[idx] = 1;
-				forEach4Index(idx, (n) => {
-					stack[top++] = n;
-				});
-			}
+			if (manorCnt === 1 && wallCnt === 0) manorMask[idx] = 0;
+		}
+	} else {
+		const rootId = kernelFind(parent, root);
+		for (let i = 0; i < 2500; i++) {
+			if (kernelFind(parent, i) === rootId) manorMask[i] = 1;
+		}
+		for (let i = 0; i < 2500; i++) {
+			if (!manorMask[i]) continue;
+			let manorCnt = 0;
+			let wallCnt = 0;
+			forEach4Index(i, (n) => {
+				if (manorMask[n]) manorCnt += 1;
+				if (!walkable[n]) wallCnt += 1;
+			});
+			if (manorCnt === 1 && wallCnt === 0) manorMask[i] = 0;
+		}
+	}
+
+	const stamp = nextFastStamp();
+	let qHead = 0;
+	let qTail = 0;
+	for (let idx = 0; idx < 2500; idx++) {
+		if (!manorMask[idx] && walkable[idx]) {
+			fastVisitStamp[idx] = stamp;
+			fastQueue[qTail++] = idx;
+		}
+	}
+	while (qHead < qTail) {
+		const idx = fastQueue[qHead++];
+		fastVisitStamp[idx] = 0;
+		if (manorMask[idx] || !walkable[idx]) continue;
+		let manorCnt = 0;
+		let wallCnt = 0;
+		forEach4Index(idx, (n) => {
+			if (manorMask[n]) manorCnt += 1;
+			if (!walkable[n]) wallCnt += 1;
+		});
+		if (manorCnt >= 2 || (manorCnt === 1 && wallCnt >= 2)) {
+			manorMask[idx] = 1;
+			forEach4Index(idx, (n) => {
+				if (!manorMask[n] && walkable[n] && fastVisitStamp[n] !== stamp) {
+					fastVisitStamp[n] = stamp;
+					fastQueue[qTail++] = n;
+				}
+			});
 		}
 	}
 
 	for (let i = 0; i < BORDER_INDEXES.length; i++) {
 		const b = BORDER_INDEXES[i];
 		if (!walkable[b]) continue;
-		roomManor[b] = 0;
+		manorMask[b] = 0;
 		forEach8Index(b, (n) => {
-			roomManor[n] = 0;
+			manorMask[n] = 0;
 		});
 	}
+};
 
-	const visited = new Uint8Array(2500);
-	const queue = new PriorityQueue(true);
-	for (let i = 0; i < 2500; i++) {
-		if (!roomManor[i]) queue.push(NewNode(walkable[i] ? -4 : -1, 0, 0, i));
+const collectKernelManorReachability = (
+	manorMask: Uint8Array,
+	walkable: ArrayLike<number>,
+	innerList?: { k: number; x?: number; y?: number }[],
+	allList?: { k: number; x?: number; y?: number }[]
+): number => {
+	const stamp = nextFastStamp();
+	let negativeLen = 0;
+	let wallQueueLen = 0;
+
+	for (let idx = 0; idx < 2500; idx++) {
+		if (manorMask[idx]) continue;
+		fastVisitStamp[idx] = stamp;
+		if (walkable[idx]) {
+			fastFrontierA[negativeLen++] = idx;
+		} else {
+			fastQueue[wallQueueLen] = idx;
+			fastQueueDist[wallQueueLen++] = -1;
+		}
+	}
+
+	let currentDist = -4;
+	let currentFrontier = fastFrontierA;
+	let nextFrontier = fastFrontierB;
+	while (currentDist < -1 && negativeLen > 0) {
+		let nextLen = 0;
+		for (let i = 0; i < negativeLen; i++) {
+			const idx = currentFrontier[i];
+			forEach8Index(idx, (n) => {
+				if (fastVisitStamp[n] === stamp) return;
+				fastVisitStamp[n] = stamp;
+				if (manorMask[n] && walkable[n] && allList) {
+					allList.push(NewNode(currentDist + 2, (n / 50) | 0, n % 50));
+				}
+				nextFrontier[nextLen++] = n;
+			});
+		}
+		currentDist += 1;
+		if (currentDist === -1) {
+			for (let i = 0; i < nextLen; i++) {
+				const idx = nextFrontier[i];
+				fastQueue[wallQueueLen] = idx;
+				fastQueueDist[wallQueueLen++] = -1;
+			}
+		}
+		const swap = currentFrontier;
+		currentFrontier = nextFrontier;
+		nextFrontier = swap;
+		negativeLen = nextLen;
 	}
 
 	let innerCnt = 0;
-	while (!queue.isEmpty()) {
-			const nd = (queue.pop() as unknown) as { k: number; v: number } | undefined;
-		if (!nd) break;
-		const k = nd.k;
-		const idx = nd.v;
-		visited[idx] = 1;
-		if (k >= -1) {
-			forEach4Index(idx, (n) => {
-				if (visited[n]) return;
-				visited[n] = 1;
-				queue.push(NewNode(k + 1, 0, 0, n));
-				if (roomManor[n] && walkable[n] && k + 1 >= 0) innerCnt += 1;
-			});
-		} else {
-			forEach8Index(idx, (n) => {
-				if (visited[n]) return;
-				visited[n] = 1;
-				queue.push(NewNode(k + 1, 0, 0, n));
-				if (roomManor[n] && walkable[n] && k + 1 >= 0) innerCnt += 1;
-			});
-		}
-		ReclaimNode(nd);
+	let qHead = 0;
+	while (qHead < wallQueueLen) {
+		const idx = fastQueue[qHead];
+		const dist = fastQueueDist[qHead++];
+		forEach4Index(idx, (n) => {
+			if (fastVisitStamp[n] === stamp) return;
+			fastVisitStamp[n] = stamp;
+			fastQueue[wallQueueLen] = n;
+			fastQueueDist[wallQueueLen++] = dist + 1;
+			if (!manorMask[n] || !walkable[n]) return;
+			const item = NewNode(dist + 2, (n / 50) | 0, n % 50);
+			if (allList) allList.push(item);
+			if (dist + 1 >= 0) {
+				innerCnt += 1;
+				if (innerList) innerList.push(item);
+			}
+		});
 	}
 
+	return innerCnt;
+};
+
+const blockPutAbleCountKernel = (
+	parent: number[] | Int32Array,
+	root: number,
+	walkable: ArrayLike<number>,
+	cache: Int16Array,
+	memberList?: number[]
+): number => {
+	const rootId = kernelFind(parent, root);
+	if (cache[rootId] >= 0) return cache[rootId];
+
+	buildKernelManorMask(parent, rootId, walkable, fastKernelManorMask, memberList);
+	const innerCnt = collectKernelManorReachability(fastKernelManorMask, walkable);
 	cache[rootId] = innerCnt;
 	return innerCnt;
 };
@@ -278,7 +375,7 @@ const computeBlockKernel = (
 	for (let i = 0; i < 2500; i++) parent[i] = i;
 	const sizeMap = new Int16Array(2500);
 	const visited = new Uint8Array(2500);
-	const posSeqMap: number[][] = Array.from({ length: 2500 }, () => []);
+	const posSeqMap: Array<number[] | undefined> = new Array(2500);
 
 	const startPoints: number[] = [];
 	for (let i = 0; i < 2500; i++) {
@@ -371,31 +468,39 @@ const computeBlockKernel = (
 			continue;
 		}
 
-		const seq = posSeqMap[pos];
+			const seq = posSeqMap[pos];
 		if (!seq || seq.length === 0) {
 			ReclaimNode(nd);
 			continue;
 		}
 
-		const visited2 = new Uint8Array(2500);
-		const nearCntMap = new Int16Array(2500);
+		const stamp = nextFastStamp();
+		let nearRootLen = 0;
 		for (let i = 0; i < seq.length; i++) {
 			const e = seq[i];
 			forEach8Index(e, (n) => {
-				if (!walkable[n] || visited2[n]) return;
-				visited2[n] = 1;
+				if (!walkable[n] || fastMergeCellStamp[n] === stamp) return;
+				fastMergeCellStamp[n] = stamp;
 				const cp = kernelFind(parent, n);
 				if (cp === pos) return;
 				const cs = sizeMap[cp];
-				if (cs > 0 && cs < 300) nearCntMap[cp] += 1;
+				if (cs <= 0 || cs >= 300) return;
+				if (fastMergeRootStamp[cp] !== stamp) {
+					fastMergeRootStamp[cp] = stamp;
+					fastMergeRootCount[cp] = 1;
+					fastMergeRootList[nearRootLen++] = cp;
+					return;
+				}
+				fastMergeRootCount[cp] += 1;
 			});
 		}
 
 		let targetPos = -1;
 		let nearCnt = 0;
 		let maxRatio = 0;
-		for (let currentPos = 0; currentPos < 2500; currentPos++) {
-			const near = nearCntMap[currentPos];
+		for (let i = 0; i < nearRootLen; i++) {
+			const currentPos = fastMergeRootList[i];
+			const near = fastMergeRootCount[currentPos];
 			if (near <= 0) continue;
 			const currentSize = sizeMap[currentPos];
 			if (currentSize <= 0) continue;
@@ -407,8 +512,9 @@ const computeBlockKernel = (
 				nearCnt = near;
 			}
 		}
-		for (let currentPos = 0; currentPos < 2500; currentPos++) {
-			const near = nearCntMap[currentPos];
+		for (let i = 0; i < nearRootLen; i++) {
+			const currentPos = fastMergeRootList[i];
+			const near = fastMergeRootCount[currentPos];
 			if (near > nearCnt) {
 				targetPos = currentPos;
 				nearCnt = near;
@@ -425,19 +531,21 @@ const computeBlockKernel = (
 			continue;
 		}
 
-		const targetPutAble = minSize > 140 ? blockPutAbleCountKernel(parent, targetPos, walkable, putAbleCache) : 0;
-		const posPutAble = k > 140 ? blockPutAbleCountKernel(parent, pos, walkable, putAbleCache) : 0;
+			const targetPutAble = minSize > 140 ? blockPutAbleCountKernel(parent, targetPos, walkable, putAbleCache, posSeqMap[targetPos]) : 0;
+			const posPutAble = k > 140 ? blockPutAbleCountKernel(parent, pos, walkable, putAbleCache, posSeqMap[pos]) : 0;
 		if (Math.max(targetPutAble, posPutAble) < 140) {
 			const mergedRoot = kernelUnion(parent, pos, targetPos);
 			const cnt = (k + minSize) | 0;
 			if (pos !== mergedRoot) sizeMap[pos] = 0;
 			else sizeMap[targetPos] = 0;
 			sizeMap[mergedRoot] = cnt;
-			const merged = new Array(posSeqMap[targetPos].length + posSeqMap[pos].length);
-			let mergedIdx = 0;
-			for (let i = 0; i < posSeqMap[targetPos].length; i++) merged[mergedIdx++] = posSeqMap[targetPos][i];
-			for (let i = 0; i < posSeqMap[pos].length; i++) merged[mergedIdx++] = posSeqMap[pos][i];
-			posSeqMap[mergedRoot] = merged;
+				const targetSeq = posSeqMap[targetPos] || [];
+				const currentSeq = posSeqMap[pos] || [];
+				const merged = new Array(targetSeq.length + currentSeq.length);
+				let mergedIdx = 0;
+				for (let i = 0; i < targetSeq.length; i++) merged[mergedIdx++] = targetSeq[i];
+				for (let i = 0; i < currentSeq.length; i++) merged[mergedIdx++] = currentSeq[i];
+				posSeqMap[mergedRoot] = merged;
 			if (pos !== mergedRoot) posSeqMap[pos] = [];
 			else posSeqMap[targetPos] = [];
 			putAbleCache[mergedRoot] = -1;
@@ -537,198 +645,14 @@ const ManagerPlanner = {
 		putAbleCacheMap: Record<number, any[]>,
 		AllCacheMap: Record<number, any[]>,
 		rootMembers?: Record<number, number[]>
-	) {
-		if (putAbleCacheMap[tarRoot]) return [putAbleCacheMap[tarRoot], AllCacheMap[tarRoot]];
-		const roomManor = routeDistance;
-		if (!roomManor) return;
-		roomManor.init();
-		const roomManorArr = roomManor.arr;
-		const walkArr = roomWalkable.arr as number[];
-		const memberList = rootMembers ? rootMembers[tarRoot] : undefined;
-		if (memberList) {
-			for (let i = 0; i < memberList.length; i++) {
-				roomManorArr[memberList[i]] = 1;
-			}
-			for (let i = 0; i < memberList.length; i++) {
-				const idx = memberList[i];
-				if (!roomManorArr[idx]) continue;
-				const x = (idx / 50) | 0;
-				const y = idx % 50;
-				let manorCnt = 0;
-				let wallCnt = 0;
-				for (let j = 0; j < 4; j++) {
-					const dx = DIR4[j][0];
-					const dy = DIR4[j][1];
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					const nidx = nx * 50 + ny;
-					if (roomManorArr[nidx]) manorCnt += 1;
-					if (!walkArr[nidx]) wallCnt += 1;
-				}
-				if (manorCnt == 1 && wallCnt == 0) roomManorArr[idx] = 0;
-			}
-		} else {
-			for (let x = 0; x < 50; x++) {
-				for (let y = 0; y < 50; y++) {
-					const idx = x * 50 + y;
-					if (tarRoot == unionFind.find(idx)) roomManorArr[idx] = 1;
-				}
-			}
-			for (let x = 0; x < 50; x++) {
-				for (let y = 0; y < 50; y++) {
-					const idx = x * 50 + y;
-					if (!roomManorArr[idx]) continue;
-					let manorCnt = 0;
-					let wallCnt = 0;
-					for (let i = 0; i < 4; i++) {
-						const dx = DIR4[i][0];
-						const dy = DIR4[i][1];
-						const nx = x + dx;
-						const ny = y + dy;
-						if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-						const nidx = nx * 50 + ny;
-						if (roomManorArr[nidx]) manorCnt += 1;
-						if (!walkArr[nidx]) wallCnt += 1;
-					}
-					if (manorCnt == 1 && wallCnt == 0) roomManorArr[idx] = 0;
-				}
-			}
-		}
-		// 迭代扩张 manor，减少递归与重复扫描
-		fastStampToken += 1;
-			if (fastStampToken >= 65530) {
-				fastStampToken = 1;
-				fastVisitStamp.fill(0);
-				fastManorStamp.fill(0);
-			}
-			const stamp = fastStampToken;
-			let qHead = 0;
-			let qTail = 0;
-			for (let x = 0; x < 50; x++) {
-				for (let y = 0; y < 50; y++) {
-					const idx = x * 50 + y;
-					if (!roomManorArr[idx] && walkArr[idx]) {
-						fastVisitStamp[idx] = stamp;
-						fastQueue[qTail++] = idx;
-					}
-				}
-			}
-			while (qHead < qTail) {
-				const idx = fastQueue[qHead++];
-				fastVisitStamp[idx] = 0;
-				if (roomManorArr[idx] || !walkArr[idx]) continue;
-				const x = (idx / 50) | 0;
-				const y = idx % 50;
-			let manorCnt = 0;
-			let wallCnt = 0;
-			for (let i = 0; i < 4; i++) {
-				const dx = DIR4[i][0];
-				const dy = DIR4[i][1];
-				const nx = x + dx;
-				const ny = y + dy;
-				if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-				const nidx = nx * 50 + ny;
-				if (roomManorArr[nidx]) manorCnt += 1;
-				if (!walkArr[nidx]) wallCnt += 1;
-			}
-			if (manorCnt >= 2 || (manorCnt == 1 && wallCnt >= 2)) {
-				roomManorArr[idx] = 1;
-				for (let i = 0; i < 4; i++) {
-					const dx = DIR4[i][0];
-					const dy = DIR4[i][1];
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					const nidx = nx * 50 + ny;
-					if (!roomManorArr[nidx] && walkArr[nidx] && fastVisitStamp[nidx] !== stamp) {
-						fastVisitStamp[nidx] = stamp;
-						fastQueue[qTail++] = nidx;
-					}
-				}
-			}
-		}
-		const clearBorderNear = (x, y) => {
-			const idx = x * 50 + y;
-			if (!walkArr[idx]) return;
-			for (let dx = -1; dx <= 1; dx++) {
-				for (let dy = -1; dy <= 1; dy++) {
-					const nx = x + dx;
-					const ny = y + dy;
-					if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
-					roomManorArr[nx * 50 + ny] = 0;
-				}
-			}
-			roomManorArr[idx] = 0;
-		};
-		for (let y = 0; y < 50; y++) {
-			clearBorderNear(0, y);
-			clearBorderNear(49, y);
-		}
-		for (let x = 1; x < 49; x++) {
-			clearBorderNear(x, 0);
-			clearBorderNear(x, 49);
-		}
-
-		const innerPutAbleList = [];
-		const AllCacheList = [];
-
-		visited.init();
-		for (let x = 0; x < 50; x++) {
-			for (let y = 0; y < 50; y++) {
-				const idx = x * 50 + y;
-				if (!roomManorArr[idx]) {
-					const val = walkArr[idx];
-					queMin.push(NewNode(val ? -4 : -1, x, y));
-				}
-			}
-		}
-
-		queMin.whileNoEmpty((nd) => {
-			visited.set(nd.x, nd.y, 1);
-			if (nd.k >= -1) {
-				for (let i = 0; i < 4; i++) {
-					const dx = DIR4[i][0];
-					const dy = DIR4[i][1];
-					const x = nd.x + dx;
-					const y = nd.y + dy;
-					if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-					const idx = x * 50 + y;
-					const val = walkArr[idx];
-					const item = NewNode(nd.k + 2, x, y);
-					if (!visited.exec(x, y, 1)) {
-						queMin.push(NewNode(nd.k + 1, x, y));
-						if (roomManorArr[idx]) {
-							if (nd.k + 1 >= 0 && val) {
-								innerPutAbleList.push(item);
-							}
-							if (val) AllCacheList.push(item);
-						}
-					}
-				}
-			} else {
-				for (let dx = -1; dx <= 1; dx++) {
-					for (let dy = -1; dy <= 1; dy++) {
-						if (!dx && !dy) continue;
-						const x = nd.x + dx;
-						const y = nd.y + dy;
-						if (x < 0 || x > 49 || y < 0 || y > 49) continue;
-						const idx = x * 50 + y;
-						const val = walkArr[idx];
-						const item = NewNode(nd.k + 2, x, y);
-						if (!visited.exec(x, y, 1)) {
-							queMin.push(NewNode(nd.k + 1, x, y));
-							if (roomManorArr[idx]) {
-								if (nd.k + 1 >= 0 && val) {
-									innerPutAbleList.push(item);
-								}
-								if (val) AllCacheList.push(item);
-							}
-						}
-					}
-				}
-			}
-		});
+		) {
+			if (putAbleCacheMap[tarRoot]) return [putAbleCacheMap[tarRoot], AllCacheMap[tarRoot]];
+			const innerPutAbleList = [];
+			const AllCacheList = [];
+			const walkArr = roomWalkable.arr as number[];
+			const memberList = rootMembers ? rootMembers[tarRoot] : undefined;
+			buildKernelManorMask(unionFind.parent, tarRoot, walkArr, fastKernelManorMask, memberList);
+			collectKernelManorReachability(fastKernelManorMask, walkArr, innerPutAbleList, AllCacheList);
 
 		putAbleCacheMap[tarRoot] = innerPutAbleList;
 		AllCacheMap[tarRoot] = AllCacheList;
@@ -742,22 +666,22 @@ const ManagerPlanner = {
 		allCacheMap: Record<number, any[]>,
 		putAbleCntCacheMap: Record<number, number>,
 		rootMembers?: Record<number, number[]>
-	) {
-		const root = Number(tarRoot);
-		if (putAbleCntCacheMap[root] != null) return putAbleCntCacheMap[root];
-		const cnt = ManagerPlanner.getBlockPutAbleCnt(
-			roomWalkable,
-			visited,
-			queMin2,
-			unionFind,
-			root,
-			putAbleCacheMap,
-			allCacheMap,
-			rootMembers
-		)[0].length;
-		putAbleCntCacheMap[root] = cnt;
-		return cnt;
-	},
+		) {
+			const root = Number(tarRoot);
+			if (putAbleCntCacheMap[root] != null) return putAbleCntCacheMap[root];
+			const walkArr = roomWalkable.arr as number[];
+			const cntCache = new Int16Array(2500);
+			cntCache.fill(-1);
+			const cnt = blockPutAbleCountKernel(
+				unionFind.parent,
+				root,
+				walkArr,
+				cntCache,
+				rootMembers ? rootMembers[root] : undefined
+			);
+			putAbleCntCacheMap[root] = cnt;
+			return cnt;
+		},
 	/**
 	 * 插值，计算区块的预处理和合并需求
 	 * @param roomName
@@ -1311,18 +1235,21 @@ const ManagerPlanner = {
 		let centerX = undefined;
 		let centerY = undefined;
 
-		let centerPos = fixedCenter;
-		if (!centerPos && Game.flags.storagePos && Game.flags.storagePos.pos.roomName == roomName) {
-			centerPos = { x: Game.flags.storagePos.pos.x, y: Game.flags.storagePos.pos.y };
-		}
-
-		for (const pos in sizeMap) {
-			const posNum = Number(pos);
-			// if(sizeMap[pos]<150)return
-
-				ManagerPlanner.getBlockPutAbleCnt(
-					roomWalkable,
-					visited,
+			let centerPos = fixedCenter;
+			if (!centerPos && Game.flags.storagePos && Game.flags.storagePos.pos.roomName == roomName) {
+				centerPos = { x: Game.flags.storagePos.pos.x, y: Game.flags.storagePos.pos.y };
+			}
+			const centerRoot = centerPos ? unionFind.find(centerPos.x * 50 + centerPos.y) : undefined;
+			const candidateRoots = centerRoot != null && sizeMap[centerRoot] > 0 ? [centerRoot] : Object.keys(sizeMap);
+	
+			for (let i = 0; i < candidateRoots.length; i++) {
+				const posNum = Number(candidateRoots[i]);
+				// if(sizeMap[pos]<150)return
+				if (sizeMap[posNum] < minPlaneCnt) continue;
+	
+					ManagerPlanner.getBlockPutAbleCnt(
+						roomWalkable,
+						visited,
 					queMin,
 					unionFind,
 				posNum,
@@ -1771,56 +1698,74 @@ const ManagerPlanner = {
 					roomStructs.set(e[0], e[1], struct);
 				}
 			}
-			visited.init();
-			for (let i = 0; i < structMap['road'].length; i++) {
-				const e = structMap['road'][i];
-				visited.set(e[0], e[1], 1);
-			}
-			for (let i = 0; i < putList.length; i++) {
-				const e = putList[i];
-				const x = e[0];
-				const y = e[1];
-				let minVal = 50;
-				costRoad.forNear(
-					(x1, y1, val) => {
-						if (minVal > val && val > 0) minVal = val;
-					},
-					x,
-					y
-				);
-				costRoad.forNear(
-					(x1, y1, val) => {
-						if (minVal == val && val > 0) {
-							roomStructs.set(x1, y1, 'road');
+				visited.init();
+				const visitedRoadArr = visited.arr as number[];
+				const costRoadArr = costRoad.arr as number[];
+				const roomStructsArrForRoad = roomStructs.arr as (number | string)[];
+				for (let i = 0; i < structMap['road'].length; i++) {
+					const e = structMap['road'][i];
+					visitedRoadArr[e[0] * 50 + e[1]] = 1;
+				}
+				for (let i = 0; i < putList.length; i++) {
+					const e = putList[i];
+					const x = e[0];
+					const y = e[1];
+					let minVal = 50;
+					for (let dx = -1; dx <= 1; dx++) {
+						for (let dy = -1; dy <= 1; dy++) {
+							if (!dx && !dy) continue;
+							const nx = x + dx;
+							const ny = y + dy;
+							if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+							const val = costRoadArr[nx * 50 + ny];
+							if (val > 0 && minVal > val) minVal = val;
 						}
-					},
-					x,
-					y
-				);
-			}
-			roomStructs.forEach((x, y, val) => {
-				if (val == 'link' || val == 'container') return;
-				if (typeof val === 'number' && val > -1) return;
-				let minVal = 50;
-				costRoad.forNear(
-					(x1, y1, nVal) => {
-						if (minVal > nVal && nVal > 0) {
-							minVal = nVal;
+					}
+					for (let dx = -1; dx <= 1; dx++) {
+						for (let dy = -1; dy <= 1; dy++) {
+							if (!dx && !dy) continue;
+							const nx = x + dx;
+							const ny = y + dy;
+							if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+							if (costRoadArr[nx * 50 + ny] === minVal && minVal > 0) {
+								roomStructsArrForRoad[nx * 50 + ny] = 'road';
+							}
 						}
-					},
-					x,
-					y
-				);
-				costRoad.forNear(
-					(x1, y1, nVal) => {
-						if (minVal == nVal && nVal > 0) {
-							if (!visited.exec(x1, y1, 1)) pushRoad(x1, y1);
+					}
+				}
+				for (let idx = 0; idx < 2500; idx++) {
+					const val = roomStructsArrForRoad[idx];
+					if (val == 'link' || val == 'container') continue;
+					if (typeof val === 'number' && val > -1) continue;
+					const x = (idx / 50) | 0;
+					const y = idx % 50;
+					let minVal = 50;
+					for (let dx = -1; dx <= 1; dx++) {
+						for (let dy = -1; dy <= 1; dy++) {
+							if (!dx && !dy) continue;
+							const nx = x + dx;
+							const ny = y + dy;
+							if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+							const nVal = costRoadArr[nx * 50 + ny];
+							if (nVal > 0 && minVal > nVal) minVal = nVal;
 						}
-					},
-					x,
-					y
-				);
-			});
+					}
+					for (let dx = -1; dx <= 1; dx++) {
+						for (let dy = -1; dy <= 1; dy++) {
+							if (!dx && !dy) continue;
+							const nx = x + dx;
+							const ny = y + dy;
+							if (nx < 0 || nx > 49 || ny < 0 || ny > 49) continue;
+							if (costRoadArr[nx * 50 + ny] === minVal && minVal > 0) {
+								const nidx = nx * 50 + ny;
+								if (!visitedRoadArr[nidx]) {
+									visitedRoadArr[nidx] = 1;
+									pushRoad(nx, ny);
+								}
+							}
+						}
+					}
+				}
 
 			const costs = new PathFinder.CostMatrix();
 			const terrain = new Room.Terrain(roomName);
@@ -1884,11 +1829,3 @@ export const autoPlanner = {
 	name: 'auto',
 	ManagerPlanner
 };
-
-
-
-
-
-
-
-

@@ -261,7 +261,15 @@ const outCarry = {
         const myIndex = carriers.findIndex((c: Creep) => c.id === creep.id);
         if (myIndex < 0) return null;
 
-        const frontCollectors = 1;
+        const feeders = creep.room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) =>
+                !c.spawning &&
+                c.memory.homeRoom === creep.memory.homeRoom &&
+                (c.memory.role === 'out-harvest' || c.memory.role === 'out-mineral')
+        }) as Creep[];
+        const feederCount = Math.max(1, feeders.length);
+        const frontCollectorCap = carriers.length >= 4 ? 2 : 1;
+        const frontCollectors = Math.max(1, Math.min(frontCollectorCap, feederCount));
         const waitingRank = Math.max(0, myIndex - frontCollectors);
         const lineLength = queuePositions.length;
         if (lineLength <= 1) return null;

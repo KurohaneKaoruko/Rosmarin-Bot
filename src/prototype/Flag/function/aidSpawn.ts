@@ -6,8 +6,12 @@ import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle
 // Spawn mission uses smaller level as higher priority; 0 is highest practical priority.
 const JUMP_SPAWN_PRIORITY = 0;
 const CLAIM_SPAWN_PRIORITY = 0;
+const MANUAL_AID_BUILD_SPAWN_PRIORITY = 0;
+const AID_BUILD_DEFAULT_INTERVAL = 200;
+const MANUAL_AID_BUILD_TARGET_COUNT = 5;
 
 type SpawnMemoryMatcher = (memory: any) => boolean;
+type SpawnLiveMatcher = (creep: Creep) => boolean;
 
 const matchesFlagSpawnMemory = (
     memory: any,
@@ -24,12 +28,16 @@ const getFlagSpawnLoad = (
     spawnRoom: Room,
     flagName: string,
     role: string,
-    legacyMatch: SpawnMemoryMatcher
+    legacyMatch: SpawnMemoryMatcher,
+    liveMatch?: SpawnLiveMatcher
 ) => {
     let live = 0;
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName];
-        if (matchesFlagSpawnMemory(creep?.memory, flagName, role, legacyMatch)) {
+        if (
+            matchesFlagSpawnMemory(creep?.memory, flagName, role, legacyMatch) &&
+            (!liveMatch || liveMatch(creep))
+        ) {
             live++;
         }
     }
@@ -47,6 +55,12 @@ const getFlagSpawnLoad = (
         queued,
         total: live + queued,
     };
+};
+
+const isActiveAidBuildFlagCreep = (creep: Creep) => {
+    if (creep.spawning) return true;
+    const ttl = creep.ticksToLive || 0;
+    return ttl > Math.max(120, creep.body.length * 3);
 };
 
 export default class AidSpawnFunction extends Flag {
@@ -71,7 +85,7 @@ export default class AidSpawnFunction extends Flag {
     private handleAidBuildFlag(flagName: string): boolean {
         if (!flagName.startsWith('AID-BUILD/')) return false;
 
-        const spawnInterval = this.getSpawnIntervalFromName();
+        const spawnInterval = this.getSpawnIntervalFromName(AID_BUILD_DEFAULT_INTERVAL);
         if (!this.timeCheck(spawnInterval)) return true;
 
         const room = this.getSpawnRoomFromName();
@@ -83,9 +97,10 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === sourceRoom
+            (memory) => memory.targetRoom === targetRoom && (memory.sourceRoom || targetRoom) === sourceRoom,
+            isActiveAidBuildFlagCreep
         );
-        if (spawnLoad.total >= 1) return true;
+        if (spawnLoad.total >= MANUAL_AID_BUILD_TARGET_COUNT) return true;
 
         let bodys: any[] = [];
         const memory = { sourceRoom, targetRoom, spawnFlag: flagName } as CreepMemory;
@@ -105,10 +120,15 @@ export default class AidSpawnFunction extends Flag {
             }
         }
 
-        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-build', memory);
+        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), MANUAL_AID_BUILD_SPAWN_PRIORITY, 'aid-build', memory);
+        if (ret !== OK) {
+            log('AID', `${room.name} -> ${targetRoom} spawn aid-build failed ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
+            return true;
+        }
         if (ret === OK && memory['boostmap']) {
             room.AssignBoostTaskByBody(bodys, memory['boostmap'] as any, memory['boostOwnerId'] as any);
         }
+        log('AID', `${room.name} -> ${targetRoom} queue aid-build`);
         return true;
     }
 

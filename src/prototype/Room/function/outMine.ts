@@ -98,22 +98,17 @@ const getOutHarvesterSlotCap = (targetRoom: Room): number => {
 }
 
 const getQueuedSpawnRoleNumByTarget = (homeRoom: Room, role: string, targetRoomName: string): number => {
-    const roomAny = homeRoom as any;
-    if (roomAny._spawnRoleTargetCacheTick !== Game.time) {
-        const cache: Record<string, number> = {};
-        const tasks = homeRoom.getAllMissionFromPool('spawn') || [];
-        for (const task of tasks) {
-            const memory = (task as any)?.data?.memory;
-            if (!memory?.role) continue;
-            if (memory.homeRoom && memory.homeRoom !== homeRoom.name) continue;
-            const key = `${memory.role}|${memory.targetRoom || ''}`;
-            cache[key] = (cache[key] || 0) + 1;
-        }
-        roomAny._spawnRoleTargetCache = cache;
-        roomAny._spawnRoleTargetCacheTick = Game.time;
+    const tasks = homeRoom.getAllMissionFromPool('spawn') || [];
+    let count = 0;
+    for (const task of tasks) {
+        const memory = (task as any)?.data?.memory;
+        if (!memory?.role) continue;
+        if (memory.role !== role) continue;
+        if ((memory.targetRoom || '') !== targetRoomName) continue;
+        if (memory.homeRoom && memory.homeRoom !== homeRoom.name) continue;
+        count++;
     }
-    const key = `${role}|${targetRoomName}`;
-    return (roomAny._spawnRoleTargetCache?.[key] || 0) as number;
+    return count;
 }
 
 const isSameHomeRoom = (creepHomeRoom: string | undefined, homeRoomName: string): boolean => {
@@ -718,6 +713,13 @@ const outCarry2Spawn = function (
     const spawnCarNum = getQueuedSpawnRoleNumByTarget(homeRoom, 'out-car', targetRoom.name);
 
     if (preferSmall) {
+        if (allowWorkCarry && outerCar + spawnCarNum === 0) {
+            const role = 'out-car';
+            const memory = { homeRoom: homeRoom.name, targetRoom: targetRoom.name, aggressiveCarry } as CreepMemory;
+            homeRoom.SpawnMissionAdd('OC', 'w1c4m4', OUTMINE_PRIORITY.carry, role, memory);
+            return true;
+        }
+
         const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
         const needNum = num - totalCarry;
         if (needNum > 0) {
