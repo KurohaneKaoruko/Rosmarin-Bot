@@ -516,6 +516,7 @@ const originMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
 const originPull = Creep.prototype.$pull || Creep.prototype.pull;
 const originCancelOrder = Creep.prototype.$cancelOrder || Creep.prototype.cancelOrder;
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
+// PowerCreep 需要保留原始方法备份（热重载时避免 move 意图递归）
 const originPowerMove = powerCreepProto ? (powerCreepProto.$move || powerCreepProto.move) : undefined;
 const originPowerMoveTo = powerCreepProto ? (powerCreepProto.$moveTo || powerCreepProto.moveTo) : undefined;
 const originPowerCancelOrder = powerCreepProto ? (powerCreepProto.$cancelOrder || powerCreepProto.cancelOrder) : undefined;
@@ -526,11 +527,17 @@ function isPowerCreepUnit(unit) {
 }
 
 function getOriginMoveMethod(unit) {
-    return isPowerCreepUnit(unit) && originPowerMove ? originPowerMove : originMove;
+    if (isPowerCreepUnit(unit)) {
+        return (powerCreepProto && powerCreepProto.$move) || originPowerMove || originMove;
+    }
+    return originMove;
 }
 
 function getOriginCancelOrderMethod(unit) {
-    return isPowerCreepUnit(unit) && originPowerCancelOrder ? originPowerCancelOrder : originCancelOrder;
+    if (isPowerCreepUnit(unit)) {
+        return (powerCreepProto && powerCreepProto.$cancelOrder) || originPowerCancelOrder || originCancelOrder;
+    }
+    return originCancelOrder;
 }
 
 // 统计变量
@@ -3966,6 +3973,31 @@ function endTickResolve(userIsWorkTile) {
     }
 }
 
+// ----------------------------------------------------------------------------
+// 12.1) PowerCreep 原型方法保护（热重载时防止 moveTo/endTickResolve 递归）
+// ----------------------------------------------------------------------------
+function ensurePowerCreepBaseMethods() {
+    if (!powerCreepProto) return;
+    if (!powerCreepProto.$move) {
+        const baseMove = originPowerMove || powerCreepProto.move;
+        powerCreepProto.$move = (baseMove === powerCreepProto.move && baseMove !== originMove)
+            ? originMove
+            : baseMove;
+    }
+    if (!powerCreepProto.$moveTo) {
+        const baseMoveTo = originPowerMoveTo || powerCreepProto.moveTo;
+        powerCreepProto.$moveTo = (baseMoveTo === powerCreepProto.moveTo && baseMoveTo !== originMoveTo)
+            ? originMoveTo
+            : baseMoveTo;
+    }
+    if (!powerCreepProto.$cancelOrder) {
+        const baseCancel = originPowerCancelOrder || powerCreepProto.cancelOrder;
+        powerCreepProto.$cancelOrder = (baseCancel === powerCreepProto.cancelOrder && baseCancel !== originCancelOrder)
+            ? originCancelOrder
+            : baseCancel;
+    }
+}
+
 function wrapFn(fn, name) {
     return function () {
         if (name === 'moveTo') {
@@ -4549,7 +4581,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
     if (ops.range === undefined) ops.range = 1;
 
-    if (!isPowerCreepUnit(this) && !hasActiveBodypart(this.body, MOVE)) {
+    if (!hasActiveBodypart(this.body, MOVE)) {
         return ERR_NO_BODYPART;
     }
 
@@ -4597,7 +4629,7 @@ function betterMove(target) {
     if (this.fatigue > 0) {
         return ERR_TIRED;
     }
-    if (!isPowerCreepUnit(this) && !hasActiveBodypart(this.body, MOVE)) {
+    if (!hasActiveBodypart(this.body, MOVE)) {
         return ERR_NO_BODYPART;
     }
     let direction = +target;
@@ -5189,6 +5221,7 @@ function bmDeletePathInRoom(roomName) {
 
 function bmSetChangeMoveTo(bool) {
     config.changeMoveTo = !!bool;
+    ensurePowerCreepBaseMethods();
     const creepCore = bool ? betterMoveTo : originMoveTo;
     const creepImpl = wrapFn(function (...args) {
         updateDontPullMeForMoveTo(this);
@@ -5196,10 +5229,13 @@ function bmSetChangeMoveTo(bool) {
     }, 'moveTo');
     wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
     if (powerCreepProto) {
-        const nativeMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
-        if (nativeMoveTo) {
-            powerCreepProto.$moveTo = nativeMoveTo;
-            powerCreepProto.moveTo = nativeMoveTo;
+        if (bool) {
+            powerCreepProto.moveTo = wrapFn(betterMoveTo, 'moveTo');
+        } else if (bool === false) {
+            const powerMoveTo = powerCreepProto.$moveTo || originPowerMoveTo || originMoveTo;
+            if (powerMoveTo) {
+                powerCreepProto.moveTo = powerMoveTo;
+            }
         }
     }
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
@@ -5310,15 +5346,12 @@ function bmPrint() {
 
 function bmSetChangeMove(bool) {
     config.changeMove = !!bool;
+    ensurePowerCreepBaseMethods();
     if (bool) {
         wrapProtoMethod(Creep.prototype, 'move', '$move', wrapFn(betterMove, 'move'));
         wrapProtoMethod(Creep.prototype, 'pull', '$pull', wrapFn(betterPull, 'pull'));
         if (powerCreepProto) {
-            const nativeMove = Creep.prototype.$move || Creep.prototype.move;
-            if (nativeMove) {
-                powerCreepProto.$move = nativeMove;
-                powerCreepProto.move = nativeMove;
-            }
+            powerCreepProto.move = wrapFn(betterMove, 'move');
         }
     } else if (bool === false) {
         if (Creep.prototype.$move) {
@@ -5328,9 +5361,9 @@ function bmSetChangeMove(bool) {
             Creep.prototype.pull = Creep.prototype.$pull;
         }
         if (powerCreepProto) {
-            const nativeMove = Creep.prototype.$move || Creep.prototype.move;
-            if (nativeMove) {
-                powerCreepProto.move = nativeMove;
+            const powerMove = powerCreepProto.$move || originPowerMove || originMove;
+            if (powerMove) {
+                powerCreepProto.move = powerMove;
             }
         }
     }
@@ -5758,7 +5791,8 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
 
 wrapProtoMethod(Creep.prototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
 if (powerCreepProto) {
-    wrapProtoMethod(powerCreepProto, 'cancelOrder', '$cancelOrder', betterCancelOrder);
+    ensurePowerCreepBaseMethods();
+    powerCreepProto.cancelOrder = betterCancelOrder;
 }
 
 /**
