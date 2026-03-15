@@ -1,57 +1,27 @@
-import { decompress } from '@/modules/utils/compress';
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 
-const relayExitCache: Record<string, { tick: number; exit: number | null }> = {};
-const relayQueuePosCache: Record<string, { tick: number; positions: RoomPosition[] }> = {};
+const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
 const outCarry = {
     resolveCarryDepositTarget: function (creep: Creep): StructureTerminal | StructureStorage | null {
         let target: StructureTerminal | StructureStorage | null = null;
 
-        if (creep.room.terminal &&
-            creep.room.terminal.store[RESOURCE_ENERGY] < 10000) {
+        if (creep.room.terminal && creep.room.terminal.store[RESOURCE_ENERGY] < 10000) {
             target = creep.room.terminal;
         }
 
         if (!target) {
             const targets: (StructureTerminal | StructureStorage)[] = [];
-            if (creep.room.terminal &&
-                creep.room.terminal.store.getFreeCapacity() > 50000) {
+            if (creep.room.terminal && creep.room.terminal.store.getFreeCapacity() > 50000) {
                 targets.push(creep.room.terminal);
             }
-            if (creep.room.storage &&
-                creep.room.storage.store.getFreeCapacity() > 10000) {
+            if (creep.room.storage && creep.room.storage.store.getFreeCapacity() > 10000) {
                 targets.push(creep.room.storage);
             }
             target = creep.pos.findClosestByRange(targets);
         }
 
         return target;
-    },
-
-    markForcedMove: function (creep: Creep, direction?: DirectionConstant | null, keepTicks = 1) {
-        if (!creep || !direction) return;
-        creep.memory.cacheSource = creep.memory.cacheSource || {};
-        const cache = creep.memory.cacheSource as any;
-        cache.forcedMoveDirection = direction;
-        cache.forcedMoveTick = Game.time;
-        const until = Game.time + Math.max(1, keepTicks | 0);
-        cache.forcedMoveUntil = Math.max(Number(cache.forcedMoveUntil || 0), until);
-    },
-
-    markReceivedEnergy: function (receiver: Creep, homeDirection?: DirectionConstant | null) {
-        if (!receiver) return;
-        receiver.memory.cacheSource = receiver.memory.cacheSource || {};
-        const cache = receiver.memory.cacheSource as any;
-        cache.receivedEnergyTick = Game.time;
-        if (homeDirection) cache.receivedMoveDirection = homeDirection;
-        cache.receivedRetreatUntil = Math.max(Number(cache.receivedRetreatUntil || 0), Game.time + 3);
-        // 接收能量后先锁住自己，避免同 tick 被其他 creep 的对穿覆盖移动意图。
-        receiver.memory.dontPullMe = true;
-        this.markForcedMove(receiver, homeDirection, 2);
-        // 被接力后立即清空采集目标缓存，下一 tick 优先进入回程流程。
-        delete cache.targetId;
-        delete cache.targetType;
     },
 
     isLikelyCollecting: function (creep: Creep): boolean {
@@ -61,7 +31,6 @@ const outCarry = {
         const targetRoom = creep.memory.targetRoom;
         if (targetRoom && creep.room.name === targetRoom) return true;
 
-        // 非目标房且已经带了不少资源，通常处于回程，不应参与采集目标预留。
         const used = creep.store.getUsedCapacity();
         const cap = creep.store.getCapacity();
         if (used > 0 && used >= Math.floor(cap * 0.4)) return false;
@@ -73,7 +42,7 @@ const outCarry = {
         if (!targetRoom || creep.room.name === targetRoom) return null;
 
         const cacheKey = `${creep.room.name}->${targetRoom}`;
-        const cached = relayExitCache[cacheKey];
+        const cached = routeExitCache[cacheKey];
         if (cached && cached.tick === Game.time) return cached.exit;
 
         let exit: number | null = null;
@@ -82,42 +51,8 @@ const outCarry = {
             exit = route[0].exit;
         }
 
-        relayExitCache[cacheKey] = { tick: Game.time, exit };
+        routeExitCache[cacheKey] = { tick: Game.time, exit };
         return exit;
-    },
-
-    getRelayExitDirection: function (creep: Creep): number | null {
-        return this.getRouteExitDirection(creep, getCreepSourceRoom(creep.memory));
-    },
-
-    getExitProgress: function (pos: RoomPosition, exitDirection: number): number {
-        switch (exitDirection) {
-            case FIND_EXIT_TOP: return 49 - pos.y;
-            case FIND_EXIT_BOTTOM: return pos.y;
-            case FIND_EXIT_LEFT: return 49 - pos.x;
-            case FIND_EXIT_RIGHT: return pos.x;
-            default: return 0;
-        }
-    },
-
-    getOppositeDirection: function (exitDirection: number): DirectionConstant | null {
-        switch (exitDirection) {
-            case FIND_EXIT_TOP: return BOTTOM;
-            case FIND_EXIT_BOTTOM: return TOP;
-            case FIND_EXIT_LEFT: return RIGHT;
-            case FIND_EXIT_RIGHT: return LEFT;
-            default: return null;
-        }
-    },
-
-    getHomeDirection: function (exitDirection: number): DirectionConstant | null {
-        switch (exitDirection) {
-            case FIND_EXIT_TOP: return TOP;
-            case FIND_EXIT_BOTTOM: return BOTTOM;
-            case FIND_EXIT_LEFT: return LEFT;
-            case FIND_EXIT_RIGHT: return RIGHT;
-            default: return null;
-        }
     },
 
     moveAlongRouteExit: function (creep: Creep, targetRoom: string | undefined): boolean {
@@ -127,6 +62,7 @@ const outCarry = {
 
         const exitDirection = this.getRouteExitDirection(creep, targetRoom);
         if (!exitDirection) return false;
+
         const exits = creep.room.find(exitDirection);
         if (!exits || exits.length <= 0) return false;
         const exitPos = creep.pos.findClosestByRange(exits);
@@ -140,239 +76,6 @@ const outCarry = {
             swampCost: 10,
             reusePath: 3
         });
-        return true;
-    },
-
-    tryForceLineMove: function (
-        creep: Creep,
-        direction: DirectionConstant | null,
-        markIntent = true,
-        depth = 0,
-        visited?: Record<string, 1>
-    ): boolean {
-        if (!direction) return false;
-        if (markIntent) this.markForcedMove(creep, direction, 1);
-
-        const moveSelf = () => {
-            creep.memory.dontPullMe = false;
-            creep.move(direction);
-            return true;
-        };
-
-        if (creep.pos.isRoomEdge()) return moveSelf();
-
-        const seen = visited || Object.create(null);
-        if (seen[creep.id]) return moveSelf();
-        seen[creep.id] = 1;
-
-        const blocker = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-            filter: (c: Creep) =>
-                c.id !== creep.id &&
-                !c.spawning &&
-                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                creep.pos.getDirectionTo(c.pos) === direction
-        })[0];
-        if (blocker) {
-            blocker.memory.dontPullMe = false;
-            if (markIntent) this.markForcedMove(blocker, direction, 1);
-            if (depth < 4 && !seen[blocker.id]) {
-                // 级联推动同向 blocker，避免前方多层占位时接收者原地不动。
-                this.tryForceLineMove(blocker, direction, markIntent, depth + 1, seen);
-            } else {
-                blocker.move(direction);
-            }
-        }
-
-        return moveSelf();
-    },
-
-    getRelayQueuePositions: function (creep: Creep, exitDirection: number): RoomPosition[] {
-        const roadMemory = creep.room.memory.road as number[] | undefined;
-        if (!Array.isArray(roadMemory) || roadMemory.length === 0) return [];
-
-        const cacheKey = `${creep.room.name}:${exitDirection}`;
-        const cached = relayQueuePosCache[cacheKey];
-        if (cached && cached.tick === Game.time) return cached.positions;
-
-        const terrain = creep.room.getTerrain();
-        const sources = creep.room.find(FIND_SOURCES);
-        const sourceContainers = (creep.room.container || []).filter((c: StructureContainer) =>
-            sources.some((s: Source) => c.pos.inRangeTo(s.pos, 1))
-        );
-        const positions: RoomPosition[] = [];
-        const seen = new Set<string>();
-
-        for (const packed of roadMemory) {
-            if (typeof packed !== 'number') continue;
-            const [x, y] = decompress(packed);
-            if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
-            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
-
-            const key = `${x}:${y}`;
-            if (seen.has(key)) continue;
-            seen.add(key);
-
-            const pos = new RoomPosition(x, y, creep.room.name);
-            // 采集位周围留空，避免排队 creep 抢占矿工与直连传递位置。
-            if (sources.some((s: Source) => pos.inRangeTo(s.pos, 1))) continue;
-            // 采集容器周围也留空，避免堵住 OH 的取放与掉头路径。
-            if (sourceContainers.some((c: StructureContainer) => pos.inRangeTo(c.pos, 1))) continue;
-            positions.push(pos);
-        }
-
-        // 按“到回家出口的推进度”从小到大排序，形成由矿点向出口延展的站位序列。
-        positions.sort((a, b) => this.getExitProgress(a, exitDirection) - this.getExitProgress(b, exitDirection));
-        relayQueuePosCache[cacheKey] = { tick: Game.time, positions };
-        return positions;
-    },
-
-    getRelayQueueContext: function (creep: Creep): {
-        exitDirection: number;
-        carriers: Creep[];
-        myIndex: number;
-        frontCollectors: number;
-        slotPos: RoomPosition;
-    } | null {
-        if (creep.room.name !== creep.memory.targetRoom) return null;
-        if (creep.pos.isRoomEdge()) return null;
-        const sourceRoom = getCreepSourceRoom(creep.memory);
-        if (!sourceRoom) return null;
-
-        const exitDirection = this.getRelayExitDirection(creep);
-        if (!exitDirection) return null;
-
-        const queuePositions = this.getRelayQueuePositions(creep, exitDirection);
-        if (queuePositions.length === 0) return null;
-
-        const carriers = creep.room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) =>
-                !c.spawning &&
-                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                getCreepSourceRoom(c.memory) === sourceRoom &&
-                c.memory.targetRoom === creep.memory.targetRoom &&
-                c.store.getFreeCapacity() > 0
-        }) as Creep[];
-        if (carriers.length <= 1) return null;
-
-        carriers.sort((a: Creep, b: Creep) => {
-            const progressA = this.getExitProgress(a.pos, exitDirection);
-            const progressB = this.getExitProgress(b.pos, exitDirection);
-            if (progressA !== progressB) return progressA - progressB;
-            return a.id.localeCompare(b.id);
-        });
-
-        const myIndex = carriers.findIndex((c: Creep) => c.id === creep.id);
-        if (myIndex < 0) return null;
-
-        const feeders = creep.room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) =>
-                !c.spawning &&
-                getCreepSourceRoom(c.memory) === sourceRoom &&
-                (c.memory.role === 'out-harvest' || c.memory.role === 'out-mineral')
-        }) as Creep[];
-        const feederCount = Math.max(1, feeders.length);
-        const frontCollectorCap = carriers.length >= 4 ? 2 : 1;
-        const frontCollectors = Math.max(1, Math.min(frontCollectorCap, feederCount));
-        const waitingRank = Math.max(0, myIndex - frontCollectors);
-        const lineLength = queuePositions.length;
-        if (lineLength <= 1) return null;
-
-        // 槽位分配策略：
-        // 1) 先使用 1,3,5...（隔一格站位，给接收后返程留空）
-        // 2) 超出后再使用 2,4,6...（扩大容量，避免队尾多人叠在同一格）
-        // 3) 再超出时按已有槽位循环，至少保证分布而不是固定挤在末尾
-        const slotOrder: number[] = [];
-        for (let i = 1; i < lineLength; i += 2) slotOrder.push(i);
-        for (let i = 2; i < lineLength; i += 2) slotOrder.push(i);
-        if (slotOrder.length <= 0) return null;
-
-        const slotIndex = slotOrder[waitingRank % slotOrder.length];
-        const slotPos = queuePositions[slotIndex];
-        if (!slotPos) return null;
-
-        return { exitDirection, carriers, myIndex, frontCollectors, slotPos };
-    },
-
-    waitInRelayLine: function (creep: Creep): boolean {
-        const context = this.getRelayQueueContext(creep);
-        if (!context) return false;
-        if (context.myIndex < context.frontCollectors) return false;
-
-        if (!creep.pos.isEqualTo(context.slotPos)) {
-            creep.moveTo(context.slotPos, {
-                maxRooms: 1,
-                range: 0,
-                ignoreCreeps: false,
-                plainCost: 2,
-                swampCost: 10,
-                reusePath: 3
-            });
-        }
-
-        return true;
-    },
-
-    relayCarryToForward: function (creep: Creep): boolean {
-        if (creep.store[RESOURCE_ENERGY] <= 0) return false;
-        if (creep.pos.isRoomEdge()) return false;
-        const sourceRoom = getCreepSourceRoom(creep.memory);
-        if (!sourceRoom) return false;
-
-        const exitDirection = this.getRelayExitDirection(creep);
-        if (!exitDirection) return false;
-
-        const selfProgress = this.getExitProgress(creep.pos, exitDirection);
-        const teammates = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-            filter: (c: Creep) =>
-                c.id !== creep.id &&
-                !c.spawning &&
-                !c.pos.isRoomEdge() &&
-                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                getCreepSourceRoom(c.memory) === sourceRoom &&
-                c.memory.targetRoom === creep.memory.targetRoom
-        });
-        if (teammates.length === 0) return false;
-
-        const pickBestTarget = (pool: Creep[]): Creep | null => {
-            let best: Creep | null = null;
-            let bestProgress = -1;
-            let bestFree = -1;
-            for (const c of pool) {
-                const progress = this.getExitProgress(c.pos, exitDirection);
-                if (progress <= selfProgress) continue;
-                const free = c.store.getFreeCapacity(RESOURCE_ENERGY);
-                if (free <= 0) continue;
-                if (!best ||
-                    progress > bestProgress ||
-                    (progress === bestProgress && free > bestFree) ||
-                    (progress === bestProgress && free === bestFree && c.id < best.id)) {
-                    best = c;
-                    bestProgress = progress;
-                    bestFree = free;
-                }
-            }
-            return best;
-        };
-
-        let target = pickBestTarget(teammates.filter((c: Creep) =>
-            c.store.getUsedCapacity(RESOURCE_ENERGY) > 0
-        ));
-        if (!target) {
-            target = pickBestTarget(teammates);
-        }
-        if (!target) return false;
-
-        const ret = creep.transfer(target, RESOURCE_ENERGY);
-        if (ret !== OK) return false;
-        const homeDirection = this.getHomeDirection(exitDirection);
-        this.markReceivedEnergy(target, homeDirection);
-        // 被传递后同 tick 先锁住，避免被其他 moveTo 的对穿逻辑覆盖返程移动。
-        target.memory.dontPullMe = true;
-        creep.memory.dontPullMe = false;
-        this.tryForceLineMove(target, homeDirection);
-
-        const reverseDirection = this.getOppositeDirection(exitDirection);
-        this.tryForceLineMove(creep, reverseDirection);
         return true;
     },
 
@@ -502,21 +205,17 @@ const outCarry = {
         return best;
     },
 
-    withdraw: function(creep: Creep) {
-        creep.memory.cacheSource = creep.memory.cacheSource || {}
-        const cache = creep.memory.cacheSource as any
+    withdraw: function (creep: Creep) {
+        creep.memory.cacheSource = creep.memory.cacheSource || {};
+        const cache = creep.memory.cacheSource as any;
+        const sourceRoom = getCreepSourceRoom(creep.memory);
 
         if (cache.waitUntil && Game.time < cache.waitUntil) {
-            const relayContextOnWait = this.getRelayQueueContext(creep);
-            if (!relayContextOnWait ||
-                relayContextOnWait.carriers.length < 3 ||
-                relayContextOnWait.myIndex < relayContextOnWait.frontCollectors) {
-                const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
-                    filter: (r: Resource) => r.amount > 0
-                })[0];
-                if (nearbyDrop) creep.pickup(nearbyDrop);
-                return;
-            }
+            const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+                filter: (r: Resource) => r.amount > 0
+            })[0];
+            if (nearbyDrop) creep.pickup(nearbyDrop);
+            return;
         }
         delete cache.waitUntil;
 
@@ -525,34 +224,9 @@ const outCarry = {
             creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
-        
-        // 处理缓存的目标
-        const relayContext = this.getRelayQueueContext(creep);
-        if (relayContext && relayContext.carriers.length >= 3) {
-            // 仅允许前排少量搬运冲前取货，其余固定在接力位，避免全体挤到采集点。
-            if (relayContext.myIndex >= relayContext.frontCollectors) {
-                delete cache.targetId;
-                delete cache.targetType;
-
-                if (creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && this.relayCarryToForward(creep)) {
-                    return;
-                }
-
-                const nearEnergy = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
-                    filter: (r: Resource) => r.resourceType === RESOURCE_ENERGY && r.amount > 0
-                })[0];
-                if (nearEnergy) {
-                    creep.pickup(nearEnergy);
-                    return;
-                }
-
-                this.waitInRelayLine(creep);
-                return;
-            }
-        }
 
         if (cache.targetId) {
-            let target = Game.getObjectById(cache.targetId as Id<any>) as any;
+            const target = Game.getObjectById(cache.targetId as Id<any>) as any;
             if (!target) {
                 delete cache.targetId;
                 delete cache.targetType;
@@ -560,7 +234,7 @@ const outCarry = {
             }
 
             if (!creep.pos.inRangeTo(target, 1)) {
-                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 })
+                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
                 return;
             }
 
@@ -578,7 +252,6 @@ const outCarry = {
 
                 const nonEnergyResource = Object.keys(target.store).find((res) => res !== RESOURCE_ENERGY && target.store[res] > 0) as ResourceConstant;
                 const energyAmount = target.store[RESOURCE_ENERGY] || 0;
-                const sourceRoom = getCreepSourceRoom(creep.memory);
                 const canStoreMinerals = !!(sourceRoom && (Game.rooms[sourceRoom]?.storage || Game.rooms[sourceRoom]?.terminal));
                 const resourceType = (canStoreMinerals && nonEnergyResource)
                     ? nonEnergyResource
@@ -586,7 +259,7 @@ const outCarry = {
                 creep.withdraw(target, resourceType);
             }
 
-            if ((targetType === 'dropped' && target.amount === 0) || 
+            if ((targetType === 'dropped' && target.amount === 0) ||
                 ((targetType === 'container' || targetType === 'ruin' || targetType === 'tombstone') && target.store.getUsedCapacity() === 0)) {
                 delete cache.targetId;
                 delete cache.targetType;
@@ -618,39 +291,17 @@ const outCarry = {
             delete cache.targetType;
         }
 
-        // 掉落阈值按自身容量动态调整：大于自身容量的掉落能量应允许拾取。
         const droppedPickupThreshold = Math.min(500, creep.store.getCapacity());
-        if (creep.collectDroppedResource(undefined, droppedPickupThreshold)) {
-            return;
-        }
-
-        // 使用 collectFromContainer 收集能量容器
-        if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) {
-            return;
-        }
-        
-        // 使用 collectFromTombstone 收集墓碑资源
-        if (creep.collectFromTombstone(undefined, 500)) {
-            return;
-        }
-
-        // 使用 collectFromStorage 收集存储资源
-        if (creep.collectFromStorage(RESOURCE_ENERGY, 0)) {
-            return;
-        }
-
-        // 如果没有可以拿的资源，移动到最近的out-harvest身边，或者out-mineral身边
-        // 优先miner
-        // 资源暂时断流时先在道路上排成接力线，避免所有搬运同时堆在采集点。
-        if (this.waitInRelayLine(creep)) {
-            return;
-        }
+        if (creep.collectDroppedResource(undefined, droppedPickupThreshold)) return;
+        if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) return;
+        if (creep.collectFromTombstone(undefined, 500)) return;
+        if (creep.collectFromStorage(RESOURCE_ENERGY, 0)) return;
 
         const nearestMiner = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
             filter: (c) => c.memory.role === 'out-mineral'
         });
         if (nearestMiner) {
-            if(!creep.pos.inRangeTo(nearestMiner, 1) || nearestMiner.store.getUsedCapacity() > 0) {
+            if (!creep.pos.inRangeTo(nearestMiner, 1) || nearestMiner.store.getUsedCapacity() > 0) {
                 creep.moveTo(nearestMiner, {
                     ignoreCreeps: false,
                     range: 1,
@@ -661,19 +312,19 @@ const outCarry = {
             }
             return;
         }
+
         const nearestHarvester = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
             filter: (c) => c.memory.role === 'out-harvest' && c.pos.findInRange(FIND_SOURCES, 1).length > 0
         });
         if (nearestHarvester) {
-            if (!creep.pos.inRangeTo(nearestHarvester, 2) ||
-                nearestHarvester.store[RESOURCE_ENERGY] > 0) {
+            if (!creep.pos.inRangeTo(nearestHarvester, 2) || nearestHarvester.store[RESOURCE_ENERGY] > 0) {
                 creep.moveTo(nearestHarvester, {
                     ignoreCreeps: false,
                     range: 1,
                     maxRooms: 1,
                     plainCost: 2,
                     swampCost: 10
-                })
+                });
             }
             return;
         }
@@ -686,95 +337,85 @@ const outCarry = {
                 maxRooms: 1,
                 plainCost: 2,
                 swampCost: 10
-            })
+            });
         }
     },
-    
-    carry: function(creep: any) {
-        creep.memory.cacheTarget = creep.memory.cacheTarget || {}
-        const cache = creep.memory.cacheTarget as any
+
+    carry: function (creep: Creep) {
+        creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        const cache = creep.memory.cacheTarget as any;
         const sourceRoom = getCreepSourceRoom(creep.memory);
         if (!sourceRoom) return;
+
         if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
             if (creep.room.name != sourceRoom && !creep.pos.isRoomEdge()) {
-                if (this.relayCarryToForward(creep)) return;
                 if (this.moveAlongRouteExit(creep, sourceRoom)) return;
             }
             creep.moveToRoom(sourceRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
 
-        let target: StructureTerminal | StructureStorage;
-    
+        let target: StructureTerminal | StructureStorage | null = null;
         if (cache.targetId) {
-            target = Game.getObjectById(cache.targetId) as StructureTerminal | StructureStorage;
+            target = Game.getObjectById(cache.targetId as Id<StructureTerminal | StructureStorage>) as StructureTerminal | StructureStorage;
             if (target) {
                 if (creep.pos.inRangeTo(target, 1)) {
-                    // 已经回到 sourceRoom 时，优先把能量落到终端/仓库。
-                    // 不能再像路上接力那样把能量递给相邻 creep，否则会在目的地来回传能卡住。
                     if (target.store.getFreeCapacity(RESOURCE_ENERGY) > 200) {
-                        creep.transfer(target, Object.keys(creep.store)[0]);
+                        creep.transfer(target, Object.keys(creep.store)[0] as ResourceConstant);
                     } else {
                         delete cache.targetId;
                     }
                 } else {
-                    creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
+                    creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
                 }
                 return;
             }
             delete cache.targetId;
         }
 
-        if(!target) {
-            target = this.resolveCarryDepositTarget(creep);
-        }
-    
+        if (!target) target = this.resolveCarryDepositTarget(creep);
         if (target) {
             cache.targetId = target.id;
             if (creep.pos.inRangeTo(target, 1)) {
                 if (target.store.getFreeCapacity() > 0) {
-                    creep.transfer(target, Object.keys(creep.store)[0]);
+                    creep.transfer(target, Object.keys(creep.store)[0] as ResourceConstant);
                 } else {
                     delete cache.targetId;
                 }
             } else {
-                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
+                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
             }
+            return;
+        }
+
+        const storage = creep.room.storage;
+        const controller = creep.room.controller;
+        if (storage) {
+            if (creep.pos.inRangeTo(storage, 1)) creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
+            else creep.moveTo(storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            return;
+        }
+
+        if (controller && controller.level < 8) {
+            if (creep.pos.inRangeTo(controller, 1)) creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
+            else creep.moveTo(controller, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            return;
+        }
+
+        const centerPos = creep.room.getCenter();
+        if (centerPos && creep.pos.inRangeTo(centerPos, 1)) {
+            creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
         } else {
-            const storage = creep.room.storage;
-            const controller = creep.room.controller;
-            if (storage) {
-                if (creep.pos.inRangeTo(storage, 1)) {
-                    creep.drop(Object.keys(creep.store)[0]);
-                } else {
-                    creep.moveTo(storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
-                }
-            } else if (controller && controller.level < 8) {
-                if (creep.pos.inRangeTo(controller, 1)) {
-                    creep.drop(Object.keys(creep.store)[0]);
-                } else {
-                    creep.moveTo(controller, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
-                }
-            } 
-            else {
-                const centerPos = creep.room.getCenter();
-                if (centerPos && creep.pos.inRangeTo(centerPos, 1)) {
-                    creep.drop(Object.keys(creep.store)[0]);
-                } else {
-                    creep.moveTo(centerPos, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10  });
-                }
-            }
+            creep.moveTo(centerPos, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
         }
     },
 
-    buildRepair: function(creep: Creep) {
+    buildRepair: function (creep: Creep) {
         const sourceRoom = getCreepSourceRoom(creep.memory);
         if (sourceRoom && creep.room.name == sourceRoom) return false;
-        if(creep.memory.role !== 'out-car') return false;
-        if(creep.store[RESOURCE_ENERGY] == 0) return false;
+        if (creep.memory.role !== 'out-car') return false;
+        if (creep.store[RESOURCE_ENERGY] == 0) return false;
 
-        // 使用 repairRoad 方法维修道路
-        // 只维修范围1内的道路
         const roads = creep.room.road?.filter((r: any) => {
             if (!r || r.hits >= r.hitsMax * 0.8) return false;
             if (!creep.pos.inRangeTo(r.pos, 1)) return false;
@@ -786,11 +427,13 @@ const outCarry = {
             if (creep.pos.isRoomEdge()) {
                 creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
             }
-            if(result == OK) return true;
-            if(result == ERR_NOT_IN_RANGE) { creep.moveTo(road); return true; }
+            if (result == OK) return true;
+            if (result == ERR_NOT_IN_RANGE) {
+                creep.moveTo(road);
+                return true;
+            }
         }
 
-        // 使用 buildRoad 方法建造道路
         if (creep.buildRoad()) {
             if (creep.pos.isRoomEdge()) {
                 creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
@@ -801,73 +444,24 @@ const outCarry = {
         creep.memory.dontPullMe = false;
         return false;
     },
+
     run: function (creep: Creep) {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         delete creep.memory.working;
 
-        const sourceCache = creep.memory.cacheSource as any;
-        const forcedMoveDir = sourceCache.forcedMoveDirection as DirectionConstant | undefined;
-        const forcedMoveUntil = Number(sourceCache.forcedMoveUntil || 0);
-        const forcedMoveTick = Number(sourceCache.forcedMoveTick || 0);
-        if (forcedMoveDir && forcedMoveUntil >= Game.time && !creep.pos.isRoomEdge()) {
-            // 同 tick 可能被多段逻辑调用 move，最后一次会覆盖前面意图；
-            // 把“被传能后返程/被让路推动”的移动锁定到 run 最前面，避免被后续逻辑改写。
-            this.tryForceLineMove(creep, forcedMoveDir, false);
-            creep.memory.dontPullMe = true;
-            if (forcedMoveUntil <= Game.time) {
-                delete sourceCache.forcedMoveDirection;
-                delete sourceCache.forcedMoveTick;
-                delete sourceCache.forcedMoveUntil;
-            }
-            return;
-        } else if (forcedMoveTick > 0 && forcedMoveUntil < Game.time) {
-            delete sourceCache.forcedMoveDirection;
-            delete sourceCache.forcedMoveTick;
-            delete sourceCache.forcedMoveUntil;
-        }
-
-        const used = creep.store.getUsedCapacity();
-        const forcedReceivedTick = Number(sourceCache.receivedEnergyTick || 0);
-        const retreatUntil = Number(sourceCache.receivedRetreatUntil || 0);
-        const forcedDir = sourceCache.receivedMoveDirection as DirectionConstant | undefined;
-        const sourceRoom = getCreepSourceRoom(creep.memory);
-        if (!forcedMoveDir && forcedReceivedTick === Game.time && forcedDir && used > 0 && sourceRoom && creep.room.name !== sourceRoom) {
-            sourceCache.partialLeaveWait = 0;
-            this.markForcedMove(creep, forcedDir, 1);
-            this.tryForceLineMove(creep, forcedDir, false);
-            creep.memory.dontPullMe = true;
-            return;
-        }
-
         if (this.buildRepair(creep)) {
             creep.memory.dontPullMe = false;
             return;
         }
 
+        const sourceCache = creep.memory.cacheSource as any;
+        const used = creep.store.getUsedCapacity();
         const free = creep.store.getFreeCapacity();
         const inTargetRoom = creep.room.name === creep.memory.targetRoom;
         const lowHealth = creep.hits < creep.hitsMax * 0.5;
-        const receivedEnergyTick = Number(sourceCache.receivedEnergyTick || 0);
-        const recentlyReceived = receivedEnergyTick >= Game.time - 1;
-        const inRetreatWindow = retreatUntil >= Game.time || recentlyReceived;
 
-        if (used === 0) {
-            delete sourceCache.receivedEnergyTick;
-            delete sourceCache.receivedMoveDirection;
-            delete sourceCache.receivedRetreatUntil;
-        }
-
-        // 刚被接力到能量时，优先回程，不再继续向前找货。
-        if (inRetreatWindow && used > 0 && sourceRoom && creep.room.name !== sourceRoom) {
-            sourceCache.partialLeaveWait = 0;
-            this.carry(creep);
-            creep.memory.dontPullMe = false;
-            return;
-        }
-
-        // 目标房内优先拿满：只要有空位就继续取货；连续若干 tick 无增量时才允许半仓回程。
         if (inTargetRoom && !lowHealth && free > 0) {
             const before = used;
             this.withdraw(creep);
@@ -881,8 +475,6 @@ const outCarry = {
 
             const wait = Number(sourceCache.partialLeaveWait || 0) + 1;
             sourceCache.partialLeaveWait = wait;
-
-            // 空仓始终继续找货；半仓在短时等待后允许回程，避免房间瞬时断流时卡死。
             if (after === 0) return;
             if (wait < 18) return;
 
@@ -902,7 +494,6 @@ const outCarry = {
         this.carry(creep);
         creep.memory.dontPullMe = false;
     }
-}
+};
 
 export default outCarry;
-

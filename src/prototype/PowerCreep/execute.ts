@@ -1,12 +1,19 @@
 import { runAssist } from './mode/assist';
 import { runOperate } from './mode/operate';
 
+function setPcDebug(pc: PowerCreep, state: string) {
+    if (!Game.flags[`${pc.name}-debug`]) return;
+    (pc.memory as any)._debugState = `${Game.time}:${state}`;
+    pc.say(state, true);
+}
+
 export default class PowerCreepExecute extends PowerCreep {
     exec() {
         if(!this.room) return;
 
         const assistFlag = Game.flags[`${this.name}-assist`];
         if (assistFlag) {
+            setPcDebug(this, 'assist-flag');
             runAssist(this, assistFlag);
             return;
         }
@@ -27,26 +34,35 @@ export default class PowerCreepExecute extends PowerCreep {
             const healerOk = !!healer && healer.memory.role === 'pc-heal' && healer.ticksToLive > 250;
 
             if (this.room.name !== idleRoom) {
+                setPcDebug(this, 'assist-back');
                 if (healerOk) this.pcDoubleMoveToRoom(idleRoom, healer, '#ffffff', { plainCost: 1, swampCost: 5 } as any);
                 else this.moveToRoom(idleRoom, { plainCost: 1, swampCost: 5 });
                 return;
             }
 
             if (this.pos.isRoomEdge()) {
+                setPcDebug(this, 'assist-edge');
                 if (healerOk) this.pcDoubleFleeEdge(healer, { plainCost: 1, swampCost: 5 } as any);
                 else this.moveTo(idlePos, { plainCost: 1, swampCost: 5 });
                 return;
             }
 
             if (!this.pos.isEqualTo(idlePos)) {
+                setPcDebug(this, 'assist-idle');
                 if (healerOk) this.pcDoubleMoveTo(idlePos, healer, '#ffffff', { plainCost: 1, swampCost: 5 } as any);
                 else this.moveTo(idlePos, { plainCost: 1, swampCost: 5 });
                 return;
             }
 
             if (healerOk && this.room.my) {
-                if (healer!.room.name !== idlePos.roomName) return;
-                if (!healer!.pos.inRangeTo(idlePos, 1)) return;
+                if (healer!.room.name !== idlePos.roomName) {
+                    setPcDebug(this, 'assist-waitH');
+                    return;
+                }
+                if (!healer!.pos.inRangeTo(idlePos, 1)) {
+                    setPcDebug(this, 'assist-waitH');
+                    return;
+                }
                 healer!.suicide();
                 delete mem.healerName;
             }
@@ -57,7 +73,10 @@ export default class PowerCreepExecute extends PowerCreep {
             delete mem.assistAbortReason;
         }
 
-        if (this.ToRenew()) return true;
+        if (this.ToRenew()) {
+            setPcDebug(this, 'renew');
+            return true;
+        }
         runOperate(this);
     }
 }

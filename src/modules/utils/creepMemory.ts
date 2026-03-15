@@ -28,10 +28,11 @@ export const getCreepSourceRoom = (
     memory?: Pick<CreepMemory, 'home' | 'sourceRoom' | 'homeRoom'> | null
 ): string | undefined => {
     if (!memory) return undefined;
-    if (memory.home) return memory.sourceRoom;
     const role = (memory as CreepMemory).role;
     const canUseLegacyHomeRoom = !!role && LEGACY_SOURCE_ROOM_ROLE_SET.has(role);
-    return memory.sourceRoom || (canUseLegacyHomeRoom ? memory.homeRoom : undefined);
+    if (memory.sourceRoom) return memory.sourceRoom;
+    if (canUseLegacyHomeRoom && memory.homeRoom) return memory.homeRoom;
+    return undefined;
 };
 
 export const getCreepAssignedRoom = (
