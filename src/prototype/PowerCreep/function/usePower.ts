@@ -1,23 +1,45 @@
-import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
+import { getLabAB } from '@/modules/utils/labReservations';
 import { getStructData } from '@/modules/utils/memory';
 
 export default class PowerCreepUsePower extends PowerCreep {
+    private usePowerOrMove(
+        power: PowerConstant,
+        target: RoomObject,
+        range = 3,
+        moveOpts: MoveToOpts = { plainCost: 1, swampCost: 1 }
+    ): boolean {
+        const moveRange = (moveOpts as any).range ?? range;
+        const moveOptions = moveRange === (moveOpts as any).range ? moveOpts : { ...moveOpts, range: moveRange };
+        if (!this.pos.inRangeTo(target, range)) {
+            this.moveTo(target, moveOptions);
+            return true;
+        }
+
+        const result = this.usePower(power, target);
+        if (result === OK) {
+            return true;
+        }
+        if (result === ERR_NOT_IN_RANGE) {
+            this.moveTo(target, moveOptions);
+            return true;
+        }
+        return false;
+    }
+
     Generate_OPS() {
         const powers = this.powers;
-        if(!powers[PWR_GENERATE_OPS]) return false;
-        if(powers[PWR_GENERATE_OPS].cooldown > 0) return false;
-        this.usePower(PWR_GENERATE_OPS);
-        return true;
+        const power = powers[PWR_GENERATE_OPS];
+        if(!power) return false;
+        if(power.cooldown > 0) return false;
+        if(this.store.getFreeCapacity() <= 0) return false;
+        return this.usePower(PWR_GENERATE_OPS) === OK;
     }
     Regen_Source() {
         if (this.room.memory.defend) return false;
         const sources = this.room.source || [];
         const source = sources.find(s => !s.effects || !s.effects.some(e => e.effect == PWR_REGEN_SOURCE && e.ticksRemaining));
         if(!source) return false;
-        let result = this.usePower(PWR_REGEN_SOURCE, source);
-        if (result == ERR_NOT_IN_RANGE) {
-            this.moveTo(source, {plainCost: 1, swampCost: 1});
-        } return true;
+        return this.usePowerOrMove(PWR_REGEN_SOURCE, source, 3, { plainCost: 1, swampCost: 1 });
     }
     Regen_Mineral() {
         if (this.room.memory.defend) return false;
@@ -25,10 +47,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         if (!mineral) return false;
         if (mineral.mineralAmount == 0) return false;
         if (mineral.effects?.some(e => e.effect == PWR_REGEN_MINERAL && e.ticksRemaining)) return false;
-        let result = this.usePower(PWR_REGEN_MINERAL, mineral);
-        if (result == ERR_NOT_IN_RANGE) {
-            this.moveTo(mineral, {plainCost: 1, swampCost: 1});
-        } return true;
+        return this.usePowerOrMove(PWR_REGEN_MINERAL, mineral, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Spawn() {
         if(!this.room.spawn) return false;
@@ -48,12 +67,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         const spawn = spawns.find(s => !s.effects || 
             !s.effects.some(e => e.effect == PWR_OPERATE_SPAWN && e.ticksRemaining > 0));
         if(!spawn) return false;
-        if(this.pos.inRangeTo(spawn, 3)) {
-            this.usePower(PWR_OPERATE_SPAWN, spawn);
-        } else {
-            this.moveTo(spawn);
-        }
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_SPAWN, spawn, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Extension() {        
         if(!this.room.storage && !this.room.terminal) return false;
@@ -65,12 +79,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         }
         if (!target || target.store.energy < 10000) return false;
 
-        if (this.pos.inRangeTo(target, 3)) {
-            this.usePower(PWR_OPERATE_EXTENSION, target);
-        } else {
-            this.moveTo(target);
-        }
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_EXTENSION, target, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Storage() {
         const storage = this.room.storage;
@@ -80,12 +89,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         if(storage.effects && storage.effects.some(e => 
             e.effect == PWR_OPERATE_STORAGE && e.ticksRemaining > 0)
         ) return false;
-        if (this.pos.inRangeTo(storage, 3)) {
-            this.usePower(PWR_OPERATE_STORAGE, storage);
-        } else {
-            this.moveTo(storage);
-        }
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_STORAGE, storage, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Tower() {
         if(!this.room.memory.defend) return false;
@@ -97,13 +101,8 @@ export default class PowerCreepUsePower extends PowerCreep {
             !t.effects.some(e => e.effect == PWR_OPERATE_TOWER && e.ticksRemaining > 0)
         );
         if(!tower) return false;
-    
-        if(this.pos.inRangeTo(tower, 3)) {
-            this.usePower(PWR_OPERATE_TOWER, tower);
-        } else {
-            this.moveTo(tower);
-        }
-        return true;
+
+        return this.usePowerOrMove(PWR_OPERATE_TOWER, tower, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Factory() {
         // 没有factory时不处理
@@ -116,12 +115,7 @@ export default class PowerCreepUsePower extends PowerCreep {
 
         // 当 factory 没有等级时，先用一次技能固定等级，避免资源管理分配任务时无法正确判断房间的 factory 等级。
         if (!factory.level) {
-            if (this.pos.inRangeTo(factory, 3)) {
-                this.usePower(PWR_OPERATE_FACTORY, factory);
-            } else {
-                this.moveTo(factory);
-            }
-            return true;
+            return this.usePowerOrMove(PWR_OPERATE_FACTORY, factory, 3, { plainCost: 1, swampCost: 1 });
         }
 
         // 没有任务时不处理
@@ -137,13 +131,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         }
         if(factory.level && factory.level !== this.powers[PWR_OPERATE_FACTORY].level) return false;
 
-        if (this.pos.inRangeTo(factory, 3)) {
-            this.usePower(PWR_OPERATE_FACTORY, factory);
-        } else {
-            this.moveTo(factory);
-        }
-        
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_FACTORY, factory, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Lab() {
         if(!this.room.lab) return false;
@@ -171,12 +159,7 @@ export default class PowerCreepUsePower extends PowerCreep {
             return !l.effects || l.effects.every(e => e.effect != PWR_OPERATE_LAB)
         });
         if(!lab) return false;
-        if (this.pos.inRangeTo(lab, 3)) {
-            this.usePower(PWR_OPERATE_LAB, lab);
-        } else {
-            this.moveTo(lab);
-        }
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_LAB, lab, 3, { plainCost: 1, swampCost: 1 });
     }
     Operate_Power() {
         const powerSpawn = this.room.powerSpawn;
@@ -187,12 +170,7 @@ export default class PowerCreepUsePower extends PowerCreep {
         if(this.room.storage.store[RESOURCE_POWER] < 5000) return false;
         if(powerSpawn.effects && powerSpawn.effects.some(e => e.effect == PWR_OPERATE_POWER && e.ticksRemaining > 0)) return false;
 
-        if (this.pos.inRangeTo(powerSpawn, 3)) {
-            this.usePower(PWR_OPERATE_POWER, powerSpawn);
-        } else {
-            this.moveTo(powerSpawn);
-        }
-        return true;
+        return this.usePowerOrMove(PWR_OPERATE_POWER, powerSpawn, 3, { plainCost: 1, swampCost: 1 });
     }
     
     Shield(pos: RoomPosition) {

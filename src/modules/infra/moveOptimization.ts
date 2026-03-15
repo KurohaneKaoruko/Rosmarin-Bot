@@ -511,14 +511,14 @@ for (let i = OBSTACLE_OBJECT_TYPES.length; i--;){
 }
 
 
-const originMove = Creep.prototype.move;
-const originMoveTo = Creep.prototype.moveTo;
-const originPull = Creep.prototype.pull;
-const originCancelOrder = Creep.prototype.cancelOrder;
+const originMove = Creep.prototype.$move || Creep.prototype.move;
+const originMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
+const originPull = Creep.prototype.$pull || Creep.prototype.pull;
+const originCancelOrder = Creep.prototype.$cancelOrder || Creep.prototype.cancelOrder;
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
-const originPowerMove = powerCreepProto ? powerCreepProto.move : undefined;
-const originPowerMoveTo = powerCreepProto ? powerCreepProto.moveTo : undefined;
-const originPowerCancelOrder = powerCreepProto ? powerCreepProto.cancelOrder : undefined;
+const originPowerMove = powerCreepProto ? (powerCreepProto.$move || powerCreepProto.move) : undefined;
+const originPowerMoveTo = powerCreepProto ? (powerCreepProto.$moveTo || powerCreepProto.moveTo) : undefined;
+const originPowerCancelOrder = powerCreepProto ? (powerCreepProto.$cancelOrder || powerCreepProto.cancelOrder) : undefined;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
 
 function isPowerCreepUnit(unit) {
@@ -2556,6 +2556,19 @@ function findTemporalPath(creep, toPos, ops) {
 }
 
 let findPathIgnoreCondition;
+let findPathStartPos;
+let findPathStartMat;
+
+function applyStartPosWalkable(costMat, roomName) {
+    const start = findPathStartPos;
+    if (!start || start.roomName !== roomName) return costMat;
+    if (costMat.get(start.x, start.y) !== unWalkableCCost) return costMat;
+    if (!findPathStartMat) {
+        findPathStartMat = costMat.clone();
+        findPathStartMat.set(start.x, start.y, 1);
+    }
+    return findPathStartMat;
+}
 function getCostMatrixForFindPath(roomName) {
     if (!(roomName in costMatrixCache)) {
         return emptyCostMatrix;
@@ -2586,6 +2599,7 @@ function roomCallback(roomName) {
             costMat = resultCostMat;
         }
     }
+    costMat = applyStartPosWalkable(costMat, roomName);
     if (findPathAllowPortal && findPathPortalPos && roomName === findPathPortalPos.roomName) {
         if (!findPathPortalMat) {
             // 跨 shard 走 portal：允许把 portal 这一格视为可走，否则路径无法踩上 portal 触发传送
@@ -2606,6 +2620,7 @@ function roomCallbackWithRoute(roomName) {
                 costMat = resultCostMat;
             }
         }
+        costMat = applyStartPosWalkable(costMat, roomName);
         if (findPathAllowPortal && findPathPortalPos && roomName === findPathPortalPos.roomName) {
             if (!findPathPortalMat) {
                 // 跨 shard 走 portal：允许把 portal 这一格视为可走，否则路径无法踩上 portal 触发传送
@@ -2634,6 +2649,8 @@ function findPath(fromPos, toPos, ops) {
     }
 
     findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
+    findPathStartPos = fromPos;
+    findPathStartMat = null;
     userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
     findPathAllowPortal = !!ops._bmAllowPortal;
     findPathPortalPos = findPathAllowPortal ? toPos : null;
@@ -4388,6 +4405,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         return ERR_BUSY;
     }
 
+
     // moveTo 调用临时变量（局部声明，避免跨调用串值）
     const args = resolveMoveToArgs(this, firstArg, secondArg, opts);
     let toPos = args.toPos;
@@ -4531,7 +4549,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
     }
     if (ops.range === undefined) ops.range = 1;
 
-    if (!hasActiveBodypart(this.body, MOVE)) {
+    if (!isPowerCreepUnit(this) && !hasActiveBodypart(this.body, MOVE)) {
         return ERR_NO_BODYPART;
     }
 
@@ -4567,6 +4585,7 @@ function betterMove(target) {
         return ERR_BUSY;
     }
 
+
     if (target && ((target instanceof Creep) || (powerCreepProto && target instanceof PowerCreep))) {
         if (!target.pos.isNearTo(this.pos)) {
             return ERR_NOT_IN_RANGE;
@@ -4578,7 +4597,7 @@ function betterMove(target) {
     if (this.fatigue > 0) {
         return ERR_TIRED;
     }
-    if (!hasActiveBodypart(this.body, MOVE)) {
+    if (!isPowerCreepUnit(this) && !hasActiveBodypart(this.body, MOVE)) {
         return ERR_NO_BODYPART;
     }
     let direction = +target;
@@ -5177,12 +5196,11 @@ function bmSetChangeMoveTo(bool) {
     }, 'moveTo');
     wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
     if (powerCreepProto) {
-        const powerCore = bool ? betterMoveTo : (originPowerMoveTo || originMoveTo);
-        const powerImpl = wrapFn(function (...args) {
-            updateDontPullMeForMoveTo(this);
-            return powerCore.apply(this, args);
-        }, 'moveTo');
-        wrapProtoMethod(powerCreepProto, 'moveTo', '$moveTo', powerImpl);
+        const nativeMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
+        if (nativeMoveTo) {
+            powerCreepProto.$moveTo = nativeMoveTo;
+            powerCreepProto.moveTo = nativeMoveTo;
+        }
     }
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
     testCacheHits = 0;
@@ -5296,7 +5314,11 @@ function bmSetChangeMove(bool) {
         wrapProtoMethod(Creep.prototype, 'move', '$move', wrapFn(betterMove, 'move'));
         wrapProtoMethod(Creep.prototype, 'pull', '$pull', wrapFn(betterPull, 'pull'));
         if (powerCreepProto) {
-            wrapProtoMethod(powerCreepProto, 'move', '$move', wrapFn(betterMove, 'move'));
+            const nativeMove = Creep.prototype.$move || Creep.prototype.move;
+            if (nativeMove) {
+                powerCreepProto.$move = nativeMove;
+                powerCreepProto.move = nativeMove;
+            }
         }
     } else if (bool === false) {
         if (Creep.prototype.$move) {
@@ -5305,8 +5327,11 @@ function bmSetChangeMove(bool) {
         if (Creep.prototype.$pull) {
             Creep.prototype.pull = Creep.prototype.$pull;
         }
-        if (powerCreepProto && powerCreepProto.$move) {
-            powerCreepProto.move = powerCreepProto.$move;
+        if (powerCreepProto) {
+            const nativeMove = Creep.prototype.$move || Creep.prototype.move;
+            if (nativeMove) {
+                powerCreepProto.move = nativeMove;
+            }
         }
     }
     analyzeCPU.move = { sum: 0, calls: 0 };

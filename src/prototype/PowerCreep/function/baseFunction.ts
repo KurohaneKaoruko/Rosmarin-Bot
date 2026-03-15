@@ -2,6 +2,16 @@ import { inWhitelist } from '@/modules/utils/whitelist';
 import { getStructData } from '@/modules/utils/memory';
 
 export default class BaseFunction extends PowerCreep {
+    getOpsTransferTarget(): StructureStorage | StructureTerminal | null {
+        const storage = this.room.storage;
+        if (storage && storage.store.getFreeCapacity(RESOURCE_OPS) > 0) return storage;
+
+        const terminal = this.room.terminal;
+        if (terminal && terminal.store.getFreeCapacity(RESOURCE_OPS) > 0) return terminal;
+
+        return null;
+    }
+
     isWhiteList() {
         return inWhitelist(this.owner.username);
     }
@@ -16,13 +26,9 @@ export default class BaseFunction extends PowerCreep {
     }
     transferOPS(): boolean {
         if (this.store.getFreeCapacity() === 0 && this.store[RESOURCE_OPS] > 200) {
-            const storage = this.room.storage;
-            const terminal = this.room.terminal;
-            // storage 已满时，transfer 会一直 ERR_FULL；此处必须让出 tick 让 Operate_Storage 等技能逻辑继续执行，避免卡死。
-            let target: StructureStorage | StructureTerminal | null = null;
-            if (storage && storage.store.getFreeCapacity(RESOURCE_OPS) > 0) target = storage;
-            else if (terminal && terminal.store.getFreeCapacity(RESOURCE_OPS) > 0) target = terminal;
-            else return false;
+            // 没有可存放多余 OPS 的容器时，必须跳过转存逻辑，把 tick 让给扩容等能力处理。
+            const target = this.getOpsTransferTarget();
+            if (!target) return false;
 
             const halfOps = Math.floor(this.store[RESOURCE_OPS] / 2);
             const free = target.store.getFreeCapacity(RESOURCE_OPS);
@@ -39,13 +45,8 @@ export default class BaseFunction extends PowerCreep {
             return true;
         }
         if(this.ticksToLive < 50 && this.store[RESOURCE_OPS] > 0) {
-            const storage = this.room.storage;
-            const terminal = this.room.terminal;
-            // 临死前转存也要避免 storage 满导致死循环；优先 storage，满则兜底 terminal。
-            let target: StructureStorage | StructureTerminal | null = null;
-            if (storage && storage.store.getFreeCapacity(RESOURCE_OPS) > 0) target = storage;
-            else if (terminal && terminal.store.getFreeCapacity(RESOURCE_OPS) > 0) target = terminal;
-            else return false;
+            const target = this.getOpsTransferTarget();
+            if (!target) return false;
 
             if (this.pos.isNearTo(target)) {
                 const code = this.transfer(target, RESOURCE_OPS);
@@ -72,41 +73,34 @@ export default class BaseFunction extends PowerCreep {
         }
         return false
     }
+    private tryRenewAt(target: StructurePowerSpawn | StructurePowerBank): boolean {
+        if (!this.pos.isNearTo(target)) {
+            this.moveTo(target);
+            return true;
+        }
+
+        const result = this.renew(target);
+        return result === OK || result === ERR_NOT_IN_RANGE;
+    }
     ToRenew(): boolean {
         if(this.ticksToLive > 500) return false;
         if(this.room.controller?.my && this.room.powerSpawn) {
-            const powerSpawn = this.room.powerSpawn;
-            if(this.pos.isNearTo(powerSpawn)) {
-                this.renew(powerSpawn);
-            } else {
-                this.moveTo(powerSpawn);
-            }
-            return true;
+            return this.tryRenewAt(this.room.powerSpawn);
         }
         if(!(/^[EW]\d*[1-9][NS]\d*[1-9]$/.test(this.room.name))) {
             const powerBank = this.room.find(FIND_STRUCTURES, {filter: (s) => s.structureType === STRUCTURE_POWER_BANK})[0] as StructurePowerBank;
             if (powerBank) {
-                if(this.pos.isNearTo(powerBank)) {
-                    this.renew(powerBank);
-                } else {
-                    this.moveTo(powerBank);
-                }
-                return true;
+                return this.tryRenewAt(powerBank);
             }
         }
         if (Game.flags[this.name + '-renew']) {
             const flag = Game.flags[this.name + '-renew'];
             if(this.pos.roomName !== flag.pos.roomName || this.pos.isRoomEdge()) {
                 this.moveTo(flag);
+                return true;
             } else if(this.room.powerSpawn) {
-                const powerSpawn = this.room.powerSpawn;
-                if(this.pos.isNearTo(powerSpawn)) {
-                    this.renew(powerSpawn);
-                } else {
-                    this.moveTo(powerSpawn);
-                }
+                return this.tryRenewAt(this.room.powerSpawn);
             }
-            return true;
         }
         return false;
     }
@@ -151,7 +145,6 @@ export default class BaseFunction extends PowerCreep {
         
         return false;
     }
-
     moveToRoom(roomName: string, opts: MoveToOpts = {}): boolean {
         if (!this.room || this.room.name === roomName) return false;
 

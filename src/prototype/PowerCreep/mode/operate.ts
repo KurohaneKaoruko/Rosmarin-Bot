@@ -1,23 +1,32 @@
+type Step = () => boolean;
+
 export function runOperate(pc: PowerCreep): boolean {
     const name = pc.name;
     const flag = Game.flags[`${name}-move`];
-    if (flag && !pc.pos.inRangeTo(flag, 0)) {
-        pc.Generate_OPS();
-        pc.moveTo(flag, { visualizePathStyle: { stroke: '#ff0000' }, plainCost: 1, swampCost: 1 });
-        return true;
-    }
 
     const flagHome = Game.flags[`${pc.name}-home`];
-    if (flagHome && (pc.room.name != flagHome.pos.roomName || pc.pos.isRoomEdge())) {
-        pc.moveTo(flagHome, { plainCost: 1, swampCost: 1 });
-        return true;
-    }
+    const steps: Step[] = [
+        () => {
+            if (!flag || pc.pos.inRangeTo(flag, 0)) return false;
+            pc.Generate_OPS();
+            pc.moveTo(flag, { visualizePathStyle: { stroke: '#ff0000' }, plainCost: 1, swampCost: 1 });
+            return true;
+        },
+        () => {
+            if (!flagHome) return false;
+            if (pc.room.name === flagHome.pos.roomName && !pc.pos.isRoomEdge()) return false;
+            pc.moveTo(flagHome, { plainCost: 1, swampCost: 1 });
+            return true;
+        },
+        () => pc.PowerEnabled(),
+        () => pc.Generate_OPS(),
+        () => shouldPrioritizeOperateStorage(pc) && pc.Operate_Storage(),
+        () => pc.room.my && pc.transferOPS(),
+        () => pc.room.my && pc.withdrawOPS(),
+    ];
 
-    if (pc.PowerEnabled()) return true;
-    if (pc.Generate_OPS()) return true;
-    if (pc.room.my) {
-        if (pc.transferOPS()) return true;
-        if (pc.withdrawOPS()) return true;
+    for (const step of steps) {
+        if (step()) return true;
     }
 
     const powerHandlers: Array<[PowerConstant, (pc: PowerCreep) => boolean]> = [
@@ -43,6 +52,21 @@ export function runOperate(pc: PowerCreep): boolean {
         if (!canStandOn(pc.room, idleFlag.pos)) return true;
         pc.moveTo(idleFlag, { plainCost: 1, swampCost: 1 });
     }
+    return true;
+}
+
+function shouldPrioritizeOperateStorage(pc: PowerCreep): boolean {
+    if (!pc.room.my) return false;
+
+    const storage = pc.room.storage;
+    if (!storage) return false;
+    if ((pc.store[RESOURCE_OPS] || 0) < 100) return false;
+    if (storage.store.getFreeCapacity() > 5000) return false;
+    if (storage.effects?.some(e => e.effect == PWR_OPERATE_STORAGE && e.ticksRemaining > 0)) return false;
+
+    const power = pc.powers[PWR_OPERATE_STORAGE];
+    if (!power || power.cooldown > 0) return false;
+
     return true;
 }
 
