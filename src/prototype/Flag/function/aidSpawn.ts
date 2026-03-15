@@ -58,6 +58,36 @@ const getFlagSpawnLoad = (
     };
 };
 
+const getGlobalReserverLoad = (targetRoom: string) => {
+    let live = 0;
+    let queued = 0;
+
+    for (const creepName in Game.creeps) {
+        const creep = Game.creeps[creepName];
+        if (!creep || creep.memory?.role !== 'reserver') continue;
+        if (creep.memory?.targetRoom !== targetRoom) continue;
+        live++;
+    }
+
+    for (const roomName in Game.rooms) {
+        const room = Game.rooms[roomName];
+        if (!room || typeof (room as any).getAllMissionFromPool !== 'function') continue;
+        const tasks = room.getAllMissionFromPool('spawn') || [];
+        for (const task of tasks as any[]) {
+            const memory = task?.data?.memory;
+            if (!memory || memory.role !== 'reserver') continue;
+            if (memory.targetRoom !== targetRoom) continue;
+            queued++;
+        }
+    }
+
+    return {
+        live,
+        queued,
+        total: live + queued,
+    };
+};
+
 const isActiveAidBuildFlagCreep = (creep: Creep) => {
     if (creep.spawning) return true;
     const ttl = creep.ticksToLive || 0;
@@ -701,6 +731,10 @@ export default class AidSpawnFunction extends Flag {
         const room = this.getSpawnRoomFromName();
         if (!room) return true;
         const targetRoom = this.pos.roomName;
+
+        const globalLoad = getGlobalReserverLoad(targetRoom);
+        if (globalLoad.total >= 1) return true;
+
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,

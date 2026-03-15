@@ -215,6 +215,34 @@ class ExternalMineSpawner {
         return count;
     }
 
+    private static getQueuedSpawnRoleNumByTargetGlobal(role: string, targetRoomName: string): number {
+        let count = 0;
+        for (const roomName in Game.rooms) {
+            const room = Game.rooms[roomName] as Room | undefined;
+            if (!room || typeof (room as any).getAllMissionFromPool !== 'function') continue;
+            const tasks = room.getAllMissionFromPool('spawn') || [];
+            for (const task of tasks) {
+                const memory = (task as any)?.data?.memory;
+                if (!memory?.role) continue;
+                if (memory.role !== role) continue;
+                if ((memory.targetRoom || '') !== targetRoomName) continue;
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static getActiveRoleNumByTarget(role: string, targetRoomName: string): number {
+        let count = 0;
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep || creep.memory?.role !== role) continue;
+            if (creep.memory?.targetRoom !== targetRoomName) continue;
+            count++;
+        }
+        return count;
+    }
+
     private static getQueuedSpawnRoleNumBySource(sourceRoom: Room, role: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let count = 0;
@@ -327,6 +355,10 @@ class ExternalMineSpawner {
     }
 
     static scout(sourceRoom: Room, targetRoomName: string): boolean {
+        const globalActive = this.getActiveRoleNumByTarget('scout', targetRoomName);
+        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('scout', targetRoomName);
+        if (globalActive + globalQueued > 0) return false;
+
         const activeSourceScouts = Object.values(Game.creeps).filter((creep) =>
             creep &&
             creep.memory?.role === 'scout' &&
@@ -440,6 +472,11 @@ class ExternalMineSpawner {
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
         const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-harvest', targetRoom.name);
         const slotCap = ExternalMineMath.getOutHarvesterSlotCap(targetRoom);
+        if (slotCap > 0) {
+            const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
+            const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+            if (globalActive + globalQueued >= slotCap) return false;
+        }
         const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap);
         if (targetNum <= 0) return false;
         if (outerHarvesters + spawnNum >= targetNum) return false;
@@ -498,9 +535,8 @@ class ExternalMineSpawner {
             targetRoom.controller.reservation.username === sourceRoom.controller.owner.username &&
             targetRoom.controller.reservation.ticksToEnd > 1000) return false;
 
-        const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-        const outerReservers = (creepByTargetRoom['reserver'] || []).length;
-        const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'reserver', targetRoom.name);
+        const outerReservers = this.getActiveRoleNumByTarget('reserver', targetRoom.name);
+        const spawnNum = this.getQueuedSpawnRoleNumByTargetGlobal('reserver', targetRoom.name);
         if (outerReservers + spawnNum >= 1) return false;
 
         sourceRoom.SpawnMissionAdd('', '', this.PRIORITY.reserver, 'reserver', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
