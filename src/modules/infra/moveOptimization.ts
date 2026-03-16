@@ -518,6 +518,55 @@ const originCancelOrder = Creep.prototype.$cancelOrder || Creep.prototype.cancel
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
 
+// per-tick 缓存：房间地形缓冲与己方单位位置索引，降低频繁查找开销
+let terrainCacheTick = -1;
+const terrainCache = Object.create(null);
+
+function resetTerrainCacheIfNeeded() {
+    if (terrainCacheTick === Game.time) return;
+    terrainCacheTick = Game.time;
+    clearObjectKeys(terrainCache);
+}
+
+function getRoomTerrainBuffer(roomName) {
+    resetTerrainCacheIfNeeded();
+    let buf = terrainCache[roomName];
+    if (!buf) {
+        const room = Game.rooms[roomName];
+        if (!room) return null;
+        buf = room.getTerrain().getRawBuffer();
+        terrainCache[roomName] = buf;
+    }
+    return buf;
+}
+
+let creepIndexTick = -1;
+const myCreepIndex = new Map();
+const myPowerCreepIndex = new Map();
+
+function ensureMyCreepIndex() {
+    if (creepIndexTick === Game.time) return;
+    creepIndexTick = Game.time;
+    myCreepIndex.clear();
+    myPowerCreepIndex.clear();
+    for (const name in Game.creeps) {
+        const creep = Game.creeps[name];
+        if (!creep || !creep.my) continue;
+        const formal = formalizeIntentPos(creep.pos);
+        if (typeof formal.x !== 'number' || typeof formal.y !== 'number') continue;
+        myCreepIndex.set(packIntentTile(formal), name);
+    }
+    if (typeof PowerCreep !== 'undefined') {
+        for (const name in Game.powerCreeps) {
+            const pc = Game.powerCreeps[name];
+            if (!pc || !pc.my) continue;
+            const formal = formalizeIntentPos(pc.pos);
+            if (typeof formal.x !== 'number' || typeof formal.y !== 'number') continue;
+            myPowerCreepIndex.set(packIntentTile(formal), name);
+        }
+    }
+}
+
 function getOriginMoveMethod(unit) {
     return originMove;
 }
@@ -1262,7 +1311,7 @@ function getSameRoomEdgeCostMatrix(roomName, ignoreCondition) {
 }
 
 function buildIntentEdgeArray(room) {
-    const terrain = room.getTerrain().getRawBuffer();
+    const terrain = getRoomTerrainBuffer(room.name) || room.getTerrain().getRawBuffer();
     const edgeArray = new Uint16Array(2500 << 3);
     const edgeIdx = new Uint8Array(2500);
     let u;
@@ -1363,7 +1412,7 @@ function initialMap(terrain) {
 }
 
 function getSquadCostMatrix(room, costMatrix) {
-    const terrain = room.getTerrain().getRawBuffer();
+    const terrain = getRoomTerrainBuffer(room.name) || room.getTerrain().getRawBuffer();
     const { squareMap, squadCostMatrix, edgeArray, edgeIdx } = initialMap(terrain);
     let current, u, v, w;
 
@@ -3640,21 +3689,20 @@ const yieldMoveScore = 6;
 
 function defaultCheckTile(tileList) {
     const moveIntents = [];
+    ensureMyCreepIndex();
     for (let i = 0; i < tileList.length; i++) {
         const tile = tileList[i];
         if (checkedTiles.has(tile)) {
             continue;
         }
-        const pos = tile2Pos(tile);
-        const roomName = pos.roomName;
-        const room = Game.rooms[roomName];
-        if (!room) {
-            checkedTiles.set(tile, '');
-            continue;
-        }
-        let creep = room.lookForAt('creep', pos.x, pos.y).filter(c => c.my)[0];
-        if (!creep) {
-            const powerCreep = room.lookForAt('powerCreep', pos.x, pos.y).filter(c => c.my)[0];
+        const creepName = myCreepIndex.get(tile);
+        if (!creepName) {
+            const powerName = myPowerCreepIndex.get(tile);
+            if (!powerName) {
+                checkedTiles.set(tile, '');
+                continue;
+            }
+            const powerCreep = Game.powerCreeps[powerName];
             if (!powerCreep) {
                 checkedTiles.set(tile, '');
                 continue;
@@ -3666,6 +3714,11 @@ function defaultCheckTile(tileList) {
                 isSuper: false,
                 targetList: [{ target: tile, score: ultraMoveScore }]
             });
+            continue;
+        }
+        const creep = Game.creeps[creepName];
+        if (!creep) {
+            checkedTiles.set(tile, '');
             continue;
         }
         checkedTiles.set(tile, creep.name);
@@ -3682,12 +3735,14 @@ function defaultCheckTile(tileList) {
                 target: tile,
                 score: 0
             });
+            const room = creep.room;
+            const roomName = room.name;
             if (!(roomName in costMatrixCache)) {
                 generateCostMatrix(room);
             }
             const CostMatrix = costMatrixCache[roomName].false;
             const edgeArray = costMatrixCache[roomName].edgeArray;
-            const terrain = creep.room.getTerrain().getRawBuffer();
+            const terrain = getRoomTerrainBuffer(roomName) || room.getTerrain().getRawBuffer();
             const startIdx = (py * 50 + px) << 3;
             for (let idx = startIdx; idx < startIdx + 8; idx++) {
                 const v = edgeArray[idx];
@@ -3856,7 +3911,7 @@ function endTickResolve(userIsWorkTile) {
             continue;
         }
         const roomName = creep.room.name;
-        const terrain = creep.room.getTerrain().getRawBuffer();
+        const terrain = getRoomTerrainBuffer(roomName) || creep.room.getTerrain().getRawBuffer();
         const CostMatrix = costMatrixCache[roomName].false;
         const edgeArray = costMatrixCache[roomName].edgeArray;
         const startIdx = (creep.pos.y * 50 + creep.pos.x) << 3;

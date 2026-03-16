@@ -166,9 +166,16 @@ const doWork = function (creep: Creep) {
 
     // 有工地且不处于补能紧急态时，优先建造，避免被控制器缓冲补能长期占用。
     if (hasBuildSite && !urgent) {
-        const buildPriority = creep.room.level <= 3
-            ? [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART]
-            : [STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART];
+        const buildPriority = [
+            STRUCTURE_SPAWN,
+            STRUCTURE_EXTENSION,
+            STRUCTURE_TOWER,
+            STRUCTURE_STORAGE,
+            STRUCTURE_TERMINAL,
+            STRUCTURE_CONTAINER,
+            STRUCTURE_ROAD,
+            STRUCTURE_RAMPART
+        ];
         if (creep.findAndBuild({ priority: buildPriority, range: 3 })) return;
     }
 
@@ -179,9 +186,16 @@ const doWork = function (creep: Creep) {
         return;
     }
 
-    const buildPriority = creep.room.level <= 3
-        ? [STRUCTURE_SPAWN, STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART]
-        : [STRUCTURE_EXTENSION, STRUCTURE_CONTAINER, STRUCTURE_TOWER, STRUCTURE_ROAD, STRUCTURE_RAMPART];
+    const buildPriority = [
+        STRUCTURE_SPAWN,
+        STRUCTURE_EXTENSION,
+        STRUCTURE_TOWER,
+        STRUCTURE_STORAGE,
+        STRUCTURE_TERMINAL,
+        STRUCTURE_CONTAINER,
+        STRUCTURE_ROAD,
+        STRUCTURE_RAMPART
+    ];
     if (creep.findAndBuild({ priority: buildPriority, range: 3 })) return;
 
     if (creep.findAndRepair({

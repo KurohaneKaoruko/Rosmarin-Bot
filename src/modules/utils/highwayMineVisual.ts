@@ -52,6 +52,16 @@ export class HighwayMineVisual {
         if (this.lastRunTick === Game.time) return;
         this.lastRunTick = Game.time;
 
+        const qosLevel =
+            (global as any).qos?.getQoS?.()?.level ||
+            (global as any).QoS?.level ||
+            'normal';
+        const bucket = Number(Game.cpu.bucket || 0);
+        if (qosLevel === 'emergency' || bucket < 1000) return;
+        const drawInterval = (qosLevel === 'constrained' || bucket < 5000)
+            ? Math.max(5, this.MAP_DRAW_INTERVAL)
+            : this.MAP_DRAW_INTERVAL;
+
         const sourceRoomsToDraw = new Set<string>();
 
         if (this.globalEnabled || Game.flags['ALL/mineMapVisual']) {
@@ -73,7 +83,7 @@ export class HighwayMineVisual {
 
         for (const sourceRoom of sourceRoomsToDraw) {
             const lastMap = this.lastMapDrawTickBySource[sourceRoom] ?? -Infinity;
-            if (Game.time - lastMap >= this.MAP_DRAW_INTERVAL) {
+            if (Game.time - lastMap >= drawInterval) {
                 this.lastMapDrawTickBySource[sourceRoom] = Game.time;
                 this.visualizeOnMap(sourceRoom);
             }

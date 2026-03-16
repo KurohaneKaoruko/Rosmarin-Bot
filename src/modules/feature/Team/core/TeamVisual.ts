@@ -8,10 +8,24 @@ const ENABLE_TEAM_MOVE_VISUAL = true
  * 战斗绘制
  */
 export default class TeamVisual {
+    private static shouldDraw(): boolean {
+        const qosLevel =
+            (global as any).qos?.getQoS?.()?.level ||
+            (global as any).QoS?.level ||
+            'normal'
+        const bucket = Number(Game.cpu.bucket || 0)
+        if (qosLevel === 'emergency' || bucket < 1000) return false
+        if (qosLevel === 'constrained' || bucket < 3000) {
+            return Game.time % 2 === 0
+        }
+        return true
+    }
+
     /**
      * 绘制房间所有点位数据
      */
     public static drawRoomArray(roomName: string, roomArray: CostMatrix | RoomArray, color?: string) {
+        if (!this.shouldDraw()) return
         const visual = new RoomVisual(roomName)
         for (let x = 0; x < 50; x++) {
             for (let y = 0; y < 50; y++) {
@@ -25,6 +39,7 @@ export default class TeamVisual {
      * 绘制塔伤分布图
      */
     public static drawTowerDamageMap(roomName: string) {
+        if (!this.shouldDraw()) return
         const damageMap = TeamCache.getTowerDamageMap(roomName)
         this.drawRoomArray(roomName, damageMap, '#ff0000')
     }
@@ -33,6 +48,7 @@ export default class TeamVisual {
      * 绘制小队状态
      */
     public static drawTeamStatus(team: Team) {
+        if (!this.shouldDraw()) return
         const colors: { [status in Exclude<typeof team.status, undefined>]: string } = {
             // 攻击绿色
             attack: '#9af893',
@@ -61,6 +77,7 @@ export default class TeamVisual {
      * 绘制小队每个爬需要的治疗量
      */
     public static drawCreepHealNeed(team: Team) {
+        if (!this.shouldDraw()) return
         team.creeps.forEach((creep) => {
             if (!creep['_heal_need']) {
                 return
@@ -78,6 +95,7 @@ export default class TeamVisual {
      * 绘制目标位置
      */
     public static drawTargets(team: Team) {
+        if (!this.shouldDraw()) return
         team['_targets']?.forEach((target) => {
             if (!target?.pos) return
             target.room?.visual.circle(target.pos.x, target.pos.y, { fill: '#6141cc', radius: 0.5 })
@@ -88,6 +106,7 @@ export default class TeamVisual {
      * 绘制需要避让的位置
      */
     public static drawAvoidObjs(team: Team) {
+        if (!this.shouldDraw()) return
         team['_avoidObjs']?.forEach(({ pos }) => {
             const visual = new RoomVisual(pos.roomName)
             visual.circle(pos.x, pos.y, { fill: '#ff0000', radius: 0.5 })
@@ -98,6 +117,7 @@ export default class TeamVisual {
      * 绘制推进目标点（targetPos）
      */
     public static drawTargetPos(team: Team) {
+        if (!this.shouldDraw()) return
         const tp = team.cache?.targetPos
         if (!tp) return
         const pos = new RoomPosition(tp.x, tp.y, tp.roomName)
@@ -116,6 +136,7 @@ export default class TeamVisual {
      * - 为了在跨房边界也能看清方向，箭头绘制为“短箭头”（不跨房连线）。
      */
     public static drawMoveDirection(team: Team) {
+        if (!this.shouldDraw()) return
         if (!ENABLE_TEAM_MOVE_VISUAL) return
 
         const lastTick = team.cache?.lastMoveTick

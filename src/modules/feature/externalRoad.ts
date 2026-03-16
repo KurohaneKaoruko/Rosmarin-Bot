@@ -1159,6 +1159,12 @@ export class RoadVisual {
     private static lastDrawTickBySource: { [sourceRoom: string]: number } = {};
     private static lastMapDrawTickBySource: { [sourceRoom: string]: number } = {};
 
+    private static perfTick = -1;
+    private static perfDrawInterval = RoadVisual.DRAW_INTERVAL;
+    private static perfMapDrawInterval = RoadVisual.MAP_DRAW_INTERVAL;
+    private static perfAllowLines = true;
+    private static perfEnabled = true;
+
     private static roomStateCache: {
         [roomName: string]: {
             tick: number;
@@ -1176,18 +1182,18 @@ export class RoadVisual {
      * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      */
-    static visualize(sourceRoom: string, targetRoom: string): void {
+    static visualize(sourceRoom: string, targetRoom: string, allowLines = true): void {
         const positions = RoadMemory.getGroupPositions(sourceRoom, targetRoom);
         if (positions.length === 0) return;
 
-        this.drawPositions(positions, sourceRoom);
+        this.drawPositions(positions, sourceRoom, undefined, allowLines);
     }
 
     /**
      * 可视化所有路线
      * @param sourceRoom 源头房间名
      */
-    static visualizeAll(sourceRoom: string): void {
+    static visualizeAll(sourceRoom: string, allowLines = true): void {
         const targets = RoadMemory.getRouteTargets(sourceRoom);
         if (targets.length === 0) return;
 
@@ -1215,11 +1221,16 @@ export class RoadVisual {
         for (const roomName in byRoom) {
             const room = Game.rooms[roomName];
             if (!room) continue;
-            this.drawRoomPositions(room, byRoom[roomName], sharedCount);
+            this.drawRoomPositions(room, byRoom[roomName], sharedCount, allowLines);
         }
     }
 
-    private static drawPositions(positions: RoomPosition[], sourceRoom: string, sharedCount?: { [key: string]: number }): void {
+    private static drawPositions(
+        positions: RoomPosition[],
+        sourceRoom: string,
+        sharedCount?: { [key: string]: number },
+        allowLines = true
+    ): void {
         const byRoom: { [roomName: string]: RoomPosition[] } = {};
         const seenByRoom: { [roomName: string]: Set<string> } = {};
 
@@ -1235,11 +1246,16 @@ export class RoadVisual {
         for (const roomName in byRoom) {
             const room = Game.rooms[roomName];
             if (!room) continue;
-            this.drawRoomPositions(room, byRoom[roomName], sharedCount);
+            this.drawRoomPositions(room, byRoom[roomName], sharedCount, allowLines);
         }
     }
 
-    private static drawRoomPositions(room: Room, roomPositions: RoomPosition[], sharedCount?: { [key: string]: number }): void {
+    private static drawRoomPositions(
+        room: Room,
+        roomPositions: RoomPosition[],
+        sharedCount?: { [key: string]: number },
+        allowLines = true
+    ): void {
         const visual = room.visual;
         const roadIndex = new RoomArray().init();
         for (const pos of roomPositions) roadIndex.set(pos.x, pos.y, 'road');
@@ -1315,7 +1331,7 @@ export class RoadVisual {
             });
         }
 
-        if (roomPositions.length <= 1 || roomPositions.length > this.MAX_ROOM_POSITIONS_FOR_LINES) return;
+        if (!allowLines || roomPositions.length <= 1 || roomPositions.length > this.MAX_ROOM_POSITIONS_FOR_LINES) return;
 
         for (const pos of roomPositions) {
             roadIndex.forNear((x: number, y: number, val: number | string) => {
@@ -1375,6 +1391,8 @@ export class RoadVisual {
      * @description 检查 Flag 触发和启用状态，自动绘制房间内和世界地图可视化
      */
     static run(): void {
+        this.refreshPerfProfile();
+        if (!this.perfEnabled) return;
         const sourceRoomsToDraw = new Set<string>();
 
         if (Game.flags['ALL/roadVisual']) {
@@ -1397,19 +1415,44 @@ export class RoadVisual {
             if (this.enabled[sourceRoom]) sourceRoomsToDraw.add(sourceRoom);
         }
 
+        const drawInterval = this.perfDrawInterval;
+        const mapInterval = this.perfMapDrawInterval;
+        const allowLines = this.perfAllowLines;
+
         for (const sourceRoom of sourceRoomsToDraw) {
             const lastDraw = this.lastDrawTickBySource[sourceRoom] ?? -Infinity;
-            if (Game.time - lastDraw >= this.DRAW_INTERVAL) {
+            if (Game.time - lastDraw >= drawInterval) {
                 this.lastDrawTickBySource[sourceRoom] = Game.time;
-                this.visualizeAll(sourceRoom);
+                this.visualizeAll(sourceRoom, allowLines);
             }
 
             const lastMap = this.lastMapDrawTickBySource[sourceRoom] ?? -Infinity;
-            if (Game.time - lastMap >= this.MAP_DRAW_INTERVAL) {
+            if (Game.time - lastMap >= mapInterval) {
                 this.lastMapDrawTickBySource[sourceRoom] = Game.time;
                 this.visualizeOnMap(sourceRoom);
             }
         }
+    }
+
+    private static refreshPerfProfile(): void {
+        if (this.perfTick === Game.time) return;
+        this.perfTick = Game.time;
+
+        const qosLevel =
+            (global as any).qos?.getQoS?.()?.level ||
+            (global as any).QoS?.level ||
+            'normal';
+        const bucket = Number(Game.cpu.bucket || 0);
+        if (qosLevel === 'emergency' || bucket < 1000) {
+            this.perfEnabled = false;
+            return;
+        }
+
+        this.perfEnabled = true;
+        const constrained = qosLevel === 'constrained' || bucket < 5000;
+        this.perfDrawInterval = constrained ? Math.max(5, this.DRAW_INTERVAL) : this.DRAW_INTERVAL;
+        this.perfMapDrawInterval = constrained ? Math.max(5, this.MAP_DRAW_INTERVAL) : this.MAP_DRAW_INTERVAL;
+        this.perfAllowLines = !constrained && bucket >= 5000;
     }
 
     /**

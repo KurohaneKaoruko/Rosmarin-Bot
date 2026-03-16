@@ -9,11 +9,18 @@ const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)
 const LONG_STAT_INTERVAL = 100;     // 长周期统计间隔 (ticks) - 用于升级速度、市场均价等
 const CPU_AVG_WINDOW = 1000;        // CPU 平均值统计窗口 (ticks)
 const MARKET_ORDER_LIMIT = 10;      // 市场订单统计数量 (top N)
+const HUD_INTERVAL_NORMAL = 1;      // HUD 正常刷新间隔
+const HUD_INTERVAL_CONSTRAINED = 5; // HUD 在低桶/节流时的刷新间隔
+const HUD_MIN_BUCKET = 1200;        // HUD 最低桶保护
+const TARGET_REFRESH_INTERVAL = 5;  // HUD 目标缓存刷新间隔 (ticks)
+
+let cachedStatTargets: string[] = [];
+let cachedStatTargetsTick = -1;
 
 export const Statistics = {
     end: function() {
         if (Game.cpu.bucket < 2000 || (global as any).QoS?.level === 'emergency') return;
-        const targets = getStatsTargets();
+        const targets = getStatsTargetsCached();
         if (targets.length <= 0) return;
         if (!Memory.stats) Memory.stats = {}
 
@@ -26,7 +33,9 @@ export const Statistics = {
             updateCreditInfo();    // credit变动情况
         }
 
-        drawStatsHUD(targets);
+        if (shouldDrawStatsHUD()) {
+            drawStatsHUD(targets);
+        }
     }
 }
 
@@ -205,6 +214,28 @@ function updateCreditInfo() {
         Memory.stats.energyAverageSellPrice = averageSellPrice;
     }
     
+}
+
+function getStatsTargetsCached(): string[] {
+    if (cachedStatTargetsTick !== -1 && Game.time - cachedStatTargetsTick < TARGET_REFRESH_INTERVAL) {
+        return cachedStatTargets;
+    }
+    cachedStatTargetsTick = Game.time;
+    cachedStatTargets = getStatsTargets();
+    return cachedStatTargets;
+}
+
+function shouldDrawStatsHUD(): boolean {
+    const qosLevel =
+        (global as any).qos?.getQoS?.()?.level ||
+        (global as any).QoS?.level ||
+        'normal';
+    const bucket = Number(Game.cpu.bucket || 0);
+    if (qosLevel === 'emergency' || bucket < HUD_MIN_BUCKET) return false;
+    const interval = (qosLevel === 'constrained' || bucket < 5000)
+        ? HUD_INTERVAL_CONSTRAINED
+        : HUD_INTERVAL_NORMAL;
+    return interval <= 1 || (Game.time % interval === 0);
 }
 
 function getStatsTargets(): string[] {
