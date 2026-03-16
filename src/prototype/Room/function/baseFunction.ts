@@ -281,7 +281,7 @@ export default class BaseFunction extends Room {
             const interval = this.memory.energyState === 'CRITICAL' ? 2 : 5;
             if (Game.time - this.memory.energyStateTick < interval) return this.memory.energyState;
         }
-        const { cap, avail, containerEnergy, linkEnergy, totalEnergy } = this.getEnergyProfile();
+        const { cap, avail, totalEnergy } = this.getEnergyProfile();
         const capRef = Math.max(300, cap);
         const creepNum = this.getCreepNum();
         const logisticNum =
@@ -289,13 +289,19 @@ export default class BaseFunction extends Room {
             (creepNum['transport'] || 0) +
             (creepNum['manager'] || 0) +
             (creepNum['universal'] || 0);
+        const spawnNeedsEnergy = this.CheckSpawnAndTower();
+        const energyRatio = capRef > 0 ? (avail / capRef) : 0;
+        const hasStoredEnergy = totalEnergy >= capRef;
+        const logisticThin = logisticNum <= 1;
 
         type EnergyState = NonNullable<RoomMemory['energyState']>;
         let state: EnergyState;
         if (avail < Math.min(300, capRef)) {
             state = 'CRITICAL';
-        } else if (logisticNum === 0 && this.CheckSpawnAndTower() && (containerEnergy + linkEnergy) >= capRef) {
+        } else if (logisticNum === 0 && spawnNeedsEnergy && hasStoredEnergy) {
             state = 'CRITICAL';
+        } else if (spawnNeedsEnergy && hasStoredEnergy && logisticThin && energyRatio < 0.35) {
+            state = energyRatio < 0.2 ? 'CRITICAL' : 'LOW';
         } else if (totalEnergy < capRef * 5) {
             state = 'LOW';
         } else if (totalEnergy >= capRef * 50) {

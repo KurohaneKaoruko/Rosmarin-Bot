@@ -10,4 +10,7 @@ interface Flag {
 
     // 旗帜触发孵化（CLAIM/RESERVE/AID-*）
     handleAidSpawnFlag(): boolean;
+
+    // 房间内冲级/刷墙旗帜（UP-UPGRADE/UP-REPAIR）
+    handleUpSpawnFlag(): boolean;
 }

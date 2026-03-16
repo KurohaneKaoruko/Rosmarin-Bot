@@ -3,7 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/modules/utils/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
-import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMissionConditions';
+import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMission';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
 
