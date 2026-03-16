@@ -8,8 +8,11 @@ import { getAutoData, getMissionPools, getRoomData } from '@/modules/utils/memor
 export const roomRunner = function (room: Room) {
     if (!room) return;
 
+    // 更新建筑缓存(对所有有视野的房间)
+    if (Game.time % 10 === 0) room.update();
+
     // 只运行自己的房间
-    if (!room.controller?.my) return;
+    if (!room.my) return;
 
     let roomMem = getRoomData(room.name) as any;
     if (!roomMem) {
@@ -27,9 +30,6 @@ export const roomRunner = function (room: Room) {
 
     if (!(roomMem?.mode)) roomMem.mode = 'main';
     if (roomMem.mode === 'stop') return;
-
-    // 定期更新建筑缓存
-    if (Game.time % 10 === 0) room.update();
 
     const roomMemory = room.memory as any;
     if (!roomMemory._init) {

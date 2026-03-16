@@ -516,27 +516,13 @@ const originMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
 const originPull = Creep.prototype.$pull || Creep.prototype.pull;
 const originCancelOrder = Creep.prototype.$cancelOrder || Creep.prototype.cancelOrder;
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
-// PowerCreep 需要保留原始方法备份（热重载时避免 move 意图递归）
-const originPowerMove = powerCreepProto ? (powerCreepProto.$move || powerCreepProto.move) : undefined;
-const originPowerMoveTo = powerCreepProto ? (powerCreepProto.$moveTo || powerCreepProto.moveTo) : undefined;
-const originPowerCancelOrder = powerCreepProto ? (powerCreepProto.$cancelOrder || powerCreepProto.cancelOrder) : undefined;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
 
-function isPowerCreepUnit(unit) {
-    return !!powerCreepProto && unit instanceof PowerCreep;
-}
-
 function getOriginMoveMethod(unit) {
-    if (isPowerCreepUnit(unit)) {
-        return (powerCreepProto && powerCreepProto.$move) || originPowerMove || originMove;
-    }
     return originMove;
 }
 
 function getOriginCancelOrderMethod(unit) {
-    if (isPowerCreepUnit(unit)) {
-        return (powerCreepProto && powerCreepProto.$cancelOrder) || originPowerCancelOrder || originCancelOrder;
-    }
     return originCancelOrder;
 }
 
@@ -3668,11 +3654,19 @@ function defaultCheckTile(tileList) {
         }
         let creep = room.lookForAt('creep', pos.x, pos.y).filter(c => c.my)[0];
         if (!creep) {
-            creep = room.lookForAt('powerCreep', pos.x, pos.y).filter(c => c.my)[0];
-            if (!creep) {
+            const powerCreep = room.lookForAt('powerCreep', pos.x, pos.y).filter(c => c.my)[0];
+            if (!powerCreep) {
                 checkedTiles.set(tile, '');
                 continue;
             }
+            // PowerCreep 不参与移动优化，只占位不让步
+            checkedTiles.set(tile, powerCreep.name);
+            moveIntents.push({
+                start: powerCreep.name,
+                isSuper: false,
+                targetList: [{ target: tile, score: ultraMoveScore }]
+            });
+            continue;
         }
         checkedTiles.set(tile, creep.name);
         const intent = [];
@@ -3926,6 +3920,7 @@ function endTickResolve(userIsWorkTile) {
                     creep = allPowerCreeps[start];
                 }
                 if (!creep) continue;
+                if (powerCreepProto && creep instanceof PowerCreep) continue;
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {
@@ -3938,6 +3933,7 @@ function endTickResolve(userIsWorkTile) {
                     creep = allPowerCreeps[start];
                 }
                 if (!creep) continue;
+                if (powerCreepProto && creep instanceof PowerCreep) continue;
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {
@@ -3953,6 +3949,7 @@ function endTickResolve(userIsWorkTile) {
                     creep = allPowerCreeps[squad[i]];
                 }
                 if (!creep) continue;
+                if (powerCreepProto && creep instanceof PowerCreep) continue;
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target[i]);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {
@@ -3970,31 +3967,6 @@ function endTickResolve(userIsWorkTile) {
         analyzeCPU.endTickResolve.calls++;
         analyzeCPU.endTickResolve.moveCount += moveCount;
         analyzeCPU.endTickResolve.sum += Game.cpu.getUsed() - resolveStartTime - moveCount * 0.2;
-    }
-}
-
-// ----------------------------------------------------------------------------
-// 12.1) PowerCreep 原型方法保护（热重载时防止 moveTo/endTickResolve 递归）
-// ----------------------------------------------------------------------------
-function ensurePowerCreepBaseMethods() {
-    if (!powerCreepProto) return;
-    if (!powerCreepProto.$move) {
-        const baseMove = originPowerMove || powerCreepProto.move;
-        powerCreepProto.$move = (baseMove === powerCreepProto.move && baseMove !== originMove)
-            ? originMove
-            : baseMove;
-    }
-    if (!powerCreepProto.$moveTo) {
-        const baseMoveTo = originPowerMoveTo || powerCreepProto.moveTo;
-        powerCreepProto.$moveTo = (baseMoveTo === powerCreepProto.moveTo && baseMoveTo !== originMoveTo)
-            ? originMoveTo
-            : baseMoveTo;
-    }
-    if (!powerCreepProto.$cancelOrder) {
-        const baseCancel = originPowerCancelOrder || powerCreepProto.cancelOrder;
-        powerCreepProto.$cancelOrder = (baseCancel === powerCreepProto.cancelOrder && baseCancel !== originCancelOrder)
-            ? originCancelOrder
-            : baseCancel;
     }
 }
 
@@ -5221,23 +5193,12 @@ function bmDeletePathInRoom(roomName) {
 
 function bmSetChangeMoveTo(bool) {
     config.changeMoveTo = !!bool;
-    ensurePowerCreepBaseMethods();
     const creepCore = bool ? betterMoveTo : originMoveTo;
     const creepImpl = wrapFn(function (...args) {
         updateDontPullMeForMoveTo(this);
         return creepCore.apply(this, args);
     }, 'moveTo');
     wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
-    if (powerCreepProto) {
-        if (bool) {
-            powerCreepProto.moveTo = wrapFn(betterMoveTo, 'moveTo');
-        } else if (bool === false) {
-            const powerMoveTo = powerCreepProto.$moveTo || originPowerMoveTo || originMoveTo;
-            if (powerMoveTo) {
-                powerCreepProto.moveTo = powerMoveTo;
-            }
-        }
-    }
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
     testCacheHits = 0;
     testCacheMiss = 0;
@@ -5346,25 +5307,15 @@ function bmPrint() {
 
 function bmSetChangeMove(bool) {
     config.changeMove = !!bool;
-    ensurePowerCreepBaseMethods();
     if (bool) {
         wrapProtoMethod(Creep.prototype, 'move', '$move', wrapFn(betterMove, 'move'));
         wrapProtoMethod(Creep.prototype, 'pull', '$pull', wrapFn(betterPull, 'pull'));
-        if (powerCreepProto) {
-            powerCreepProto.move = wrapFn(betterMove, 'move');
-        }
     } else if (bool === false) {
         if (Creep.prototype.$move) {
             Creep.prototype.move = Creep.prototype.$move;
         }
         if (Creep.prototype.$pull) {
             Creep.prototype.pull = Creep.prototype.$pull;
-        }
-        if (powerCreepProto) {
-            const powerMove = powerCreepProto.$move || originPowerMove || originMove;
-            if (powerMove) {
-                powerCreepProto.move = powerMove;
-            }
         }
     }
     analyzeCPU.move = { sum: 0, calls: 0 };
@@ -5790,10 +5741,6 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
 }
 
 wrapProtoMethod(Creep.prototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
-if (powerCreepProto) {
-    ensurePowerCreepBaseMethods();
-    powerCreepProto.cancelOrder = betterCancelOrder;
-}
 
 /**
  * moveTo 前更新 dontPullMe 状态

@@ -6,26 +6,35 @@ import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
+// 目标房间列表的类型：普通外矿（能量）与中心房（SK/中心区）外矿。
 type OutMineTargetListKey = 'energy' | 'centerRoom';
+
+// 单次外矿运行的状态快照，用于控制节奏与副作用（造路/侦查等）。
 type OutMineRunState = {
     qosLevel: string;
     canRunSecondaryAction: boolean;
 };
 
+// 外矿逻辑的执行间隔设置（不同 QoS 下采用不同的 tick 间隔）。
 export type ExternalMineTiming = {
     normalInterval: number;
     constrainedInterval: number;
 };
 
+// 外矿运行的状态工具：QoS、房间模式、节流、以及视觉渲染。
 class ExternalMineState {
+    // 从全局 QoS 中获取当前级别，缺失时默认 normal。
     static getQosLevel(): string {
         return global.qos.getQoS()?.level || 'normal';
     }
 
+    // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
     static getRoomMode(room: Room): string {
         return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
     }
 
+    // 根据 QoS 与间隔判断本 tick 是否运行，返回运行状态快照。
+    // emergency 时直接停机，constrained 时拉长间隔且限制副作用操作频率。
     static getRunState(timing: ExternalMineTiming): OutMineRunState | null {
         const qosLevel = this.getQosLevel();
         if (qosLevel === 'emergency') return null;
@@ -38,6 +47,7 @@ class ExternalMineState {
         return { qosLevel, canRunSecondaryAction };
     }
 
+    // 从外矿配置中读取目标房间列表，并去重/过滤非法项。
     static getUniqueTargets(sourceRoom: Room, key: OutMineTargetListKey): string[] {
         const targets = getOutMineData(sourceRoom.name)?.[key];
         if (!Array.isArray(targets) || targets.length <= 0) return [];
@@ -51,6 +61,7 @@ class ExternalMineState {
         return { sourceRoom: sourceRoomName, targetRoom: targetRoomName } as CreepMemory;
     }
 
+    // 受 QoS 限制且满足等级时，周期性触发外矿道路建造。
     static tryBuildRoad(
         sourceRoom: Room,
         targetRoom: Room,
@@ -63,23 +74,60 @@ class ExternalMineState {
         RoadBuilder.createRoadSites(sourceRoom, targetRoom);
     }
 
+    // 外矿相关的可视化输出。
     static runVisuals(): void {
         RoadVisual.run();
         HighwayMineVisual.run();
     }
 }
 
+// 外矿的数学/容量估算集中在此处，避免散落的魔数。
 class ExternalMineMath {
+    // 每个 RCL 对应的外矿单源工作量估计（单位：能量/tick）。
     private static readonly HARVEST_PER_SOURCE = [0, 2, 4, 6, 8, 8, 10, 20, 20] as const;
+    // 每个 RCL 对应的单个运输队列的承载能力估计（单位：能量）。
     private static readonly CARRY_CAPACITY = [0, 100, 150, 200, 400, 1000, 1000, 1300, 1600] as const;
+    // 期望单源总 WORK 数量（用于估算采集人数）。
     private static readonly SOURCE_TARGET_WORK = 5;
+    // 单源最多允许的外矿采集者上限。
     private static readonly MAX_HARVESTERS_PER_SOURCE = 3;
+    // high/rush 模式下外矿经济单位使用较小体型的能量预算上限（便于多数量）。
+    private static readonly SMALL_BODY_ENERGY_CAP_HIGH = 650;
+    private static readonly SMALL_BODY_ENERGY_CAP_RUSH = 650;
+    // 仅这些外矿运输角色应用“小体型”策略，避免影响采集与战斗单位。
+    private static readonly SMALL_BODY_ROLE_SET = new Set<string>(['out-carry', 'out-car']);
+    // 允许占位在采集点旁的可通行结构类型。
     private static readonly WALKABLE_SOURCE_STRUCTURE_SET = new Set<StructureConstant>([
         STRUCTURE_CONTAINER,
         STRUCTURE_ROAD,
         STRUCTURE_RAMPART,
     ]);
 
+    private static getModeLimitedEnergyBudget(sourceRoom: Room, role: string, upbody?: boolean): number | null {
+        if (upbody) return null;
+        if (!this.SMALL_BODY_ROLE_SET.has(role)) return null;
+        const mode = ExternalMineState.getRoomMode(sourceRoom);
+        if (mode !== 'high' && mode !== 'rush') return null;
+        const cap = mode === 'rush' ? this.SMALL_BODY_ENERGY_CAP_RUSH : this.SMALL_BODY_ENERGY_CAP_HIGH;
+        const roomCap = sourceRoom.energyCapacityAvailable || 0;
+        const budget = Math.min(cap, roomCap > 0 ? roomCap : cap);
+        return budget > 0 ? budget : null;
+    }
+
+    // 获取 high/rush 模式下的外矿角色体型配置；非高功耗模式返回 null。
+    static getModeLimitedBodyConfig(
+        sourceRoom: Room,
+        role: string,
+        upbody?: boolean
+    ): ((BodyPartConstant | number)[])[] | null {
+        const budget = this.getModeLimitedEnergyBudget(sourceRoom, role, upbody);
+        if (!budget) return null;
+        const body = sourceRoom.GetRoleBodys(role, upbody, budget);
+        if (!Array.isArray(body) || body.length === 0) return null;
+        return body as ((BodyPartConstant | number)[])[];
+    }
+
+    // 判断外矿资源点旁某个坐标是否可站立（不在边界、非墙、结构阻塞）。
     private static isStandableOutmineSourcePos(room: Room, x: number, y: number): boolean {
         const terrain = room.getTerrain();
         if (x <= 0 || x >= 49 || y <= 0 || y >= 49) return false;
@@ -100,6 +148,7 @@ class ExternalMineMath {
         return true;
     }
 
+    // 计算并缓存某个 Source 周围可站立格数，用于采集者数量上限估计。
     private static getOutmineSourceStandableCount(room: Room, source: Source): number {
         if (!room.memory.sourcePosCount) room.memory.sourcePosCount = {};
         const cached = room.memory.sourcePosCount[source.id];
@@ -121,6 +170,7 @@ class ExternalMineMath {
         return walkable;
     }
 
+    // 获取目标房间内所有资源点的可站立格总数（作为全局采集上限）。
     static getOutHarvesterSlotCap(targetRoom: Room): number {
         const sources = (targetRoom.source || targetRoom.find(FIND_SOURCES) || []) as Source[];
         if (sources.length <= 0) return 0;
@@ -132,6 +182,7 @@ class ExternalMineMath {
         return totalSlots;
     }
 
+    // 计算外矿采集者的 WORK 数量，支持 upbody（固定高配）或读取配置。
     static getOutHarvesterWorkParts(sourceRoom: Room, upbody?: boolean): number {
         if (upbody) return 16;
         const body = sourceRoom.GetRoleBodys('out-harvest');
@@ -147,6 +198,26 @@ class ExternalMineMath {
         return Math.max(1, workParts);
     }
 
+    // 根据体型配置估算 out-carry 的单体承载能力。
+    static getOutCarryCapacity(sourceRoom: Room): number {
+        const modeBody = this.getModeLimitedBodyConfig(sourceRoom, 'out-carry');
+        const body = modeBody || sourceRoom.GetRoleBodys('out-carry');
+        if (Array.isArray(body) && body.length > 0) {
+            let carryParts = 0;
+            for (const part of body as ((BodyPartConstant | number)[])[]) {
+                if (!Array.isArray(part) || part.length < 2) continue;
+                if (part[0] !== CARRY) continue;
+                if (typeof part[1] !== 'number') continue;
+                carryParts += part[1];
+            }
+            const capacity = carryParts * 50;
+            if (capacity > 0) return capacity;
+        }
+        const lv = Math.max(1, Math.min(8, sourceRoom.level));
+        return this.CARRY_CAPACITY[lv];
+    }
+
+    // 根据源数、WORK 能力与站位上限，估算采集者目标数量。
     static calcOutHarvesterTargetNum(sourceRoom: Room, sourceNum: number, upbody?: boolean, slotCap?: number): number {
         if (sourceNum <= 0) return 0;
         const workParts = this.getOutHarvesterWorkParts(sourceRoom, upbody);
@@ -157,7 +228,14 @@ class ExternalMineMath {
         return targetNum;
     }
 
-    static calcEnergyOutCarryTarget(sourceRoom: Room, targetRoomName: string, sourceNum: number, allowWorkCarry: boolean): number {
+    // 根据距离与吞吐估算运输数量，考虑 RCL 运输能力、往返时间与产量。
+    static calcEnergyOutCarryTarget(
+        sourceRoom: Room,
+        targetRoomName: string,
+        sourceNum: number,
+        allowWorkCarry: boolean,
+        carryCapacityOverride?: number
+    ): number {
         const lv = Math.max(1, Math.min(8, sourceRoom.level));
         const baseNum = allowWorkCarry
             ? sourceNum
@@ -169,7 +247,9 @@ class ExternalMineMath {
 
         const harvestPerSource = this.HARVEST_PER_SOURCE[lv];
         const estimatedIncomePerTick = harvestPerSource * sourceNum;
-        const carryCapacity = this.CARRY_CAPACITY[lv];
+        const carryCapacity = (carryCapacityOverride && carryCapacityOverride > 0)
+            ? carryCapacityOverride
+            : this.CARRY_CAPACITY[lv];
         const throughputNeed = Math.ceil((estimatedIncomePerTick * roundTripTicks) / Math.max(50, carryCapacity));
         const dynamicNum = throughputNeed + 1;
 
@@ -178,7 +258,9 @@ class ExternalMineMath {
     }
 }
 
+// 外矿相关的刷怪决策与刷怪队列维护。
 class ExternalMineSpawner {
+    // 各角色任务优先级，统一从角色配置读取。
     private static readonly PRIORITY = {
         reserver: RoleData['reserver'].level,
         harvest: RoleData['out-harvest'].level,
@@ -188,6 +270,7 @@ class ExternalMineSpawner {
         mineral: RoleData['out-mineral'].level,
     } as const;
 
+    // 用于统一修正 spawn 任务优先级的映射（兼容别名）。
     private static readonly ROLE_PRIORITY_BY_ROLE: Record<string, number> = {
         scout: this.PRIORITY.scout,
         reserver: this.PRIORITY.reserver,
@@ -198,8 +281,10 @@ class ExternalMineSpawner {
         'out-mineral': this.PRIORITY.mineral,
     };
 
+    // 触发“双人防御”模式的最低 RCL。
     private static readonly DOUBLE_DEFEND_MIN_LEVEL = 7;
 
+    // 统计某房间针对某目标房间的排队刷怪数量（仅本房间任务池）。
     private static getQueuedSpawnRoleNumByTarget(sourceRoom: Room, role: string, targetRoomName: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let count = 0;
@@ -215,6 +300,7 @@ class ExternalMineSpawner {
         return count;
     }
 
+    // 统计全局所有房间针对某目标房间的排队刷怪数量（用于避免重复刷 scout 等）。
     private static getQueuedSpawnRoleNumByTargetGlobal(role: string, targetRoomName: string): number {
         let count = 0;
         for (const roomName in Game.rooms) {
@@ -232,6 +318,7 @@ class ExternalMineSpawner {
         return count;
     }
 
+    // 统计全局某角色在目标房间的存活数量。
     private static getActiveRoleNumByTarget(role: string, targetRoomName: string): number {
         let count = 0;
         for (const creepName in Game.creeps) {
@@ -243,6 +330,7 @@ class ExternalMineSpawner {
         return count;
     }
 
+    // 统计某房间自身任务池里某角色排队数量（不关心 targetRoom）。
     private static getQueuedSpawnRoleNumBySource(sourceRoom: Room, role: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let count = 0;
@@ -256,11 +344,13 @@ class ExternalMineSpawner {
         return count;
     }
 
+    // 判断 creep 记录的 sourceRoom 是否与期望源房一致。
     private static isSameSourceRoom(creepSourceRoom: string | undefined, sourceRoomName: string): boolean {
         if (!creepSourceRoom) return false;
         return creepSourceRoom === sourceRoomName;
     }
 
+    // 目标房中是否已有“来自本源房”的外矿采集者（用于运输前置）。
     private static hasActiveOutHarvesterByTargetName(sourceRoom: Room, targetRoomName: string): boolean {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoomName);
         const activeHarvesters = (creepByTargetRoom['out-harvest'] || [])
@@ -273,6 +363,7 @@ class ExternalMineSpawner {
         return activeHarvesters > 0;
     }
 
+    // 清理指定目标房的 out-carry/out-car 刷怪任务，返回移除数量。
     private static clearTargetOutCarrySpawnMissions(sourceRoom: Room, targetRoomName: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let removed = 0;
@@ -290,10 +381,12 @@ class ExternalMineSpawner {
         return removed;
     }
 
+    // 目标房是否已有采集者（本源房视角）。
     private static hasActiveOutHarvester(sourceRoom: Room, targetRoom: Room): boolean {
         return this.hasActiveOutHarvesterByTargetName(sourceRoom, targetRoom.name);
     }
 
+    // 清理：当目标房没有采集者时，移除其 carry 任务，避免浪费刷怪。
     static pruneInvalidOutCarrySpawnMissions(sourceRoom: Room): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         const invalidTargets = new Set<string>();
@@ -317,6 +410,7 @@ class ExternalMineSpawner {
         return removed;
     }
 
+    // 清理历史遗留的 aggressiveCarry 任务（可能导致经济异常）。
     static pruneLegacyAggressiveOutCarrySpawnMissions(sourceRoom: Room): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         const removeIds: string[] = [];
@@ -341,6 +435,7 @@ class ExternalMineSpawner {
         return removeIds.length;
     }
 
+    // 统一修正外矿相关任务的优先级，避免因历史任务导致优先级偏低。
     static normalizeEconomicPriority(room: Room): void {
         const tasks = room.getAllMissionFromPool('spawn') || [];
         for (const task of tasks) {
@@ -354,6 +449,7 @@ class ExternalMineSpawner {
         }
     }
 
+    // 侦查：全局与本房均只允许 1 个 scout，以避免重复探路。
     static scout(sourceRoom: Room, targetRoomName: string): boolean {
         const globalActive = this.getActiveRoleNumByTarget('scout', targetRoomName);
         const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('scout', targetRoomName);
@@ -377,6 +473,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 常规外矿攻击者（单目标房最多 1 个）。
     static attack(sourceRoom: Room, targetRoom: Room): boolean {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerAttackers = (creepByTargetRoom['out-attack'] || [])
@@ -388,6 +485,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 远程攻击者（单目标房最多 1 个）。
     static ranged(sourceRoom: Room, targetRoom: Room): boolean {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerRanged = (creepByTargetRoom['out-ranged'] || [])
@@ -399,6 +497,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 外矿矿物采集（需要 RCL6+ 且单房仅 1 个）。
     static mineral(sourceRoom: Room, targetRoom: Room): boolean {
         if (sourceRoom.level < 6) return false;
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
@@ -410,6 +509,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 常规防守：根据敌人种类/数量派遣 out-defend 或 out-invader。
     static defend(sourceRoom: Room, targetRoom: Room, hostiles: Creep[]): boolean {
         const invaderCore = targetRoom.find(FIND_STRUCTURES, {
             filter: (structure) => structure.structureType === STRUCTURE_INVADER_CORE
@@ -445,6 +545,7 @@ class ExternalMineSpawner {
         return false;
     }
 
+    // 高等级的“双人防守”编队（out-2attack + out-2heal）。
     static doubleDefend(sourceRoom: Room, targetRoom: Room, hostiles: Creep[]): boolean {
         if (hostiles.length === 0) return false;
 
@@ -466,6 +567,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 外矿采集者：根据源数、站位上限与 body 配置决定目标数量。
     static harvester(sourceRoom: Room, targetRoom: Room, sourceNum: number, upbody?: boolean): boolean {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerHarvesters = (creepByTargetRoom['out-harvest'] || [])
@@ -490,6 +592,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 外矿运输者：依赖采集者存在；allowWorkCarry 时允许先出 work+carry 的过渡车。
     static carry(sourceRoom: Room, targetRoom: Room, num: number, allowWorkCarry = true): boolean {
         if (!this.hasActiveOutHarvester(sourceRoom, targetRoom)) {
             this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom.name);
@@ -504,29 +607,32 @@ class ExternalMineSpawner {
 
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
         const spawnCarNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-car', targetRoom.name);
+        const modeCarryBody = ExternalMineMath.getModeLimitedBodyConfig(sourceRoom, 'out-carry');
+        const modeCarBody = ExternalMineMath.getModeLimitedBodyConfig(sourceRoom, 'out-car');
 
         if (!allowWorkCarry) {
             const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
             if (totalCarry < num) {
-                sourceRoom.SpawnMissionAdd('OC', [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+                sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
                 return true;
             }
             return false;
         }
 
         if (outerCar + spawnCarNum === 0) {
-            sourceRoom.SpawnMissionAdd('OC', [], this.PRIORITY.carry, 'out-car', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            sourceRoom.SpawnMissionAdd('OC', modeCarBody || [], this.PRIORITY.carry, 'out-car', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
         if (outerCarry + spawnCarryNum < num - 1) {
-            sourceRoom.SpawnMissionAdd('OC', [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
         return false;
     }
 
+    // 外矿预定：仅在目标未被占领、且自家预定不足时派遣。
     static reserver(sourceRoom: Room, targetRoom: Room): boolean {
         if (!targetRoom.controller || targetRoom.controller.my) return false;
         if (sourceRoom.controller.level < 3) return false;
@@ -543,6 +649,7 @@ class ExternalMineSpawner {
         return true;
     }
 
+    // 外矿建造者：仅为道路/容器施工存在时派遣。
     static builder(sourceRoom: Room, targetRoom: Room): boolean {
         const constructionSite = targetRoom.find(FIND_CONSTRUCTION_SITES, {
             filter: (site) => site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER
@@ -562,7 +669,9 @@ class ExternalMineSpawner {
     }
 }
 
+// 外矿入口类：调度能量外矿与中心房外矿的整体流程。
 export class ExternalMine {
+    // 每个 tick 的准备阶段：防守与战争态短路、清理无效任务、修正优先级。
     static prepareRoom(room: Room): string | null {
         if (room.memory.defend) return null;
         if (Memory['warmode']) return null;
@@ -575,14 +684,17 @@ export class ExternalMine {
         return qosLevel;
     }
 
+    // 外矿相关可视化。
     static runVisuals(): void {
         ExternalMineState.runVisuals();
     }
 
+    // 对外暴露房间模式读取接口（兼容旧调用）。
     static getRoomMode(room: Room): string {
         return ExternalMineState.getRoomMode(room);
     }
 
+    // 常规外矿：能量采集、运输、防守、预定与建造。
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
@@ -643,7 +755,8 @@ export class ExternalMine {
             ExternalMineSpawner.harvester(room, targetRoom, sourceNum);
 
             const allowWorkCarry = room.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
-            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, sourceNum, allowWorkCarry);
+            const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
+            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, sourceNum, allowWorkCarry, carryCapacity);
             ExternalMineSpawner.carry(room, targetRoom, carryNum, allowWorkCarry);
 
             if (runState.qosLevel === 'normal') {
@@ -652,6 +765,7 @@ export class ExternalMine {
         }
     }
 
+    // 中心房外矿：包含 SK/中心房的高强度采集与矿物采集逻辑。
     static runCenter(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
@@ -701,7 +815,8 @@ export class ExternalMine {
             }
 
             const allowWorkCarry = room.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
-            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, centerSourceNum, allowWorkCarry);
+            const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
+            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, centerSourceNum, allowWorkCarry, carryCapacity);
             ExternalMineSpawner.carry(room, targetRoom, carryNum, allowWorkCarry);
 
             if (runState.qosLevel === 'normal') {
