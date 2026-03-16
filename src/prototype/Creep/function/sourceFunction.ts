@@ -222,7 +222,7 @@ export default class SourceFunction extends Creep {
     }
 
     /**
-     * 维护 Source 旁的 Container (建造/修理)
+     * 维护 Source 旁的 Container（修理/建造已有工地）
      * @returns `acted` 表示本 tick 已处理；`blocked` 表示想建但当前建不出来；`idle` 表示当前无需处理
      */
     maintainSourceContainer(): 'acted' | 'blocked' | 'idle' {
@@ -237,7 +237,7 @@ export default class SourceFunction extends Creep {
             return 'idle';
         }
 
-        // 寻找或创建工地
+        // 寻找容器工地
         const source = this.getBoundSource();
         if (!source) return 'idle';
         
@@ -246,16 +246,21 @@ export default class SourceFunction extends Creep {
         })[0];
         
         if (!site) {
-            // 如果附近有 Link，则不建造 Container (视逻辑而定，这里参考 harvester.ts)
+            // 如果附近有 Link，则不需要 Container
             if (source.pos.findInRange(FIND_STRUCTURES, 2, { filter: s => s.structureType === STRUCTURE_LINK }).length > 0) {
                 return 'idle';
             }
-            // 在当前位置创建（需确保在范围内）
-            if (this.pos.inRangeTo(source, 1)) {
+
+            // 仅禁止主房 harvester 自动创建容器工地（其他角色仍可自动建）
+            const role = this.memory?.role as string | undefined;
+            const allowAutoSite = role !== 'harvester';
+            if (allowAutoSite && this.pos.inRangeTo(source, 1)) {
                 const result = this.pos.createConstructionSite(STRUCTURE_CONTAINER);
                 return result === OK ? 'acted' : 'blocked';
             }
-            return 'idle'; // 下一 tick 靠近后再建造
+
+            // 其他角色交给布局系统创建容器工地
+            return 'idle';
         }
         
         this.build(site);
