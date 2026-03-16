@@ -17,10 +17,7 @@ export default class PowerCreepExecute extends PowerCreep {
             const idleFlag = Game.flags[`${this.name}-idle`] || Game.flags[`${this.name}-IDLE`];
             const homeFlag = Game.flags[`${this.name}-home`];
             const idleRoom = idleFlag?.pos.roomName || homeFlag?.pos.roomName || mem.assistIdleRoom || mem.spawnRoom || this.room.name;
-            const idlePos =
-                (idleFlag && idleFlag.pos.roomName === idleRoom ? idleFlag.pos : undefined) ||
-                (homeFlag && homeFlag.pos.roomName === idleRoom ? homeFlag.pos : undefined) ||
-                new RoomPosition(25, 25, idleRoom);
+            const idlePos = idleFlag.pos || homeFlag.pos || new RoomPosition(25, 25, idleRoom);
 
             const healerName = mem.healerName as string | undefined;
             const healer = healerName ? Game.creeps[healerName] : undefined;

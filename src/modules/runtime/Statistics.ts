@@ -12,6 +12,7 @@ const MARKET_ORDER_LIMIT = 10;      // 市场订单统计数量 (top N)
 
 export const Statistics = {
     end: function() {
+        if (Game.cpu.bucket < 2000 || (global as any).QoS?.level === 'emergency') return;
         const targets = getStatsTargets();
         if (targets.length <= 0) return;
         if (!Memory.stats) Memory.stats = {}

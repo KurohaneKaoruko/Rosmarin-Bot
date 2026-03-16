@@ -244,6 +244,8 @@ const calcRoomCapacityScore = (room: Room): number => {
 /** 资源管理模块 */
 export const ResourceManage = {
     tick: function () {
+        // CPU 告急时跳过资源管理，优先保留核心逻辑与移动。
+        if (Game.cpu.bucket < 2000 || (global as any).QoS?.level === 'emergency') return;
         // 降低全局资源平衡的 CPU 占用：固定间隔执行
         if (Game.time % 50) return;
         // 初始化市场交易成本缓存（global 级缓存，避免写入 Memory）
