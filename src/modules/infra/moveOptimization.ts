@@ -559,7 +559,7 @@ function ensureMyCreepIndex() {
     if (typeof PowerCreep !== 'undefined') {
         for (const name in Game.powerCreeps) {
             const pc = Game.powerCreeps[name];
-            if (!pc || !pc.my) continue;
+            if (!pc || !pc.my || !pc.pos) continue;
             const formal = formalizeIntentPos(pc.pos);
             if (typeof formal.x !== 'number' || typeof formal.y !== 'number') continue;
             myPowerCreepIndex.set(packIntentTile(formal), name);
@@ -711,6 +711,7 @@ function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N
  * @param {RoomPosition} pos
  */
 function formalize(pos) {
+    if (!pos || !pos.roomName) return {};
     let parsed = parseRoomName(pos.roomName);
     if (parsed) {
         return { // 如果这里出现类型错误，那么意味着房间名字不是正确格式但通过了parse，小概率事件
@@ -722,6 +723,7 @@ function formalize(pos) {
 }
 
 function formalizeIntentPos(pos) {
+    if (!pos || !pos.roomName) return {};
     const parsed = parseRoomName(pos.roomName);
     if (parsed) {
         return {
@@ -733,6 +735,7 @@ function formalizeIntentPos(pos) {
 }
 
 function formalizeIntentMovePos(pos) {
+    if (!pos || !pos.roomName) return {};
     const formalPos = formalizeIntentPos(pos);
     if (typeof formalPos.x !== 'number' || typeof formalPos.y !== 'number') {
         return formalPos;

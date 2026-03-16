@@ -30,6 +30,15 @@ const getConsumer = function () {
 // 缓存映射关系以提高性能
 const cache = {}
 
+const shouldSkipSourceMap = () => {
+    if (typeof Game === 'undefined' || !Game.cpu) return false;
+    const bucket = Game.cpu.bucket || 0;
+    if (bucket > 0 && bucket < 2000) return true;
+    const limit = Game.cpu.limit || 0;
+    if (limit > 0 && Game.cpu.getUsed() > limit * 0.8) return true;
+    return false;
+};
+
 /**
  * 使用源映射生成堆栈跟踪，并生成原始标志位
  * 警告 - global 重置之后的首次调用会产生很高的 cpu 消耗 (> 30 CPU)
@@ -40,26 +49,32 @@ const cache = {}
  */
 const sourceMappedStackTrace = function (error: Error | string): string {
     const stack = error instanceof Error ? error.stack : error
+    const stackText = typeof stack === 'string' ? stack : String(error);
     // 有缓存直接用
-    if (cache.hasOwnProperty(stack)) return cache[stack]
+    if (cache.hasOwnProperty(stackText)) return cache[stackText]
+    if (shouldSkipSourceMap()) return stackText;
 
     const re = /^\s+at\s+(.+?\s+)?\(?([0-z._\-\\\/]+):(\d+):(\d+)\)?$/gm
     let match: RegExpExecArray
     let outStack = error.toString()
-    log("ErrorMapper -> sourceMappedStackTrace -> outStack", outStack)
     
     const consumer = getConsumer()
-    if (!consumer) return stack
+    if (!consumer) return stackText
 
-    while ((match = re.exec(stack))) {
+    while ((match = re.exec(stackText))) {
         // 解析完成
         if (match[2] !== "main") break
         
         // 获取追踪定位
-        const pos = consumer.originalPositionFor({
-            column: parseInt(match[4], 10),
-            line: parseInt(match[3], 10)
-        })
+        let pos: { source?: string | null; line?: number | null; column?: number | null; name?: string | null };
+        try {
+            pos = consumer.originalPositionFor({
+                column: parseInt(match[4], 10),
+                line: parseInt(match[3], 10)
+            });
+        } catch {
+            return stackText;
+        }
 
         // 无法定位
         if (!pos.line) {
@@ -77,7 +92,7 @@ const sourceMappedStackTrace = function (error: Error | string): string {
         }
     }
 
-    cache[stack] = outStack
+    cache[stackText] = outStack
     return outStack
 }
 
