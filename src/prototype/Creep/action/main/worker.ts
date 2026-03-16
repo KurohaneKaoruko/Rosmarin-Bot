@@ -15,6 +15,21 @@ const getCache = (creep: Creep) => {
     return creep.memory.cacheTarget as any
 }
 
+const resetCacheIfRoomChanged = (creep: Creep, cache: any) => {
+    const roomName = creep.room.name;
+    if (cache._roomName && cache._roomName !== roomName) {
+        delete cache.task;
+        delete cache.taskid;
+        delete cache.tasktype;
+        delete cache.wallPos;
+        delete cache.targetHits;
+        delete cache.buildRampartId;
+        delete cache.buildRampart;
+        delete cache.posInfo;
+    }
+    cache._roomName = roomName;
+}
+
 const isEarlyRushEnabled = (room: Room) => {
     if (!room.controller?.my) return false;
     const mode = (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
@@ -81,6 +96,7 @@ const RepairRampart = function (creep: Creep) {
 const BuildRepairWork = function (creep: Creep) {
     const LOCAL_BUILD_TASK_ID = '__local_build__';
     const cache = getCache(creep)
+    resetCacheIfRoomChanged(creep, cache);
     let target = null;
     let taskType: 'build' | 'repair' | null = null;
     let taskid = null;
@@ -334,6 +350,7 @@ const WorkerFunction = {
     target: function (creep: Creep) {   // 建造
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
+        if (creep.handleRoomEdge()) return;
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         if(creep.store.getUsedCapacity() === 0) {
             return true;
@@ -345,6 +362,7 @@ const WorkerFunction = {
     source: function (creep: Creep) {   // 获取能量
         if(!creep.memory.ready) return false;
         if(!creep.moveHomeRoom()) return;
+        if (creep.handleRoomEdge()) return;
         if(creep.store.getFreeCapacity() === 0) {
             if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
             WorkerAction(creep);

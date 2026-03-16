@@ -203,6 +203,14 @@ export default {
 
             let changed = 0;
             let matched = 0;
+            const clearRoomLocalCache = (mem: any) => {
+                // 清理跨房后容易失效的临时缓存/路径，避免继续追旧目标卡边缘
+                if (mem.cache && typeof mem.cache === 'object') mem.cache = {};
+                if (mem.cacheSource && typeof mem.cacheSource === 'object') mem.cacheSource = {};
+                if (mem.cacheTarget && typeof mem.cacheTarget === 'object') mem.cacheTarget = {};
+                delete mem._moveToRoomState;
+            };
+
             for (const name in Game.creeps) {
                 const creep = Game.creeps[name];
                 const mem = creep.memory as any;
@@ -223,11 +231,7 @@ export default {
                 }
                 // clear stale source lock after room migration
                 delete mem.targetSourceId;
-                if (mem.cache && typeof mem.cache === 'object') delete mem.cache.targetSourceId;
-                if (mem.cacheSource && typeof mem.cacheSource === 'object') {
-                    delete mem.cacheSource.targetId;
-                    delete mem.cacheSource.targetType;
-                }
+                clearRoomLocalCache(mem);
                 changed++;
             }
 
