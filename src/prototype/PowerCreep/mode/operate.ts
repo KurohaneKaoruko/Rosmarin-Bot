@@ -48,9 +48,15 @@ export function runOperate(pc: PowerCreep): boolean {
     }
 
     const idleFlag = Game.flags[`${name}-idle`] || Game.flags[`${name}-IDLE`] || flagHome;
-    if (idleFlag && pc.room.name == idleFlag.pos.roomName && !pc.pos.isEqualTo(idleFlag.pos)) {
-        if (!canStandOn(pc.room, idleFlag.pos)) return true;
-        pc.moveTo(idleFlag, { plainCost: 1, swampCost: 1 });
+    if (idleFlag) {
+        if (pc.room.name !== idleFlag.pos.roomName) {
+            pc.moveToRoom(idleFlag.pos.roomName, { plainCost: 1, swampCost: 1 });
+            return true;
+        }
+        if (!pc.pos.isEqualTo(idleFlag.pos)) {
+            if (!canStandOn(pc.room, idleFlag.pos)) return true;
+            pc.moveTo(idleFlag, { plainCost: 1, swampCost: 1 });
+        }
     }
     return true;
 }

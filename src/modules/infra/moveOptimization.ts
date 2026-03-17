@@ -516,6 +516,8 @@ const originMoveTo = Creep.prototype.$moveTo || Creep.prototype.moveTo;
 const originPull = Creep.prototype.$pull || Creep.prototype.pull;
 const originCancelOrder = Creep.prototype.$cancelOrder || Creep.prototype.cancelOrder;
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype : undefined;
+const originPowerMove = powerCreepProto ? (powerCreepProto.$move || powerCreepProto.move) : undefined;
+const originPowerMoveTo = powerCreepProto ? (powerCreepProto.$moveTo || powerCreepProto.moveTo) : undefined;
 const originFindClosestByPath = RoomPosition.prototype.findClosestByPath;
 
 // per-tick 缓存：房间地形缓冲与己方单位位置索引，降低频繁查找开销
@@ -573,6 +575,47 @@ function getOriginMoveMethod(unit) {
 
 function getOriginCancelOrderMethod(unit) {
     return originCancelOrder;
+}
+
+function getPowerCreepMoveMethod(): Function | undefined {
+    if (!powerCreepProto) return undefined;
+    const pcMove = powerCreepProto.$move || originPowerMove || powerCreepProto.move;
+    if (pcMove === betterMove) return originMove;
+    return pcMove || originMove;
+}
+
+function getPowerCreepMoveToMethod(): Function | undefined {
+    if (!powerCreepProto) return undefined;
+    const pcMoveTo = powerCreepProto.$moveTo || originPowerMoveTo || powerCreepProto.moveTo;
+    if (pcMoveTo === betterMoveTo) return originMoveTo;
+    return pcMoveTo || originMoveTo;
+}
+
+function getPowerCreepCancelOrderMethod(): Function | undefined {
+    if (!powerCreepProto) return undefined;
+    const pcCancel = powerCreepProto.$cancelOrder || powerCreepProto.cancelOrder;
+    if (pcCancel === betterCancelOrder) return originCancelOrder;
+    return pcCancel || originCancelOrder;
+}
+
+// 确保 PowerCreep 使用原生移动（热重载时可能遗留被包裹的 move/moveTo）。
+function restorePowerCreepNativeMethods() {
+    if (!powerCreepProto) return;
+    const baseMove = getPowerCreepMoveMethod();
+    const baseMoveTo = getPowerCreepMoveToMethod();
+    const baseCancel = getPowerCreepCancelOrderMethod();
+    if (baseMove) {
+        powerCreepProto.$move = baseMove as any;
+        powerCreepProto.move = baseMove as any;
+    }
+    if (baseMoveTo) {
+        powerCreepProto.$moveTo = baseMoveTo as any;
+        powerCreepProto.moveTo = baseMoveTo as any;
+    }
+    if (baseCancel) {
+        powerCreepProto.$cancelOrder = baseCancel as any;
+        powerCreepProto.cancelOrder = baseCancel as any;
+    }
 }
 
 // 统计变量
@@ -4459,6 +4502,11 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
  * @param {MoveToOpts} opts
  */
 function betterMoveTo(firstArg, secondArg, opts) {
+    if (powerCreepProto && this instanceof PowerCreep) {
+        const pcMoveTo = getPowerCreepMoveToMethod();
+        if (pcMoveTo) return pcMoveTo.apply(this, arguments);
+        return originMoveTo.apply(this, arguments);
+    }
     if (!this.my) {
         return ERR_NOT_OWNER;
     }
@@ -4640,6 +4688,11 @@ function betterMoveTo(firstArg, secondArg, opts) {
  * @param {DirectionConstant | Creep} target
  */
 function betterMove(target) {
+    if (powerCreepProto && this instanceof PowerCreep) {
+        const pcMove = getPowerCreepMoveMethod();
+        if (pcMove) return pcMove.call(this, target);
+        return originMove.call(this, target);
+    }
     if (!this.my) {
         return ERR_NOT_OWNER;
     }
@@ -5257,6 +5310,7 @@ function bmSetChangeMoveTo(bool) {
         return creepCore.apply(this, args);
     }, 'moveTo');
     wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
+    restorePowerCreepNativeMethods();
     analyzeCPU.moveTo = { sum: 0, calls: 0 };
     testCacheHits = 0;
     testCacheMiss = 0;
@@ -5376,6 +5430,7 @@ function bmSetChangeMove(bool) {
             Creep.prototype.pull = Creep.prototype.$pull;
         }
     }
+    restorePowerCreepNativeMethods();
     analyzeCPU.move = { sum: 0, calls: 0 };
     return OK;
 }
@@ -5799,6 +5854,7 @@ function wrapProtoMethod(proto, originalName, backupName, wrap) {
 }
 
 wrapProtoMethod(Creep.prototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
+restorePowerCreepNativeMethods();
 
 /**
  * moveTo 前更新 dontPullMe 状态
