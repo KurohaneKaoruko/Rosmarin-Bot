@@ -475,26 +475,55 @@ const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> =
     },
     'universal': (room: Room, current: number) => {
         const lv = room.level;
-        let target = getDowngradeUniversalTarget(room);
-
-        // 低能量救援：额外补 UNIV 快速恢复物流/补能循环
         const state = getEnergyState(room);
-        if ((state === 'LOW' || state === 'CRITICAL') && room.CheckSpawnAndTower()) {
-            const creepNum = room.getCreepNum() || {};
-            const logisticNum =
-                (creepNum['carrier'] || 0) +
-                (creepNum['transport'] || 0) +
-                (creepNum['manager'] || 0);
+        const isLowEnergy = state === 'LOW' || state === 'CRITICAL';
+        const creepNum = room.getCreepNum() || {};
+        const transportNum =
+            (creepNum['carrier'] || 0) +
+            (creepNum['transport'] || 0) +
+            (creepNum['manager'] || 0) +
+            (creepNum['logistic'] || 0);
+        const harvestNum =
+            (creepNum['harvester'] || 0) +
+            (creepNum['out-harvest'] || 0);
+
+        const getRoleMinEnergy = (role: string) => {
+            const config = (RoleLevelData as any)[role]?.[lv]?.bodypart;
+            if (!config) return Infinity;
+            const body = room.GenerateBodys(config, role);
+            return room.CalculateEnergy(body);
+        };
+        const minHarvesterEnergy = getRoleMinEnergy('harvester');
+        const minCarrierEnergy = getRoleMinEnergy('carrier');
+        const minTransportEnergy = getRoleMinEnergy('transport');
+        const minManagerEnergy = getRoleMinEnergy('manager');
+        const hasStorageLike = !!room.storage || !!room.terminal;
+        const minLogisticEnergy = hasStorageLike
+            ? Math.min(minTransportEnergy, minManagerEnergy)
+            : minCarrierEnergy;
+        const energyAvailable = room.energyAvailable || 0;
+        const needHarvestRescue = harvestNum === 0 && energyAvailable < minHarvesterEnergy;
+        const needTransportRescue = transportNum === 0 && energyAvailable < minLogisticEnergy;
+
+        // 1) 控制器降级兜底：仅在低等级且低能量时用 UNIV，常态靠 upgrader
+        let target = 0;
+        if (lv <= 4 && isLowEnergy) {
+            target = getDowngradeUniversalTarget(room);
+        }
+
+        // 2) 低能量救援：采集/搬运其中一方为 0 且当前能量不足以孵化该角色时补 UNIV
+        if (isLowEnergy && room.CheckSpawnAndTower() && (needHarvestRescue || needTransportRescue)) {
             let emergencyTarget = lv <= 2 ? 3 : lv <= 4 ? 2 : 1;
             if (state === 'CRITICAL') emergencyTarget += 1;
-            if (logisticNum === 0) emergencyTarget += 1;
+            if (transportNum === 0) emergencyTarget += 1;
             target = Math.max(target, emergencyTarget);
         }
 
-        if (lv < 3 || !room.container || room.container.length === 0) {
-            const mode = getRoomMode(room);
+        // 3) 仅在 high/rush 模式下，早期或无物流基建时补 UNIV
+        const hasContainer = !!room.container && room.container.length > 0;
+        const mode = getRoomMode(room);
+        if (isHighLikeMode(mode) && (lv < 3 || (!hasContainer && !hasStorageLike))) {
             target = Math.max(target, 2);
-            if (isHighLikeMode(mode)) target = Math.max(target, 3);
             if (mode === 'rush') target = Math.max(target, 5);
         }
         return current < target;
