@@ -13,31 +13,25 @@ import { ExpandModule } from '@/modules/runtime/ExpandModule';
 import { InterShardModule } from '@/modules/runtime/InterShardModule';
 import { MoveModule } from '@/modules/runtime/MoveModule';
 
-import '@/modules/infra/qos';
-import '@/modules/infra/moveOptimization';
-import '@/modules/infra/structureCache';
+import '@/modules/infra/qos';    // QoS 全局挂载
+import '@/modules/infra/moveOptimization';    // creep移动优化
+import '@/modules/infra/structureCache';  // 极致建筑缓存
 
-PrototypeExtension();
-ConsoleExtension();
+PrototypeExtension();    // 原型拓展
+ConsoleExtension();      // 控制台命令拓展
 
 const App = createApp();
 
-App.on(TeamModule);
-App.on(EventModule);
-App.on(ResourceManage);
-App.on(InterShardModule);
-App.on(ExpandModule);
-App.on(NukeModule);
-App.on(DDModule);
-App.on(ClearModule);
-App.on(Statistics);
-App.on(GeneratePixel);
-App.on(MoveModule);
+App.on(TeamModule);       // 小队模块
+App.on(EventModule);      // 事件模块
+App.on(ResourceManage);   // 资源调度管理
+App.on(InterShardModule); // InterShardMemory 缓存与清理
+App.on(ExpandModule);     // 跨 shard 扩张
+App.on(NukeModule);       // 核弹打击
+App.on(DDModule);         // 消息模块
+App.on(ClearModule);      // 过期数据清理
+App.on(Statistics);       // 统计数据
+App.on(GeneratePixel);    // 搓像素
+App.on(MoveModule);       // 移动模块
 
 export const loop = App.run;
-
-// import profiler from '@/modules/infra/screeps-profiler';
-// profiler.enable();
-// export const loop = function() {
-//     profiler.wrap(App.run);
-// };
