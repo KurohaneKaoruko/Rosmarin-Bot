@@ -713,6 +713,53 @@ export class PathPlanner {
  */
 export class RoadBuilder {
     /**
+     * 解析目标房间的外矿基础设施路径。
+     * @description
+     * - 优先复用已缓存的路径，避免重复寻路。
+     * - 若还没有路径内存，则按 source/mineral 重新规划并写回内存。
+     */
+    private static resolveInfrastructurePaths(sourceRoomName: string, targetRoom: Room): Map<string, RoomPosition[]> {
+        const targetRoomName = targetRoom.name;
+
+        // 检查是否已有路线数据。
+        const existingPaths = RoadMemory.getAllPaths(sourceRoomName, targetRoomName);
+        if (existingPaths.size > 0) return existingPaths;
+
+        // 没有缓存时才重新规划路径。
+        const targets = this.getTargetPositions(targetRoom);
+        if (targets.length === 0) return new Map<string, RoomPosition[]>();
+
+        const pathResults = PathPlanner.planPaths(sourceRoomName, targets);
+        if (pathResults.size === 0) return new Map<string, RoomPosition[]>();
+
+        // PathPlanner 输出 key 为 "roomName:x:y"，这里统一压缩回内存使用的 "x:y"。
+        const pathsToSave = new Map<string, RoomPosition[]>();
+        for (const [targetKey, positions] of pathResults) {
+            const parts = targetKey.split(':');
+            const posKey = `${parts[1]}:${parts[2]}`;
+            pathsToSave.set(posKey, positions);
+        }
+
+        if (pathsToSave.size === 0) return new Map<string, RoomPosition[]>();
+
+        RoadMemory.setPaths(sourceRoomName, targetRoomName, pathsToSave);
+        return pathsToSave;
+    }
+
+    /**
+     * 仅为目标房间补齐外矿 container 工地。
+     * @description
+     * container 不应该受道路 RCL 门槛影响，因此单独暴露一个轻量入口：
+     * - 允许在低等级外矿阶段先把 container 工地落下；
+     * - road 仍然由 `createRoadSites` 按等级与间隔控制。
+     */
+    static ensureContainerSites(sourceRoom: Room, targetRoom: Room): number {
+        const pathsToUse = this.resolveInfrastructurePaths(sourceRoom.name, targetRoom);
+        const containerAnchors = this.resolveContainerAnchors(sourceRoom, targetRoom, pathsToUse);
+        return this.createContainerSites(targetRoom, containerAnchors);
+    }
+
+    /**
      * 为目标房间创建道路建造工地
      * @param sourceRoom 源头房间
      * @param targetRoom 目标房间
@@ -720,39 +767,23 @@ export class RoadBuilder {
      */
     static createRoadSites(sourceRoom: Room, targetRoom: Room): number {
         const sourceRoomName = sourceRoom.name;
-        const targetRoomName = targetRoom.name;
+        const pathsToUse = this.resolveInfrastructurePaths(sourceRoomName, targetRoom);
 
-        // 检查是否已有路线数据
-        const existingPaths = RoadMemory.getAllPaths(sourceRoomName, targetRoomName);
-        
-        if (existingPaths.size > 0) {
-            // 使用已有路线数据创建工地
-            return this.createSitesFromPaths(sourceRoomName, existingPaths);
+        // 外矿基础设施统一由 externalRoad 模块管理：
+        // 道路工地与 source/mineral 的 container 工地都在这里集中创建，
+        // 避免再由 out-harvest / out-mineral 在运行时临时落地工地。
+        const containerAnchors = this.resolveContainerAnchors(sourceRoom, targetRoom, pathsToUse);
+        if (pathsToUse.size === 0) {
+            // 路径完全失败时无法铺 road，但 container 仍可退化到“资源点邻接保底落点”。
+            return this.createContainerSites(targetRoom, containerAnchors);
         }
-
-        // 计算新路径
-        const targets = this.getTargetPositions(targetRoom);
-        if (targets.length === 0) return 0;
-
-        const pathResults = PathPlanner.planPaths(sourceRoomName, targets);
-        if (pathResults.size === 0) return 0;
-
-        // 转换 key 格式：从 "roomName:x:y" 到 "x:y"
-        const pathsToSave = new Map<string, RoomPosition[]>();
-        for (const [targetKey, positions] of pathResults) {
-            // targetKey 格式为 "roomName:x:y"，提取 "x:y"
-            const parts = targetKey.split(':');
-            const posKey = `${parts[1]}:${parts[2]}`;
-            pathsToSave.set(posKey, positions);
-        }
-
-        if (pathsToSave.size === 0) return 0;
-
-        // 保存到内存（按目标分别存储）
-        RoadMemory.setPaths(sourceRoomName, targetRoomName, pathsToSave);
-
-        // 创建工地
-        return this.createSitesFromPaths(sourceRoomName, pathsToSave);
+        const roadSiteCount = this.createSitesFromPaths(
+            sourceRoomName,
+            pathsToUse,
+            new Set(Array.from(containerAnchors.values()).map((pos) => `${pos.roomName}:${pos.x}:${pos.y}`))
+        );
+        const containerSiteCount = this.createContainerSites(targetRoom, containerAnchors);
+        return roadSiteCount + containerSiteCount;
     }
 
     /**
@@ -761,7 +792,11 @@ export class RoadBuilder {
      * @param paths 路径映射
      * @returns 创建的工地数量
      */
-    private static createSitesFromPaths(sourceRoomName: string, paths: Map<string, RoomPosition[]>): number {
+    private static createSitesFromPaths(
+        _sourceRoomName: string,
+        paths: Map<string, RoomPosition[]>,
+        skipPositions?: Set<string>
+    ): number {
         let created = 0;
         const processedPositions = new Set<string>();
 
@@ -774,6 +809,7 @@ export class RoadBuilder {
                 const posKey = `${pos.roomName}:${pos.x}:${pos.y}`;
                 if (processedPositions.has(posKey)) continue;
                 processedPositions.add(posKey);
+                if (skipPositions?.has(posKey)) continue;
 
                 // 跳过房间边缘位置
                 if (pos.x === 0 || pos.x === 49 || pos.y === 0 || pos.y === 49) continue;
@@ -796,6 +832,219 @@ export class RoadBuilder {
                     created++;
                 }
             }
+        }
+
+        return created;
+    }
+
+    /**
+     * 为每个 source / mineral 解析容器落点。
+     * @description
+     * - 若目标周围已存在 container 或 container 工地，则不再重复放置。
+     * - 有路径时，优先取路径末端那个“贴着目标”的落脚格，保持与道路规划一致。
+     * - 路径失败时，退化为从资源点 8 邻域里选一个最靠近发起房中心的可放置点位。
+     */
+    private static resolveContainerAnchors(
+        sourceRoom: Room,
+        targetRoom: Room,
+        paths: Map<string, RoomPosition[]>
+    ): Map<string, RoomPosition> {
+        const anchors = new Map<string, RoomPosition>();
+
+        for (const targetPos of this.getAnchorTargetPositions(targetRoom, paths)) {
+            const targetPosKey = `${targetPos.x}:${targetPos.y}`;
+            if (this.hasNearbyContainerInfrastructure(targetPos)) continue;
+
+            const anchor =
+                this.findContainerAnchorForTarget(targetPos, paths.get(targetPosKey) || []) ||
+                this.findFallbackContainerAnchor(sourceRoom, targetPos);
+            if (!anchor) continue;
+            if (!this.canPlaceContainerAt(anchor)) continue;
+
+            anchors.set(targetPosKey, anchor);
+        }
+
+        return anchors;
+    }
+
+    /**
+     * 获取 container 锚点候选目标。
+     * @description
+     * 正常情况下直接以房间内真实 source/mineral 为准；
+     * 若测试环境或极端场景下对象枚举为空，但路径内存里已经有目标 key，
+     * 也要把这些 key 还原成目标坐标，避免已有路径却无法放 container。
+     */
+    private static getAnchorTargetPositions(
+        targetRoom: Room,
+        paths: Map<string, RoomPosition[]>
+    ): RoomPosition[] {
+        const positions = new Map<string, RoomPosition>();
+
+        for (const targetPos of this.getTargetPositions(targetRoom)) {
+            positions.set(`${targetPos.x}:${targetPos.y}`, targetPos);
+        }
+
+        for (const targetPosKey of paths.keys()) {
+            const [xRaw, yRaw] = targetPosKey.split(':');
+            const x = Number(xRaw);
+            const y = Number(yRaw);
+            if (!Number.isInteger(x) || !Number.isInteger(y)) continue;
+            positions.set(targetPosKey, new RoomPosition(x, y, targetRoom.name));
+        }
+
+        return Array.from(positions.values());
+    }
+
+    /**
+     * 判断目标周围是否已经存在 container 或对应工地。
+     */
+    private static hasNearbyContainerInfrastructure(targetPos: RoomPosition): boolean {
+        const hasContainer = targetPos.findInRange(FIND_STRUCTURES, 1, {
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER
+        }).length > 0;
+        if (hasContainer) return true;
+
+        const hasContainerSite = targetPos.findInRange(FIND_CONSTRUCTION_SITES, 1, {
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER
+        }).length > 0;
+        return hasContainerSite;
+    }
+
+    /**
+     * 从路径末端反推 source / mineral 的容器锚点。
+     * @description 只接受目标房内、与目标距离 1 的落脚格。
+     */
+    private static findContainerAnchorForTarget(targetPos: RoomPosition, positions: RoomPosition[]): RoomPosition | null {
+        for (let i = positions.length - 1; i >= 0; i--) {
+            const pos = positions[i];
+            if (pos.roomName !== targetPos.roomName) continue;
+            if (!pos.inRangeTo(targetPos, 1)) continue;
+            if (pos.x <= 0 || pos.x >= 49 || pos.y <= 0 || pos.y >= 49) continue;
+            return pos;
+        }
+        return null;
+    }
+
+    /**
+     * 路径规划失败时，为 source / mineral 选择一个保底的 container 落点。
+     * @description
+     * 规则：
+     * - 只在资源点 8 邻域中挑选；
+     * - 必须是可放置 container 的格子；
+     * - 选取“全局坐标距离发起房中心最近”的那个点位，尽量贴近回程方向。
+     */
+    private static findFallbackContainerAnchor(sourceRoom: Room, targetPos: RoomPosition): RoomPosition | null {
+        const candidates: RoomPosition[] = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = targetPos.x + dx;
+                const y = targetPos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                const pos = new RoomPosition(x, y, targetPos.roomName);
+                if (!this.canPlaceContainerAt(pos)) continue;
+                candidates.push(pos);
+            }
+        }
+
+        if (candidates.length <= 0) return null;
+
+        const sourceCenter = sourceRoom.getCenter();
+        const sourceWorld = this.toWorldCoord(sourceCenter);
+        if (!sourceWorld) return candidates[0];
+
+        candidates.sort((a, b) => {
+            const aWorld = this.toWorldCoord(a);
+            const bWorld = this.toWorldCoord(b);
+            const aDistance = aWorld ? Math.max(Math.abs(aWorld.x - sourceWorld.x), Math.abs(aWorld.y - sourceWorld.y)) : Infinity;
+            const bDistance = bWorld ? Math.max(Math.abs(bWorld.x - sourceWorld.x), Math.abs(bWorld.y - sourceWorld.y)) : Infinity;
+            if (aDistance !== bDistance) return aDistance - bDistance;
+            if (a.x !== b.x) return b.x - a.x;
+            return b.y - a.y;
+        });
+
+        return candidates[0];
+    }
+
+    /**
+     * 把房间坐标转换成跨房间可比较的“全局平面坐标”。
+     * @description
+     * 这里只用于比较“哪个资源邻格更接近发起房中心”，不参与真实寻路。
+     */
+    private static toWorldCoord(pos: RoomPosition): { x: number; y: number } | null {
+        const parsed = this.parseRoomName(pos.roomName);
+        if (!parsed) return null;
+        return {
+            x: parsed.x * 50 + pos.x,
+            y: parsed.y * 50 + pos.y,
+        };
+    }
+
+    /**
+     * 解析 Screeps 房间名到跨房间坐标。
+     * @example W0N0 -> (-1, -1), E0S0 -> (0, 0)
+     */
+    private static parseRoomName(roomName: string): { x: number; y: number } | null {
+        const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
+        if (!match) return null;
+
+        const [, ew, ewNum, ns, nsNum] = match;
+        return {
+            x: ew === 'W' ? -Number(ewNum) - 1 : Number(ewNum),
+            y: ns === 'N' ? -Number(nsNum) - 1 : Number(nsNum),
+        };
+    }
+
+    /**
+     * 检查容器锚点是否允许放置 container。
+     * @description
+     * - road / road 工地允许共址
+     * - 其他阻塞结构或阻塞工地直接跳过
+     */
+    private static canPlaceContainerAt(pos: RoomPosition): boolean {
+        const room = Game.rooms[pos.roomName];
+        if (!room) return false;
+        if (room.getTerrain().get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
+
+        const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y);
+        if (structures.some((s) =>
+            s.structureType !== STRUCTURE_ROAD &&
+            s.structureType !== STRUCTURE_CONTAINER &&
+            s.structureType !== STRUCTURE_RAMPART
+        )) {
+            return false;
+        }
+
+        const sites = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos.x, pos.y);
+        if (sites.some((s) =>
+            s.structureType !== STRUCTURE_ROAD &&
+            s.structureType !== STRUCTURE_CONTAINER &&
+            s.structureType !== STRUCTURE_RAMPART
+        )) {
+            return false;
+        }
+
+        if (sites.some((s) => s.structureType === STRUCTURE_CONTAINER)) return false;
+        if (structures.some((s) => s.structureType === STRUCTURE_CONTAINER)) return false;
+        return true;
+    }
+
+    /**
+     * 基于路径锚点创建外矿 container 工地。
+     */
+    private static createContainerSites(targetRoom: Room, anchors: Map<string, RoomPosition>): number {
+        let created = 0;
+        const processedPositions = new Set<string>();
+
+        for (const [, pos] of anchors) {
+            const posKey = `${pos.roomName}:${pos.x}:${pos.y}`;
+            if (processedPositions.has(posKey)) continue;
+            processedPositions.add(posKey);
+            if (pos.roomName !== targetRoom.name) continue;
+            if (!this.canPlaceContainerAt(pos)) continue;
+
+            const result = pos.createConstructionSite(STRUCTURE_CONTAINER);
+            if (result === OK) created++;
         }
 
         return created;
@@ -867,8 +1116,10 @@ export class RoadBuilder {
         // 保存到内存
         RoadMemory.setPaths(sourceRoomName, targetRoomName, pathsToSave);
 
-        // 创建工地
+        // 重新计算路线后，road / container 两类基础设施都应该由 externalRoad 统一补齐。
         this.createSitesFromPaths(sourceRoomName, pathsToSave);
+        const containerAnchors = this.resolveContainerAnchors(sourceRoom, targetRoom, pathsToSave);
+        this.createContainerSites(targetRoom, containerAnchors);
         
         return true;
     }
@@ -1590,4 +1841,3 @@ export class RoadVisual {
         return paths;
     }
 }
-

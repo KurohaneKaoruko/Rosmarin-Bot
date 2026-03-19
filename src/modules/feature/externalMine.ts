@@ -61,13 +61,16 @@ class ExternalMineState {
         return { sourceRoom: sourceRoomName, targetRoom: targetRoomName } as CreepMemory;
     }
 
-    // 受 QoS 限制且满足等级时，周期性触发外矿道路建造。
+    // 外矿基础设施建造入口。
+    // container 只要目标房有视野就优先尝试落地，不再受 secondary action 节流影响；
+    // road 仍按 secondary action、等级与 BUILD_INTERVAL 节流，避免把高成本寻路/铺路放大到每 tick。
     static tryBuildRoad(
         sourceRoom: Room,
         targetRoom: Room,
         minLevel: number,
         canRunSecondaryAction: boolean
     ): void {
+        RoadBuilder.ensureContainerSites(sourceRoom, targetRoom);
         if (!canRunSecondaryAction) return;
         if (sourceRoom.level < minLevel) return;
         if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL !== 0) return;

@@ -1,4 +1,3 @@
-import { compress } from '@/modules/utils/compress';
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
@@ -45,19 +44,14 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     return false;
 };
 
-// 没有容器时的建造逻辑
-const buildContainer = (creep: Creep) => {
+// 没有容器时仅负责施工：
+// container 工地放置由 externalRoad 统一管理，这里只消费既有工地。
+const buildContainerSite = (creep: Creep) => {
     let site = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
         filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.my
     })[0];
 
-    if (!site) {
-        const result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
-        if (result !== OK) {
-            creep.drop(RESOURCE_ENERGY);
-        }
-        return;
-    }
+    if (!site) return;
 
     if (creep.pos.inRangeTo(site, 2)) creep.build(site);
     else creep.moveTo(site, { visualizePathStyle: { stroke: '#ffaa00' } });
@@ -104,11 +98,11 @@ const handleWithContainer = (creep: Creep, container: StructureContainer) => {
     creep.moveTo(container, { range: 1, reusePath: 0, visualizePathStyle: { stroke: '#ffaa00' } });
 };
 
-// 没有容器的情况下：回到采集位并建设容器
+// 没有容器的情况下：回到采集位并施工已有 container 工地
 const handleNoContainer = (creep: Creep) => {
     const source = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
     if (!creep.moveToSourceWorkTile(source)) return;
-    buildContainer(creep);
+    buildContainerSite(creep);
 };
 
 // 目标态：把能量交给容器/运输

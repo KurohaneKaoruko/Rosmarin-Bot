@@ -31,6 +31,15 @@ type OutCarryAction = {
     buildRepair: (creep: Creep) => boolean;
 };
 
+// Build/repair 能力判定：
+// 这里不再依赖 role 字符串，而是按 creep 是否真的还有 WORK 能力来判断。
+// 这样共享同一 handler 的不同角色或未来变体不会因为命名差异被误伤。
+const canBuildRepair = (creep: Creep): boolean => {
+    if (creep.store[RESOURCE_ENERGY] <= 0) return false;
+    if (typeof creep.getActiveBodyparts !== 'function') return false;
+    return creep.getActiveBodyparts(WORK) > 0;
+};
+
 const outCarry: OutCarryAction = {
     resolveCarryDepositTarget: function (creep: Creep): StructureTerminal | StructureStorage | null {
         let target: StructureTerminal | StructureStorage | null = null;
@@ -442,8 +451,7 @@ const outCarry: OutCarryAction = {
     buildRepair: function (creep: Creep) {
         const sourceRoom = getCreepSourceRoom(creep.memory);
         if (sourceRoom && creep.room.name == sourceRoom) return false;
-        if (creep.memory.role !== 'out-car') return false;
-        if (creep.store[RESOURCE_ENERGY] == 0) return false;
+        if (!canBuildRepair(creep)) return false;
 
         const roads = creep.room.road?.filter((r: any) => {
             if (!r || r.hits >= r.hitsMax * 0.8) return false;
@@ -503,9 +511,7 @@ const outCarry: OutCarryAction = {
 const shouldBuildRepair = (creep: Creep): boolean => {
     const sourceRoom = getCreepSourceRoom(creep.memory);
     if (sourceRoom && creep.room.name == sourceRoom) return false;
-    if (creep.memory.role !== 'out-car') return false;
-    if (creep.store[RESOURCE_ENERGY] == 0) return false;
-    return true;
+    return canBuildRepair(creep);
 };
 
 // 判定是否进入采集策略

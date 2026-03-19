@@ -1,5 +1,4 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -8,14 +7,6 @@ const OUT_MINERAL_SWITCH = {
     TO_TARGET: (creep: Creep) => creep.store.getFreeCapacity() === 0,
     TO_SOURCE: (creep: Creep) => creep.store.getUsedCapacity() === 0
 } as const;
-
-const canPlaceMineralContainer = (creep: Creep): boolean => {
-    const sourceRoomName = getCreepSourceRoom(creep.memory);
-    if (!sourceRoomName) return false;
-    const sourceRoom = Game.rooms[sourceRoomName];
-    if (!sourceRoom) return false;
-    return sourceRoom.level >= 6;
-};
 
 // 尝试交给附近 out-carry
 const transferToNearbyCarrier = (creep: Creep): boolean => {
@@ -33,20 +24,23 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     return creep.transfer(nearbyCarrier, res) === OK;
 };
 
-// 没有容器时：在矿点附近放容器
+// 没有容器时：仅施工已有 container 工地。
+// 工地放置由 externalRoad 统一负责，这里不再直接 createConstructionSite。
 const handleNoContainer = (creep: Creep) => {
     const site = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
         filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.my
     })[0];
 
     if (!site) {
-        if (!canPlaceMineralContainer(creep)) return;
         const mineral = creep.room.mineral || creep.room.find(FIND_MINERALS)[0];
-        if (!creep.pos.inRangeTo(mineral, 1)) {
+        if (mineral && !creep.pos.inRangeTo(mineral, 1)) {
             creep.moveTo(mineral, { visualizePathStyle: { stroke: '#ffaa00' } });
-            return;
         }
-        creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
+        return;
+    }
+
+    if (creep.pos.inRangeTo(site, 2)) {
+        creep.build(site);
         return;
     }
 
