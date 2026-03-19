@@ -14,7 +14,7 @@ import { InterShardModule } from '@/modules/runtime/InterShardModule';
 import { MoveModule } from '@/modules/runtime/MoveModule';
 
 import '@/modules/infra/qos';    // QoS 全局挂载
-import '@/modules/infra/moveOptimization';    // creep移动优化
+import '@/modules/infra/MoveOptimization';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
 
 PrototypeExtension();    // 原型拓展
