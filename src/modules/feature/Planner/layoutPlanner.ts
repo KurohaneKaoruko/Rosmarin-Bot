@@ -3,7 +3,6 @@ import { compress, compressBatch, decompress } from '@/modules/utils/compress';
 import LayoutVisual from '@/modules/feature/Planner/utils/layoutVisual';
 import { autoPlanner } from '@/modules/feature/Planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/feature/Planner/dynamic/63Planner';
-import { scorpiorPlanner } from '@/modules/feature/Planner/dynamic/ScorpiorPlanner';
 import * as StaticPlanner from '@/modules/feature/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/modules/utils/coreDepot';
 import { getLayoutData, getRoomData } from '@/modules/utils/memory';
@@ -805,7 +804,6 @@ function computeStatic(roomName: string, layoutType: string, center: LayoutCente
  */
 function pickDynamicPlanner(layoutType: string) {
     if (layoutType === '63auto') return autoPlanner63;
-    if (layoutType === 'scorpior') return scorpiorPlanner;
     return autoPlanner;
 }
 
@@ -1153,50 +1151,6 @@ export const LayoutPlanner = {
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
         log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
-        return OK;
-    },
-
-    /**
-     * 动态布局(scorpior)可视化（不落盘）。
-     * @param roomName 房间名
-     * @returns Screeps 错误码：OK/ERR_NOT_FOUND
-     */
-    visualDynamicScorpior(roomName: string): number {
-        const computeStart = cpuNow();
-        const computed = computeDynamic(roomName, 'scorpior');
-        const computeCpu = cpuDelta(computeStart);
-        if (!computed) return ERR_NOT_FOUND;
-        const visualStart = cpuNow();
-        LayoutVisual.showRoomStructures(roomName, computed.structMap);
-        const visualCpu = cpuDelta(visualStart);
-        log('LayoutPlanner', `动态布局计算完成: ${roomName} layout=scorpior computeCpu=${cpuFmt(computeCpu)}`);
-        log('LayoutPlanner', `动态布局可视化成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y}) visualCpu=${cpuFmt(visualCpu)}`);
-        return OK;
-    },
-
-    /**
-     * 动态布局(scorpior)构建：写入 Memory.RosmarinBot.LayoutData[roomName] 并同步 RoomData.center/layout（若存在）。
-     * @param roomName 房间名
-     * @returns Screeps 错误码：OK/ERR_NOT_FOUND
-     */
-    buildDynamicScorpior(roomName: string): number {
-        const totalStart = cpuNow();
-        const computeStart = cpuNow();
-        const computed = computeDynamic(roomName, 'scorpior');
-        const computeCpu = cpuDelta(computeStart);
-        if (!computed) return ERR_NOT_FOUND;
-        const writeStart = cpuNow();
-        const BotMemRooms = getRoomData();
-        if (BotMemRooms?.[roomName]) {
-            BotMemRooms[roomName]['layout'] = 'scorpior';
-            BotMemRooms[roomName]['center'] = computed.center;
-        }
-        const layoutMemory = getLayoutData(roomName) as any;
-        for (const k in layoutMemory) delete layoutMemory[k];
-        Object.assign(layoutMemory, computed.layoutMemory as any);
-        const writeCpu = cpuDelta(writeStart);
-        const totalCpu = cpuDelta(totalStart);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=scorpior center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
         return OK;
     },
 

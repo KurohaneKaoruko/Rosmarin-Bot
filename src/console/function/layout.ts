@@ -105,8 +105,6 @@ export default {
                 return LayoutPlanner.buildDynamic(roomName);
             } else if (currentLayout == '63auto') {
                 return LayoutPlanner.buildDynamic63(roomName);
-            } else if (currentLayout == 'scorpior') {
-                return LayoutPlanner.buildDynamicScorpior(roomName);
             } else {
                 return LayoutPlanner.buildStatic(roomName, currentLayout);
             }
@@ -120,8 +118,6 @@ export default {
                     result = LayoutPlanner.visualDynamic(roomName);
                 } else if (layout == '63auto') {
                     result = LayoutPlanner.visualDynamic63(roomName);
-                } else if (layout == 'scorpior') {
-                    result = LayoutPlanner.visualDynamicScorpior(roomName);
                 } else {
                     result = LayoutPlanner.visualStatic(roomName, layout);
                 }
@@ -131,7 +127,6 @@ export default {
                     console.log(`房间 ${roomName} 的布局memory不存在，将根据自动布局可视化...`)
                     const layoutType = getRoomData()?.[roomName]?.layout;
                     if (layoutType == '63auto') result = LayoutPlanner.visualDynamic63(roomName);
-                    else if (layoutType == 'scorpior') result = LayoutPlanner.visualDynamicScorpior(roomName);
                     else result = LayoutPlanner.visualDynamic(roomName);
                 } else {
                     console.log(`将根据房间${roomName}的布局memory进行可视化...`)
