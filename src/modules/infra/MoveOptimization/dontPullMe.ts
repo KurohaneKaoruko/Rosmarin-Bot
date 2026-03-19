@@ -4,20 +4,22 @@
  * 抽到独立文件后，BetterMove 的主逻辑文件可以专注于寻路与缓存，
  * dontPullMe 这类“行为层补丁”则独立维护。
  */
-type AnyProto = Record<string, any>;
+type ProtoMethod = (...args: unknown[]) => unknown;
+type AnyProto = object;
 type CreepWithMoveMemory = Creep & {
     memory: CreepMemory & {
         _lpv?: number;
         _lpt?: number;
         dontPullMe?: boolean;
     };
-};
+} & Record<string, ProtoMethod | undefined>;
 
-export function wrapProtoMethod(proto: AnyProto, originalName: string, backupName: string, wrap: (...args: any[]) => any) {
-    if (!proto[backupName] || proto[backupName] === proto[originalName]) {
-        proto[backupName] = proto[originalName];
+export function wrapProtoMethod(proto: AnyProto, originalName: string, backupName: string, wrap: ProtoMethod) {
+    const protoMap = proto as Record<string, ProtoMethod | undefined>;
+    if (!protoMap[backupName] || protoMap[backupName] === protoMap[originalName]) {
+        protoMap[backupName] = protoMap[originalName];
     }
-    proto[originalName] = wrap;
+    protoMap[originalName] = wrap;
 }
 
 /**
@@ -65,8 +67,8 @@ export function installDontPullMePolicies({
     betterCancelOrder,
     restorePowerCreepNativeMethods,
 }: {
-    CreepPrototype: Creep['prototype'] & AnyProto;
-    betterCancelOrder: (...args: any[]) => any;
+    CreepPrototype: typeof Creep.prototype & AnyProto;
+    betterCancelOrder: ProtoMethod;
     restorePowerCreepNativeMethods: () => void;
 }) {
     wrapProtoMethod(CreepPrototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
@@ -77,8 +79,12 @@ export function installDontPullMePolicies({
         if (CreepPrototype[backupName]) {
             return;
         }
-        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: any[]) {
-            const result = this[backupName](...args);
+        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: unknown[]) {
+            const backupMethod = this[backupName];
+            if (typeof backupMethod !== 'function') {
+                return ERR_INVALID_TARGET;
+            }
+            const result = backupMethod.apply(this, args) as number;
             this.memory.dontPullMe = shouldLockActionPosition(methodName, result);
             return result;
         });

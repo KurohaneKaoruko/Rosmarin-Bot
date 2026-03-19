@@ -99,15 +99,90 @@ interface BetterMoveCacheStats {
   };
 }
 
+interface BetterMovePathCacheEntry {
+  dst?: RoomPosition | { x: number; y: number; roomName?: string };
+  path?: {
+    start?: { x: number; y: number };
+    end?: { x: number; y: number };
+    posArray: RoomPosition[];
+    ignoreRoads?: boolean;
+    ignoreStructures?: boolean;
+    ignoreSwamps?: boolean;
+    directionArray?: Array<DirectionConstant | 0>;
+    lastTime?: number;
+  };
+  idx: number;
+  avoidSignature?: string;
+}
+
+interface BetterMoveTileIntent {
+  start: string | number;
+  isSuper: boolean;
+  targetList: Array<{
+    target: number | number[];
+    score: number;
+  }>;
+}
+
+interface BetterMovePortalRecord {
+  roomName?: string;
+  x?: number;
+  y?: number;
+  destShard?: string;
+  destRoom?: string;
+  destX?: number;
+  destY?: number;
+  lastSeen?: number;
+}
+
+interface BetterMovePortalRegistry {
+  v: number;
+  list: BetterMovePortalRecord[];
+  updated: number;
+}
+
+interface BetterMoveConfig {
+  changeMove: boolean;
+  changeMoveTo: boolean;
+  changeFindClostestByPath: boolean;
+  autoVisual: boolean;
+  enableCpuStats: boolean;
+  enableCacheStats: boolean;
+  enableFlee: boolean;
+  enableSquadPath: boolean;
+  enableRouteCache: boolean;
+  routeCacheTTL: number;
+  routeCacheMaxEntries: number;
+  routeCacheMaxNewPerTick: number;
+  enableBypassCostMatReuse: boolean;
+  enableSameRoomDetourCooldown: boolean;
+  sameRoomDetourCooldownTTL: number;
+  enableRoomBounceGuardV2: boolean;
+  roomBounceWindow: number;
+  roomBounceTTL: number;
+  enableSameRoomDetourCooldownV2: boolean;
+  sameRoomDetourBounceWindow: number;
+  enableSameRoomEdgePenalty: boolean;
+  sameRoomEdgePenaltyCost: number;
+  enableTemporalBypassRefine: boolean;
+  temporalAvoidExitCheckTTL: number;
+  temporalBypassRetryMinTicks: number;
+  temporalBypassRetryMaxTicks: number;
+  pathCacheMaxEntries: number;
+  pathCacheTrimBatch: number;
+  enableObserverQueueRefine: boolean;
+  observerTaskTTL: number;
+}
+
 interface BetterMoveAPI {
   setChangeMove(bool: boolean): ScreepsReturnCode;
-  creepPathCache: Record<string, unknown>;
+  creepPathCache: Record<string, BetterMovePathCacheEntry | undefined>;
   preTickBetterMove(): void;
   squadMove(squad: Creep[], target?: Array<RoomPosition | { pos: RoomPosition }>): ScreepsReturnCode;
   squadMoveTo(squad: Creep[], x: number, y: number, opts?: SquadMoveToOpts): ScreepsReturnCode;
   squadMoveTo(squad: Creep[], target: RoomPosition | { pos: RoomPosition }, opts?: SquadMoveToOpts): ScreepsReturnCode;
   setChangeMoveTo(bool: boolean): ScreepsReturnCode;
-  setCheckTile(userCheckTile?: (posList: RoomPosition[]) => unknown): ScreepsReturnCode;
+  setCheckTile(userCheckTile?: (posList: RoomPosition[]) => BetterMoveTileIntent[]): ScreepsReturnCode;
   setChangeFindClostestByPath(bool: boolean): ScreepsReturnCode;
   setPathClearDelay(number?: number): ScreepsReturnCode;
   setHostileCostMatrixClearDelay(number?: number): ScreepsReturnCode;
@@ -122,15 +197,15 @@ interface BetterMoveAPI {
   getClosestExitPos(fromPos: RoomPosition, toRoomName: string): RoomPosition | null;
   setEnableSquadPath(bool: boolean): ScreepsReturnCode;
   setEnableFlee(bool: boolean): ScreepsReturnCode;
-  getConfig(): Record<string, unknown>;
-  setConfig(partial: Record<string, unknown>): ScreepsReturnCode;
+  getConfig(): BetterMoveConfig;
+  setConfig(partial: Partial<BetterMoveConfig> & Record<string, unknown>): ScreepsReturnCode;
   getCacheStats(): BetterMoveCacheStats;
   resetCacheStats(): ScreepsReturnCode;
   deletePathInRoom(roomName: string): ScreepsReturnCode;
   addAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
   deleteAvoidExits(fromRoomName: string, toRoomName: string): ScreepsReturnCode;
-  syncPortals(): { v: number; list: unknown[]; updated: number };
-  printPortals(targetShard?: string): unknown[];
+  syncPortals(): BetterMovePortalRegistry;
+  printPortals(targetShard?: string): BetterMovePortalRecord[];
   endTickResolve(userIsWorkTile?: (creep: Creep | PowerCreep, pos: RoomPosition) => boolean): void;
   print(): string;
   clear(options?: {

@@ -8,26 +8,52 @@
  * - squad/flee 等共享 PathFinder 能力
  * - observer 校验与 tick 维护调度
  */
+import type {
+    BetterMoveFleeTarget,
+    BetterMovePath,
+    BetterMovePathSearchResult,
+    BetterMoveTarget,
+    CreepPathCacheEntry,
+    FormalizedPos,
+} from './types';
+
+type SquadMemberOffset = { x: number; y: number };
+type RouteRoomSet = Record<string, 1>;
+type RouteStep = { room: string };
+type UserCostCallback = ((roomName: string, costMatrix: CostMatrix) => CostMatrix | boolean | void) | undefined;
+type SquadPathToOpts = MoveToOpts & { memberPos?: SquadMemberOffset[] };
+type SquadTemporalPathArgs = [
+    leader: Creep,
+    toPos: RoomPosition,
+    ops: SquadMoveToOpts,
+    key: string,
+    severe?: boolean,
+    squadNames?: Set<string>,
+];
+
 export interface PathingModuleApi {
+    // pathing 对外暴露的是“路径搜索与缓存控制面”，
+    // 这里用最小结构描述缓存路径/搜索结果，避免 API 层继续泄漏 any。
+    // 不在接口里把内部 route/observer 实现细节展开，避免和实现绑死。
     bmSetPathClearDelay: (number?: number) => ScreepsReturnCode;
     bmSetHostileCostMatrixClearDelay: (number?: number) => ScreepsReturnCode;
     bmDeleteCostMatrix: (roomName: string) => ScreepsReturnCode;
     bmGetCacheStats: () => BetterMoveCacheStats;
     bmResetCacheStats: () => ScreepsReturnCode;
-    bmDeltePath: (fromPos: unknown, toPos: unknown, opts?: MoveToOpts) => ScreepsReturnCode;
-    bmDeletePath: (fromPos: unknown, toPos: unknown, opts?: MoveToOpts) => ScreepsReturnCode;
+    bmDeltePath: (fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts) => ScreepsReturnCode;
+    bmDeletePath: (fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts) => ScreepsReturnCode;
     bmDeletePathInRoom: (roomName: string) => ScreepsReturnCode;
     clearRouteCacheEntries: (force?: boolean) => void;
     ensureRouteCacheMaintenance: (force?: boolean) => void;
-    findTemporalPath: (...args: any[]) => any;
-    findPath: (...args: any[]) => any;
-    findShortPathInCache: (...args: any[]) => any;
-    findLongPathInCache: (...args: any[]) => any;
-    findSquadTemporalPath: (...args: any[]) => any;
-    findSquadPath: (...args: any[]) => any;
-    findSquadPathTo: (this: RoomPosition, toPos: RoomPosition | { pos: RoomPosition }, opts?: PathFinderOpts) => PathFinderPath | ERR_NO_PATH | ERR_INVALID_TARGET;
-    flee: (this: Creep, targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
-    setPathTimer: (...args: any[]) => any;
+    findTemporalPath: (creep: Creep, toPos: RoomPosition, ops: MoveToOpts) => boolean;
+    findPath: (fromPos: RoomPosition, toPos: RoomPosition, ops: MoveToOpts) => BetterMovePathSearchResult;
+    findShortPathInCache: (formalFromPos: FormalizedPos, formalToPos: FormalizedPos, fromPos: RoomPosition, toRoomName: string, creepCache: CreepPathCacheEntry, ops: MoveToOpts) => boolean;
+    findLongPathInCache: (formalFromPos: FormalizedPos, formalToPos: FormalizedPos, toRoomName: string, creepCache: CreepPathCacheEntry, ops: MoveToOpts) => boolean;
+    findSquadTemporalPath: (...args: SquadTemporalPathArgs) => boolean;
+    findSquadPath: (fromPos: RoomPosition, toPos: RoomPosition, ops: SquadMoveToOpts) => BetterMovePathSearchResult;
+    findSquadPathTo: (this: RoomPosition, toPos: BetterMoveTarget, opts?: SquadPathToOpts) => PathFinderPath | ERR_NO_PATH | ERR_INVALID_TARGET;
+    flee: (this: Creep, targets: BetterMoveFleeTarget[], opts?: MoveToOpts) => ScreepsReturnCode;
+    setPathTimer: (path: CreepPathCacheEntry) => void;
     runMoveOptTickMaintenance: () => void;
 }
 
@@ -61,21 +87,21 @@ export class PathingService {
 
         // 通过构造器闭包保存搜索期临时状态，既能形成清晰的类边界，
         // 又不破坏 `findSquadPathTo` / `flee` 这类依赖调用方 `this` 的旧接口。
-        let bypassRoomName;
-        let bypassCostMat;
+        let bypassRoomName = '';
+        let bypassCostMat: CostMatrix;
         let bypassIgnoreCondition;
-        let userCostCallback;
-        let costMat;
-        let route;
-        let findPathPortalPos = null;
-        let findPathPortalMat = null;
+        let userCostCallback: UserCostCallback;
+        let costMat: CostMatrix;
+        let route: RouteRoomSet = Object.create(null);
+        let findPathPortalPos: RoomPosition | null = null;
+        let findPathPortalMat: CostMatrix | null = null;
         let findPathAllowPortal = false;
         let findPathSameRoomEdgeRoomName = '';
         let findPathIgnoreCondition;
-        let findPathStartPos;
-        let findPathStartMat;
+        let findPathStartPos: RoomPosition | undefined;
+        let findPathStartMat: CostMatrix | null | undefined;
 
-    function getCachedRoomCostMatrix(roomName, ignoreCondition) {
+    function getCachedRoomCostMatrix(roomName: string, ignoreCondition: boolean | undefined): CostMatrix {
         if (!(roomName in deps.costMatrixCache)) {
             return deps.emptyCostMatrix;
         }
@@ -151,12 +177,27 @@ export class PathingService {
         return OK;
     }
 
-    function bmResolvePosArg(posOrObj) {
+    function bmResolvePosArg(posOrObj: BetterMoveTarget | null | undefined) {
         if (!posOrObj) return null;
-        const pos = posOrObj.pos || posOrObj;
+        const pos = ('pos' in posOrObj) ? posOrObj.pos : posOrObj;
         if (!pos || typeof pos !== 'object') return null;
         if (typeof pos.x !== 'number' || typeof pos.y !== 'number' || typeof pos.roomName !== 'string') return null;
         return pos;
+    }
+
+    function resolveTargetPos(target: BetterMoveTarget | null | undefined): RoomPosition | null {
+        if (!target) {
+            return null;
+        }
+        return 'pos' in target ? target.pos : target;
+    }
+
+    function isFleeTargetWithPos(target: BetterMoveFleeTarget): target is Extract<BetterMoveFleeTarget, { pos: RoomPosition }> {
+        return !!target && typeof target === 'object' && 'pos' in target;
+    }
+
+    function isFleeRoomPosition(target: BetterMoveFleeTarget): target is RoomPosition {
+        return !!target && typeof target === 'object' && 'x' in target && 'y' in target && 'roomName' in target;
     }
 
     /**
@@ -695,8 +736,8 @@ export class PathingService {
         temporalState.cache[cacheKey] = temporalState.to || '';
     }
 
-    function buildRouteRoomSet(routeList, startRoomName) {
-        const roomSet = Object.create(null);
+    function buildRouteRoomSet(routeList: RouteStep[], startRoomName: string): RouteRoomSet {
+        const roomSet: RouteRoomSet = Object.create(null);
         roomSet[startRoomName] = 1;
         for (let i = routeList.length; i--;) {
             roomSet[routeList[i].room] = 1;
@@ -949,13 +990,13 @@ export class PathingService {
             try {
                 if (creep.pos.roomName != toPos.roomName) {
                     checkTemporalAvoidExit(creep.pos, creep.room, bypassCostMat, toPos.roomName);
-                    route = findRoute(creep.pos.roomName, toPos.roomName, true, ops);
-                    if (route == ERR_NO_PATH) {
+                    const routeList = findRoute(creep.pos.roomName, toPos.roomName, true, ops);
+                    if (routeList == ERR_NO_PATH) {
                         return false;
                     }
-                    pathFinderOpts.maxRooms = pathFinderOpts.maxRooms || route.length + 1;
-                    pathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;
-                    route = buildRouteRoomSet(route, creep.pos.roomName);
+                    pathFinderOpts.maxRooms = pathFinderOpts.maxRooms || routeList.length + 1;
+                    pathFinderOpts.maxOps = ops.maxOps || 4000 + routeList.length ** 2 * 100;
+                    route = buildRouteRoomSet(routeList, creep.pos.roomName);
                     pathFinderOpts.roomCallback = bypassRoomCallbackWithRoute;
                 } else {
                     pathFinderOpts.maxOps = ops.maxOps;
@@ -1003,7 +1044,7 @@ export class PathingService {
         });
     }
 
-    function findPath(fromPos, toPos, ops) {
+    function findPath(fromPos: RoomPosition, toPos: RoomPosition, ops: MoveToOpts & { _bmAllowPortal?: boolean }): BetterMovePathSearchResult {
         deps.ensureAvoidRoomsUpToDate();
 
         if (!(fromPos.roomName in deps.costMatrixCache) && fromPos.roomName in Game.rooms) {
@@ -1025,13 +1066,13 @@ export class PathingService {
 
         return deps.withScopedAvoids(ops, () => {
             if (fromPos.roomName != toPos.roomName) {
-                route = findRoute(fromPos.roomName, toPos.roomName, false, ops);
-                if (route == ERR_NO_PATH) {
+                const routeList = findRoute(fromPos.roomName, toPos.roomName, false, ops);
+                if (routeList == ERR_NO_PATH) {
                     return { path: [] };
                 }
-                pathFinderOpts.maxOps = ops.maxOps || 4000 + route.length ** 2 * 100;
-                pathFinderOpts.maxRooms = pathFinderOpts.maxRooms || route.length + 1;
-                route = buildRouteRoomSet(route, fromPos.roomName);
+                pathFinderOpts.maxOps = ops.maxOps || 4000 + routeList.length ** 2 * 100;
+                pathFinderOpts.maxRooms = pathFinderOpts.maxRooms || routeList.length + 1;
+                route = buildRouteRoomSet(routeList, fromPos.roomName);
                 pathFinderOpts.roomCallback = roomCallbackWithRoute;
             } else {
                 pathFinderOpts.maxOps = ops.maxOps;
@@ -1042,7 +1083,7 @@ export class PathingService {
         });
     }
 
-    function findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops, requireSecondStepCheck) {
+    function findPathInCache(formalFromPos: FormalizedPos, formalToPos: FormalizedPos, fromPos: RoomPosition | undefined, toRoomName: string, creepCache: CreepPathCacheEntry, ops: MoveToOpts, requireSecondStepCheck: boolean) {
         const statsEnabled = deps.isCpuStatsEnabled();
         if (statsEnabled) {
             deps.setStartCacheSearch(Game.cpu.getUsed());
@@ -1054,7 +1095,7 @@ export class PathingService {
         const maxY = endKey + 1 + range;
         const variantKey = deps.buildPathVariantKeyFromQuery(ops, toRoomName);
 
-        const visit = (pathArray, skipOpsCheck) => {
+        const visit = (pathArray: BetterMovePath[], skipOpsCheck: boolean) => {
             for (let i = pathArray.length; i--;) {
                 const path = pathArray[i];
                 if (statsEnabled) deps.runtimeMetrics.pathCounter++;
@@ -1103,18 +1144,18 @@ export class PathingService {
         return false;
     }
 
-    function findShortPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops) {
+    function findShortPathInCache(formalFromPos: FormalizedPos, formalToPos: FormalizedPos, fromPos: RoomPosition, toRoomName: string, creepCache: CreepPathCacheEntry, ops: MoveToOpts) {
         return findPathInCache(formalFromPos, formalToPos, fromPos, toRoomName, creepCache, ops, true);
     }
 
-    function findLongPathInCache(formalFromPos, formalToPos, toRoomName, creepCache, ops) {
+    function findLongPathInCache(formalFromPos: FormalizedPos, formalToPos: FormalizedPos, toRoomName: string, creepCache: CreepPathCacheEntry, ops: MoveToOpts) {
         return findPathInCache(formalFromPos, formalToPos, undefined, toRoomName, creepCache, ops, false);
     }
 
     /**
      * 为跨房缓存路径记录最近使用时间，供延迟回收逻辑按需清理。
      */
-    function setPathTimer(creepCache) {
+    function setPathTimer(creepCache: CreepPathCacheEntry) {
         const pathClearDelay = deps.getPathClearDelay();
         if (!pathClearDelay) {
             return;
@@ -1166,7 +1207,7 @@ export class PathingService {
         return costMat;
     }
 
-    function findSquadTemporalPath(leader, toPos, ops, key, severe, squadNames) {
+    function findSquadTemporalPath(leader: Creep, toPos: RoomPosition, ops: SquadMoveToOpts, key: string, severe = false, squadNames: Set<string> = new Set()) {
         bypassRoomName = leader.room.name;
         if (!(bypassRoomName in deps.costMatrixCache) && bypassRoomName in Game.rooms) {
             deps.generateCostMatrix(Game.rooms[bypassRoomName], leader.pos);
@@ -1226,7 +1267,7 @@ export class PathingService {
         return costMat;
     }
 
-    function findSquadPath(fromPos, toPos, ops) {
+    function findSquadPath(fromPos: RoomPosition, toPos: RoomPosition, ops: SquadMoveToOpts): BetterMovePathSearchResult {
         deps.ensureAvoidRoomsUpToDate();
         if (!(fromPos.roomName in deps.costMatrixCache) && fromPos.roomName in Game.rooms) {
             deps.generateCostMatrix(Game.rooms[fromPos.roomName], fromPos);
@@ -1238,7 +1279,7 @@ export class PathingService {
         return deps.withScopedAvoids(ops, () => PathFinder.search(fromPos, { pos: toPos, range: ops.range }, pathFinderOpts));
     }
 
-    function getMemberPosSignature(memberPos) {
+    function getMemberPosSignature(memberPos: SquadMemberOffset[]) {
         if (!memberPos.length) {
             return '';
         }
@@ -1256,9 +1297,9 @@ export class PathingService {
         return deps.squadDerivedState.cache;
     }
 
-    function findSquadPathTo(toPos, opts) {
+    function findSquadPathTo(this: RoomPosition, toPos: BetterMoveTarget, opts: SquadPathToOpts | undefined) {
         deps.ensureAvoidRoomsUpToDate();
-        const targetPos = toPos && toPos.pos ? toPos.pos : toPos;
+        const targetPos = resolveTargetPos(toPos);
         if (!targetPos || typeof targetPos.x != 'number' || typeof targetPos.y != 'number') {
             return [];
         }
@@ -1325,7 +1366,7 @@ export class PathingService {
         return deps.withScopedAvoids(opts, () => PathFinder.search(this, { pos: targetPos, range }, pathFinderOpts).path);
     }
 
-    function flee(targets, opts) {
+    function flee(this: Creep, targets: BetterMoveFleeTarget[], opts?: MoveToOpts) {
         deps.ensureAvoidRoomsUpToDate();
         opts = opts || {};
         const range = typeof opts.range == 'number' ? opts.range : 5;
@@ -1339,9 +1380,9 @@ export class PathingService {
         for (let i = targets.length; i--;) {
             const target = targets[i];
             if (!target) continue;
-            if (target.pos && typeof target.pos.x == 'number') {
+            if (isFleeTargetWithPos(target) && typeof target.pos.x == 'number') {
                 goals.push({ pos: target.pos, range: typeof target.range == 'number' ? target.range : range });
-            } else if (typeof target.x == 'number' && typeof target.y == 'number' && target.roomName) {
+            } else if (isFleeRoomPosition(target) && typeof target.x == 'number' && typeof target.y == 'number' && target.roomName) {
                 goals.push({ pos: target, range });
             }
         }

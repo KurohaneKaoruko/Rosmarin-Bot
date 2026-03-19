@@ -4,18 +4,23 @@
  * 把路径/CostMatrix 的定时回收，以及 `BetterMove.clear()` 的热重载恢复逻辑
  * 从主文件抽走，避免 `index.ts` 在核心移动流程中混入大量 housekeeping 细节。
  */
-type Dictionary = Record<string, unknown>;
-type ObserverRuntime = {
-    id: string;
-    roomName: string;
-    taskQueue: unknown[];
-    taskHead: number;
-};
-type BetterMovePortalRegistry = {
-    v: number;
-    list: unknown[];
-    updated: number;
-};
+import type {
+    BetterMoveObserverRuntime,
+    BetterMoveObserverTask,
+    BetterMovePath,
+    BetterMovePathInsertToken,
+    BetterMovePortalRegistry,
+    CreepPathCacheEntry,
+} from './types';
+
+type RoomFlagMap = Record<string, 1>;
+type AvoidExitMap = Record<string, RoomFlagMap>;
+type NumericMap = Record<string, number>;
+type PathTimerMap = Record<number, BetterMovePath[]>;
+type CostMatrixExpiryEntry = { roomName: string; avoids: string[] };
+type CostMatrixTimerMap = Record<number, CostMatrixExpiryEntry[]>;
+type RouteKeysByTick = Record<number, string[]>;
+type ObserverResultMap = Record<number, BetterMoveObserverTask[]>;
 type BetterMoveGlobalState = typeof globalThis & {
     _bmPortals?: BetterMovePortalRegistry;
 };
@@ -24,40 +29,40 @@ type DueTickQueue = {
     marks: Record<number, 1>;
 };
 type CleanupDeps = {
-    globalPathCache: Dictionary;
-    globalPathCacheByVariant: Dictionary;
-    roomSameRoomPathRefs: Dictionary;
-    roomSameRoomPathCount: Dictionary;
-    roomStartKeyRefs: Dictionary;
-    roomStartKeyCount: Dictionary;
-    endKeyStartKeyRefs: Dictionary;
-    roomEndKeyRefs: Dictionary;
-    roomEndKeyCount: Dictionary;
-    creepPathCache: Dictionary;
-    creepMoveCache: Dictionary;
-    pathCacheTimer: Dictionary;
+    globalPathCache: object;
+    globalPathCacheByVariant: object;
+    roomSameRoomPathRefs: object;
+    roomSameRoomPathCount: NumericMap;
+    roomStartKeyRefs: object;
+    roomStartKeyCount: NumericMap;
+    endKeyStartKeyRefs: object;
+    roomEndKeyRefs: object;
+    roomEndKeyCount: NumericMap;
+    creepPathCache: Record<string, CreepPathCacheEntry | undefined>;
+    creepMoveCache: NumericMap;
+    pathCacheTimer: PathTimerMap;
     pathCacheTimerDueQueue: DueTickQueue;
-    pathCacheInsertQueue: unknown[];
-    costMatrixCacheTimer: Dictionary;
+    pathCacheInsertQueue: BetterMovePathInsertToken[];
+    costMatrixCacheTimer: CostMatrixTimerMap;
     costMatrixCacheTimerDueQueue: DueTickQueue;
-    costMatrixCache: Dictionary;
-    costMatrixRevision: Dictionary;
-    sameRoomEdgeCostMatCache: Dictionary;
-    avoidRooms: Dictionary;
-    avoidExits: Dictionary;
-    syncedBypassRooms: Dictionary;
-    observers: ObserverRuntime[];
-    obTimer: Dictionary;
+    costMatrixCache: object;
+    costMatrixRevision: NumericMap;
+    sameRoomEdgeCostMatCache: object;
+    avoidRooms: RoomFlagMap;
+    avoidExits: AvoidExitMap;
+    syncedBypassRooms: RoomFlagMap;
+    observers: BetterMoveObserverRuntime[];
+    obTimer: ObserverResultMap;
     obTimerDueQueue: DueTickQueue;
-    routeCacheKeysByDueTick: Dictionary;
+    routeCacheKeysByDueTick: RouteKeysByTick;
     routeCacheDueQueue: DueTickQueue;
-    bypassRouteCacheKeysByTick: Dictionary;
+    bypassRouteCacheKeysByTick: RouteKeysByTick;
     bypassRouteCacheDueQueue: DueTickQueue;
-    bypassCostMatReuseCache: Dictionary;
-    temporalAvoidExitCache: Dictionary;
+    bypassCostMatReuseCache: object;
+    temporalAvoidExitCache: object;
     geometryCaches: {
-        roomNameParseCache: Dictionary;
-        shardRoomNameParseCache: Dictionary;
+        roomNameParseCache: object;
+        shardRoomNameParseCache: object;
         tileToPosCache: Map<number, RoomPosition>;
     };
     getPathClearDelay: () => number;
@@ -68,13 +73,13 @@ type CleanupDeps = {
     setTemporalAvoidExitCacheTick: (value: number) => void;
     setTemporalAvoidRooms: (from: string, to: string) => void;
     setBounceAvoidState: (from: string, to: string, until: number) => void;
-    setSquadDerivedState: (tick: number, cache: Dictionary) => void;
+    setSquadDerivedState: (tick: number, cache: object) => void;
     setAutoDiscoverObserverTick: (value: number) => void;
     setObTick: (value: number) => void;
     setAvoidRoomsMemoryInitialized: (value: boolean) => void;
     setAvoidRoomsMemorySignature: (value: string) => void;
     setAvoidRoomsSyncTick: (value: number) => void;
-    deletePath: (path: any) => void;
+    deletePath: (path: BetterMovePath) => void;
     drainDueTickQueue: (queue: DueTickQueue, now: number, visit: (tick: number) => void) => void;
     clearDueTickQueue: (queue: DueTickQueue) => void;
     markAvoidRoomsChanged: () => void;
@@ -84,12 +89,13 @@ type CleanupDeps = {
     ensureObserversUpToDate: () => void;
     resetMoveOptStats: () => void;
     resetMoveIntentState: () => void;
-    setCheckTile: (value: ((posList: RoomPosition[]) => unknown) | undefined) => void;
+    setCheckTile: (value: ((posList: RoomPosition[]) => BetterMoveTileIntent[]) | undefined) => void;
 };
 
-export function clearObjectKeys(obj: Dictionary) {
-    for (const key in obj) {
-        delete obj[key];
+export function clearObjectKeys<T extends object>(obj: T) {
+    const target = obj as Record<string, unknown>;
+    for (const key in target) {
+        delete target[key];
     }
 }
 
@@ -106,7 +112,7 @@ export function createCleanupModule(deps: CleanupDeps) {
 
     function clearExpiredPaths() {
         deps.drainDueTickQueue(deps.pathCacheTimerDueQueue, Game.time, (time) => {
-            const paths = deps.pathCacheTimer[time] as Array<{ lastTime?: number }> | undefined;
+            const paths = deps.pathCacheTimer[time] as BetterMovePath[] | undefined;
             if (!paths || !paths.length) {
                 delete deps.pathCacheTimer[time];
                 return;

@@ -5,16 +5,12 @@
  * 同时顺手收口对 avoidRooms / avoidExits 的运行时增删改查，
  * 让主文件不再混杂这类状态控制细节。
  */
+import type { BetterMoveObserverRuntime } from './types';
+
 type RoomFlagMap = Record<string, 1>;
 type AvoidExitMap = Record<string, RoomFlagMap>;
-type ObserverRuntime = {
-    id: string;
-    roomName: string;
-    taskQueue: unknown[];
-    taskHead: number;
-};
 type AvoidSyncDeps = {
-    observers: ObserverRuntime[];
+    observers: BetterMoveObserverRuntime[];
     avoidRooms: RoomFlagMap;
     avoidExits: AvoidExitMap;
     syncedBypassRooms: RoomFlagMap;
@@ -125,7 +121,7 @@ export function createAvoidSyncModule(deps: AvoidSyncDeps) {
     }
 
     function autoDiscoverObservers() {
-        const newObservers: ObserverRuntime[] = [];
+        const newObservers: BetterMoveObserverRuntime[] = [];
 
         for (const id in Game.structures) {
             const structure = Game.structures[id];

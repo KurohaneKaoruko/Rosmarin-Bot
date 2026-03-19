@@ -7,14 +7,130 @@
  * 当前优先保持行为稳定，因此先沿用原有自由函数实现，
  * 通过构造器闭包 + 依赖注入建立模块边界，再逐步收紧类型。
  */
+import type {
+    BetterMoveConfig,
+    BetterMovePath,
+    BetterMovePathSearchResult,
+    BetterMoveTarget,
+    CreepPathCacheEntry,
+    FormalizedPos,
+} from './types';
+
+type BetterMoveToMethod = (this: Creep, target: BetterMoveTarget, opts?: MoveToOpts) => ScreepsReturnCode;
+type BetterMoveToXYMethod = (this: Creep, x: number, y: number, opts?: MoveToOpts) => ScreepsReturnCode;
+type SquadMoveToTargetMethod = (squad: Creep[], target: BetterMoveTarget, opts?: SquadMoveToOpts) => ScreepsReturnCode;
+type SquadMoveToXYMethod = (squad: Creep[], x: number, y: number, opts?: SquadMoveToOpts) => ScreepsReturnCode;
+type BetterFindClosestByPathOpts = FindPathOpts & Partial<FilterOptions<FIND_STRUCTURES>> & { algorithm?: string };
+type BetterFindClosestByPathResult = ReturnType<typeof RoomPosition.prototype.findClosestByPath>;
+type SquadTemporalPathFn = (leader: Creep, toPos: RoomPosition, ops: SquadMoveToOpts, key: string, severe?: boolean, squadNames?: Set<string>) => boolean;
+
 export interface MovementModuleApi {
-    betterMoveTo: (this: Creep, ...args: any[]) => ScreepsReturnCode;
-    betterMove: (this: Creep, ...args: any[]) => ScreepsReturnCode;
+    betterMoveTo: BetterMoveToMethod & BetterMoveToXYMethod;
+    betterMove: (this: Creep, target: DirectionConstant | Creep | PowerCreep) => ScreepsReturnCode;
     betterPull: (this: Creep, target: Creep) => ScreepsReturnCode;
-    squadMove: (squad: Creep[], target?: Array<RoomPosition | { pos: RoomPosition }>) => ScreepsReturnCode;
-    squadMoveTo: (squad: Creep[], ...args: any[]) => ScreepsReturnCode;
-    betterFindClosestByPath: (this: RoomPosition, type: FindConstant, opts?: FindPathOpts & FilterOptions<FIND_STRUCTURES> & { algorithm?: string }) => any;
+    squadMove: (squad: Creep[], target?: BetterMoveTarget[]) => ScreepsReturnCode;
+    squadMoveTo: SquadMoveToTargetMethod & SquadMoveToXYMethod;
+    betterFindClosestByPath: (this: RoomPosition, type: FindConstant, opts?: BetterFindClosestByPathOpts) => BetterFindClosestByPathResult;
 }
+
+type RuntimeMetrics = {
+    pathCounter: number;
+    testCacheHits: number;
+    testCacheMiss: number;
+    testNormal: number;
+    testNearStorageCheck: number;
+    testNearStorageSwap: number;
+    testTrySwap: number;
+    testBypass: number;
+    normalLogicalCost: number;
+    cacheHitCost: number;
+    cacheMissCost: number;
+};
+
+type ParsedShardRoomName = {
+    shard: string | null;
+    room: string | null | undefined;
+};
+
+type MovementDeps = {
+    config: BetterMoveConfig;
+    powerCreepProto?: (typeof PowerCreep.prototype & {
+        $move?: typeof PowerCreep.prototype.move;
+        $moveTo?: typeof PowerCreep.prototype.moveTo;
+    }) | undefined;
+    originMoveTo: typeof Creep.prototype.moveTo;
+    originMove: typeof Creep.prototype.move;
+    originPull: typeof Creep.prototype.pull;
+    originFindClosestByPath: typeof RoomPosition.prototype.findClosestByPath;
+    getPowerCreepMoveToMethod: () => typeof PowerCreep.prototype.moveTo | undefined;
+    getPowerCreepMoveMethod: () => typeof PowerCreep.prototype.move | undefined;
+    parseShardRoomName: (roomName: string | null | undefined) => ParsedShardRoomName;
+    scanPortals: (force: boolean) => void;
+    pickPortalToShard: (fromRoomName: string, targetShard: string, targetRoomName: string | null | undefined) => { x: number; y: number; roomName: string } | null | undefined;
+    registerRoomBounceGuard: (creep: Creep, targetRoomName: string) => void;
+    applySameRoomDetourCooldown: (creep: Creep, toPos: RoomPosition, ops: MoveToOpts) => void;
+    validateMoveToArgTypes: (ops: unknown) => ops is MoveToOpts;
+    getScopedAvoidSignature: (ops: MoveToOpts) => string;
+    formalizeIntentPos: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
+    formalizeIntentMovePos: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
+    hasActiveBodypart: (body: BodyPartDefinition[] | undefined | null, type: BodyPartConstant) => boolean;
+    getPositiveConfigNumber: (value: unknown, fallback: number) => number;
+    formalize: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
+    inRange: (pos1: { x: number; y: number; roomName?: string | null }, pos2: { x: number; y: number; roomName?: string | null }, range: number) => boolean;
+    isEqual: (pos1: { x: number; y: number; roomName?: string | null }, pos2: { x: number; y: number; roomName?: string | null }) => boolean;
+    isNear: (pos1: { x: number; y: number; roomName?: string | null }, pos2: { x: number; y: number; roomName?: string | null }) => boolean;
+    isCpuStatsEnabled: () => boolean;
+    runtimeMetrics: RuntimeMetrics;
+    checkRoom: (room: Room | { name: string }, path: BetterMovePath, startIdx: number) => boolean;
+    deletePath: (path: BetterMovePath) => void;
+    clearUnused: () => void;
+    findPath: (fromPos: RoomPosition, toPos: RoomPosition, ops: MoveToOpts) => BetterMovePathSearchResult;
+    findTemporalPath: (creep: Creep, toPos: RoomPosition, ops: MoveToOpts) => boolean;
+    findShortPathInCache: (
+        fromFormalPos: FormalizedPos,
+        toFormalPos: FormalizedPos,
+        fromPos: RoomPosition,
+        toRoomName: string,
+        creepCache: CreepPathCacheEntry,
+        ops: MoveToOpts
+    ) => boolean;
+    findLongPathInCache: (
+        fromFormalPos: FormalizedPos,
+        toFormalPos: FormalizedPos,
+        toRoomName: string,
+        creepCache: CreepPathCacheEntry,
+        ops: MoveToOpts
+    ) => boolean;
+    findSquadTemporalPath: SquadTemporalPathFn;
+    findSquadPath: (fromPos: RoomPosition, toPos: RoomPosition, ops: SquadMoveToOpts) => BetterMovePathSearchResult;
+    setPathTimer: (path: CreepPathCacheEntry) => void;
+    ensurePathVersion: (path: BetterMovePath) => number;
+    generateDirectionArray: (path: BetterMovePath) => void;
+    addPathIntoCache: (newPath: BetterMovePath) => void;
+    isObstacleStructure: (room: Room, pos: RoomPosition, ignoreStructures: boolean) => boolean;
+    registerMoveIntent: (creep: Creep, targetFormalPos: { x: number; y: number } | 0, priority?: number) => ScreepsReturnCode;
+    registerSquad: (creep1: Creep, creep2: Creep) => void;
+    checkSquadTarget: (
+        creepPosArray: RoomPosition[],
+        leaderPos: { x: number; y: number; roomName: string },
+        leaderNextPos: { x: number; y: number; roomName: string }
+    ) => boolean;
+    creepPathCache: Record<string, CreepPathCacheEntry | undefined>;
+    creepMoveCache: Record<string, number>;
+    costMatrixCache: Record<string, object | undefined>;
+    costMatrixRevision: Record<string, number>;
+    sameRoomEdgeCostMatCache: Record<string, object | undefined>;
+    rerouteSquad: Set<string>;
+    tempArray: RoomPosition[];
+    defaultVisualizePathStyle: PolyStyle;
+    generateCostMatrix: (room: Room, pos?: RoomPosition) => void;
+    getSquadCostMatrixForRoom: (roomName: string, ignoreStructures: boolean | undefined) => CostMatrix;
+    unWalkableCCost: number;
+    tile2Pos: (tile: number) => RoomPosition;
+    packIntentTile: (formalPos: { x: number; y: number }) => number;
+    getStartCacheSearch: () => number;
+    getStartTime: () => number;
+};
 
 export class MovementService {
     declare betterMoveTo: MovementModuleApi['betterMoveTo'];
@@ -24,7 +140,7 @@ export class MovementService {
     declare squadMoveTo: MovementModuleApi['squadMoveTo'];
     declare betterFindClosestByPath: MovementModuleApi['betterFindClosestByPath'];
 
-    constructor(deps: any) {
+    constructor(deps: MovementDeps) {
         let autoClearTick = Game.time;
         let findPathIgnoreCondition: boolean | undefined;
 
@@ -209,7 +325,7 @@ function direction2Pos(pos, target) {
 /**
  * moveTo 同 tick 去重使用的参数签名
  * @param {Creep} creep
- * @param {IArguments | any[]} args
+ * @param {IArguments | ArrayLike<unknown>} args
  * @returns {string}
  */
 function buildMoveToDedupKey(creep, args) {
@@ -398,7 +514,7 @@ function startSquadRoute(squad, leader, creepPosArray, leaderPos, pathCache, vis
 function resolveMoveToArgs(creep, firstArg, secondArg, opts) {
     if (typeof firstArg == 'object') {
         return {
-            toPos: firstArg.pos || firstArg,
+            toPos: ('pos' in firstArg) ? firstArg.pos : firstArg,
             ops: secondArg || {}
         };
     }
@@ -406,6 +522,10 @@ function resolveMoveToArgs(creep, firstArg, secondArg, opts) {
         toPos: { x: firstArg, y: secondArg, roomName: creep.room.name },
         ops: opts || {}
     };
+}
+
+function resolveTargetPos(target: BetterMoveTarget): RoomPosition {
+    return 'pos' in target ? target.pos : target;
 }
 
 /**
@@ -500,19 +620,19 @@ function resolvePathAndStartRoute(creep, toPos, ops, creepCache) {
             clearUnused();
         }
 
-        let result = findPath(creep.pos, toPos, ops);
-        if (!result.path.length || (result.incomplete && result.path.length == 1)) {     // 一步也动不了了
+        const pathResult = findPath(creep.pos, toPos, ops);
+        if (!pathResult.path.length || (pathResult.incomplete && pathResult.path.length == 1)) {     // 一步也动不了了
             //creep.say('no path')
             return ERR_NO_PATH;
         }
-        result = result.path;
-        result.unshift(creep.pos);
+        const pathArray = pathResult.path.slice();
+        pathArray.unshift(creep.pos);
 
         //creep.say('start new');
         let newPath = {
-            start: formalize(result[0]),
-            end: formalize(result[result.length - 1]),
-            posArray: result,
+            start: formalize(pathArray[0]),
+            end: formalize(pathArray[pathArray.length - 1]),
+            posArray: pathArray,
             ignoreRoads: !!ops.ignoreRoads,
             ignoreStructures: !!ops.ignoreDestructibleStructures,
             ignoreSwamps: !!ops.ignoreSwamps
@@ -701,7 +821,7 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
  * @param {number | MoveToOpts} secondArg
  * @param {MoveToOpts} opts
  */
-function betterMoveTo(firstArg, secondArg, opts) {
+function betterMoveTo(this: Creep, firstArg: number | BetterMoveTarget, secondArg?: number | MoveToOpts, opts?: MoveToOpts) {
     if (powerCreepProto && this instanceof PowerCreep) {
         const pcMoveTo = getPowerCreepMoveToMethod();
         if (pcMoveTo) return pcMoveTo.apply(this, arguments);
@@ -887,7 +1007,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
  *
  * @param {DirectionConstant | Creep} target
  */
-function betterMove(target) {
+function betterMove(this: Creep, target: DirectionConstant | Creep | PowerCreep) {
     if (powerCreepProto && this instanceof PowerCreep) {
         const pcMove = getPowerCreepMoveMethod();
         if (pcMove) return pcMove.call(this, target);
@@ -937,12 +1057,12 @@ function betterPull(target) {
     return ret;
 }
 
-function squadMove(squad, target = undefined) {
+function squadMove(squad: Creep[], target: BetterMoveTarget[] | undefined = undefined) {
     if (squad.length <= 1 || squad.length > 9 || (target && target.length !== squad.length)) {
         return ERR_INVALID_ARGS;
     }
     if (target) {
-        const firstPos = target[0].pos || target[0];
+        const firstPos = resolveTargetPos(target[0]);
         const firstFormalPos = formalizeIntentPos(firstPos);
         if (firstPos.x === 0) {
             firstFormalPos.x--;
@@ -955,7 +1075,7 @@ function squadMove(squad, target = undefined) {
         }
         registerMoveIntent(squad[0], firstFormalPos);
         for (let i = squad.length; --i;) {
-            const pos = target[i].pos || target[i];
+            const pos = resolveTargetPos(target[i]);
             const formalPos = formalizeIntentPos(pos);
             if (pos.x === 0) {
                 formalPos.x--;
@@ -978,7 +1098,7 @@ function squadMove(squad, target = undefined) {
     }
 }
 
-function squadMoveTo(squad, firstArg, secondArg, opts) {
+function squadMoveTo(squad: Creep[], firstArg: number | BetterMoveTarget, secondArg?: number | SquadMoveToOpts, opts?: SquadMoveToOpts) {
     let qx = 0;
     let qy = 0;
     let px;
@@ -991,7 +1111,7 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
         return ERR_INVALID_ARGS;
     }
     if (typeof firstArg == 'object') {
-        toPos = firstArg.pos || firstArg;
+        toPos = resolveTargetPos(firstArg);
         moveOpts = secondArg === undefined ? {} : secondArg;
     } else {
         moveOpts = opts === undefined ? {} : opts;
@@ -1112,17 +1232,17 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
         creepPathCache[key] = creepCache;
     }
 
-    let result = findSquadPath(leader.pos, toPos, moveOpts);
-    if (!result.path.length || (result.incomplete && result.path.length == 1)) {
+    const squadPathResult = findSquadPath(leader.pos, toPos, moveOpts);
+    if (!squadPathResult.path.length || (squadPathResult.incomplete && squadPathResult.path.length == 1)) {
         creepCache.path = undefined;
         squadMove(squad);
         return ERR_NO_PATH;
     }
-    result = result.path;
-    result.unshift(leader.pos);
+    const squadPathArray = squadPathResult.path.slice();
+    squadPathArray.unshift(leader.pos);
     let newPath = {
-        end: formalize(result[result.length - 1]),
-        posArray: result,
+        end: formalize(squadPathArray[squadPathArray.length - 1]),
+        posArray: squadPathArray,
         ignoreStructures: findPathIgnoreCondition
     };
     creepCache.path = newPath;
@@ -1134,7 +1254,7 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
  * @param {FindConstant} type
  * @param {FindPathOpts & FilterOptions<FIND_STRUCTURES> & { algorithm?: string }} opts
  */
-function betterFindClosestByPath(type, opts) {
+function betterFindClosestByPath(this: RoomPosition, type: FindConstant, opts?: BetterFindClosestByPathOpts): BetterFindClosestByPathResult {
     if (!opts) {
         opts = {};
     }

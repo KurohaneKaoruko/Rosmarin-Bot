@@ -4,6 +4,10 @@
  * 统一封装原型挂载开关、统计打印与运行时配置更新，
  * 让 `index.ts` 更聚焦在移动主流程与模块装配本身。
  */
+import type { MovementModuleApi } from './movement';
+import type { PathingModuleApi } from './pathing';
+import type { BetterMoveConfig, BetterMoveConfigPatch, BetterMoveFleeTarget, BetterMovePortalRecord } from './types';
+
 type CpuBucket = {
     sum: number;
     calls: number;
@@ -36,8 +40,8 @@ type BetterMoveCreepPrototype = typeof Creep.prototype & {
     $move?: typeof Creep.prototype.move;
     $moveTo?: typeof Creep.prototype.moveTo;
     $pull?: typeof Creep.prototype.pull;
-    $flee?: (targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
-    flee?: (targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
+    $flee?: (targets: BetterMoveFleeTarget[], opts?: MoveToOpts) => ScreepsReturnCode;
+    flee?: (targets: BetterMoveFleeTarget[], opts?: MoveToOpts) => ScreepsReturnCode;
 };
 
 type BetterMoveRoomPositionPrototype = typeof RoomPosition.prototype & {
@@ -47,24 +51,24 @@ type BetterMoveRoomPositionPrototype = typeof RoomPosition.prototype & {
 };
 
 type RuntimeControlDeps = {
-    config: Record<string, any>;
+    config: BetterMoveConfig;
     analyzeCPU: AnalyzeCpuMap;
     runtimeMetrics: RuntimeMetrics;
     getCacheStats: () => BetterMoveCacheStats;
     isCpuStatsEnabled: () => boolean;
     resetCacheRuntimeStats: () => void;
     applyConfig: () => void;
-    originMoveTo: (...args: any[]) => any;
-    wrapFn: (fn: Function, name: string) => any;
+    originMoveTo: typeof Creep.prototype.moveTo;
+    wrapFn: (fn: (...args: unknown[]) => unknown, name: string) => (...args: unknown[]) => unknown;
     updateDontPullMeForMoveTo: (creep: Creep) => void;
-    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: Function) => void;
+    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: (...args: unknown[]) => unknown) => void;
     restorePowerCreepNativeMethods: () => void;
-    betterMoveTo: (...args: any[]) => any;
-    betterMove: (...args: any[]) => any;
-    betterPull: (...args: any[]) => any;
-    betterFindClosestByPath: (...args: any[]) => any;
-    findSquadPathTo: (...args: any[]) => any;
-    flee: (...args: any[]) => any;
+    betterMoveTo: MovementModuleApi['betterMoveTo'];
+    betterMove: MovementModuleApi['betterMove'];
+    betterPull: MovementModuleApi['betterPull'];
+    betterFindClosestByPath: MovementModuleApi['betterFindClosestByPath'];
+    findSquadPathTo: PathingModuleApi['findSquadPathTo'];
+    flee: PathingModuleApi['flee'];
 };
 
 type RuntimeControlApi = {
@@ -74,21 +78,10 @@ type RuntimeControlApi = {
     bmSetChangeFindClostestByPath: (bool: boolean) => ScreepsReturnCode;
     bmSetEnableSquadPath: (bool: boolean) => ScreepsReturnCode;
     bmSetEnableFlee: (bool: boolean) => ScreepsReturnCode;
-    bmGetConfig: () => Record<string, any>;
-    bmSetConfig: (partial: Record<string, any>) => ScreepsReturnCode;
+    bmGetConfig: () => BetterMoveConfig;
+    bmSetConfig: (partial: BetterMoveConfigPatch) => ScreepsReturnCode;
     resetMoveOptStats: () => void;
     bmResetCacheStats: () => ScreepsReturnCode;
-};
-
-type BetterMovePortalRecord = {
-    roomName?: string;
-    x?: number;
-    y?: number;
-    destShard?: string;
-    destRoom?: string;
-    destX?: number;
-    destY?: number;
-    lastSeen?: number;
 };
 
 type BetterMoveGlobalApiDeps = {
@@ -219,7 +212,7 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
             if (!roomPositionProto.$findClosestByPath) {
                 roomPositionProto.$findClosestByPath = RoomPosition.prototype.findClosestByPath;
             }
-            RoomPosition.prototype.findClosestByPath = deps.wrapFn(deps.betterFindClosestByPath, 'findClosestByPath');
+            RoomPosition.prototype.findClosestByPath = deps.wrapFn(deps.betterFindClosestByPath, 'findClosestByPath') as typeof RoomPosition.prototype.findClosestByPath;
         } else if (bool === false) {
             if (roomPositionProto.$findClosestByPath) {
                 RoomPosition.prototype.findClosestByPath = roomPositionProto.$findClosestByPath;
@@ -235,7 +228,7 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
             if (!roomPositionProto.$findSquadPathTo) {
                 roomPositionProto.$findSquadPathTo = RoomPosition.prototype.findSquadPathTo;
             }
-            RoomPosition.prototype.findSquadPathTo = deps.wrapFn(deps.findSquadPathTo, 'findSquadPathTo');
+            RoomPosition.prototype.findSquadPathTo = deps.wrapFn(deps.findSquadPathTo, 'findSquadPathTo') as typeof RoomPosition.prototype.findSquadPathTo;
         } else if (bool === false) {
             if (roomPositionProto.$findSquadPathTo) {
                 RoomPosition.prototype.findSquadPathTo = roomPositionProto.$findSquadPathTo;
@@ -250,7 +243,7 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
             if (!creepProto.$flee) {
                 creepProto.$flee = creepProto.flee;
             }
-            creepProto.flee = deps.wrapFn(deps.flee, 'flee');
+            creepProto.flee = deps.wrapFn(deps.flee, 'flee') as BetterMoveCreepPrototype['flee'];
         } else if (bool === false) {
             if (creepProto.$flee) {
                 creepProto.flee = creepProto.$flee;
@@ -290,7 +283,7 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
         return OK;
     }
 
-    function bmSetConfig(partial) {
+    function bmSetConfig(partial: BetterMoveConfigPatch) {
         if (!partial || typeof partial !== 'object') {
             return ERR_INVALID_ARGS;
         }

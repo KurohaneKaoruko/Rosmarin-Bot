@@ -30,6 +30,7 @@ import { MovementModuleApi, MovementService } from './movement';
 import { installDontPullMePolicies, updateDontPullMeForMoveTo, wrapProtoMethod } from './dontPullMe';
 import { createIntentSolverModule } from './intentSolver';
 import { createBetterMoveGlobalApi, createMoveRuntimeControlModule } from './controls';
+import type { BetterMoveConfig, BetterMoveObserverRuntime, BetterMoveObserverTask, BetterMovePath, BetterMovePathInsertToken } from './types';
 
 /*
 creep对穿+跨房间寻路+寻路缓存 
@@ -41,7 +42,7 @@ reusePath、serializeMemory、noPathFinding、ignore、avoid、serialize
 // 1) 模块配置与运行时开关
 // ============================================================================
 // 初始化参数
-let config = {
+let config: BetterMoveConfig = {
     changeMove: true,   // 为creep.move增加对穿能力
     changeMoveTo: true, // 为 creep.moveTo 提供统一跨房寻路入口
     changeFindClostestByPath: true,     // 轻度修改findClosestByPath，使得默认按照ignoreCreeps寻找最短
@@ -95,28 +96,6 @@ function markAvoidExitsChanged() {
 let currentAvoidRooms = null;
 let currentAvoidExits = null;
 
-type ObserverTrackedPath = {
-    _bmVersion?: number;
-    directionArray?: Array<DirectionConstant | 0>;
-};
-
-type ObserverTask = {
-    path: ObserverTrackedPath;
-    idx: number;
-    roomName: string;
-    createdTick?: number;
-    expireTick?: number;
-    pathVersion?: number;
-};
-
-type MoveOptObserverRuntime = {
-    id: string;
-    roomName: string;
-    taskQueue: ObserverTask[];
-    taskHead: number;
-    lastIssuedTick?: number;
-};
-
 function isValidAvoidExitsMap(candidate) {
     if (!(candidate instanceof Map)) {
         return false;
@@ -151,20 +130,21 @@ function hasScopedAvoids(ops) {
     );
 }
 
-function validateMoveToArgTypes(ops) {
+function validateMoveToArgTypes(ops: unknown): ops is MoveToOpts {
     if (!ops || typeof ops !== 'object') {
         return false;
     }
-    if (ops.range !== undefined && typeof ops.range !== 'number') {
+    const candidate = ops as MoveToOpts;
+    if (candidate.range !== undefined && typeof candidate.range !== 'number') {
         return false;
     }
-    if (ops.bypassRange !== undefined && typeof ops.bypassRange !== 'number') {
+    if (candidate.bypassRange !== undefined && typeof candidate.bypassRange !== 'number') {
         return false;
     }
-    if (ops.avoidRooms !== undefined && !(ops.avoidRooms instanceof Set)) {
+    if (candidate.avoidRooms !== undefined && !(candidate.avoidRooms instanceof Set)) {
         return false;
     }
-    if (ops.avoidExits !== undefined && !isValidAvoidExitsMap(ops.avoidExits)) {
+    if (candidate.avoidExits !== undefined && !isValidAvoidExitsMap(candidate.avoidExits)) {
         return false;
     }
     return true;
@@ -227,7 +207,7 @@ function getCurrentAvoidScopeSignature() {
         avoidExits: currentAvoidExits
     });
 }
-let observers: MoveOptObserverRuntime[] = [];  // 如果想用ob寻路，把ob的id放这里
+let observers: BetterMoveObserverRuntime[] = [];  // 如果想用ob寻路，把ob的id放这里
 let autoDiscoverObserverTick = -1;
 
 let pathVersionCounter = 0;
@@ -299,7 +279,7 @@ function ensureObserversUpToDate() {
 // 4) 全局缓存与运行时状态
 // ============================================================================
 // 4.1 Observer 异步任务结果缓存
-let obTimer: Record<number, ObserverTask[]> = Object.create(null);   // observer async results keyed by due tick
+let obTimer: Record<number, BetterMoveObserverTask[]> = Object.create(null);   // observer async results keyed by due tick
 let obTimerDueQueue = createDueTickQueue();
 let obTick = Game.time;
 
@@ -309,7 +289,7 @@ let globalPathCache = Object.create(null);     // 缓存path
 let globalPathCacheByVariant = Object.create(null); // startKey -> variantKey -> combinedY -> path[]
 let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
 let globalPathCachePathCount = 0; // 当前缓存路径总数，空时可快速退出清理逻辑
-let pathCacheInsertQueue = [];
+let pathCacheInsertQueue: BetterMovePathInsertToken[] = [];
 let pathCacheInsertHead = 0;
 let roomSameRoomPathRefs = Object.create(null); // roomName -> { pathVersion: path }，仅记录同房路径
 let roomSameRoomPathCount = Object.create(null); // roomName -> 同房路径条数
@@ -381,10 +361,13 @@ const originMove = creepProto.$move || creepProto.move;
 const originMoveTo = creepProto.$moveTo || creepProto.moveTo;
 const originPull = creepProto.$pull || creepProto.pull;
 const originCancelOrder = creepProto.$cancelOrder || creepProto.cancelOrder;
+type MoveMethod = typeof Creep.prototype.move;
+type MoveToMethod = typeof Creep.prototype.moveTo;
+type CancelOrderMethod = typeof PowerCreep.prototype.cancelOrder;
 const powerCreepProto = typeof PowerCreep !== 'undefined' ? PowerCreep.prototype as typeof PowerCreep.prototype & {
-    $move?: typeof PowerCreep.prototype.move;
-    $moveTo?: typeof PowerCreep.prototype.moveTo;
-    $cancelOrder?: typeof PowerCreep.prototype.cancelOrder;
+    $move?: MoveMethod;
+    $moveTo?: MoveToMethod;
+    $cancelOrder?: CancelOrderMethod;
 } : undefined;
 const originPowerMove = powerCreepProto ? (powerCreepProto.$move || powerCreepProto.move) : undefined;
 const originPowerMoveTo = powerCreepProto ? (powerCreepProto.$moveTo || powerCreepProto.moveTo) : undefined;
@@ -447,25 +430,25 @@ function getOriginCancelOrderMethod(unit) {
     return originCancelOrder;
 }
 
-function getPowerCreepMoveMethod(): Function | undefined {
+function getPowerCreepMoveMethod(): MoveMethod | undefined {
     if (!powerCreepProto) return undefined;
     const pcMove = powerCreepProto.$move || originPowerMove || powerCreepProto.move;
     if (pcMove === betterMove) return originMove;
     return pcMove || originMove;
 }
 
-function getPowerCreepMoveToMethod(): Function | undefined {
+function getPowerCreepMoveToMethod(): MoveToMethod | undefined {
     if (!powerCreepProto) return undefined;
     const pcMoveTo = powerCreepProto.$moveTo || originPowerMoveTo || powerCreepProto.moveTo;
     if (pcMoveTo === betterMoveTo) return originMoveTo;
     return pcMoveTo || originMoveTo;
 }
 
-function getPowerCreepCancelOrderMethod(): Function | undefined {
+function getPowerCreepCancelOrderMethod(): CancelOrderMethod | undefined {
     if (!powerCreepProto) return undefined;
     const pcCancel = powerCreepProto.$cancelOrder || powerCreepProto.cancelOrder;
-    if (pcCancel === betterCancelOrder) return originCancelOrder;
-    return pcCancel || originCancelOrder;
+    if (pcCancel === betterCancelOrder) return originCancelOrder as CancelOrderMethod;
+    return (pcCancel || originCancelOrder) as CancelOrderMethod;
 }
 
 // 确保 PowerCreep 使用原生移动（热重载时可能遗留被包裹的 move/moveTo）。
@@ -475,16 +458,16 @@ function restorePowerCreepNativeMethods() {
     const baseMoveTo = getPowerCreepMoveToMethod();
     const baseCancel = getPowerCreepCancelOrderMethod();
     if (baseMove) {
-        powerCreepProto.$move = baseMove as any;
-        powerCreepProto.move = baseMove as any;
+        powerCreepProto.$move = baseMove;
+        powerCreepProto.move = baseMove;
     }
     if (baseMoveTo) {
-        powerCreepProto.$moveTo = baseMoveTo as any;
-        powerCreepProto.moveTo = baseMoveTo as any;
+        powerCreepProto.$moveTo = baseMoveTo;
+        powerCreepProto.moveTo = baseMoveTo;
     }
     if (baseCancel) {
-        powerCreepProto.$cancelOrder = baseCancel as any;
-        powerCreepProto.cancelOrder = baseCancel as any;
+        powerCreepProto.$cancelOrder = baseCancel;
+        powerCreepProto.cancelOrder = baseCancel;
     }
 }
 
@@ -525,7 +508,7 @@ const cachedMoveIntents = new Map();
 const creepToSquad = new Map();
 const squadToCreeps = new Map();
 const squadNextTile = new Set();
-const rerouteSquad = new Set();
+const rerouteSquad = new Set<string>();
 const checkedTiles = new Map();
 let squadIdx = 1;
 let creepIdx = 1;
@@ -549,8 +532,8 @@ function getObserverTaskTTL() {
     return ttl > 0 ? ttl : 12;
 }
 
-function createObserverTask(path, idx, roomName) {
-    const task: ObserverTask = { path, idx, roomName };
+function createObserverTask(path: BetterMovePath, idx: number, roomName: string): BetterMoveObserverTask {
+    const task: BetterMoveObserverTask = { path, idx, roomName };
     if (config.enableObserverQueueRefine) {
         task.createdTick = Game.time;
         task.expireTick = Game.time + getObserverTaskTTL();
@@ -559,11 +542,11 @@ function createObserverTask(path, idx, roomName) {
     return task;
 }
 
-function isObserverTaskExpired(task) {
+function isObserverTaskExpired(task: BetterMoveObserverTask | undefined) {
     return !!(task && task.expireTick && Game.time > task.expireTick);
 }
 
-function isObserverTaskStale(task) {
+function isObserverTaskStale(task: BetterMoveObserverTask | undefined) {
     if (!task || !task.path || !task.path.posArray || !task.path.posArray.length || typeof task.path.posArray[0] !== 'object') {
         return true;
     }
@@ -574,7 +557,7 @@ function isObserverTaskStale(task) {
 }
 
 // 6.1 Observer 队列操作（FIFO + head 指针，避免 shift 的 O(n) 搬移）
-function getObserverQueueSize(obData) {
+function getObserverQueueSize(obData: BetterMoveObserverRuntime) {
     const queue = obData.taskQueue || [];
     if (!config.enableObserverQueueRefine) {
         return queue.length;
@@ -584,7 +567,7 @@ function getObserverQueueSize(obData) {
     return size > 0 ? size : 0;
 }
 
-function peekObserverTask(obData) {
+function peekObserverTask(obData: BetterMoveObserverRuntime) {
     const queue = obData.taskQueue;
     if (!queue || !queue.length) return undefined;
     if (!config.enableObserverQueueRefine) {
@@ -594,7 +577,7 @@ function peekObserverTask(obData) {
     return queue[head];
 }
 
-function compactObserverQueue(obData) {
+function compactObserverQueue(obData: BetterMoveObserverRuntime) {
     if (!config.enableObserverQueueRefine) return;
     const queue = obData.taskQueue;
     const head = obData.taskHead | 0;
@@ -605,7 +588,7 @@ function compactObserverQueue(obData) {
     }
 }
 
-function dropObserverTask(obData) {
+function dropObserverTask(obData: BetterMoveObserverRuntime) {
     const queue = obData.taskQueue;
     if (!queue || !queue.length) return;
     if (config.enableObserverQueueRefine) {
@@ -616,7 +599,7 @@ function dropObserverTask(obData) {
     queue.pop();
 }
 
-function estimateObserverReadyTick(obData) {
+function estimateObserverReadyTick(obData: BetterMoveObserverRuntime) {
     const queueLen = getObserverQueueSize(obData);
     if (!config.enableObserverQueueRefine) return queueLen;
     const lastIssuedTick = obData.lastIssuedTick | 0;
@@ -624,7 +607,7 @@ function estimateObserverReadyTick(obData) {
     return nextTick + queueLen;
 }
 
-function addObTask(path, idx) {
+function addObTask(path: BetterMovePath, idx: number) {
     if (!path || !path.posArray || !(idx in path.posArray)) return;
     ensureObserversUpToDate();
     if (!observers.length) return;
@@ -1442,7 +1425,7 @@ function compactPathCacheInsertQueue() {
     }
 }
 
-function pushPathCacheInsertToken(token) {
+function pushPathCacheInsertToken(token: BetterMovePathInsertToken) {
     pathCacheInsertQueue.push(token);
     const maxEntries = config.pathCacheMaxEntries | 0;
     const maxQueueSize = maxEntries > 0 ? Math.max(maxEntries * 2, 1024) : 4096;
@@ -1453,7 +1436,7 @@ function pushPathCacheInsertToken(token) {
     compactPathCacheInsertQueue();
 }
 
-function resolvePathCacheInsertToken(token) {
+function resolvePathCacheInsertToken(token: BetterMovePathInsertToken) {
     if (!token) return null;
     const xBucket = globalPathCache[token.startKey];
     if (!xBucket) return null;
@@ -1779,7 +1762,7 @@ let tempArray = [];
 // 12) 原型包装入口：统计、去重、每 tick 维护
 // ----------------------------------------------------------------------------
 /**
- * @param {Function} fn
+ * @param {(...args: unknown[]) => unknown} fn
  */
 const intentSolver = createIntentSolverModule({
     getOriginCancelOrderMethod,
@@ -1968,7 +1951,7 @@ const {
 // 14) moveTo / move / flee 等核心流程
 // ============================================================================
 
-const defaultVisualizePathStyle = { fill: 'transparent', stroke: '#fff', lineStyle: 'dashed', strokeWidth: .15, opacity: .1 };
+const defaultVisualizePathStyle: PolyStyle = { fill: 'transparent', stroke: '#fff', lineStyle: 'dashed', strokeWidth: .15, opacity: .1 };
 
 /**
  * 解析 moveTo 参数

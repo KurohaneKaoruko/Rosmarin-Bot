@@ -4,6 +4,7 @@
  * 这一层只做“纯计算”与轻量缓存，不触碰寻路状态机与原型补丁，
  * 方便在跨房路由、路径缓存、移动解算等多个功能块之间复用。
  */
+import type { FormalizedPos } from './types';
 
 const HALF_WORLD_SIZE = 255 >> 1;
 
@@ -27,10 +28,6 @@ type PosLike = {
     x: number;
     y: number;
     roomName?: string | null;
-};
-type FormalizedPos = {
-    x: number;
-    y: number;
 };
 type PathVariantPathLike = {
     ignoreRoads?: boolean;

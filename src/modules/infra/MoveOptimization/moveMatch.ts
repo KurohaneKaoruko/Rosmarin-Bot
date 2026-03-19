@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 "use strict";
 /**
  *  用 SSP (Successive Shortest Paths) + SPFA 求解二分图最优匹配问题
@@ -38,20 +36,49 @@
  *  6. https://brc2.com/the-algorithm-workshop/
  *
  */
-const MODULE_NAME = "MoveMatch";
+export type MoveMatchWorldPos = number;
 
-/**
- * @template T
- * @typedef {{target: T, score: number}} TargetScore
- */
-/**
- * @template T
- * @typedef {{target: T[], score: number}} SuperTargetScore
- */
-/**
- * @template S, T
- * @typedef {Array<{start: S, isSuper: false, targetList: TargetScore<T>[]} | {start: S, isSuper: true, targetList: SuperTargetScore<T>[]}>} StartList
- */
+export type MoveMatchTargetScore = {
+    target: MoveMatchWorldPos;
+    score: number;
+};
+
+export type MoveMatchSuperTargetScore = {
+    target: MoveMatchWorldPos[];
+    score: number;
+};
+
+export type MoveMatchSingleEntry = {
+    start: string;
+    isSuper: false;
+    targetList: MoveMatchTargetScore[];
+};
+
+export type MoveMatchSuperEntry = {
+    start: number;
+    isSuper: true;
+    targetList: MoveMatchSuperTargetScore[];
+};
+
+export type MoveMatchEntry = MoveMatchSingleEntry | MoveMatchSuperEntry;
+
+export type MoveMatchStartList = MoveMatchEntry[];
+
+export type MoveMatchSingleResultEntry = {
+    start: string;
+    target: MoveMatchWorldPos;
+};
+
+export type MoveMatchSuperResultEntry = {
+    start: number;
+    target: MoveMatchWorldPos[];
+};
+
+export type MoveMatchResultEntry = MoveMatchSingleResultEntry | MoveMatchSuperResultEntry;
+
+export type MoveMatchCheckNewSource = (targets: MoveMatchWorldPos[]) => MoveMatchSingleEntry[];
+
+type MoveMatchIndexedObject = string | number | MoveMatchWorldPos[];
 
 
 // 根据房间数量和 creep 总数初始化数组长度
@@ -75,21 +102,21 @@ let spfaDist = new Int16Array(NUM_NODE);
 let spfaPrev = new Uint16Array(NUM_NODE);
 let spfaInQue = new Uint8Array(NUM_NODE);
 let greedyStack = new Uint16Array(MAX_NUM_SQUAD);
-let idxToObject = new Array(NUM_NODE);
-const startToIdx = new Map();
-const targetToIdx = new Map();
-/**@type {Set<number>} 内容为 targetIdx */
-const matchedTarget = new Set();
-/**@type {Set<number>} 内容为 targetIdx */
-const addedTarget = new Set();
+let idxToObject: MoveMatchIndexedObject[] = new Array(NUM_NODE);
+const startToIdx = new Map<string | number, number>();
+const targetToIdx = new Map<MoveMatchWorldPos | MoveMatchWorldPos[], number>();
+const matchedTarget = new Set<number>();
+const addedTarget = new Set<number>();
 
-const circleStyle = [
-    { radius: 0.4, opacity: 0.15, fill: '#4169E1' },
-    { radius: 0.4, opacity: 0.15, fill: '#ADFF2F' },
-    { radius: 0.4, opacity: 0.15, fill: '#FFD700' },
-    { radius: 0.4, opacity: 0.15, fill: '#D2B48C' },
-    { radius: 0.4, opacity: 0.15, fill: '#f47983' }
-]
+function toResultEntry(startObject: MoveMatchIndexedObject, targetObject: MoveMatchIndexedObject): MoveMatchResultEntry | null {
+    if (typeof startObject === 'string' && typeof targetObject === 'number') {
+        return { start: startObject, target: targetObject };
+    }
+    if (typeof startObject === 'number' && Array.isArray(targetObject)) {
+        return { start: startObject, target: targetObject };
+    }
+    return null;
+}
 
 /**
  * 先为解决交通堵塞问题编写。
@@ -124,13 +151,11 @@ const circleStyle = [
  * 
  * TODO：用于其他问题时需支持流量 amount
  * 
- * @typedef {number | string} Start
- * @typedef {number} WorldPos
- * @param {StartList<Start, WorldPos>} startList - 源列表，Start 是 creep 名称，WorldPos 是 target 格子坐标
- * @param {(targets: WorldPos[]) => StartList<Start, WorldPos>} checkNewSource - 检查 target 格子上是否有 creep，有则返回新的 start
- * @returns {Array<{start: Start, target: WorldPos} | {start: Start, target: WorldPos[]}>} 所有 start 的匹配结果
+ * @param {MoveMatchStartList} startList - 源列表，start 是 creep 名称或 squad 编号，target 是打包后的格子坐标
+ * @param {MoveMatchCheckNewSource} checkNewSource - 检查 target 格子上是否有 creep，有则返回新的 start
+ * @returns {MoveMatchResultEntry[]} 所有 start 的匹配结果
  */
-function moveMatch(startList, checkNewSource) {
+function moveMatch(startList: MoveMatchStartList, checkNewSource: MoveMatchCheckNewSource): MoveMatchResultEntry[] {
     if (startList.length === 0) return [];
 
     /* ================================================================
@@ -154,22 +179,46 @@ function moveMatch(startList, checkNewSource) {
     matchedTarget.clear();                          // 清空已匹配的 target 索引集合
 
 
-    /** @type {WorldPos[]} */
-    const uncheckedTargets = [];                    // 尚未传入 checkNewSource 检查的 target 对象集合
-    /** @type {[number, number][]}} */
-    const allSuperStarts = [];                     // 用于全体 superStart 排序
-    let edgeIdx, curStartIdx, targetEdgeIdx, curTargetIdx, curSuperTargetIdx, curEdgeIdx, score, bestScore, bestTargetIdx, bestEdgeIdx;
-    let superTarget, target, superEdges;
-    let idx, i, j, occupied, totalScore, maxScore, maxEdgeIdx, superStartUnplaced, jSuperStart, jSuperTarget, jTarget, kTarget, jEdgeIdx, kEdgeIdx;
-    let greedyStackTop, qHead, qTail;
+    const uncheckedTargets: MoveMatchWorldPos[] = []; // 尚未传入 checkNewSource 检查的 target 对象集合
+    const allSuperStarts: Array<[number, number]> = []; // 用于全体 superStart 排序
+    let edgeIdx = 0;
+    let curStartIdx = 0;
+    let targetEdgeIdx = 0;
+    let curTargetIdx = 0;
+    let curSuperTargetIdx = 0;
+    let curEdgeIdx = 0;
+    let score = 0;
+    let bestScore = 0;
+    let bestTargetIdx = 0;
+    let bestEdgeIdx = 0;
+    let superTarget: MoveMatchWorldPos[] = [];
+    let target = 0;
+    let superEdges: Array<[number, number]> = [];
+    let idx = 0;
+    let i = 0;
+    let j = 0;
+    let occupied = false;
+    let totalScore = 0;
+    let maxScore = 0;
+    let maxEdgeIdx = 0;
+    let superStartUnplaced = false;
+    let jSuperStart = 0;
+    let jSuperTarget = 0;
+    let jTarget = 0;
+    let kTarget = 0;
+    let jEdgeIdx = 0;
+    let kEdgeIdx = 0;
+    let greedyStackTop = 0;
+    let qHead = 0;
+    let qTail = 0;
 
     /**
      * 将一批 StartList 条目加入图中。
      * 若 start 已存在则跳过（去重），新发现的 target 追加到 uncheckedTargets。
-     * @param {StartList<string, WorldPos>} entries
+     * @param {MoveMatchStartList} entries
      */
-    const addEntries = (entries) => {
-        for (let entry of entries) {
+    const addEntries = (entries: MoveMatchStartList) => {
+        for (const entry of entries) {
             if (startToIdx.has(entry.start)) continue;       // 该 start 已在图中，跳过
 
             startToIdx.set(entry.start, startIdx);           // 记录 对象→索引 映射
@@ -177,17 +226,18 @@ function moveMatch(startList, checkNewSource) {
             edgeIdx = (startIdx << 3) + startIdx;            // 该 start 的出边起始索引, 每个 start 最多9条边
 
             if (entry.isSuper) { // superStart，target 都是一组格子
+                const superEntry = entry as MoveMatchSuperEntry;
                 superEdges = [];
                 // 每个 start 只选其最优 target
                 bestScore = Number.MIN_SAFE_INTEGER;
                 bestTargetIdx = 1;
 
                 // 对于 superTarget，总分放在 start → superTarget 边中，而 superTarget → target 边中0分
-                for (let targetScore of entry.targetList) {
+                for (const targetScore of superEntry.targetList) {
                     superTarget = targetScore.target;
                     score = targetScore.score * superTarget.length;
                     if (targetToIdx.has(superTarget)) {
-                        curSuperTargetIdx = targetToIdx.get(superTarget);
+                        curSuperTargetIdx = targetToIdx.get(superTarget)!;
                     } else {
                         curSuperTargetIdx = superTargetIdx;              // 为新 superTarget 分配递增索引
                         targetToIdx.set(superTarget, curSuperTargetIdx);      // 记录 对象→索引 映射
@@ -196,7 +246,7 @@ function moveMatch(startList, checkNewSource) {
 
                         for (target of superTarget) {
                             if (targetToIdx.has(target)) {
-                                curTargetIdx = targetToIdx.get(target);
+                                curTargetIdx = targetToIdx.get(target)!;
                             } else {
                                 curTargetIdx = targetIdx;                   // 为新 target 分配递增索引
                                 targetToIdx.set(target, curTargetIdx);      // 记录 对象→索引 映射
@@ -220,25 +270,26 @@ function moveMatch(startList, checkNewSource) {
                 }
                 // superStart → superTarget 边，按分数从大到小加入 edgeArray
                 superEdges.sort((a, b) => b[0] - a[0]);
-                for (let [score, superTargetIdx] of superEdges) {
-                    edgeArray[edgeIdx] = superTargetIdx | 0x8000;   // | 0x8000 表示有容量
-                    weightArray[edgeIdx++] = score;
+                for (const [superScore, superTargetNode] of superEdges) {
+                    edgeArray[edgeIdx] = superTargetNode | 0x8000;   // | 0x8000 表示有容量
+                    weightArray[edgeIdx++] = superScore;
                 }
 
                 // 将 superStart 收集起来，用于 Phase 2 排序后贪心放置
                 allSuperStarts.push([bestScore, startIdx]);
 
             } else {  // 普通 start，target 都是单个格子
+                const singleEntry = entry as MoveMatchSingleEntry;
                 // 每个 start 只选其最优 target
                 bestScore = Number.MIN_SAFE_INTEGER;
                 bestTargetIdx = 1;
                 bestEdgeIdx = 0;
                 // target 都是单个格子
-                for (let targetScore of entry.targetList) {
+                for (const targetScore of singleEntry.targetList) {
                     target = targetScore.target;
                     score = targetScore.score;
                     if (targetToIdx.has(target)) {
-                        curTargetIdx = targetToIdx.get(target);
+                        curTargetIdx = targetToIdx.get(target)!;
                     } else {
                         curTargetIdx = targetIdx;                   // 为新 target 分配递增索引
                         targetToIdx.set(target, curTargetIdx);      // 记录 对象→索引 映射
@@ -320,8 +371,8 @@ function moveMatch(startList, checkNewSource) {
     if (allSuperStarts.length) {
         allSuperStarts.sort((a, b) => a[0] - b[0]);
         greedyStackTop = 0;
-        for (i of allSuperStarts) {
-            greedyStack[greedyStackTop++] = i[1];
+        for (const [, superStartNode] of allSuperStarts) {
+            greedyStack[greedyStackTop++] = superStartNode;
         }
         do {
             curStartIdx = greedyStack[--greedyStackTop];
@@ -776,8 +827,7 @@ function moveMatch(startList, checkNewSource) {
      *  Phase 4 — 收集结果
      * ================================================================ */
 
-    /** @type {Array<{start: Start, target: WorldPos} | {start: Start, target: WorldPos[]}>} */
-    const result = [];         // 存放所有匹配对
+    const result: MoveMatchResultEntry[] = []; // 存放所有匹配对
     for (idx = 2; idx < startIdx; idx += 4) {
         if (occupiedEdgeIdx[idx]) {
             curTargetIdx = edgeArray[occupiedEdgeIdx[idx]];
@@ -785,7 +835,12 @@ function moveMatch(startList, checkNewSource) {
                 console.log(`❌Error: idx ${idx}: ${idxToObject[idx]} 已匹配的边仍有容量`);
                 curTargetIdx &= 0x7FFF;
             }
-            result.push({ start: idxToObject[idx], target: idxToObject[curTargetIdx] });
+            const resultEntry = toResultEntry(idxToObject[idx], idxToObject[curTargetIdx]);
+            if (resultEntry) {
+                result.push(resultEntry);
+            } else {
+                console.log(`❌Error: idx ${idx}: ${idxToObject[idx]} 的匹配结果类型异常`);
+            }
         } else {
             console.log(`❌Error: idx ${idx}: ${idxToObject[idx]} 没有匹配的 target`);
         }
@@ -794,8 +849,8 @@ function moveMatch(startList, checkNewSource) {
 }
 
 /**
- * @param {StartList<string, WorldPos>} startList - 源列表，string 是 creep 名称，WorldPos 是 target 格子坐标
- * @param {(targets: WorldPos[]) => StartList<string, WorldPos>} checkNewSource - 检查 target 格子上是否有 creep，有则返回新的 start
- * @returns {Array<{start: string, target: WorldPos} | {start: string, target: WorldPos[]}>} 所有 start 的匹配结果
+ * @param {MoveMatchStartList} startList - 源列表，string 是 creep 名称，number 是 squad 编号
+ * @param {MoveMatchCheckNewSource} checkNewSource - 检查 target 格子上是否有 creep，有则返回新的 start
+ * @returns {MoveMatchResultEntry[]} 所有 start 的匹配结果
  */
 export default moveMatch;
