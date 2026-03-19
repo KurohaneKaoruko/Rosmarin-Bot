@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * BetterMove 路径缓存与寻路维护控制面。
  * @description
@@ -7,30 +5,83 @@
  * - 路径缓存维护、缓存统计、缓存失效
  * - route cache 与跨房 route 查找
  * - 普通 creep 的 PathFinder 搜索与缓存命中逻辑
+ * - squad/flee 等共享 PathFinder 能力
  * - observer 校验与 tick 维护调度
- *
- * index.ts 只保留共享状态、共享工具和入口装配，
- * 避免出现“入口文件里再套一层 movement.ts”的空转结构。
  */
-export function createPathingModule(deps) {
-    const routeState = deps.routeCacheState;
-    const temporalState = deps.temporalAvoidState;
-    const observerState = deps.observerState;
+export interface PathingModuleApi {
+    bmSetPathClearDelay: (number?: number) => ScreepsReturnCode;
+    bmSetHostileCostMatrixClearDelay: (number?: number) => ScreepsReturnCode;
+    bmDeleteCostMatrix: (roomName: string) => ScreepsReturnCode;
+    bmGetCacheStats: () => BetterMoveCacheStats;
+    bmResetCacheStats: () => ScreepsReturnCode;
+    bmDeltePath: (fromPos: unknown, toPos: unknown, opts?: MoveToOpts) => ScreepsReturnCode;
+    bmDeletePath: (fromPos: unknown, toPos: unknown, opts?: MoveToOpts) => ScreepsReturnCode;
+    bmDeletePathInRoom: (roomName: string) => ScreepsReturnCode;
+    clearRouteCacheEntries: (force?: boolean) => void;
+    ensureRouteCacheMaintenance: (force?: boolean) => void;
+    findTemporalPath: (...args: any[]) => any;
+    findPath: (...args: any[]) => any;
+    findShortPathInCache: (...args: any[]) => any;
+    findLongPathInCache: (...args: any[]) => any;
+    findSquadTemporalPath: (...args: any[]) => any;
+    findSquadPath: (...args: any[]) => any;
+    findSquadPathTo: (this: RoomPosition, toPos: RoomPosition | { pos: RoomPosition }, opts?: PathFinderOpts) => PathFinderPath | ERR_NO_PATH | ERR_INVALID_TARGET;
+    flee: (this: Creep, targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
+    setPathTimer: (...args: any[]) => any;
+    runMoveOptTickMaintenance: () => void;
+}
 
-    // 这组状态只在一次 route / path 搜索过程中使用，保留在模块内部即可。
-    let bypassRoomName;
-    let bypassCostMat;
-    let bypassIgnoreCondition;
-    let userCostCallback;
-    let costMat;
-    let route;
-    let findPathPortalPos = null;
-    let findPathPortalMat = null;
-    let findPathAllowPortal = false;
-    let findPathSameRoomEdgeRoomName = '';
-    let findPathIgnoreCondition;
-    let findPathStartPos;
-    let findPathStartMat;
+export class PathingService {
+    declare bmSetPathClearDelay: PathingModuleApi['bmSetPathClearDelay'];
+    declare bmSetHostileCostMatrixClearDelay: PathingModuleApi['bmSetHostileCostMatrixClearDelay'];
+    declare bmDeleteCostMatrix: PathingModuleApi['bmDeleteCostMatrix'];
+    declare bmGetCacheStats: PathingModuleApi['bmGetCacheStats'];
+    declare bmResetCacheStats: PathingModuleApi['bmResetCacheStats'];
+    declare bmDeltePath: PathingModuleApi['bmDeltePath'];
+    declare bmDeletePath: PathingModuleApi['bmDeletePath'];
+    declare bmDeletePathInRoom: PathingModuleApi['bmDeletePathInRoom'];
+    declare clearRouteCacheEntries: PathingModuleApi['clearRouteCacheEntries'];
+    declare ensureRouteCacheMaintenance: PathingModuleApi['ensureRouteCacheMaintenance'];
+    declare findTemporalPath: PathingModuleApi['findTemporalPath'];
+    declare findPath: PathingModuleApi['findPath'];
+    declare findShortPathInCache: PathingModuleApi['findShortPathInCache'];
+    declare findLongPathInCache: PathingModuleApi['findLongPathInCache'];
+    declare findSquadTemporalPath: PathingModuleApi['findSquadTemporalPath'];
+    declare findSquadPath: PathingModuleApi['findSquadPath'];
+    declare findSquadPathTo: PathingModuleApi['findSquadPathTo'];
+    declare flee: PathingModuleApi['flee'];
+    declare setPathTimer: PathingModuleApi['setPathTimer'];
+    declare runMoveOptTickMaintenance: PathingModuleApi['runMoveOptTickMaintenance'];
+
+    constructor(deps) {
+        const routeState = deps.routeCacheState;
+        const temporalState = deps.temporalAvoidState;
+        const observerState = deps.observerState;
+        type PathFinderOptsWithMaxOps = PathFinderOpts & { maxOps?: number };
+
+        // 通过构造器闭包保存搜索期临时状态，既能形成清晰的类边界，
+        // 又不破坏 `findSquadPathTo` / `flee` 这类依赖调用方 `this` 的旧接口。
+        let bypassRoomName;
+        let bypassCostMat;
+        let bypassIgnoreCondition;
+        let userCostCallback;
+        let costMat;
+        let route;
+        let findPathPortalPos = null;
+        let findPathPortalMat = null;
+        let findPathAllowPortal = false;
+        let findPathSameRoomEdgeRoomName = '';
+        let findPathIgnoreCondition;
+        let findPathStartPos;
+        let findPathStartMat;
+
+    function getCachedRoomCostMatrix(roomName, ignoreCondition) {
+        if (!(roomName in deps.costMatrixCache)) {
+            return deps.emptyCostMatrix;
+        }
+        const roomCache = deps.costMatrixCache[roomName];
+        return ignoreCondition ? roomCache.true : roomCache.false;
+    }
 
     function bmSetPathClearDelay(number) {
         if (typeof number === 'number' && number > 0) {
@@ -1083,6 +1134,252 @@ export function createPathingModule(deps) {
         }
     }
 
+    function createSquadPathFinderOpts(ops, roomCallback) {
+        const pathFinderOpts: PathFinderOptsWithMaxOps = {
+            maxRooms: typeof ops.maxRooms === 'number' ? ops.maxRooms : 10,
+            maxCost: typeof ops.maxCost === 'number' ? ops.maxCost : 1000,
+            heuristicWeight: typeof ops.heuristicWeight === 'number' ? ops.heuristicWeight : 1.2,
+            roomCallback
+        };
+        if (typeof ops.maxOps === 'number') {
+            pathFinderOpts.maxOps = ops.maxOps;
+        }
+        return pathFinderOpts;
+    }
+
+    function squadTemporalRoomCallback(roomName) {
+        if (deps.isRoomAvoided(roomName)) {
+            return false;
+        }
+        if (roomName == bypassRoomName) {
+            costMat = bypassCostMat;
+        } else {
+            costMat = deps.getSquadCostMatrixForRoom(roomName, findPathIgnoreCondition);
+        }
+        if (userCostCallback) {
+            const roomCache = deps.costMatrixCache[roomName];
+            const resultCostMat = userCostCallback(roomName, roomCache ? costMat.clone() : new PathFinder.CostMatrix);
+            if (resultCostMat instanceof PathFinder.CostMatrix) {
+                costMat = resultCostMat;
+            }
+        }
+        return costMat;
+    }
+
+    function findSquadTemporalPath(leader, toPos, ops, key, severe, squadNames) {
+        bypassRoomName = leader.room.name;
+        if (!(bypassRoomName in deps.costMatrixCache) && bypassRoomName in Game.rooms) {
+            deps.generateCostMatrix(Game.rooms[bypassRoomName], leader.pos);
+        }
+        userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
+        findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
+        const nearbyCreeps = leader.pos.findInRange(FIND_CREEPS, 5);
+        bypassCostMat = deps.getSquadCostMatrixForRoom(bypassRoomName, findPathIgnoreCondition).clone();
+        if (severe) {
+            for (const creep of nearbyCreeps) {
+                if (!squadNames.has(creep.name)) {
+                    bypassCostMat.set(creep.pos.x, creep.pos.y, 10);
+                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y, bypassCostMat.get(creep.pos.x + 1, creep.pos.y) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
+                    bypassCostMat.set(creep.pos.x, creep.pos.y + 1, bypassCostMat.get(creep.pos.x, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
+                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y + 1, bypassCostMat.get(creep.pos.x + 1, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
+                }
+            }
+        } else {
+            for (const creep of nearbyCreeps) {
+                if (deps.creepToSquad.has(creep.name) && !deps.rerouteSquad.has(creep.name)) {
+                    bypassCostMat.set(creep.pos.x, creep.pos.y, deps.unWalkableCCost);
+                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y, deps.unWalkableCCost);
+                    bypassCostMat.set(creep.pos.x, creep.pos.y + 1, deps.unWalkableCCost);
+                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y + 1, bypassCostMat.get(creep.pos.x + 1, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 5);
+                    leader.room.visual.circle(creep.pos, { radius: 0.5, fill: 'red', opacity: 0.1 });
+                }
+            }
+        }
+        const pathFinderOpts = createSquadPathFinderOpts(ops, squadTemporalRoomCallback);
+        const creepCache = deps.creepPathCache[key];
+        const range = typeof ops.range === 'number' ? ops.range : 0;
+        let result = deps.withScopedAvoids(ops, () => PathFinder.search(leader.pos, { pos: toPos, range }, pathFinderOpts));
+        if (result.incomplete && result.path.length <= 1) {
+            return false;
+        }
+        result = result.path;
+        creepCache.path = {
+            end: deps.formalize(result[result.length - 1]),
+            posArray: result,
+            ignoreStructures: findPathIgnoreCondition
+        };
+        return true;
+    }
+
+    function squadRoomCallback(roomName) {
+        if (deps.isRoomAvoided(roomName)) {
+            return false;
+        }
+        costMat = deps.getSquadCostMatrixForRoom(roomName, findPathIgnoreCondition);
+        if (userCostCallback) {
+            const roomCache = deps.costMatrixCache[roomName];
+            const resultCostMat = userCostCallback(roomName, roomCache ? costMat.clone() : new PathFinder.CostMatrix);
+            if (resultCostMat instanceof PathFinder.CostMatrix) {
+                costMat = resultCostMat;
+            }
+        }
+        return costMat;
+    }
+
+    function findSquadPath(fromPos, toPos, ops) {
+        deps.ensureAvoidRoomsUpToDate();
+        if (!(fromPos.roomName in deps.costMatrixCache) && fromPos.roomName in Game.rooms) {
+            deps.generateCostMatrix(Game.rooms[fromPos.roomName], fromPos);
+        }
+
+        findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
+        userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
+        const pathFinderOpts = createSquadPathFinderOpts(ops, squadRoomCallback);
+        return deps.withScopedAvoids(ops, () => PathFinder.search(fromPos, { pos: toPos, range: ops.range }, pathFinderOpts));
+    }
+
+    function getMemberPosSignature(memberPos) {
+        if (!memberPos.length) {
+            return '';
+        }
+        return memberPos.map((p) => `${p.x},${p.y}`).sort().join('|');
+    }
+
+    function getSquadDerivedMatCacheForThisTick() {
+        if (typeof Game == 'undefined') {
+            return null;
+        }
+        if (deps.squadDerivedState.tick !== Game.time) {
+            deps.squadDerivedState.tick = Game.time;
+            deps.squadDerivedState.cache = Object.create(null);
+        }
+        return deps.squadDerivedState.cache;
+    }
+
+    function findSquadPathTo(toPos, opts) {
+        deps.ensureAvoidRoomsUpToDate();
+        const targetPos = toPos && toPos.pos ? toPos.pos : toPos;
+        if (!targetPos || typeof targetPos.x != 'number' || typeof targetPos.y != 'number') {
+            return [];
+        }
+        opts = opts || {};
+
+        const range = typeof opts.range == 'number' ? opts.range : 1;
+        const ignoreCondition = !!opts.ignoreDestructibleStructures;
+        const memberPos = Array.isArray(opts.memberPos) ? opts.memberPos : [];
+        const memberPosSignature = getMemberPosSignature(memberPos);
+
+        const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
+        const derivedMatCache = userCallback ? Object.create(null) : (getSquadDerivedMatCacheForThisTick() || Object.create(null));
+
+        const roomCallback = (roomName) => {
+            if (deps.isRoomAvoided(roomName)) {
+                return false;
+            }
+            let base = getCachedRoomCostMatrix(roomName, ignoreCondition);
+            if (userCallback) {
+                const resultCostMat = userCallback(roomName, roomName in deps.costMatrixCache ? base.clone() : new PathFinder.CostMatrix);
+                if (resultCostMat instanceof PathFinder.CostMatrix) {
+                    base = resultCostMat;
+                }
+            }
+            if (!memberPos.length) {
+                return base;
+            }
+            const cacheKey = `${roomName}|${ignoreCondition ? 1 : 0}|${memberPosSignature}`;
+            if (derivedMatCache[cacheKey]) {
+                return derivedMatCache[cacheKey];
+            }
+            const derived = new PathFinder.CostMatrix;
+            for (let y = 0; y < 50; y++) {
+                for (let x = 0; x < 50; x++) {
+                    let blocked = false;
+                    for (let i = memberPos.length; i--;) {
+                        const rel = memberPos[i];
+                        const rx = x + rel.x;
+                        const ry = y + rel.y;
+                        if (rx < 0 || ry < 0 || rx > 49 || ry > 49 || base.get(rx, ry) == deps.unWalkableCCost) {
+                            blocked = true;
+                            break;
+                        }
+                    }
+                    if (blocked) {
+                        derived.set(x, y, deps.unWalkableCCost);
+                    } else {
+                        const value = base.get(x, y);
+                        if (value) {
+                            derived.set(x, y, value);
+                        }
+                    }
+                }
+            }
+            derivedMatCache[cacheKey] = derived;
+            return derived;
+        };
+
+        const pathFinderOpts = deps.createPathFinderBaseOpts(opts);
+        deps.applyMoveToTerrainCosts(pathFinderOpts, opts);
+        pathFinderOpts.roomCallback = roomCallback;
+        pathFinderOpts.maxOps = opts.maxOps;
+
+        return deps.withScopedAvoids(opts, () => PathFinder.search(this, { pos: targetPos, range }, pathFinderOpts).path);
+    }
+
+    function flee(targets, opts) {
+        deps.ensureAvoidRoomsUpToDate();
+        opts = opts || {};
+        const range = typeof opts.range == 'number' ? opts.range : 5;
+        const ignoreCondition = !!opts.ignoreDestructibleStructures;
+        const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
+
+        if (!Array.isArray(targets) || !targets.length) {
+            return ERR_INVALID_ARGS;
+        }
+        const goals = [];
+        for (let i = targets.length; i--;) {
+            const target = targets[i];
+            if (!target) continue;
+            if (target.pos && typeof target.pos.x == 'number') {
+                goals.push({ pos: target.pos, range: typeof target.range == 'number' ? target.range : range });
+            } else if (typeof target.x == 'number' && typeof target.y == 'number' && target.roomName) {
+                goals.push({ pos: target, range });
+            }
+        }
+        if (!goals.length) {
+            return ERR_INVALID_ARGS;
+        }
+
+        const roomCallback = (roomName) => {
+            if (deps.isRoomAvoided(roomName)) {
+                return false;
+            }
+            let base = getCachedRoomCostMatrix(roomName, ignoreCondition);
+            if (userCallback) {
+                const resultCostMat = userCallback(roomName, roomName in deps.costMatrixCache ? base.clone() : new PathFinder.CostMatrix);
+                if (resultCostMat instanceof PathFinder.CostMatrix) {
+                    base = resultCostMat;
+                }
+            }
+            return base;
+        };
+
+        const pathFinderOpts = deps.createPathFinderBaseOpts(opts);
+        deps.applyMoveToTerrainCosts(pathFinderOpts, opts);
+        pathFinderOpts.roomCallback = roomCallback;
+        pathFinderOpts.maxOps = opts.maxOps;
+        pathFinderOpts.flee = true;
+
+        const result = deps.withScopedAvoids(opts, () => PathFinder.search(this.pos, goals, pathFinderOpts).path);
+        if (!result.length) {
+            return ERR_NO_PATH;
+        }
+        if (this.fatigue) {
+            return ERR_TIRED;
+        }
+        deps.creepMoveCache[this.name] = Game.time;
+        return deps.originMove.call(this, deps.getDirection(this.pos, result[0]));
+    }
+
     /**
      * 执行 observer 队列中的房间校验任务。
      * 若路径已失效或已能直接判断，则立即丢弃任务，避免队列长期堆积。
@@ -1119,7 +1416,7 @@ export function createPathingModule(deps) {
                     deps.dropObserverTask(obData);
                     continue;
                 }
-                const ob = Game.getObjectById(obData.id);
+                const ob = Game.getObjectById(obData.id) as StructureObserver | null;
                 if (!ob) {
                     observerState.observers.splice(i, 1);
                     break;
@@ -1192,22 +1489,27 @@ export function createPathingModule(deps) {
         }
     }
 
-    return {
-        bmSetPathClearDelay,
-        bmSetHostileCostMatrixClearDelay,
-        bmDeleteCostMatrix,
-        bmGetCacheStats,
-        bmResetCacheStats,
-        bmDeltePath,
-        bmDeletePath,
-        bmDeletePathInRoom,
-        clearRouteCacheEntries,
-        ensureRouteCacheMaintenance,
-        findTemporalPath,
-        findPath,
-        findShortPathInCache,
-        findLongPathInCache,
-        setPathTimer,
-        runMoveOptTickMaintenance,
-    };
+        Object.assign(this, {
+            bmSetPathClearDelay,
+            bmSetHostileCostMatrixClearDelay,
+            bmDeleteCostMatrix,
+            bmGetCacheStats,
+            bmResetCacheStats,
+            bmDeltePath,
+            bmDeletePath,
+            bmDeletePathInRoom,
+            clearRouteCacheEntries,
+            ensureRouteCacheMaintenance,
+            findTemporalPath,
+            findPath,
+            findShortPathInCache,
+            findLongPathInCache,
+            findSquadTemporalPath,
+            findSquadPath,
+            findSquadPathTo,
+            flee,
+            setPathTimer,
+            runMoveOptTickMaintenance,
+        });
+    }
 }

@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * BetterMove 障碍物判定。
  * @description
@@ -8,15 +6,16 @@
  */
 
 export function buildObstacleMap() {
-    const obstacles = Object.create(null);
+    const obstacles: Record<string, 1> = Object.create(null);
     for (let i = OBSTACLE_OBJECT_TYPES.length; i--;) {
         obstacles[OBSTACLE_OBJECT_TYPES[i]] = 1;
     }
     return obstacles;
 }
 
-export function isClosedRampart(structure) {
-    return structure.structureType == STRUCTURE_RAMPART && !structure.my && !structure.isPublic;
+export function isClosedRampart(structure: Structure) {
+    const rampart = structure as StructureRampart & { my?: boolean; isPublic?: boolean };
+    return structure.structureType == STRUCTURE_RAMPART && !rampart.my && !rampart.isPublic;
 }
 
 /**
@@ -26,19 +25,25 @@ export function isClosedRampart(structure) {
  * - `ignoreStructures` 只忽略“可破坏的他人阻塞建筑”；
  * - 己方阻塞建筑仍然视为不可通行，否则会把己方 spawn/extension 误判成可穿。
  */
-export function isObstacleStructure(room, pos, ignoreStructures, obstacles) {
-    const consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos);
+export function isObstacleStructure(
+    room: Room,
+    pos: RoomPosition,
+    ignoreStructures: boolean,
+    obstacles: Record<string, 1>
+) {
+    const consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos) as ConstructionSite[];
     if (0 in consSite && consSite[0].my && obstacles[consSite[0].structureType]) {
         return true;
     }
 
-    const structures = room.lookForAt(LOOK_STRUCTURES, pos);
+    const structures = room.lookForAt(LOOK_STRUCTURES, pos) as Structure[];
     for (let i = structures.length; i--;) {
         const s = structures[i];
-        if (!s.hits || s.ticksToDeploy) {
+        const runtimeStructure = s as Structure & { my?: boolean; ticksToDeploy?: number };
+        if (!('hits' in s) || !!runtimeStructure.ticksToDeploy) {
             return true;
         } else if (obstacles[s.structureType]) {
-            if (s.my || !ignoreStructures) {
+            if (runtimeStructure.my || !ignoreStructures) {
                 return true;
             }
         } else if (!ignoreStructures && isClosedRampart(s)) {

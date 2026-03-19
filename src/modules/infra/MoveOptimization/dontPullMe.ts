@@ -1,12 +1,19 @@
-// @ts-nocheck
-
 /**
  * 原型方法包装工具。
  * @description
  * 抽到独立文件后，BetterMove 的主逻辑文件可以专注于寻路与缓存，
  * dontPullMe 这类“行为层补丁”则独立维护。
  */
-export function wrapProtoMethod(proto, originalName, backupName, wrap) {
+type AnyProto = Record<string, any>;
+type CreepWithMoveMemory = Creep & {
+    memory: CreepMemory & {
+        _lpv?: number;
+        _lpt?: number;
+        dontPullMe?: boolean;
+    };
+};
+
+export function wrapProtoMethod(proto: AnyProto, originalName: string, backupName: string, wrap: (...args: any[]) => any) {
     if (!proto[backupName] || proto[backupName] === proto[originalName]) {
         proto[backupName] = proto[originalName];
     }
@@ -19,7 +26,7 @@ export function wrapProtoMethod(proto, originalName, backupName, wrap) {
  * - 真正位于房间边缘时，锁定 dontPullMe，避免被对穿推回出口导致抖动；
  * - 其余情况允许对穿，减少房间门口与核心区的互锁。
  */
-export function updateDontPullMeForMoveTo(creep) {
+export function updateDontPullMeForMoveTo(creep: CreepWithMoveMemory) {
     const isEdge = creep.pos.x === 0 || creep.pos.x === 49 || creep.pos.y === 0 || creep.pos.y === 49;
 
     // 用紧凑数字记录“上一个位置”，避免每 tick 额外创建对象。
@@ -41,7 +48,7 @@ const YIELDABLE_ACTIONS = new Set([
 ]);
 const ACTION_OK = 0;
 
-function shouldLockActionPosition(actionName, actionResult) {
+function shouldLockActionPosition(actionName: string, actionResult: number) {
     if (actionResult !== ACTION_OK) return false;
     if (YIELDABLE_ACTIONS.has(actionName)) return false;
     return true;
@@ -57,16 +64,20 @@ export function installDontPullMePolicies({
     CreepPrototype,
     betterCancelOrder,
     restorePowerCreepNativeMethods,
+}: {
+    CreepPrototype: Creep['prototype'] & AnyProto;
+    betterCancelOrder: (...args: any[]) => any;
+    restorePowerCreepNativeMethods: () => void;
 }) {
     wrapProtoMethod(CreepPrototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
     restorePowerCreepNativeMethods();
 
-    const wrapActionSetDontPullMePolicy = (methodName) => {
+    const wrapActionSetDontPullMePolicy = (methodName: string) => {
         const backupName = `$${methodName}`;
         if (CreepPrototype[backupName]) {
             return;
         }
-        wrapProtoMethod(CreepPrototype, methodName, backupName, function (...args) {
+        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: any[]) {
             const result = this[backupName](...args);
             this.memory.dontPullMe = shouldLockActionPosition(methodName, result);
             return result;

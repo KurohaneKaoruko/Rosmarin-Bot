@@ -1,12 +1,136 @@
-// @ts-nocheck
-
 /**
  * BetterMove 运行时控制面。
  * @description
  * 统一封装原型挂载开关、统计打印与运行时配置更新，
  * 让 `index.ts` 更聚焦在移动主流程与模块装配本身。
  */
-export function createMoveRuntimeControlModule(deps) {
+type CpuBucket = {
+    sum: number;
+    calls: number;
+    moveCount?: number;
+};
+
+type AnalyzeCpuMap = Record<string, CpuBucket> & {
+    endTickResolve: {
+        sum: number;
+        calls: number;
+        moveCount: number;
+    };
+};
+
+type RuntimeMetrics = {
+    pathCounter: number;
+    testCacheHits: number;
+    testCacheMiss: number;
+    testNormal: number;
+    testNearStorageCheck: number;
+    testNearStorageSwap: number;
+    testTrySwap: number;
+    testBypass: number;
+    normalLogicalCost: number;
+    cacheHitCost: number;
+    cacheMissCost: number;
+};
+
+type BetterMoveCreepPrototype = typeof Creep.prototype & {
+    $move?: typeof Creep.prototype.move;
+    $moveTo?: typeof Creep.prototype.moveTo;
+    $pull?: typeof Creep.prototype.pull;
+    $flee?: (targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
+    flee?: (targets: unknown[], opts?: MoveToOpts) => ScreepsReturnCode;
+};
+
+type BetterMoveRoomPositionPrototype = typeof RoomPosition.prototype & {
+    $findClosestByPath?: typeof RoomPosition.prototype.findClosestByPath;
+    $findSquadPathTo?: typeof RoomPosition.prototype.findSquadPathTo;
+    findSquadPathTo?: typeof RoomPosition.prototype.findSquadPathTo;
+};
+
+type RuntimeControlDeps = {
+    config: Record<string, any>;
+    analyzeCPU: AnalyzeCpuMap;
+    runtimeMetrics: RuntimeMetrics;
+    getCacheStats: () => BetterMoveCacheStats;
+    isCpuStatsEnabled: () => boolean;
+    resetCacheRuntimeStats: () => void;
+    applyConfig: () => void;
+    originMoveTo: (...args: any[]) => any;
+    wrapFn: (fn: Function, name: string) => any;
+    updateDontPullMeForMoveTo: (creep: Creep) => void;
+    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: Function) => void;
+    restorePowerCreepNativeMethods: () => void;
+    betterMoveTo: (...args: any[]) => any;
+    betterMove: (...args: any[]) => any;
+    betterPull: (...args: any[]) => any;
+    betterFindClosestByPath: (...args: any[]) => any;
+    findSquadPathTo: (...args: any[]) => any;
+    flee: (...args: any[]) => any;
+};
+
+type RuntimeControlApi = {
+    bmPrint: () => string;
+    bmSetChangeMoveTo: (bool: boolean) => ScreepsReturnCode;
+    bmSetChangeMove: (bool: boolean) => ScreepsReturnCode;
+    bmSetChangeFindClostestByPath: (bool: boolean) => ScreepsReturnCode;
+    bmSetEnableSquadPath: (bool: boolean) => ScreepsReturnCode;
+    bmSetEnableFlee: (bool: boolean) => ScreepsReturnCode;
+    bmGetConfig: () => Record<string, any>;
+    bmSetConfig: (partial: Record<string, any>) => ScreepsReturnCode;
+    resetMoveOptStats: () => void;
+    bmResetCacheStats: () => ScreepsReturnCode;
+};
+
+type BetterMovePortalRecord = {
+    roomName?: string;
+    x?: number;
+    y?: number;
+    destShard?: string;
+    destRoom?: string;
+    destX?: number;
+    destY?: number;
+    lastSeen?: number;
+};
+
+type BetterMoveGlobalApiDeps = {
+    bmSetChangeMove: BetterMoveAPI['setChangeMove'];
+    creepPathCache: BetterMoveAPI['creepPathCache'];
+    preTickBetterMove: BetterMoveAPI['preTickBetterMove'];
+    squadMove: BetterMoveAPI['squadMove'];
+    squadMoveTo: BetterMoveAPI['squadMoveTo'];
+    bmSetChangeMoveTo: BetterMoveAPI['setChangeMoveTo'];
+    setCheckTile: BetterMoveAPI['setCheckTile'];
+    bmSetChangeFindClostestByPath: BetterMoveAPI['setChangeFindClostestByPath'];
+    bmSetPathClearDelay: BetterMoveAPI['setPathClearDelay'];
+    bmSetHostileCostMatrixClearDelay: BetterMoveAPI['setHostileCostMatrixClearDelay'];
+    bmDeleteCostMatrix: BetterMoveAPI['deleteCostMatrix'];
+    bmDeletePath: (fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts) => ScreepsReturnCode;
+    bmDeltePath: BetterMoveAPI['deltePath'];
+    bmGetAvoidRoomsMap: BetterMoveAPI['getAvoidRoomsMap'];
+    bmGetAvoidExitsMap: BetterMoveAPI['getAvoidExitsMap'];
+    bmAddAvoidRooms: BetterMoveAPI['addAvoidRooms'];
+    bmDeleteAvoidRooms: BetterMoveAPI['deleteAvoidRooms'];
+    bmClearAvoidExits: BetterMoveAPI['clearAvoidExits'];
+    getClosestExitPos: BetterMoveAPI['getClosestExitPos'];
+    bmSetEnableSquadPath: BetterMoveAPI['setEnableSquadPath'];
+    bmSetEnableFlee: BetterMoveAPI['setEnableFlee'];
+    bmGetConfig: BetterMoveAPI['getConfig'];
+    bmSetConfig: BetterMoveAPI['setConfig'];
+    bmGetCacheStats: BetterMoveAPI['getCacheStats'];
+    bmResetCacheStats: BetterMoveAPI['resetCacheStats'];
+    bmDeletePathInRoom: BetterMoveAPI['deletePathInRoom'];
+    bmAddAvoidExits: BetterMoveAPI['addAvoidExits'];
+    bmDeleteAvoidExits: BetterMoveAPI['deleteAvoidExits'];
+    scanPortals: (force: boolean) => void;
+    getPortalRegistry: () => { v: number; list: BetterMovePortalRecord[]; updated: number };
+    endTickResolve: BetterMoveAPI['endTickResolve'];
+    bmPrint: BetterMoveAPI['print'];
+    bmClear: BetterMoveAPI['clear'];
+};
+
+export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): RuntimeControlApi {
+    const creepProto = Creep.prototype as BetterMoveCreepPrototype;
+    const roomPositionProto = RoomPosition.prototype as BetterMoveRoomPositionPrototype;
+
     function appendCacheStatsText(text) {
         const stats = deps.getCacheStats();
         if (!stats.enabled) {
@@ -77,11 +201,11 @@ export function createMoveRuntimeControlModule(deps) {
             deps.wrapProtoMethod(Creep.prototype, 'move', '$move', deps.wrapFn(deps.betterMove, 'move'));
             deps.wrapProtoMethod(Creep.prototype, 'pull', '$pull', deps.wrapFn(deps.betterPull, 'pull'));
         } else if (bool === false) {
-            if (Creep.prototype.$move) {
-                Creep.prototype.move = Creep.prototype.$move;
+            if (creepProto.$move) {
+                Creep.prototype.move = creepProto.$move;
             }
-            if (Creep.prototype.$pull) {
-                Creep.prototype.pull = Creep.prototype.$pull;
+            if (creepProto.$pull) {
+                Creep.prototype.pull = creepProto.$pull;
             }
         }
         deps.restorePowerCreepNativeMethods();
@@ -92,13 +216,13 @@ export function createMoveRuntimeControlModule(deps) {
     function bmSetChangeFindClostestByPath(bool) {
         deps.config.changeFindClostestByPath = !!bool;
         if (bool) {
-            if (!RoomPosition.prototype.$findClosestByPath) {
-                RoomPosition.prototype.$findClosestByPath = RoomPosition.prototype.findClosestByPath;
+            if (!roomPositionProto.$findClosestByPath) {
+                roomPositionProto.$findClosestByPath = RoomPosition.prototype.findClosestByPath;
             }
             RoomPosition.prototype.findClosestByPath = deps.wrapFn(deps.betterFindClosestByPath, 'findClosestByPath');
         } else if (bool === false) {
-            if (RoomPosition.prototype.$findClosestByPath) {
-                RoomPosition.prototype.findClosestByPath = RoomPosition.prototype.$findClosestByPath;
+            if (roomPositionProto.$findClosestByPath) {
+                RoomPosition.prototype.findClosestByPath = roomPositionProto.$findClosestByPath;
             }
         }
         deps.analyzeCPU.findClosestByPath = { sum: 0, calls: 0 };
@@ -108,13 +232,13 @@ export function createMoveRuntimeControlModule(deps) {
     function bmSetEnableSquadPath(bool) {
         deps.config.enableSquadPath = !!bool;
         if (bool) {
-            if (!RoomPosition.prototype.$findSquadPathTo) {
-                RoomPosition.prototype.$findSquadPathTo = RoomPosition.prototype.findSquadPathTo;
+            if (!roomPositionProto.$findSquadPathTo) {
+                roomPositionProto.$findSquadPathTo = RoomPosition.prototype.findSquadPathTo;
             }
             RoomPosition.prototype.findSquadPathTo = deps.wrapFn(deps.findSquadPathTo, 'findSquadPathTo');
         } else if (bool === false) {
-            if (RoomPosition.prototype.$findSquadPathTo) {
-                RoomPosition.prototype.findSquadPathTo = RoomPosition.prototype.$findSquadPathTo;
+            if (roomPositionProto.$findSquadPathTo) {
+                RoomPosition.prototype.findSquadPathTo = roomPositionProto.$findSquadPathTo;
             }
         }
         return OK;
@@ -123,15 +247,15 @@ export function createMoveRuntimeControlModule(deps) {
     function bmSetEnableFlee(bool) {
         deps.config.enableFlee = !!bool;
         if (bool) {
-            if (!Creep.prototype.$flee) {
-                Creep.prototype.$flee = Creep.prototype.flee;
+            if (!creepProto.$flee) {
+                creepProto.$flee = creepProto.flee;
             }
-            Creep.prototype.flee = deps.wrapFn(deps.flee, 'flee');
+            creepProto.flee = deps.wrapFn(deps.flee, 'flee');
         } else if (bool === false) {
-            if (Creep.prototype.$flee) {
-                Creep.prototype.flee = Creep.prototype.$flee;
+            if (creepProto.$flee) {
+                creepProto.flee = creepProto.$flee;
             } else {
-                delete Creep.prototype.flee;
+                delete creepProto.flee;
             }
         }
         return OK;
@@ -198,7 +322,7 @@ export function createMoveRuntimeControlModule(deps) {
  * 这里和运行时控制逻辑放在同一个文件里，避免再拆出一个只负责
  * `global.BetterMove = { ... }` 映射表的薄包装模块。
  */
-export function createBetterMoveGlobalApi(deps) {
+export function createBetterMoveGlobalApi(deps: BetterMoveGlobalApiDeps): BetterMoveAPI {
     return {
         setChangeMove: deps.bmSetChangeMove,
         creepPathCache: deps.creepPathCache,

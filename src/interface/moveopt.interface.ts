@@ -112,6 +112,7 @@ interface BetterMoveAPI {
   setPathClearDelay(number?: number): ScreepsReturnCode;
   setHostileCostMatrixClearDelay(number?: number): ScreepsReturnCode;
   deleteCostMatrix(roomName: string): ScreepsReturnCode;
+  deletePath(fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts): ScreepsReturnCode;
   deltePath(fromPos: RoomPosition | { pos: RoomPosition }, toPos: RoomPosition | { pos: RoomPosition }, opts?: MoveToOpts): ScreepsReturnCode;
   getAvoidRoomsMap(): Record<string, 1>;
   getAvoidExitsMap(): Record<string, Record<string, 1>>;

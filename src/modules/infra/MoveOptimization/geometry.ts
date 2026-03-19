@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 /**
  * BetterMove 基础几何/房间名工具。
  * @description
@@ -9,17 +7,68 @@
 
 const HALF_WORLD_SIZE = 255 >> 1;
 
+type ParsedRoomName = {
+    ew: 'W' | 'E';
+    ewNum: number;
+    ns: 'N' | 'S';
+    nsNum: number;
+    baseX: number;
+    baseY: number;
+};
+
+type ParsedShardRoomName = {
+    shard: string | null;
+    room: string | null | undefined;
+};
+
+type ParsedRoomNameCache = Record<string, ParsedRoomName | null | undefined>;
+type ParsedShardRoomNameCache = Record<string, ParsedShardRoomName | undefined>;
+type PosLike = {
+    x: number;
+    y: number;
+    roomName?: string | null;
+};
+type FormalizedPos = {
+    x: number;
+    y: number;
+};
+type PathVariantPathLike = {
+    ignoreRoads?: boolean;
+    ignoreSwamps?: boolean;
+    ignoreStructures?: boolean;
+    posArray?: Array<{ roomName?: string | null }>;
+};
+type PathVariantQueryLike = {
+    ignoreRoads?: boolean;
+    ignoreSwamps?: boolean;
+    ignoreDestructibleStructures?: boolean;
+};
+
+function createEmptyFormalizedPos(): FormalizedPos {
+    return {} as FormalizedPos;
+}
+
+function hasRoomName(pos: PosLike | null | undefined): pos is PosLike & { roomName: string } {
+    return !!pos && typeof pos.roomName === 'string' && pos.roomName.length > 0;
+}
+
+function isExitFindConstant(value: number): value is FIND_EXIT_TOP | FIND_EXIT_RIGHT | FIND_EXIT_BOTTOM | FIND_EXIT_LEFT {
+    return value === FIND_EXIT_TOP ||
+        value === FIND_EXIT_RIGHT ||
+        value === FIND_EXIT_BOTTOM ||
+        value === FIND_EXIT_LEFT;
+}
+
 export const geometryCaches = {
-    roomNameParseCache: Object.create(null),
-    shardRoomNameParseCache: Object.create(null),
+    roomNameParseCache: Object.create(null) as ParsedRoomNameCache,
+    shardRoomNameParseCache: Object.create(null) as ParsedShardRoomNameCache,
     tileToPosCache: new Map<number, RoomPosition>(),
 };
 
 /**
  * 解析房间名。
- * @returns {{ ew:'W'|'E', ewNum:number, ns:'N'|'S', nsNum:number, baseX:number, baseY:number } | null}
  */
-export function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number; ns: 'N' | 'S'; nsNum: number; baseX: number; baseY: number; } | null {
+export function parseRoomName(roomName: string): ParsedRoomName | null {
     const cached = geometryCaches.roomNameParseCache[roomName];
     if (cached !== undefined) return cached;
     const len = roomName.length;
@@ -80,10 +129,10 @@ export function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number;
         return null;
     }
 
-    const parsed = {
-        ew: /** @type {'W'|'E'} */(ewCode === 87 ? 'W' : 'E'),
+    const parsed: ParsedRoomName = {
+        ew: ewCode === 87 ? 'W' : 'E',
         ewNum,
-        ns: /** @type {'N'|'S'} */(nsCode === 83 ? 'S' : 'N'),
+        ns: nsCode === 83 ? 'S' : 'N',
         nsNum,
         baseX: (ewCode === 87 ? -ewNum : ewNum + 1) * 50,
         baseY: (nsCode === 83 ? nsNum + 1 : -nsNum) * 50
@@ -95,28 +144,28 @@ export function parseRoomName(roomName: string): { ew: 'W' | 'E'; ewNum: number;
 /**
  * 统一到大地图坐标。
  */
-export function formalize(pos) {
-    if (!pos || !pos.roomName) return {};
+export function formalize(pos: PosLike | null | undefined): FormalizedPos {
+    if (!hasRoomName(pos)) return createEmptyFormalizedPos();
     const parsed = parseRoomName(pos.roomName);
-    if (!parsed) return {};
+    if (!parsed) return createEmptyFormalizedPos();
     return {
         x: parsed.baseX + pos.x,
         y: parsed.baseY + pos.y
     };
 }
 
-export function formalizeIntentPos(pos) {
-    if (!pos || !pos.roomName) return {};
+export function formalizeIntentPos(pos: PosLike | null | undefined): FormalizedPos {
+    if (!hasRoomName(pos)) return createEmptyFormalizedPos();
     const parsed = parseRoomName(pos.roomName);
-    if (!parsed) return {};
+    if (!parsed) return createEmptyFormalizedPos();
     return {
         x: (parsed.ew === 'W' ? HALF_WORLD_SIZE - parsed.ewNum : HALF_WORLD_SIZE + parsed.ewNum + 1) * 50 + pos.x,
         y: (parsed.ns === 'S' ? HALF_WORLD_SIZE + parsed.nsNum + 1 : HALF_WORLD_SIZE - parsed.nsNum) * 50 + pos.y
     };
 }
 
-export function formalizeIntentMovePos(pos) {
-    if (!pos || !pos.roomName) return {};
+export function formalizeIntentMovePos(pos: PosLike | null | undefined): FormalizedPos {
+    if (!hasRoomName(pos)) return createEmptyFormalizedPos();
     const formalPos = formalizeIntentPos(pos);
     if (typeof formalPos.x !== 'number' || typeof formalPos.y !== 'number') {
         return formalPos;
@@ -133,11 +182,11 @@ export function formalizeIntentMovePos(pos) {
     return formalPos;
 }
 
-export function packIntentTile(formalPos) {
+export function packIntentTile(formalPos: FormalizedPos): number {
     return (formalPos.y << 14) | formalPos.x;
 }
 
-export function tile2Pos(tile) {
+export function tile2Pos(tile: number): RoomPosition {
     const cached = geometryCaches.tileToPosCache.get(tile);
     if (cached) {
         return cached;
@@ -153,8 +202,8 @@ export function tile2Pos(tile) {
     return pos;
 }
 
-export function getAdjacents(pos) {
-    const posArray = [];
+export function getAdjacents(pos: { x: number; y: number }): Array<{ x: number; y: number }> {
+    const posArray: Array<{ x: number; y: number }> = [];
     for (let i = -1; i <= 1; i++) {
         for (let j = -1; j <= 1; j++) {
             posArray.push({
@@ -169,7 +218,7 @@ export function getAdjacents(pos) {
 /**
  * 解析带 shard 前缀的房间名（格式：`shardX/W1N1`）。
  */
-export function parseShardRoomName(roomName) {
+export function parseShardRoomName(roomName: string | null | undefined): ParsedShardRoomName {
     if (typeof roomName !== 'string') return { shard: null, room: roomName };
     const cached = geometryCaches.shardRoomNameParseCache[roomName];
     if (cached !== undefined) return cached;
@@ -186,11 +235,11 @@ export function parseShardRoomName(roomName) {
     return parsed;
 }
 
-export function isEqual(pos1, pos2) {
+export function isEqual(pos1: PosLike, pos2: PosLike): boolean {
     return pos1.x == pos2.x && pos1.y == pos2.y && pos1.roomName == pos2.roomName;
 }
 
-export function isNear(pos1, pos2) {
+export function isNear(pos1: PosLike, pos2: PosLike): boolean {
     if (pos1.roomName == pos2.roomName) {
         return -1 <= pos1.x - pos2.x && pos1.x - pos2.x <= 1 && -1 <= pos1.y - pos2.y && pos1.y - pos2.y <= 1;
     } else if (pos1.roomName && pos2.roomName) {
@@ -206,7 +255,7 @@ export function isNear(pos1, pos2) {
     return false;
 }
 
-export function inRange(pos1, pos2, range) {
+export function inRange(pos1: PosLike, pos2: PosLike, range: number): boolean {
     if (pos1.roomName == pos2.roomName) {
         return -range <= pos1.x - pos2.x && pos1.x - pos2.x <= range && -range <= pos1.y - pos2.y && pos1.y - pos2.y <= range;
     }
@@ -223,7 +272,7 @@ export function inRange(pos1, pos2, range) {
     return -range <= formalizedEW && formalizedEW <= range && -range <= formalizedNS && formalizedNS <= range;
 }
 
-export function getClosestExitPos(fromPos, toRoomName) {
+export function getClosestExitPos(fromPos: RoomPosition | null | undefined, toRoomName: string | null | undefined): RoomPosition | null {
     if (!fromPos || !toRoomName) {
         return null;
     }
@@ -232,7 +281,7 @@ export function getClosestExitPos(fromPos, toRoomName) {
         return null;
     }
     const exitDir = room.findExitTo(toRoomName);
-    if (typeof exitDir !== 'number') {
+    if (!isExitFindConstant(exitDir)) {
         return null;
     }
     const exits = room.find(exitDir);
@@ -245,7 +294,7 @@ export function getClosestExitPos(fromPos, toRoomName) {
 /**
  * `fromPos` 和 `toPos` 都是 pathFinder 路径上的点，只可能是同房相邻点或跨房边界点。
  */
-export function getDirection(fromPos, toPos) {
+export function getDirection(fromPos: PosLike | null | undefined, toPos: PosLike | null | undefined): DirectionConstant | 0 {
     const from = formalizeIntentPos(fromPos);
     const to = formalizeIntentPos(toPos);
     if (typeof from.x !== 'number' || typeof from.y !== 'number' || typeof to.x !== 'number' || typeof to.y !== 'number') {
@@ -272,7 +321,7 @@ export function getDirection(fromPos, toPos) {
     return 0;
 }
 
-export function isNearExitDirection(pos, exitDir, range = 1) {
+export function isNearExitDirection(pos: { x: number; y: number }, exitDir: number, range = 1): boolean {
     switch (exitDir) {
         case FIND_EXIT_TOP:
             return pos.y <= range;
@@ -292,7 +341,7 @@ export function isNearExitDirection(pos, exitDir, range = 1) {
  * @description
  * 只支持 1000 以内房间号；当前项目已足够。
  */
-export function isHighWay(roomName) {
+export function isHighWay(roomName: string): boolean {
     if (roomName.charCodeAt(roomName.length - 1) === 48) return true;
 
     let code = roomName.charCodeAt(2);
@@ -307,13 +356,13 @@ export function isHighWay(roomName) {
     return false;
 }
 
-export function isSameOps(path, ops) {
+export function isSameOps(path: PathVariantQueryLike, ops: PathVariantQueryLike): boolean {
     return path.ignoreRoads == !!ops.ignoreRoads &&
         path.ignoreSwamps == !!ops.ignoreSwamps &&
-        path.ignoreStructures == !!ops.ignoreDestructibleStructures;
+        (path as PathVariantPathLike).ignoreStructures == !!ops.ignoreDestructibleStructures;
 }
 
-export function getPathOpsSignature(ignoreRoads, ignoreSwamps, ignoreStructures) {
+export function getPathOpsSignature(ignoreRoads: boolean, ignoreSwamps: boolean, ignoreStructures: boolean): number {
     let bits = 0;
     if (ignoreRoads) bits |= 1;
     if (ignoreSwamps) bits |= 2;
@@ -321,22 +370,22 @@ export function getPathOpsSignature(ignoreRoads, ignoreSwamps, ignoreStructures)
     return bits;
 }
 
-export function buildPathVariantKey(ignoreRoads, ignoreSwamps, ignoreStructures, endRoomName) {
+export function buildPathVariantKey(ignoreRoads: boolean, ignoreSwamps: boolean, ignoreStructures: boolean, endRoomName?: string | null): string {
     const opsSig = getPathOpsSignature(!!ignoreRoads, !!ignoreSwamps, !!ignoreStructures);
     return `${opsSig}|${endRoomName || ""}`;
 }
 
-export function buildPathVariantKeyFromPath(path) {
+export function buildPathVariantKeyFromPath(path: PathVariantPathLike | null | undefined): string | null {
     if (!path || !path.posArray || !path.posArray.length) return null;
     const endRoomName = path.posArray[path.posArray.length - 1].roomName || "";
     return buildPathVariantKey(path.ignoreRoads, path.ignoreSwamps, path.ignoreStructures, endRoomName);
 }
 
-export function buildPathVariantKeyFromQuery(ops, toRoomName) {
+export function buildPathVariantKeyFromQuery(ops: PathVariantQueryLike, toRoomName?: string | null): string {
     return buildPathVariantKey(ops.ignoreRoads, ops.ignoreSwamps, ops.ignoreDestructibleStructures, toRoomName);
 }
 
-export function hasActiveBodypart(body, type) {
+export function hasActiveBodypart(body: BodyPartDefinition[] | undefined | null, type: BodyPartConstant): boolean {
     if (!body) {
         return true;
     }

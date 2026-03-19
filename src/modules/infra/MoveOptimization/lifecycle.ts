@@ -1,12 +1,21 @@
-// @ts-nocheck
-
 /**
  * BetterMove tick 生命周期入口。
  * @description
  * 把“每 tick 开始时重置哪些移动意图状态”独立出来，
  * 减少主文件在 API、原型包装、解算逻辑之间来回跳转。
  */
-export function createMoveIntentLifecycle(deps) {
+type LifecycleDeps = {
+    cachedMoveIntents: Map<string, number>;
+    creepToSquad: Map<string, number>;
+    squadToCreeps: Map<number, string[]>;
+    squadNextTile: Set<number>;
+    rerouteSquad: Set<string>;
+    checkedTiles: Map<number, string>;
+    setCreepIdx: (value: number) => void;
+    setSquadIdx: (value: number) => void;
+};
+
+export function createMoveIntentLifecycle(deps: LifecycleDeps) {
     function resetMoveIntentState() {
         deps.cachedMoveIntents.clear();
         deps.creepToSquad.clear();

@@ -1,25 +1,42 @@
-// @ts-nocheck
-
 /**
  * BetterMove portal 注册与跨 shard 入口选择。
  */
+type PortalRegistryEntry = {
+    id: Id<StructurePortal>;
+    roomName: string;
+    x: number;
+    y: number;
+    destShard: string;
+    destRoom: string;
+    destX: number;
+    destY: number;
+    lastSeen: number;
+};
+
+type PortalRegistry = {
+    v: number;
+    list: PortalRegistryEntry[];
+    updated: number;
+};
+
 export function createPortalModule() {
     let portalScanTick = -1;
     let portalPruneTick = -1;
     const PORTAL_SCAN_INTERVAL = 20;
     const PORTAL_ENTRY_TTL = 50000;
 
-    function getPortalRegistry() {
-        if (!global._bmPortals || typeof global._bmPortals !== 'object') {
-            global._bmPortals = { v: 1, list: [], updated: 0 };
+    function getPortalRegistry(): PortalRegistry {
+        const globalState = globalThis as typeof globalThis & { _bmPortals?: PortalRegistry };
+        if (!globalState._bmPortals || typeof globalState._bmPortals !== 'object') {
+            globalState._bmPortals = { v: 1, list: [], updated: 0 };
         }
-        if (!global._bmPortals.list || !Array.isArray(global._bmPortals.list)) {
-            global._bmPortals.list = [];
+        if (!globalState._bmPortals.list || !Array.isArray(globalState._bmPortals.list)) {
+            globalState._bmPortals.list = [];
         }
-        return global._bmPortals;
+        return globalState._bmPortals;
     }
 
-    function scanPortals(force) {
+    function scanPortals(force: boolean) {
         if (!force) {
             if (portalScanTick !== -1 && (Game.time - portalScanTick) < PORTAL_SCAN_INTERVAL) return;
         }
@@ -27,7 +44,7 @@ export function createPortalModule() {
 
         const reg = getPortalRegistry();
         const list = reg.list;
-        const indexById = Object.create(null);
+        const indexById: Record<string, PortalRegistryEntry> = Object.create(null);
         for (let i = list.length; i--;) {
             const it = list[i];
             if (it && it.id) indexById[it.id] = it;
@@ -36,7 +53,7 @@ export function createPortalModule() {
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName];
             if (!room) continue;
-            const portals = room.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_PORTAL });
+            const portals = room.find(FIND_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_PORTAL }) as StructurePortal[];
             if (!portals || !portals.length) continue;
 
             for (let i = portals.length; i--;) {
@@ -44,17 +61,24 @@ export function createPortalModule() {
                 const id = portal.id;
                 const dest = portal.destination;
                 if (!dest) continue;
+                const runtimeDest = dest as RoomPosition & {
+                    shard?: string;
+                    room?: string;
+                    roomName?: string;
+                    x?: number;
+                    y?: number;
+                };
 
                 let destShard = Game.shard && Game.shard.name ? Game.shard.name : '';
                 let destRoom = '';
                 let destX = 25;
                 let destY = 25;
 
-                if (typeof dest.shard === 'string') destShard = dest.shard;
-                if (typeof dest.room === 'string') destRoom = dest.room;
-                else if (typeof dest.roomName === 'string') destRoom = dest.roomName;
-                if (typeof dest.x === 'number') destX = dest.x;
-                if (typeof dest.y === 'number') destY = dest.y;
+                if (typeof runtimeDest.shard === 'string') destShard = runtimeDest.shard;
+                if (typeof runtimeDest.room === 'string') destRoom = runtimeDest.room;
+                else if (typeof runtimeDest.roomName === 'string') destRoom = runtimeDest.roomName;
+                if (typeof runtimeDest.x === 'number') destX = runtimeDest.x;
+                if (typeof runtimeDest.y === 'number') destY = runtimeDest.y;
 
                 if (!destRoom) continue;
 
@@ -98,12 +122,12 @@ export function createPortalModule() {
         }
     }
 
-    function pickPortalToShard(fromRoomName, targetShard, targetRoomName) {
+    function pickPortalToShard(fromRoomName: string, targetShard: string, targetRoomName: string) {
         const reg = getPortalRegistry();
         const list = reg.list;
         if (!list || !list.length) return null;
 
-        let best = null;
+        let best: PortalRegistryEntry | null = null;
         let bestCost = Infinity;
         for (let i = list.length; i--;) {
             const p = list[i];

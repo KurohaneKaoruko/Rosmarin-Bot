@@ -1,5 +1,3 @@
-// @ts-nocheck
-
 import moveMatch from '@/modules/utils/moveMatch';
 import {
     formalizeIntentMovePos,
@@ -9,6 +7,17 @@ import {
     tile2Pos,
 } from './geometry';
 import { createMoveIntentLifecycle } from './lifecycle';
+
+type MoveableCreep = Creep | PowerCreep;
+type WorkTileChecker = (creep: MoveableCreep, pos: RoomPosition) => boolean;
+
+function getTerrainBuffer(room: Room, getRoomTerrainBuffer: (roomName: string) => Uint8Array | undefined): Uint8Array {
+    return getRoomTerrainBuffer(room.name) || (room.getTerrain() as RoomTerrain & { getRawBuffer(): Uint8Array }).getRawBuffer();
+}
+
+function getOwnedUnit(name: string): MoveableCreep | undefined {
+    return Game.creeps[name] || Game.powerCreeps[name];
+}
 
 /**
  * 统一封装移动意图登记与 tick 末解算。
@@ -38,12 +47,12 @@ export function createIntentSolverModule(deps) {
     const badMoveScore = -32;
     const IntentTiles = new Uint32Array(Math.max(Object.keys(Game.rooms).length * 64, 4096));
     const Priorities = new Uint8Array(IntentTiles.length);
-    const cachedMoveIntents = new Map();
-    const creepToSquad = new Map();
-    const squadToCreeps = new Map();
-    const squadNextTile = new Set();
-    const rerouteSquad = new Set();
-    const checkedTiles = new Map();
+    const cachedMoveIntents = new Map<string, number>();
+    const creepToSquad = new Map<string, number>();
+    const squadToCreeps = new Map<number, string[]>();
+    const squadNextTile = new Set<number>();
+    const rerouteSquad = new Set<string>();
+    const checkedTiles = new Map<number, string>();
     let squadIdx = 1;
     let creepIdx = 1;
 
@@ -124,8 +133,8 @@ export function createIntentSolverModule(deps) {
         };
     }
 
-    const defaultIsWorkTile = () => true;
-    let isWorkTile = defaultIsWorkTile;
+    const defaultIsWorkTile: WorkTileChecker = () => true;
+    let isWorkTile: WorkTileChecker = defaultIsWorkTile;
 
     /**
      * 默认瓦片检查器：把已占位 creep 的潜在让步目标转换成 moveMatch 可消费的候选列表。
@@ -188,7 +197,7 @@ export function createIntentSolverModule(deps) {
                 const roomCache = costMatrixCache[roomName];
                 const CostMatrix = roomCache.false;
                 const edgeArray = roomCache.edgeArray;
-                const terrain = getRoomTerrainBuffer(roomName) || room.getTerrain().getRawBuffer();
+                const terrain = getTerrainBuffer(room, getRoomTerrainBuffer);
                 const startIdx = (py * 50 + px) << 3;
                 for (let idx = startIdx; idx < startIdx + 8; idx++) {
                     const v = edgeArray[idx];
@@ -343,15 +352,12 @@ export function createIntentSolverModule(deps) {
             let score;
             const tx = (targetTile & 0x3fff) % 50;
             const ty = (targetTile >> 14) % 50;
-            let creep = Game.creeps[creepName];
-            if (!creep) {
-                creep = Game.powerCreeps[creepName];
-            }
+            const creep = getOwnedUnit(creepName);
             if (!creep) {
                 continue;
             }
             const roomName = creep.room.name;
-            const terrain = getRoomTerrainBuffer(roomName) || creep.room.getTerrain().getRawBuffer();
+            const terrain = getTerrainBuffer(creep.room, getRoomTerrainBuffer);
             const roomCache = costMatrixCache[roomName];
             const CostMatrix = roomCache.false;
             const edgeArray = roomCache.edgeArray;
@@ -411,10 +417,7 @@ export function createIntentSolverModule(deps) {
             if (typeof start === 'string') {
                 const startIdx = cachedMoveIntents.get(start);
                 if (!startIdx) {
-                    let creep = allCreeps[start];
-                    if (!creep) {
-                        creep = allPowerCreeps[start];
-                    }
+                    const creep = getOwnedUnit(start);
                     if (!creep) continue;
                     if (powerCreepProto && creep instanceof PowerCreep) continue;
                     const creepPos = creep.pos;
@@ -424,10 +427,7 @@ export function createIntentSolverModule(deps) {
                         moveCount++;
                     }
                 } else if (target !== IntentTiles[startIdx + 1]) {
-                    let creep = allCreeps[start];
-                    if (!creep) {
-                        creep = allPowerCreeps[start];
-                    }
+                    const creep = getOwnedUnit(start);
                     if (!creep) continue;
                     if (powerCreepProto && creep instanceof PowerCreep) continue;
                     const creepPos = creep.pos;
@@ -440,10 +440,7 @@ export function createIntentSolverModule(deps) {
             } else {
                 const squad = squadToCreeps.get(start);
                 for (let i = squad.length; i--;) {
-                    let creep = allCreeps[squad[i]];
-                    if (!creep) {
-                        creep = allPowerCreeps[squad[i]];
-                    }
+                    const creep = getOwnedUnit(squad[i]);
                     if (!creep) continue;
                     if (powerCreepProto && creep instanceof PowerCreep) continue;
                     const creepPos = creep.pos;
