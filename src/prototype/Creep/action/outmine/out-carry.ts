@@ -1,8 +1,37 @@
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
+import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
-const outCarry = {
+// 策略 ID：集中声明，避免散落字符串
+const OUT_CARRY_STRATEGIES = {
+    BUILD_REPAIR: 'build-repair',
+    COLLECT: 'collect',
+    DELIVER: 'deliver'
+} as const;
+
+type OutCarryMode = typeof OUT_CARRY_STRATEGIES[keyof typeof OUT_CARRY_STRATEGIES];
+
+type OutCarryContext = {
+    creep: Creep;
+    mode: OutCarryMode;
+};
+
+type OutCarryAction = {
+    run: (creep: Creep) => void;
+    resolveCarryDepositTarget: (creep: Creep) => StructureTerminal | StructureStorage | null;
+    isLikelyCollecting: (creep: Creep) => boolean;
+    getRouteExitDirection: (creep: Creep, targetRoom: string | undefined) => number | null;
+    moveAlongRouteExit: (creep: Creep, targetRoom: string | undefined) => boolean;
+    estimateIncomingPerTick: (container: StructureContainer) => number;
+    calcWaitTicksNearHarvester: (creep: Creep, container: StructureContainer) => number;
+    findBestWithdrawTarget: (creep: Creep) => { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null;
+    withdraw: (creep: Creep) => void;
+    carry: (creep: Creep) => void;
+    buildRepair: (creep: Creep) => boolean;
+};
+
+const outCarry: OutCarryAction = {
     resolveCarryDepositTarget: function (creep: Creep): StructureTerminal | StructureStorage | null {
         let target: StructureTerminal | StructureStorage | null = null;
 
@@ -445,55 +474,118 @@ const outCarry = {
         return false;
     },
 
+    // 统一入口：先执行 BuildRepair，若无动作则按采集/交付兜底
     run: function (creep: Creep) {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         delete creep.memory.working;
 
-        if (this.buildRepair(creep)) {
-            creep.memory.dontPullMe = false;
-            return;
+        const mode: OutCarryMode = shouldBuildRepair(creep)
+            ? OUT_CARRY_STRATEGIES.BUILD_REPAIR
+            : shouldCollect(creep)
+                ? OUT_CARRY_STRATEGIES.COLLECT
+                : OUT_CARRY_STRATEGIES.DELIVER;
+
+        const ctx: OutCarryContext = { creep, mode };
+        const handled = runStrategy(outCarryStrategyContainer, ctx);
+
+        if (mode === OUT_CARRY_STRATEGIES.BUILD_REPAIR && !handled) {
+            const fallbackMode: OutCarryMode = shouldCollect(creep)
+                ? OUT_CARRY_STRATEGIES.COLLECT
+                : OUT_CARRY_STRATEGIES.DELIVER;
+            runStrategy(outCarryStrategyContainer, { creep, mode: fallbackMode });
         }
-
-        const sourceCache = creep.memory.cacheSource as any;
-        const used = creep.store.getUsedCapacity();
-        const free = creep.store.getFreeCapacity();
-        const inTargetRoom = creep.room.name === creep.memory.targetRoom;
-        const lowHealth = creep.hits < creep.hitsMax * 0.5;
-
-        if (inTargetRoom && !lowHealth && free > 0) {
-            const before = used;
-            this.withdraw(creep);
-            creep.memory.dontPullMe = false;
-
-            const after = creep.store.getUsedCapacity();
-            if (after > before) {
-                sourceCache.partialLeaveWait = 0;
-                return;
-            }
-
-            const wait = Number(sourceCache.partialLeaveWait || 0) + 1;
-            sourceCache.partialLeaveWait = wait;
-            if (after === 0) return;
-            if (wait < 18) return;
-
-            delete sourceCache.partialLeaveWait;
-            this.carry(creep);
-            creep.memory.dontPullMe = false;
-            return;
-        }
-
-        sourceCache.partialLeaveWait = 0;
-        if (used === 0) {
-            this.withdraw(creep);
-            creep.memory.dontPullMe = false;
-            return;
-        }
-
-        this.carry(creep);
-        creep.memory.dontPullMe = false;
-    }
+    },
 };
+
+// 判断是否满足“修路/修路肩”策略的前置条件
+const shouldBuildRepair = (creep: Creep): boolean => {
+    const sourceRoom = getCreepSourceRoom(creep.memory);
+    if (sourceRoom && creep.room.name == sourceRoom) return false;
+    if (creep.memory.role !== 'out-car') return false;
+    if (creep.store[RESOURCE_ENERGY] == 0) return false;
+    return true;
+};
+
+// 判定是否进入采集策略
+const shouldCollect = (creep: Creep): boolean => {
+    const used = creep.store.getUsedCapacity();
+    const free = creep.store.getFreeCapacity();
+    const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+    const lowHealth = creep.hits < creep.hitsMax * 0.5;
+    if (inTargetRoom && !lowHealth && free > 0) return true;
+    if (used === 0) return true;
+    return false;
+};
+
+// 复刻原采集逻辑（包含“半仓等待”策略）
+const runCollectMode = (creep: Creep) => {
+    const sourceCache = creep.memory.cacheSource as any;
+    const used = creep.store.getUsedCapacity();
+    const free = creep.store.getFreeCapacity();
+    const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+    const lowHealth = creep.hits < creep.hitsMax * 0.5;
+
+    if (inTargetRoom && !lowHealth && free > 0) {
+        const before = used;
+        outCarry.withdraw(creep);
+        creep.memory.dontPullMe = false;
+
+        const after = creep.store.getUsedCapacity();
+        if (after > before) {
+            sourceCache.partialLeaveWait = 0;
+            return;
+        }
+
+        const wait = Number(sourceCache.partialLeaveWait || 0) + 1;
+        sourceCache.partialLeaveWait = wait;
+        if (after === 0) return;
+        if (wait < 18) return;
+
+        delete sourceCache.partialLeaveWait;
+        outCarry.carry(creep);
+        creep.memory.dontPullMe = false;
+        return;
+    }
+
+    sourceCache.partialLeaveWait = 0;
+    if (used === 0) {
+        outCarry.withdraw(creep);
+        creep.memory.dontPullMe = false;
+        return;
+    }
+
+    outCarry.carry(creep);
+    creep.memory.dontPullMe = false;
+};
+
+// 策略容器：按优先级注册
+const outCarryStrategyContainer = new StrategyContainer<OutCarryContext, boolean>();
+
+outCarryStrategyContainer.register({
+    id: OUT_CARRY_STRATEGIES.BUILD_REPAIR,
+    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.BUILD_REPAIR,
+    run: (ctx) => outCarry.buildRepair(ctx.creep)
+});
+
+outCarryStrategyContainer.register({
+    id: OUT_CARRY_STRATEGIES.COLLECT,
+    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.COLLECT,
+    run: (ctx) => {
+        runCollectMode(ctx.creep);
+        return true;
+    }
+});
+
+outCarryStrategyContainer.register({
+    id: OUT_CARRY_STRATEGIES.DELIVER,
+    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.DELIVER,
+    run: (ctx) => {
+        outCarry.carry(ctx.creep);
+        ctx.creep.memory.dontPullMe = false;
+        return true;
+    }
+});
 
 export default outCarry;

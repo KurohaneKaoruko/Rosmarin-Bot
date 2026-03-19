@@ -1,288 +1,203 @@
 import { compress } from '@/modules/utils/compress';
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
+// 迁移条件集中声明：采集满 -> 转交付，背包空 -> 转采集
+const OUT_HARVEST_SWITCH = {
+    TO_TARGET: (creep: Creep) => creep.store.getFreeCapacity() === 0,
+    TO_SOURCE: (creep: Creep) => creep.store.getUsedCapacity() === 0
+} as const;
 
+// 尝试把能量就近交给 out-carry，避免卡在容器满溢上
+const transferToNearbyCarrier = (creep: Creep): boolean => {
+    const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
+        creep.room.find(FIND_MY_CREEPS, {
+            filter: (c) =>
+                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+        }) as Creep[]
+    );
+    const nearbyCarrier = carriers.find((c) => creep.pos.inRangeTo(c, 1));
+    if (!nearbyCarrier) return false;
 
-const createSite = function(creep: any) {
-    const sourceRoom = getCreepSourceRoom(creep.memory);
-    if (!sourceRoom) return;
-    const sourceRoomObj = Game.rooms[sourceRoom];
-    if (!sourceRoomObj?.controller || sourceRoomObj.controller.level < 4) return;
+    if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
+        // 标记对方刚收到能量，尽快返程
+        nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
+        const cache = nearbyCarrier.memory.cacheSource as any;
+        cache.receivedEnergyTick = Game.time;
+        delete cache.targetId;
+        delete cache.targetType;
 
-    if (!creep.room.my && creep.fatigue > 0 &&
-        !(creep.room.memory.road?.includes(compress(creep.pos.x, creep.pos.y)))
-    ) {
-        // creep.room.memory.road?.push(compress(creep.pos.x, creep.pos.y));
-        creep.room.createConstructionSite(creep.pos, STRUCTURE_ROAD);
-    }
-
-
-    if (creep.room.name !== creep.memory.targetRoom) return;
-    if (!creep.pos.isRoomEdge()) return;
-    if (creep.room.memory.road && creep.room.memory.road.length > 0) return;
-    creep.room.memory.road = [];
-    const Path = [];
-    const pos = [];
-    const sourcePos = creep.room.find(FIND_SOURCES);
-    for (const source of sourcePos) {
-        pos.push(source.pos);
-    }
-    const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(creep.room.name);
-    if (isCenterRoom) {
-        const mineralPos = creep.room.find(FIND_MINERALS)[0];
-        if (mineralPos) pos.push(mineralPos.pos);
-    }
-    const closestPos = creep.pos.findClosestByRange(pos);
-
-    const costs = new PathFinder.CostMatrix();
-    const terrain = new Room.Terrain(creep.room.name);
-    for (let i = 0; i < 50; i++) {
-        for (let j = 0; j < 50; j++) {
-            const te = terrain.get(i, j);
-            costs.set(i, j, te == TERRAIN_MASK_WALL ? 255 : te == TERRAIN_MASK_SWAMP ? 4 : 2);
-        }
-    }
-
-    PathFinder.search(
-        creep.pos,
-        { pos: closestPos, range: 1 },
-        {
-            roomCallback: () => {
-                return costs;
-            },
-            maxRooms: 1
-        }
-    ).path.forEach(pos => {
-        costs.set(pos.x,pos.y,1);
-        Path.push(pos)
-    })
-
-    for (let i = 0; i < pos.length; i++) {
-        for (let j = i+1; j < pos.length; j++) {
-            PathFinder.search(
-                pos[i],
-                { pos: pos[j], range: 1 },
-                {
-                    roomCallback: () => {
-                        return costs;
-                    },
-                    maxRooms: 1
-                }
-            ).path.forEach(pos => {
-                costs.set(pos.x,pos.y,1);
-                Path.push(pos)
-            })
-        }
-    }
-
-    for (const p of Path) {
-        const xy = compress(p.x, p.y);
-        if (creep.room.memory.road.includes(xy)) continue;
-        creep.room.memory.road.push(xy);
-    }
-}
-
-const outHarvest = {
-    target: function(creep: Creep) {
-        if (creep.store.getUsedCapacity() == 0) return true;
-
-        // 尝试将能量传递给附近的运输单位
-        if (this.transferToNearbyCarrier(creep)) return;
-
-        let targetContainer
-
-        let targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        if(!targetSource) {
-            // 查找附近的容器
-            targetContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
-                filter: (structure) => structure.structureType == STRUCTURE_CONTAINER
-            })[0];
-        } else {
-            // 查找附近的容器
-            targetContainer = targetSource.pos.findInRange(FIND_STRUCTURES, 1, {
-                filter: (structure) => structure.structureType == STRUCTURE_CONTAINER
-            })[0];
-        }
-
-        if (!targetContainer) {
-            // 没有容器时的处理
-            this.handleNoContainer(creep);
-        } else {
-            // 有容器时的处理
-            this.handleWithContainer(creep, targetContainer);
-        }
-
-        return creep.store.getUsedCapacity() == 0;
-    },
-
-    handleNoContainer: function(creep: Creep) {
-        // 建造容器前确保在采集点附近
-        const source = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        if (!creep.moveToSourceWorkTile(source)) {
-            return;
-        }
-
-        // 建造容器
-        this.buildContainer(creep);
-    },
-
-    handleWithContainer: function(creep, container) {
-        const source = Game.getObjectById(creep.memory.targetSourceId as Id<Source>) as Source | null;
-        if (source && !creep.moveToSourceWorkTile(source)) {
-            return;
-        }
-        // 修理容器
-        if (container.hits < container.hitsMax * 0.8) {
-            this.repairContainer(creep, container);
-            return;
-        }
-
-        // 向容器传输能量
-        if (creep.pos.isEqualTo(container)) {
-            let result = creep.transfer(container, RESOURCE_ENERGY);
-            if (result == ERR_FULL) {
-                this.handleFullContainer(creep, container);
+        const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
+        if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
+            const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
+            if (Array.isArray(route) && route.length > 0 && route[0].exit) {
+                const sourceDirection = route[0].exit as DirectionConstant;
+                cache.receivedMoveDirection = sourceDirection;
+                nearbyCarrier.move(sourceDirection);
             }
-        } else if (creep.pos.inRangeTo(container, 1)) {
-            let result = creep.transfer(container, RESOURCE_ENERGY);
-            if (result == ERR_FULL) {
-                this.handleFullContainer(creep, container);
-            }
-        } else {
-            creep.moveTo(container, { range: 1, reusePath: 0, visualizePathStyle: { stroke: '#ffaa00' } });
         }
-    },
+        return true;
+    }
 
-    // 尝试将能量传递给附近的运输单位
-    transferToNearbyCarrier: function(creep) {
-        const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
-            creep.room.find(FIND_MY_CREEPS, {
+    return false;
+};
+
+// 没有容器时的建造逻辑
+const buildContainer = (creep: Creep) => {
+    let site = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
+        filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.my
+    })[0];
+
+    if (!site) {
+        const result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
+        if (result !== OK) {
+            creep.drop(RESOURCE_ENERGY);
+        }
+        return;
+    }
+
+    if (creep.pos.inRangeTo(site, 2)) creep.build(site);
+    else creep.moveTo(site, { visualizePathStyle: { stroke: '#ffaa00' } });
+};
+
+// 容器需要维修时优先维修
+const repairContainer = (creep: Creep, container: StructureContainer) => {
+    if (creep.pos.inRangeTo(container, 3)) {
+        if (creep.repair(container) === ERR_NOT_IN_RANGE) {
+            creep.moveTo(container, { reusePath: 50, visualizePathStyle: { stroke: '#ffaa00' } });
+        }
+        return;
+    }
+    creep.moveTo(container);
+};
+
+// 容器满载时的处理：优先修理或临时丢弃
+const handleFullContainer = (creep: Creep, container: StructureContainer) => {
+    if (container.hits < container.hitsMax) {
+        creep.repair(container);
+        return;
+    }
+    if (!transferToNearbyCarrier(creep)) {
+        creep.drop(RESOURCE_ENERGY);
+    }
+};
+
+// 有容器的情况下执行交付逻辑
+const handleWithContainer = (creep: Creep, container: StructureContainer) => {
+    const source = Game.getObjectById(creep.memory.targetSourceId as Id<Source>) as Source | null;
+    if (source && !creep.moveToSourceWorkTile(source)) return;
+
+    if (container.hits < container.hitsMax * 0.8) {
+        repairContainer(creep, container);
+        return;
+    }
+
+    if (creep.pos.inRangeTo(container, 1)) {
+        const result = creep.transfer(container, RESOURCE_ENERGY);
+        if (result === ERR_FULL) handleFullContainer(creep, container);
+        return;
+    }
+
+    creep.moveTo(container, { range: 1, reusePath: 0, visualizePathStyle: { stroke: '#ffaa00' } });
+};
+
+// 没有容器的情况下：回到采集位并建设容器
+const handleNoContainer = (creep: Creep) => {
+    const source = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
+    if (!creep.moveToSourceWorkTile(source)) return;
+    buildContainer(creep);
+};
+
+// 目标态：把能量交给容器/运输
+const runTargetPhase = (creep: Creep): boolean => {
+    if (OUT_HARVEST_SWITCH.TO_SOURCE(creep)) return true;
+
+    // 优先就近交给运输
+    if (transferToNearbyCarrier(creep)) return OUT_HARVEST_SWITCH.TO_SOURCE(creep);
+
+    let targetContainer: StructureContainer | undefined;
+    const targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
+    if (!targetSource) {
+        targetContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER
+        })[0] as StructureContainer | undefined;
+    } else {
+        targetContainer = targetSource.pos.findInRange(FIND_STRUCTURES, 1, {
+            filter: (s) => s.structureType === STRUCTURE_CONTAINER
+        })[0] as StructureContainer | undefined;
+    }
+
+    if (!targetContainer) handleNoContainer(creep);
+    else handleWithContainer(creep, targetContainer);
+
+    return OUT_HARVEST_SWITCH.TO_SOURCE(creep);
+};
+
+// 源态：前往采集点并采集
+const runSourcePhase = (creep: Creep): boolean => {
+    if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {
+        creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
+        return false;
+    }
+
+    if (!creep.memory.targetSourceId) {
+        const closestSource = creep.room.closestSource(creep);
+        if (!closestSource) {
+            creep.say('No source');
+            return false;
+        }
+        creep.memory.targetSourceId = closestSource.id;
+    }
+
+    let targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
+    if (!targetSource || targetSource.room.name !== creep.room.name) {
+        delete creep.memory.targetSourceId;
+        const rebound = creep.room.closestSource(creep);
+        if (!rebound) return false;
+        creep.memory.targetSourceId = rebound.id;
+        targetSource = rebound;
+    }
+
+    if (creep.pos.isNear(targetSource.pos)) {
+        if (!creep.moveToSourceWorkTile(targetSource)) return false;
+        // source 枯竭时不能提前 return，否则会跳过“满载切换 target”判定。
+        if (targetSource.energy > 0) creep.harvest(targetSource);
+    } else {
+        const dangerousHostiles = getRoomTickCacheValue(creep.room, 'out_harvest_dangerous_hostiles', () =>
+            creep.room.find(FIND_HOSTILE_CREEPS, {
                 filter: (c) =>
-                    (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-                    c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                    !c.isWhiteList() &&
+                    (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
             }) as Creep[]
         );
-        const nearbyCarrier = carriers.find((c) => creep.pos.inRangeTo(c, 1));
-
-        if (!nearbyCarrier) return false;
-
-        if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
-            nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
-            const cache = nearbyCarrier.memory.cacheSource as any;
-            cache.receivedEnergyTick = Game.time;
-            delete cache.targetId;
-            delete cache.targetType;
-            const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
-            if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
-                const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
-                if (Array.isArray(route) && route.length > 0 && route[0].exit) {
-                    const sourceDirection = route[0].exit as DirectionConstant;
-                    cache.receivedMoveDirection = sourceDirection;
-                    nearbyCarrier.move(sourceDirection);
-                }
-            }
-            return true;
-        }
-
-        return false;
-    },
-
-    // 建造容器
-    buildContainer: function(creep) {
-        let constructionSite = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
-            filter: (site) => site.structureType === STRUCTURE_CONTAINER && site.my
-        })[0];
-
-        if (!constructionSite) {
-            let result = creep.pos.createConstructionSite(STRUCTURE_CONTAINER);
-            if (result !== OK) {
-                creep.drop(RESOURCE_ENERGY);
-                return;
-            }
-        } else if (creep.pos.inRangeTo(constructionSite, 2)) {
-            creep.build(constructionSite);
-        } else {
-            creep.moveTo(constructionSite, { visualizePathStyle: { stroke: '#ffaa00' } });
-        }
-    },
-
-    // 修理容器
-    repairContainer: function(creep, container) {
-        if (creep.pos.inRangeTo(container, 3)) {
-            if (creep.repair(container) == ERR_NOT_IN_RANGE) {
-                creep.moveTo(container, { reusePath: 50, visualizePathStyle: { stroke: '#ffaa00' } });
-            }
-        } else {
-            creep.moveTo(container);
-        }
-    },
-
-    // 满载时的处理
-    handleFullContainer: function(creep, container) {
-        if (container.hits < container.hitsMax) {
-            creep.repair(container);
-        } else {
-            if (!this.transferToNearbyCarrier(creep)) {
-                creep.drop(RESOURCE_ENERGY);
-            }
-        }
-    },
-
-    source: function(creep: Creep) {
-        if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-            creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
-            return;
-        }
-
-        // 如果还没有绑定采集点，则绑定一个
-        if (!creep.memory.targetSourceId) {
-            // 从绑定数量最少的采集点中寻找离Creep最近的
-            let closestSource = creep.room.closestSource(creep);
-            if (closestSource) {
-                creep.memory.targetSourceId = closestSource.id;
-            }
-            else {
-                creep.say('No source');
-                return;
-            }
-        }
-
-        let targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source;
-        if (!targetSource || targetSource.room.name !== creep.room.name) {
-            delete creep.memory.targetSourceId;
-            const rebound = creep.room.closestSource(creep);
-            if (!rebound) return;
-            creep.memory.targetSourceId = rebound.id;
-            targetSource = rebound;
-        }
-
-        // 如果离采集点过远，则移动过去
-        if (creep.pos.isNear(targetSource.pos)) {
-            if (!creep.moveToSourceWorkTile(targetSource)) return;
-            // source 枯竭时不能提前 return，否则会跳过“满载切换 target”判定。
-            if (targetSource.energy > 0) creep.harvest(targetSource);
-        } else {
-            const dangerousHostiles = getRoomTickCacheValue(creep.room, 'out_harvest_dangerous_hostiles', () =>
-                creep.room.find(FIND_HOSTILE_CREEPS, {
-                    filter: (c) =>
-                        !c.isWhiteList() &&
-                        (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
-                }) as Creep[]
-            );
-            if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource.pos, 3))) return;
-            creep.moveToSourceWorkTile(targetSource);
-        }
-
-        // let container = creep.room.container.find((c) => c.pos.isNearTo(targetSource.pos));
-        // if (container && !creep.pos.isEqualTo(container)) {
-        //     creep.moveTo(container, { maxRooms: 1, plainCost: 2, swampCost: 10});
-        //     return;
-        // }
-
-        if (creep.store.getCapacity() == 0) return false;
-        return creep.store.getFreeCapacity() == 0;
+        if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource!.pos, 3))) return false;
+        creep.moveToSourceWorkTile(targetSource);
     }
-}
+
+    if (creep.store.getCapacity() === 0) return false;
+    return OUT_HARVEST_SWITCH.TO_TARGET(creep);
+};
+
+const onTarget = (creep: Creep): WorkEvent => {
+    const shouldSwitch = runTargetPhase(creep);
+    return shouldSwitch ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+};
+
+const onSource = (creep: Creep): WorkEvent => {
+    const shouldSwitch = runSourcePhase(creep);
+    return shouldSwitch ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
+
+const outHarvest = {
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep)
+        });
+    }
+};
 
 export default outHarvest;

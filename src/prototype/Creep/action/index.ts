@@ -63,8 +63,18 @@ import defendRanged from './defend/defend-ranged';
 import defend2Attack from './defend/defend-2attack';
 import defend2Heal from './defend/defend-2heal';
 
-// Work模式注册表 - 包含source和target方法的函数
-export const workRegistry: Record<string, any> = {
+// 统一角色执行器接口：
+// prepare 用于一次性准备阶段，run 负责每 tick 的实际执行。
+export type CreepRoleHandler = {
+    prepare?: (creep: Creep) => boolean;
+    run: (creep: Creep) => void;
+};
+
+type MissingRoleHandlerReporter = (id: string) => void;
+
+// 统一角色执行器注册表：
+// 所有角色都通过同一个入口分发，不再区分 work / action 命名空间。
+export const roleRegistry: Record<string, CreepRoleHandler> = {
     'carrier': carrier,
     'upgrader': upgrader,
     'worker': worker,
@@ -82,10 +92,6 @@ export const workRegistry: Record<string, any> = {
     'power-carry': powerCarry,
     'aid-carry': aidCarry,
     'aid-upgrade': aidUpgrade,
-};
-
-// Action模式注册表 - 包含run方法的函数
-export const actionRegistry: Record<string, any> = {
     'harvester': harvester,
     'transport': transport,
     'manager': manager,
@@ -119,4 +125,14 @@ export const actionRegistry: Record<string, any> = {
     'power-heal': powerHeal,
     'power-ranged': powerRanged,
     'pc-heal': pcHeal,
+};
+
+// 统一处理器解析函数：
+// 让 execute 层只关心“按 id 取 handler”，不再感知注册表细节。
+// 当调用方提供 onMissing 时，这里会把缺失事件显式抛回上层做日志或监控。
+export const getRoleHandler = (id: string, onMissing?: MissingRoleHandlerReporter): CreepRoleHandler | null => {
+    const handler = roleRegistry[id];
+    if (handler) return handler;
+    onMissing?.(id);
+    return null;
 };

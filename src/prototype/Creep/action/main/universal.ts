@@ -1,4 +1,5 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { Effect, pipeEffect } from '@/framework/ai/pipeline';
 
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
 
@@ -209,32 +210,100 @@ const doWork = function (creep: Creep) {
     creep.goUpgrade();
 }
 
-const UniversalFunction = {
-    run: function (creep: Creep) {
-        if (!creep.moveHomeRoom()) return;
-        if (creep.handleRoomEdge()) return;
+// 管道上下文：仅传递 creep 本体
+type UniversalContext = { creep: Creep };
 
-        delete creep.memory.working;
-        const used = creep.store.getUsedCapacity();
-        const free = creep.store.getFreeCapacity();
-        const cap = creep.store.getCapacity();
-        const urgentRefill = isUrgentRefill(creep.room);
-        const forceUpgrade = shouldForceUpgrade(creep.room);
-        // 非紧急补能场景必须采满再干活；仅在 spawn/tower 紧急补能时允许半仓回流。
-        const minWorkPayload = forceUpgrade
-            ? 1
-            : urgentRefill
+type UniversalSnapshot = {
+    creep: Creep;
+    used: number;
+    free: number;
+    cap: number;
+    urgentRefill: boolean;
+    forceUpgrade: boolean;
+};
+
+type UniversalPayload = UniversalSnapshot & {
+    minWorkPayload: number;
+};
+
+type UniversalDecision = UniversalPayload & {
+    mode: 'gather' | 'work';
+};
+
+type UniversalPlan = UniversalDecision & {
+    shouldClearSource: boolean;
+};
+
+// 纯计算：快照当前能量状态
+const snapshotEnergy = (ctx: UniversalContext): UniversalSnapshot => {
+    const { creep } = ctx;
+    return {
+        creep,
+        used: creep.store.getUsedCapacity(),
+        free: creep.store.getFreeCapacity(),
+        cap: creep.store.getCapacity(),
+        urgentRefill: isUrgentRefill(creep.room),
+        forceUpgrade: shouldForceUpgrade(creep.room)
+    };
+};
+
+// 纯计算：计算进入工作态所需的最小载荷阈值
+const attachMinWorkPayload = (snapshot: UniversalSnapshot): UniversalPayload => {
+    const { cap, urgentRefill, forceUpgrade } = snapshot;
+    const minWorkPayload = forceUpgrade
+        ? 1
+        : urgentRefill
             ? Math.min(cap, Math.max(50, Math.floor(cap * 0.5)))
             : cap;
+    return { ...snapshot, minWorkPayload };
+};
 
-        // 无缝模式：优先按“载荷阈值”决策，不再依赖 source/target 状态切换。
-        if (used === 0 || (free > 0 && used < minWorkPayload)) {
+// 纯计算：决定进入采集态还是工作态
+const decideMode = (payload: UniversalPayload): UniversalDecision => {
+    const { used, free, minWorkPayload } = payload;
+    const shouldGather = used === 0 || (free > 0 && used < minWorkPayload);
+    return { ...payload, mode: shouldGather ? 'gather' : 'work' };
+};
+
+// 纯计算：补齐执行标记
+const finalizePlan = (decision: UniversalDecision): UniversalPlan => ({
+    ...decision,
+    shouldClearSource: decision.mode === 'work'
+});
+
+// 副作用集中执行：移动/采集/建造/升级全部在此进行
+const executePlan = (plan: UniversalPlan) =>
+    Effect.perform<UniversalContext, UniversalPlan>('execute-universal-plan', () => {
+        const { creep } = plan;
+
+        if (!creep.moveHomeRoom()) return plan;
+        if (creep.handleRoomEdge()) return plan;
+
+        delete creep.memory.working;
+
+        if (plan.mode === 'gather') {
             getEnergy(creep);
-            return;
+            return plan;
         }
 
-        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+        if (plan.shouldClearSource && creep.memory.targetSourceId) {
+            delete creep.memory.targetSourceId;
+        }
         doWork(creep);
+        return plan;
+    });
+
+const UniversalFunction = {
+    run: function (creep: Creep) {
+        // 管道式执行：前四步纯计算，最后一步执行副作用
+        pipeEffect(
+            Effect.of<UniversalContext, UniversalContext>({ creep }),
+            (eff) => eff.map(snapshotEnergy),
+            (eff) => eff.map(attachMinWorkPayload),
+            (eff) => eff.map(decideMode),
+            (eff) => eff.map(finalizePlan),
+            (eff) => eff.flatMap(executePlan)
+        ).run({ creep });
     }
 };
 

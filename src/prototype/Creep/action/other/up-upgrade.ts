@@ -1,4 +1,6 @@
 import { compress, decompress} from '@/modules/utils/compress';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 
 const upgrade = function (creep: Creep) {
@@ -153,46 +155,53 @@ function withdrawEnergy(creep) {
 
 
 
+const onTarget = (creep: Creep): WorkEvent => {
+    if(!creep.memory.ready) return WORK_EVENTS.STAY;
+    if(creep.ticksToLive < 10) {
+        if(creep.unBoost()) creep.suicide();
+        return WORK_EVENTS.STAY;
+    }
+    if (creep.store.getUsedCapacity() === 0) {
+        return WORK_EVENTS.TO_SOURCE;
+    }
+    if(creep.ticksToLive < 100) {
+        creep.memory.dontPullMe = false;
+    } else if (!creep.memory.dontPullMe) {
+        creep.memory.dontPullMe = true;
+    }
+    upgrade(creep);
+    return WORK_EVENTS.STAY;
+};
+
+const onSource = (creep: Creep): WorkEvent => {
+    if(!creep.memory.ready) return WORK_EVENTS.STAY;
+    if(!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
+    if(!creep.memory.boosted) {
+        const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
+        creep.memory.boosted = result === OK;
+        if(result !== OK) return WORK_EVENTS.STAY;
+    }
+    if(creep.ticksToLive < 10) {
+        if(creep.unBoost()) creep.suicide();
+        return WORK_EVENTS.STAY;
+    }
+    if (creep.store.getFreeCapacity() === 0) {
+        return WORK_EVENTS.TO_TARGET;
+    }
+    withdrawEnergy(creep);
+    return WORK_EVENTS.STAY;
+};
+
 const UpUpgradeFunction = {
     prepare: function (creep: Creep) {
         return creep.goBoost({ [WORK]: ['XGH2O'], [MOVE]: ['XZHO2'] }) === OK;
     },
 
-    target: function (creep: Creep) {   // 升级控制器
-        if(!creep.memory.ready) return false;
-        if(creep.ticksToLive < 10) {
-            if(creep.unBoost()) creep.suicide();
-            return false;
-        }
-        if (creep.store.getUsedCapacity() === 0) {
-            return true;
-        }
-        if(creep.ticksToLive < 100) {
-            creep.memory.dontPullMe = false;
-        } else if (!creep.memory.dontPullMe) {
-            creep.memory.dontPullMe = true;
-        }
-        upgrade(creep);
-        return false;
-    },
-
-    source: function (creep: Creep) {   // 获取能量
-        if(!creep.memory.ready) return false;
-        if(!creep.moveToTargetRoom()) return;
-        if(!creep.memory.boosted) {
-            const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
-            creep.memory.boosted = result === OK;
-            if(result !== OK) return;
-        }
-        if(creep.ticksToLive < 10) {
-            if(creep.unBoost()) creep.suicide();
-            return false;
-        }
-        if (creep.store.getFreeCapacity() === 0) {
-            return true;
-        }
-        withdrawEnergy(creep);
-        return false;
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     },
 }
 

@@ -1,3 +1,5 @@
+import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+
 type DismantleMode = 'clean' | 'route';
 
 type DismantleMemory = CreepMemory & {
@@ -15,9 +17,21 @@ type DismantleMemory = CreepMemory & {
     boostmap?: any;
 };
 
+// 策略 ID 常量
+const DISMANTLE_STRATEGIES = {
+    ROUTE: 'route',
+    CLEAN: 'clean'
+} as const;
+
+type DismantleContext = {
+    creep: Creep;
+    mem: DismantleMemory;
+    mode: DismantleMode;
+};
+
 const isEdge = (pos: RoomPosition) => pos.x === 0 || pos.x === 49 || pos.y === 0 || pos.y === 49;
 
-const getMode = (creep: Creep, mem: DismantleMemory): DismantleMode => {
+const getMode = (_creep: Creep, mem: DismantleMemory): DismantleMode => {
     if (mem.dismantleMode) return mem.dismantleMode;
     if (mem.role === 'cleaner') return 'clean';
     return 'route';
@@ -49,7 +63,7 @@ const ensureBoostIfNeeded = (creep: Creep, mem: DismantleMemory, mode: Dismantle
     const retryAt = typeof mem.boostRetryAt === 'number' ? mem.boostRetryAt : 0;
     if (Game.time < retryAt) return false;
 
-    // route 模式需要尽快拆通路，否则搬运/推进会拖太久，所以优先抢 boost
+    // route 模式需要尽快拆通路，所以优先抢 boost
     const boostmap = mem.boostmap || {
         [WORK]: ['XZH2O', 'ZH2O', 'ZH'],
         [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
@@ -177,6 +191,85 @@ const pickCleanTarget = (creep: Creep, mem: DismantleMemory): Structure | undefi
     return best;
 };
 
+// route 模式：优先打通到 storage/terminal 的路线
+const updateRouteTarget = (creep: Creep, mem: DismantleMemory) => {
+    const room = creep.room;
+    const storage = room.storage;
+    const terminal = room.terminal;
+    const terminalHasRes = !!terminal && terminal.store.getUsedCapacity() > 0;
+
+    if (storage && !mem.routeProgress!.storage) {
+        const obstacle = findNextObstacleToward(creep, storage.pos, 1);
+        if (obstacle) {
+            mem.targetId = obstacle.id;
+        } else {
+            const onStorage = storage.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+            const rampartOnStorage = onStorage.find(s => s.structureType === STRUCTURE_RAMPART && isBlockingOnTile(s)) as Structure | undefined;
+            if (rampartOnStorage) mem.targetId = rampartOnStorage.id;
+            else mem.routeProgress!.storage = true;
+        }
+    }
+
+    if (terminalHasRes && terminal && mem.routeProgress!.storage && !mem.routeProgress!.terminal) {
+        const obstacle = findNextObstacleToward(creep, terminal.pos, 1);
+        if (obstacle) {
+            mem.targetId = obstacle.id;
+        } else {
+            const onTerminal = terminal.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+            const rampartOnTerminal = onTerminal.find(s => s.structureType === STRUCTURE_RAMPART && isBlockingOnTile(s)) as Structure | undefined;
+            if (rampartOnTerminal) mem.targetId = rampartOnTerminal.id;
+            else mem.routeProgress!.terminal = true;
+        }
+    }
+};
+
+// 统一执行拆除目标
+const resolveTargetAndDismantle = (creep: Creep, mem: DismantleMemory) => {
+    let target = mem.targetId ? (Game.getObjectById(mem.targetId) as Structure | null) : null;
+    if (!target) {
+        mem.targetId = null;
+        target = pickCleanTarget(creep, mem) || null;
+        if (target) mem.targetId = target.id;
+    }
+
+    if (!target) {
+        mem.idleUntil = Game.time + 10;
+        return;
+    }
+
+    if (creep.pos.isNearTo(target)) {
+        creep.dismantle(target);
+        return;
+    }
+
+    const moveRet = creep.moveTo(target, { maxRooms: 1, range: 1, ignoreCreeps: true });
+    if (moveRet === ERR_NO_PATH) {
+        mem.noPathIds!.push(target.id);
+        mem.targetId = null;
+        mem.idleUntil = Game.time + 1;
+    }
+};
+
+// 策略容器：route 优先
+const dismantleStrategyContainer = new StrategyContainer<DismantleContext, void>();
+
+dismantleStrategyContainer.register({
+    id: DISMANTLE_STRATEGIES.ROUTE,
+    canRun: (ctx) => ctx.mode === 'route',
+    run: (ctx) => {
+        updateRouteTarget(ctx.creep, ctx.mem);
+        resolveTargetAndDismantle(ctx.creep, ctx.mem);
+    }
+});
+
+dismantleStrategyContainer.register({
+    id: DISMANTLE_STRATEGIES.CLEAN,
+    canRun: (ctx) => ctx.mode === 'clean',
+    run: (ctx) => {
+        resolveTargetAndDismantle(ctx.creep, ctx.mem);
+    }
+});
+
 const dismantle = {
     run: function (creep: Creep) {
         const mem = creep.memory as DismantleMemory;
@@ -191,61 +284,8 @@ const dismantle = {
         const mode = getMode(creep, mem);
         if (!ensureBoostIfNeeded(creep, mem, mode)) return;
 
-        if (mode === 'route') {
-            const room = creep.room;
-            const storage = room.storage;
-            const terminal = room.terminal;
-            const terminalHasRes = !!terminal && terminal.store.getUsedCapacity() > 0;
-
-            // 先拆通到 storage/terminal 的路，才能让后续搬运快速进场回收资源
-            if (storage && !mem.routeProgress!.storage) {
-                const obstacle = findNextObstacleToward(creep, storage.pos, 1);
-                if (obstacle) {
-                    mem.targetId = obstacle.id;
-                } else {
-                    const onStorage = storage.pos.lookFor(LOOK_STRUCTURES) as Structure[];
-                    const rampartOnStorage = onStorage.find(s => s.structureType === STRUCTURE_RAMPART && isBlockingOnTile(s)) as Structure | undefined;
-                    if (rampartOnStorage) mem.targetId = rampartOnStorage.id;
-                    else mem.routeProgress!.storage = true;
-                }
-            }
-
-            if (terminalHasRes && terminal && mem.routeProgress!.storage && !mem.routeProgress!.terminal) {
-                const obstacle = findNextObstacleToward(creep, terminal.pos, 1);
-                if (obstacle) {
-                    mem.targetId = obstacle.id;
-                } else {
-                    const onTerminal = terminal.pos.lookFor(LOOK_STRUCTURES) as Structure[];
-                    const rampartOnTerminal = onTerminal.find(s => s.structureType === STRUCTURE_RAMPART && isBlockingOnTile(s)) as Structure | undefined;
-                    if (rampartOnTerminal) mem.targetId = rampartOnTerminal.id;
-                    else mem.routeProgress!.terminal = true;
-                }
-            }
-        }
-
-        let target = mem.targetId ? (Game.getObjectById(mem.targetId) as Structure | null) : null;
-        if (!target) {
-            mem.targetId = null;
-            target = pickCleanTarget(creep, mem) || null;
-            if (target) mem.targetId = target.id;
-        }
-
-        if (!target) {
-            mem.idleUntil = Game.time + 10;
-            return;
-        }
-
-        if (creep.pos.isNearTo(target)) {
-            creep.dismantle(target);
-            return;
-        }
-
-        const moveRet = creep.moveTo(target, { maxRooms: 1, range: 1, ignoreCreeps: true });
-        if (moveRet === ERR_NO_PATH) {
-            mem.noPathIds!.push(target.id);
-            mem.targetId = null;
-            mem.idleUntil = Game.time + 1;
-        }
+        const ctx: DismantleContext = { creep, mem, mode };
+        runStrategy(dismantleStrategyContainer, ctx);
     }
 };
 

@@ -1,4 +1,6 @@
 import { decompress } from '@/modules/utils/compress';
+import { HARVESTER_LAYERS, HARVESTER_FLOW_STATES, HARVESTER_DELIVER_STATES } from '@/prototype/Creep/action/main/harvester';
+import { AID_BUILD_LAYERS, AID_BUILD_JOB_STATES } from '@/prototype/Creep/action/aid/aid-build';
 
 // 工位候选：用于判断 creep 是否需要让位。
 type WorkTileCandidate = {
@@ -105,8 +107,9 @@ function hasExplicitBuildOrRepairTarget(cacheTarget: any): boolean {
 // source 相关角色的工作状态判定规则。
 function isSourceWorkState(creep: Creep, role: string): boolean {
     if (role === 'harvester') {
-        const action = String(creep.memory.action || '');
-        return action === 'harvest' || action === 'build';
+        const flowState = creep.memory.fsm?.[HARVESTER_LAYERS.FLOW] || '';
+        const deliverState = creep.memory.fsm?.[HARVESTER_LAYERS.DELIVER] || '';
+        return flowState === HARVESTER_FLOW_STATES.COLLECT || deliverState === HARVESTER_DELIVER_STATES.BUILD;
     }
     if (role === 'out-harvest') {
         return !creep.memory.working;
@@ -170,7 +173,7 @@ function collectWorkTileCandidates(creep: Creep): WorkTileCandidate[] {
     }
 
     // 5) aid-build 在升级状态时保护控制器附近
-    if (role === 'aid-build' && creep.room.controller?.my && String(creep.memory.action || '') === 'upgrade') {
+    if (role === 'aid-build' && creep.room.controller?.my && creep.memory.fsm?.[AID_BUILD_LAYERS.JOB] === AID_BUILD_JOB_STATES.UPGRADE) {
         addCandidate(candidates, seen, creep.room.controller.pos, 3);
     }
 
@@ -183,7 +186,7 @@ function collectWorkTileCandidates(creep: Creep): WorkTileCandidate[] {
     // 7) 采集工在建造状态下的目标工位
     if (
         role === 'harvester' &&
-        String(creep.memory.action || '') === 'build' &&
+        creep.memory.fsm?.[HARVESTER_LAYERS.DELIVER] === HARVESTER_DELIVER_STATES.BUILD &&
         creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0
     ) {
         addObjectIdCandidate(candidates, seen, cacheTarget?.targetId, 1);

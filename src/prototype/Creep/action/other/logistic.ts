@@ -1,4 +1,6 @@
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 type LogisticCache = {
     targetId?: Id<any>;
@@ -183,6 +185,16 @@ function transfer(creep: Creep) {
     creep.drop(resoureType);
 }
 
+const onSource = (creep: Creep): WorkEvent => {
+    withdraw(creep);
+    return creep.store.getFreeCapacity() === 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
+
+const onTarget = (creep: Creep): WorkEvent => {
+    transfer(creep);
+    return creep.store.getUsedCapacity() === 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+};
+
 const logisticFunction = {
     prepare: function (creep: Creep) {
         const boostmap = (creep.memory as any).boostmap
@@ -200,13 +212,11 @@ const logisticFunction = {
         creep.memory.boosted = result === OK
         return creep.memory.boosted
     },
-    source: function (creep: Creep) {
-        withdraw(creep);
-        return creep.store.getFreeCapacity() === 0;
-    },
-    target: function (creep: Creep) {
-        transfer(creep);
-        return creep.store.getUsedCapacity() === 0;
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     }
 };
 

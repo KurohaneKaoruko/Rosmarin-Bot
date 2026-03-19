@@ -1,3 +1,6 @@
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+
 type ScoutCache = {
     stompSiteId?: Id<ConstructionSite> | null;
 };
@@ -64,32 +67,108 @@ const runStomp = (creep: Creep): boolean => {
     return true;
 };
 
+// 判断是否处于房间边缘（不依赖 isRoomEdge 原型，便于测试）
+const isEdgePos = (pos: RoomPosition): boolean =>
+    pos.x <= 0 || pos.x >= 49 || pos.y <= 0 || pos.y >= 49;
+
+// 判定结构是否会阻塞 scout 驻足。
+// 道路、container 与可通行 rampart 都允许站立，不应把它们当作障碍。
+const isBlockingScoutStructure = (structure: AnyStructure) => {
+    if (structure.structureType === STRUCTURE_ROAD) return false;
+    if (structure.structureType === STRUCTURE_CONTAINER) return false;
+    if (structure.structureType === STRUCTURE_RAMPART) {
+        return !('my' in structure ? structure.my : false) && !('isPublic' in structure ? structure.isPublic : false);
+    }
+    return true;
+};
+
+// 判定某个格子是否可以驻足（避开墙、阻塞结构、施工点与单位）
+const isWalkableTile = (room: Room, x: number, y: number): boolean => {
+    if (x < 0 || x > 49 || y < 0 || y > 49) return false;
+    if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) return false;
+    if (room.lookForAt(LOOK_STRUCTURES, x, y).some((structure) => isBlockingScoutStructure(structure as AnyStructure))) return false;
+    if (room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).length > 0) return false;
+    if (room.lookForAt(LOOK_CREEPS, x, y).length > 0) return false;
+    if (room.lookForAt(LOOK_POWER_CREEPS, x, y).length > 0) return false;
+    return true;
+};
+
+// 从边缘向内找一个可落脚点：先直线向内，再尝试对角点
+const findInteriorPos = (creep: Creep): RoomPosition | null => {
+    const { x, y } = creep.pos;
+    const room = creep.room;
+
+    if (!isEdgePos(creep.pos)) return null;
+
+    const candidates: Array<[number, number]> = [];
+
+    if (x <= 0) {
+        candidates.push([x + 1, y]);
+        candidates.push([x + 1, y - 1]);
+        candidates.push([x + 1, y + 1]);
+    } else if (x >= 49) {
+        candidates.push([x - 1, y]);
+        candidates.push([x - 1, y - 1]);
+        candidates.push([x - 1, y + 1]);
+    } else if (y <= 0) {
+        candidates.push([x, y + 1]);
+        candidates.push([x - 1, y + 1]);
+        candidates.push([x + 1, y + 1]);
+    } else if (y >= 49) {
+        candidates.push([x, y - 1]);
+        candidates.push([x - 1, y - 1]);
+        candidates.push([x + 1, y - 1]);
+    }
+
+    for (const [cx, cy] of candidates) {
+        if (isWalkableTile(room, cx, cy)) {
+            return new RoomPosition(cx, cy, room.name);
+        }
+    }
+
+    return null;
+};
+
+// 边缘驻足处理：仅在贴边时向内移动，避免无意义地强制回中心
+const parkInRoom = (creep: Creep) => {
+    const idlePos = findInteriorPos(creep);
+    if (!idlePos) return;
+    creep.moveTo(idlePos);
+};
+
+const onTarget = (creep: Creep): WorkEvent => {
+    if (creep.room.name !== creep.memory.targetRoom) {
+        creep.moveToRoom(creep.memory.targetRoom, { plainCost: 1, swampCost: 1 });
+        return WORK_EVENTS.STAY;
+    }
+
+    if (runStomp(creep)) {
+        return WORK_EVENTS.STAY;
+    }
+
+    const controller = creep.room.controller;
+    if (controller && creep.memory['sign'] != undefined && creep.memory['sign'] !== controller.sign?.text) {
+        creep.signControllerIfNeeded(creep.memory['sign'], {
+            overwrite: true,
+            moveOptions: { plainCost: 1, swampCost: 1, maxRooms: 1, range: 1 }
+        });
+    } else {
+        parkInRoom(creep);
+    }
+
+    return WORK_EVENTS.STAY;
+};
+
+const onSource = (): WorkEvent => {
+    return WORK_EVENTS.TO_TARGET;
+};
+
 const Scout = {
-    target: function(creep: Creep) {
-        if (creep.room.name !== creep.memory.targetRoom) {
-            creep.moveToRoom(creep.memory.targetRoom, { plainCost: 1, swampCost: 1 });
-            return false;
-        }
-
-        if (runStomp(creep)) {
-            return false;
-        }
-
-        const controller = creep.room.controller;
-        if (!controller) return false;
-        if (creep.memory['sign'] != undefined && creep.memory['sign'] !== controller.sign?.text) {
-            creep.signControllerIfNeeded(creep.memory['sign'], {
-                overwrite: true,
-                moveOptions: { plainCost: 1, swampCost: 1, maxRooms: 1, range: 1 }
-            });
-        } else {
-            creep.moveTo(new RoomPosition(25, 25, creep.room.name), { plainCost: 1, swampCost: 1, range: 10 });
-        }
-        
-        return false;
-    },
-    source: function() {
-        return true;
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     }
 }
 

@@ -1,5 +1,7 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getCoreDepotContainer, getCoreDepotTarget, hasCoreDepotTarget, isCoreDepotContainer } from '@/modules/utils/coreDepot';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 type CarrierLockEntry = {
     name: string;
@@ -695,35 +697,43 @@ const goGenerateSafeMode = (creep: Creep): boolean => {
 
 
 
+const onSource = (creep: Creep): WorkEvent => {
+    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+    if (creep.store.getFreeCapacity() === 0) {
+        carry(creep);
+        return WORK_EVENTS.TO_TARGET;
+    }
+    if (goGenerateSafeMode(creep)) return WORK_EVENTS.STAY;
+    const result = withdraw(creep);
+    if (result) return WORK_EVENTS.TO_TARGET;
+
+    // 源侧暂时断流时，允许带着半仓资源先回去交付，避免卡在 source 态空转。
+    if (creep.store.getUsedCapacity() > 0 && !getCarrierSourceCache(creep).sourceId) {
+        carry(creep);
+        return WORK_EVENTS.TO_TARGET;
+    }
+
+    return WORK_EVENTS.STAY;
+};
+
+const onTarget = (creep: Creep): WorkEvent => {
+    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+    if (creep.store.getUsedCapacity() === 0) {
+        withdraw(creep);
+        return WORK_EVENTS.TO_SOURCE;
+    }
+    if (checkAndFillNearbyExtensions(creep)) return WORK_EVENTS.STAY;
+    return carry(creep) ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+};
+
 // Carrier 主逻辑
 const CarrierFunction = {
-    source: (creep: Creep) => {
-        if (!creep.moveHomeRoom()) return;
-        if (creep.store.getFreeCapacity() === 0) {
-            carry(creep)
-            return true
-        }
-        if (goGenerateSafeMode(creep)) return;
-        const result = withdraw(creep);
-        if (result) return true;
-
-        // 源侧暂时断流时，允许带着半仓资源先回去交付，避免卡在 source 态空转。
-        if (creep.store.getUsedCapacity() > 0 && !getCarrierSourceCache(creep).sourceId) {
-            carry(creep);
-            return true;
-        }
-
-        return result;
-    },
-    target: (creep: Creep) => {
-        if (!creep.moveHomeRoom()) return;
-        if (creep.store.getUsedCapacity() === 0) {
-            withdraw(creep)
-            return true
-        }
-        if (checkAndFillNearbyExtensions(creep)) return;
-        return carry(creep);;
-    },
+    run: (creep: Creep) => {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
+    }
 };
 
 export default CarrierFunction;

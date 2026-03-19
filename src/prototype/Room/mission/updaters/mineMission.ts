@@ -8,7 +8,13 @@ const SURROUNDING_OFFSETS: Array<[number, number]> = [
     [-1, 1], [0, 1], [1, 1],
 ];
 
-const countActiveCreeps = (creeps: Creep[] | undefined, minTicksToLive: number) => {
+// 这里只依赖目标房 creep 索引中的轻量字段，不要求完整 Creep 实例。
+type IndexedTargetRoomCreep = {
+    ticksToLive?: number;
+    spawning: boolean;
+};
+
+const countActiveCreeps = (creeps: IndexedTargetRoomCreep[] | undefined, minTicksToLive: number) => {
     return (creeps || []).filter((creep) => creep.spawning || (creep.ticksToLive || 0) > minTicksToLive).length;
 };
 

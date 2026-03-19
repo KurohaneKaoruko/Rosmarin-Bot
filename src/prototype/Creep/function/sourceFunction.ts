@@ -12,7 +12,8 @@ export default class SourceFunction extends Creep {
                 energy += 2;
                 continue;
             }
-            energy += 2 * (BOOSTS.work[part.boost]['harvest'] || 1);
+            // boost 表缺项时按未 boost 处理，避免异常数据导致运行时错误。
+            energy += 2 * (BOOSTS.work[part.boost]?.['harvest'] || 1);
         }
         return energy;
     }

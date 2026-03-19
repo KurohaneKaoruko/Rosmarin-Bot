@@ -1,4 +1,5 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, hotSwap, fail } from '@/framework/ai/behaviorTree';
 
 function FlagActionMove(creep: Creep) {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
@@ -123,53 +124,71 @@ function AutoActionDismantle(creep: Creep) {
 }
 
 
+type WarCtx = { creep: Creep };
+
+// 行为树注册表：支持双人拆除逻辑热插拔
+export const doubleDismantleRegistry = new BehaviorTreeRegistry<WarCtx>();
+
+const runLegacy = (creep: Creep) => {
+    creep.disableAttackNotificationsOnce();
+
+    if (!creep.memory.boosted) {
+        if (creep.memory['boostmap']) {
+            const result = creep.goBoost(creep.memory['boostmap']);
+            if (result === OK) {
+                creep.memory.boosted = true;
+            }
+        } else {
+            creep.memory.boosted = creep.goBoost({
+                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+                [WORK]: ['XZH2O', 'ZH2O', 'ZH']
+            }) === OK;
+        }
+        return;
+    }
+
+    // 等待绑定
+    if (!creep.memory.bind) return;
+
+    // 获取绑定的另一个creep
+    const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
+    if (!bindcreep) {
+        delete creep.memory.bind;
+        return;
+    }
+
+    creep.memory.dontPullMe = true;
+
+    // 旗帜移动
+    if (FlagActionMove(creep)) return;
+
+    // 手动标记行动
+    if (FlagActionDismantle(creep)) return;
+
+    // 自动行动
+    if (AutoActionDismantle(creep)) return;
+
+    // 移动到目标房间, 未到达房间不继续行动
+    if (creep.doubleMoveToRoom(creep.memory.targetRoom, '#ffff00')) return;
+    if (creep.room.my || Game.time < (creep.memory.idle || 0)) return;
+
+    // 自动寻找目标
+    AutoFindTarget(creep);
+};
+
+const tree = new BehaviorTree<WarCtx>(
+    selector(
+        hotSwap(doubleDismantleRegistry, 'root', fail()),
+        leaf<WarCtx>(({ creep }) => {
+            runLegacy(creep);
+            return BtStatus.Running;
+        })
+    )
+);
+
 const double_dismantle = {
     run: function (creep: Creep) {
-        creep.disableAttackNotificationsOnce();
-
-        if (!creep.memory.boosted) {
-            if (creep.memory['boostmap']) {
-                let result = creep.goBoost(creep.memory['boostmap']);
-                if (result === OK) {
-                    creep.memory.boosted = true;
-                }
-            } else {
-                creep.memory.boosted = creep.goBoost({
-                    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-                    [WORK]: ['XZH2O', 'ZH2O', 'ZH']
-                }) === OK;
-            }
-            return;
-        }
-    
-        // 等待绑定
-        if(!creep.memory.bind) return;
-    
-        // 获取绑定的另一个creep
-        const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
-    
-        if(!bindcreep) {
-            delete creep.memory.bind;
-            return;
-        }
-
-        creep.memory.dontPullMe = true;
-    
-        // 旗帜移动
-        if (FlagActionMove(creep)) return;
-
-        // 手动标记行动
-        if (FlagActionDismantle(creep)) return;
-
-        // 自动行动
-        if (AutoActionDismantle(creep)) return;
-
-        // 移动到目标房间, 未到达房间不继续行动
-        if (creep.doubleMoveToRoom(creep.memory.targetRoom, '#ffff00')) return;
-        if (creep.room.my || Game.time < (creep.memory.idle||0)) return;
-
-        // 自动寻找目标
-        AutoFindTarget(creep);
+        tree.tick({ creep });
     }
 }
 

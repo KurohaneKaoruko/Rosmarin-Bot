@@ -1,27 +1,28 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
-const deposit_harvest = {
-    source: function(creep: Creep) {
-        creep.disableAttackNotificationsOnce();
-        const sourceRoom = getCreepSourceRoom(creep.memory);
-        
-        if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-            let opt = {};
-            if (sourceRoom && creep.room.name != sourceRoom) opt = { ignoreCreeps: false };
-            creep.moveToRoom(creep.memory.targetRoom, opt);
-            return;
+const onSource = (creep: Creep): WorkEvent => {
+    creep.disableAttackNotificationsOnce();
+    const sourceRoom = getCreepSourceRoom(creep.memory);
+
+    if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
+        let opt = {};
+        if (sourceRoom && creep.room.name != sourceRoom) opt = { ignoreCreeps: false };
+        creep.moveToRoom(creep.memory.targetRoom, opt);
+        return WORK_EVENTS.STAY;
+    }
+
+    if (!creep.memory['targetDeposit']) {
+        let deposits = creep.room.find(FIND_DEPOSITS);
+        // 筛选
+        let activeDeposits = deposits.filter(d => d.lastCooldown <= OUTMINE_CONFIG.DEPOSIT_MAX_COOLDOWN);
+        if (activeDeposits.length > 0) {
+            deposits = activeDeposits;
         }
-
-        if (!creep.memory['targetDeposit']) {
-            let deposits = creep.room.find(FIND_DEPOSITS);
-            // 筛选
-            let activeDeposits = deposits.filter(d => d.lastCooldown <= OUTMINE_CONFIG.DEPOSIT_MAX_COOLDOWN);
-            if (activeDeposits.length > 0) {
-                deposits = activeDeposits;
-            }
-            if (deposits.length == 0) return;
+        if (deposits.length == 0) return WORK_EVENTS.STAY;
 
             const role = creep.memory.role;
             const boundCountByDeposit = getRoomTickCacheValue(
@@ -83,16 +84,16 @@ const deposit_harvest = {
                 if (creepCount >= 3) return;
                 return true;
             });
-            if (!deposit) return;
-            boundCountByDeposit[deposit.id] = (boundCountByDeposit[deposit.id] || 0) + 1;
-            creep.memory['targetDeposit'] = deposit.id;
-        }
+        if (!deposit) return WORK_EVENTS.STAY;
+        boundCountByDeposit[deposit.id] = (boundCountByDeposit[deposit.id] || 0) + 1;
+        creep.memory['targetDeposit'] = deposit.id;
+    }
 
-        const deposit = Game.getObjectById(creep.memory['targetDeposit']) as Deposit;
-        if (!deposit) {
-            creep.memory['targetDeposit'] = null;
-            return;
-        }
+    const deposit = Game.getObjectById(creep.memory['targetDeposit']) as Deposit;
+    if (!deposit) {
+        creep.memory['targetDeposit'] = null;
+        return WORK_EVENTS.STAY;
+    }
 
         const closeHostiles = getRoomTickCacheValue(creep.room, 'deposit_harvest_close_work_heal_hostiles', () =>
             creep.room.find(FIND_HOSTILE_CREEPS, {
@@ -104,7 +105,7 @@ const deposit_harvest = {
             if (!creep.memory.dontPullMe) creep.memory.dontPullMe = true;
             if (deposit.cooldown == 0) {
                 creep.harvest(deposit);
-                return false;
+                return WORK_EVENTS.STAY;
             }
             if (creep.getActiveBodyparts(ATTACK) > 0) {
                 if (closeHostiles.length > 0) creep.attack(closeHostiles[0]);
@@ -113,7 +114,7 @@ const deposit_harvest = {
             if (creep.getActiveBodyparts(ATTACK) > 0) {
                 if (closeHostiles.length > 0) {
                     creep.attack(closeHostiles[0]);
-                    return false;
+                    return WORK_EVENTS.STAY;
                 }
             }
             if (creep.memory.dontPullMe) creep.memory.dontPullMe = false;
@@ -138,26 +139,35 @@ const deposit_harvest = {
                 if (creep.pos.inRangeTo(nearbyTransport, 1)) {
                     creep.transfer(nearbyTransport, resourceType);
                 }
-                return false;
+                return WORK_EVENTS.STAY;
             }
-        }
+    }
 
-        return creep.store.getFreeCapacity() == 0;
-    },
-    target: function(creep: Creep) {
-        const transferCreeps = getRoomTickCacheValue(creep.room, 'deposit_harvest_transfer_creeps', () =>
-            creep.room.find(FIND_MY_CREEPS, {
-                filter: (c) => c.memory.role === 'deposit-transfer'
-            }) as Creep[]
-        );
-        const nearbyTransport = transferCreeps.find((c) =>
-            c.store.getFreeCapacity() > 0 && creep.pos.inRangeTo(c, 1)
-        );
-        if (!nearbyTransport) return creep.store.getUsedCapacity() == 0;
+    return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
 
-        const resourceType = Object.keys(creep.store)[0] as ResourceConstant;
-        creep.transfer(nearbyTransport, resourceType);
-        return creep.store.getUsedCapacity() == 0;
+const onTarget = (creep: Creep): WorkEvent => {
+    const transferCreeps = getRoomTickCacheValue(creep.room, 'deposit_harvest_transfer_creeps', () =>
+        creep.room.find(FIND_MY_CREEPS, {
+            filter: (c) => c.memory.role === 'deposit-transfer'
+        }) as Creep[]
+    );
+    const nearbyTransport = transferCreeps.find((c) =>
+        c.store.getFreeCapacity() > 0 && creep.pos.inRangeTo(c, 1)
+    );
+    if (!nearbyTransport) return creep.store.getUsedCapacity() == 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+
+    const resourceType = Object.keys(creep.store)[0] as ResourceConstant;
+    creep.transfer(nearbyTransport, resourceType);
+    return creep.store.getUsedCapacity() == 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+};
+
+const deposit_harvest = {
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     }
 }
 

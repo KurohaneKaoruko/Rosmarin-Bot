@@ -7,13 +7,25 @@ type MemoryStateStorage<S extends StateId> = {
     set: (state: S) => void;
 };
 
+// 确保 creep.memory 自身是可写对象：
+// 某些脏数据场景下，memory 可能被写成 null / 数组 / 原始值，
+// 此时继续访问 memory.fsm 会直接抛异常，因此要先把根容器修正回来。
+const ensureCreepMemoryObject = (creep: Creep): CreepMemory => {
+    if (creep.memory == null || typeof creep.memory !== 'object' || Array.isArray(creep.memory)) {
+        (creep as Creep & { memory: CreepMemory }).memory = {} as CreepMemory;
+    }
+    return creep.memory;
+};
+
 // 确保 fsm 容器存在
 export const ensureFsmBucket = <T extends StateId = StateId>(creep: Creep): Record<string, T> => {
-    // 防御异常 memory 结构（如被写成数组/非对象），统一重置为对象容器
-    if (!creep.memory.fsm || typeof creep.memory.fsm !== 'object' || Array.isArray(creep.memory.fsm)) {
-        creep.memory.fsm = {};
+    const memory = ensureCreepMemoryObject(creep);
+
+    // 防御异常 fsm 结构（如被写成 null / 数组 / 非对象），统一重置为对象容器。
+    if (memory.fsm == null || typeof memory.fsm !== 'object' || Array.isArray(memory.fsm)) {
+        memory.fsm = {};
     }
-    return creep.memory.fsm as Record<string, T>;
+    return memory.fsm as Record<string, T>;
 };
 
 // 多层 FSM 状态存储：写入 creep.memory.fsm

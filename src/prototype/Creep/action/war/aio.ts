@@ -1,4 +1,5 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
 
 const getRoomNonWhitelistHostiles = (creep: Creep) =>
     getRoomTickCacheValue(creep.room, 'aio_room_non_whitelist_hostiles', () =>
@@ -124,104 +125,123 @@ let autoAttack = (creep) => {
     }
 }
 
-const aio = {
-    run: function (creep: Creep) {
-        creep.disableAttackNotificationsOnce();
+type WarCtx = { creep: Creep };
 
-        if (!creep.memory.boosted) {
-            if (creep.memory['boostmap']) {
-                let result = creep.goBoost(creep.memory['boostmap'])
-                if (result == OK) {
-                    creep.memory.boosted = true
+// 行为树注册表：支持 AIO 战斗逻辑热插拔
+export const aioRegistry = new BehaviorTreeRegistry<WarCtx>();
+
+// boost 逻辑节点：未完成时返回 Running，完成后返回 Success
+const ensureBoost = leaf<WarCtx>(({ creep }) => {
+    creep.disableAttackNotificationsOnce();
+    if (creep.memory.boosted) return BtStatus.Success;
+    if (creep.memory['boostmap']) {
+        const result = creep.goBoost(creep.memory['boostmap']);
+        if (result === OK) {
+            creep.memory.boosted = true;
+            return BtStatus.Success;
+        }
+        return BtStatus.Running;
+    }
+    const ok = creep.goBoost({
+        [TOUGH]: ['XGHO2'],
+        [HEAL]: ['XLHO2'],
+        [RANGED_ATTACK]: ['XKHO2'],
+        [MOVE]: ['XZHO2']
+    }) === OK;
+    if (ok) creep.memory.boosted = true;
+    return ok ? BtStatus.Success : BtStatus.Running;
+});
+
+// 主战斗节点：执行一次即可，保持 Running 让行为树持续驱动
+const runCombat = leaf<WarCtx>(({ creep }) => {
+    creep.heal(creep);
+
+    // 躲避
+    const attackHostile = findNonWhitelistHostilesInRange(creep, 3, (e) =>
+        e.body.some((t) => t.boost == "XUH2O")
+    )[0];
+    if (attackHostile) {
+        if (creep.room.level > 0 && !creep.room.my && creep.room.tower) {
+            const exit = creep.pos.findClosestByPath(FIND_EXIT);
+            creep.moveTo(exit);
+            creep.rangedMassAttack();
+        } else {
+            const em = attackHostile;
+            if (creep.pos.inRangeTo(em, 2)) {
+                const range = creep.pos.getRangeTo(em) + 1;
+                const path = PathFinder.search(creep.pos, { pos: em.pos, range }, { flee: true }).path;
+                creep.moveByPath(path);
+                creep.rangedAttack(em);
+
+                const exit = creep.pos.findClosestByPath(FIND_EXIT);
+                if (exit && creep.pos.isNear(exit) && creep.pos.isNearTo(em)) {
+                    creep.moveTo(exit);
                 }
+            }
+        }
+        return BtStatus.Running;
+    }
+
+    const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
+    const moveflag = Game.flags[name + '-move'];
+    if (moveflag) {
+        if (creep.room.name !== moveflag.pos.roomName) {
+            creep.memory.targetRoom = moveflag.pos.roomName;
+        }
+        creep.moveTo(moveflag.pos, { visualizePathStyle: { stroke: '#0000ff' } });
+        return BtStatus.Running;
+    }
+
+    const rangedAttack = (c: Creep) => {
+        let creeps = findNonWhitelistHostilesInRange(c, 1);
+        if (creeps.length) {
+            return c.rangedMassAttack();
+        }
+        creeps = findNonWhitelistHostilesInRange(c, 3);
+        if (creeps.length) {
+            c.rangedAttack(creeps.reduce((a, b) => a.hits < b.hits ? a : b));
+        }
+    };
+
+    if (creep.room.name != creep.memory.targetRoom) {
+        const inner = (pos: RoomPosition) => pos.x > 2 && pos.x < 47 && pos.y > 2 && pos.y < 47;
+        if ((creep.hitsMax - creep.hits) > 1300 && !inner(creep.pos) && !creep.room.tower.find(e => !e.my)) {
+            rangedAttack(creep);
+            creep.moveTo(new RoomPosition(25, 25, creep.room.name));
+        } else if ((creep.hitsMax - creep.hits) <= 1300) {
+            rangedAttack(creep);
+            const tarPos = Game.flags[`aio-${name}`]?.pos;
+            if (tarPos) {
+                creep.moveTo(tarPos);
             } else {
-                creep.memory.boosted = creep.goBoost({
-                    [TOUGH]: ['XGHO2'],
-                    [HEAL]: ['XLHO2'],
-                    [RANGED_ATTACK]: ['XKHO2'],
-                    [MOVE]: ['XZHO2']
-                }) === OK;
-            }
-            return;
-        }
-
-        creep.heal(creep);
-
-        // 躲避
-        let attackHostile = findNonWhitelistHostilesInRange(creep, 3, (e) =>
-            e.body.some((t) => t.boost == "XUH2O")
-        )[0];
-        if (attackHostile) {
-            if (creep.room.level > 0 && !creep.room.my && creep.room.tower) {
-                let exit = creep.pos.findClosestByPath(FIND_EXIT);
-                creep.moveTo(exit);
-                creep.rangedMassAttack();
-            } else {
-                let em = attackHostile;
-                if (creep.pos.inRangeTo(em, 2)) {
-                    let range = creep.pos.getRangeTo(em) + 1;
-                    let path = PathFinder.search(creep.pos, { pos: em.pos, range }, { flee: true }).path;
-                    creep.moveByPath(path);
-                    creep.rangedAttack(em);
-
-                    let exit = creep.pos.findClosestByPath(FIND_EXIT);
-                    if (exit && creep.pos.isNear(exit) && creep.pos.isNearTo(em)) {
-                        creep.moveTo(exit);
-                    }
-                }
-            }
-            return;
-        }
-
-        
-
-        const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
-        const moveflag = Game.flags[name + '-move'];
-        if (moveflag) {
-            if (creep.room.name !== moveflag.pos.roomName) {
-                creep.memory.targetRoom = moveflag.pos.roomName;
-            }
-            creep.moveTo(moveflag.pos, { visualizePathStyle: { stroke: '#0000ff' } })
-            return;
-        }
-
-        let rangedAttack = (c) => {
-            let creeps = findNonWhitelistHostilesInRange(c, 1);
-            if (creeps.length) {
-                return c.rangedMassAttack();
-            }
-            creeps = findNonWhitelistHostilesInRange(c, 3);
-            if (creeps.length) {
-                c.rangedAttack(creeps.reduce((a, b) => a.hits < b.hits ? a : b));
-            }
-        }
-
-
-        if (creep.room.name != creep.memory.targetRoom) {
-            let inner = (pos) => pos.x > 2 && pos.x < 47 && pos.y > 2 && pos.y < 47;
-            if ((creep.hitsMax-creep.hits) > 1300 && !inner(creep.pos) && !creep.room.tower.find(e => !e.my)) {
-                rangedAttack(creep);
-                creep.moveTo(new RoomPosition(25, 25, creep.room.name));
-            } else if ((creep.hitsMax-creep.hits) <= 1300) {
-                rangedAttack(creep);
-                let tarPos = Game.flags[`aio-${name}`]?.pos;
-                if (tarPos) {
-                    creep.moveTo(tarPos);
-                } else {
-                    creep.moveToRoom(creep.memory.targetRoom);
-                }
-            } else {
-                autoAttack(creep);
+                creep.moveToRoom(creep.memory.targetRoom);
             }
         } else {
-            if(creep.hits + 1300 >= creep.hitsMax){
-                autoAttack(creep);
-            }else{
-                rangedAttack(creep);
-                creep.moveTo(new RoomPosition(25,25,creep.room.name));
-            }
+            autoAttack(creep);
+        }
+    } else {
+        if (creep.hits + 1300 >= creep.hitsMax) {
+            autoAttack(creep);
+        } else {
+            rangedAttack(creep);
+            creep.moveTo(new RoomPosition(25, 25, creep.room.name));
         }
     }
-}
+    return BtStatus.Running;
+});
+
+// 行为树：可被 hotSwap 替换根节点，默认执行 boost -> 战斗
+const tree = new BehaviorTree<WarCtx>(
+    selector(
+        hotSwap(aioRegistry, 'root', fail()),
+        sequence(ensureBoost, runCombat)
+    )
+);
+
+const aio = {
+    run: function (creep: Creep) {
+        tree.tick({ creep });
+    }
+};
 
 export default aio

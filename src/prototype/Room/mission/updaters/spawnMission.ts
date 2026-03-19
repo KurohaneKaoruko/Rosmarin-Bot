@@ -249,7 +249,7 @@ const getHarvesterTargetBySource = (room: Room): number => {
 };
 
 // 每个角色一个检查函数，保持结构清晰
-const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
+export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
         let num = getHarvesterTargetBySource(room);
@@ -326,13 +326,16 @@ const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> =
         return current < num;
     },
     'transport': (room: Room, current: number) => {
-        // 没有 storage/terminal 时 transport 无法运转，禁止生成
-        if (!room.storage && !room.terminal) return false;
-
-        const highMode = isHighLikeMode(getRoomMode(room));
         const state = getEnergyState(room);
+        const highMode = isHighLikeMode(getRoomMode(room));
         const storedEnergy = getStoredEnergy(room);
+        const hasStorageLike = !!room.storage || !!room.terminal;
         let num = RoleLevelData['transport'][room.level]['num'];
+
+        // transport 当前仍依赖 storage / terminal 体系与 transport mission 调度，
+        // 因此在只有 container 的恢复期不能提前孵化，否则只会空转占位。
+        if (!hasStorageLike) return false;
+
         if (highMode && state !== 'LOW' && state !== 'CRITICAL') {
             if (storedEnergy >= TRANSPORT_HIGH) num += 1;
             if (storedEnergy >= TRANSPORT_HIGH * 3 && hasControllerEnergyBuffer(room)) num += 1;
@@ -341,7 +344,7 @@ const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> =
         if (current >= num) return false;
         if (state === 'LOW' || state === 'CRITICAL') return true;
         if (storedEnergy < TRANSPORT_MIN) return false;
-        return !!(room.storage || room.terminal);
+        return hasStorageLike;
     },
     'manager': (room: Room, current: number) => {
         const num = RoleLevelData['manager'][room.level]['num'];
@@ -530,6 +533,55 @@ const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> =
     },
 };
 
+export type SpawnCheckContext = {
+    room: Room;
+    creepNum: Record<string, number>;
+    spawnMissionNum: Record<string, number>;
+    shouldRecover: boolean;
+    downgradedCount: Record<string, number>;
+};
+
+// 统一构造孵化检查上下文：
+// 把“当前数量 + 已入队数量 + 降级物流扣减”集中在这里，避免各处重复拼装。
+export const createSpawnCheckContext = (
+    room: Room,
+    creepNum: Record<string, number>,
+    spawnMissionNum: Record<string, number>,
+): SpawnCheckContext => {
+    const state = getEnergyState(room);
+    const shouldRecover = state === 'NORMAL' || state === 'SURPLUS';
+    return {
+        room,
+        creepNum,
+        spawnMissionNum,
+        shouldRecover,
+        downgradedCount: shouldRecover ? getDowngradedLogisticsCountByAssignedRoom(room.name) : {},
+    };
+};
+
+// 获取某个角色经过“恢复期物流扣减”后的有效当前数量。
+export const getAdjustedSpawnRoleCurrent = (context: SpawnCheckContext, role: string): number => {
+    const current = (context.creepNum[role] || 0) + (context.spawnMissionNum[role] || 0);
+    if (!context.shouldRecover) return current;
+    return Math.max(0, current - (context.downgradedCount[role] || 0));
+};
+
+// 统一角色孵化判定入口：
+// 默认使用上下文中的当前数量，也允许外部显式传入 current 做单点判断。
+export const shouldSpawnRole = (
+    role: string,
+    context: SpawnCheckContext,
+    current = getAdjustedSpawnRoleCurrent(context, role),
+): boolean => {
+    if (role === 'universal') {
+        return getDowngradeUniversalSpawnMissing(context.room, current) > 0 || RoleSpawnCheck[role]?.(context.room, current) === true;
+    }
+
+    const checker = RoleSpawnCheck[role];
+    if (!checker) return false;
+    return checker(context.room, current);
+};
+
 /**
  * 房间孵化任务模块（spawn）
  * @description
@@ -549,15 +601,10 @@ export default class SpawnMission extends Room {
 
         const creepNum = this.getCreepNum();
         const spawnMissionNum = this.getSpawnMissionNum();
-        const state = getEnergyState(this);
-        const shouldRecover = state === 'NORMAL' || state === 'SURPLUS';
-        const downgradedCount: Record<string, number> = shouldRecover
-            ? getDowngradedLogisticsCountByAssignedRoom(this.name)
-            : {};
+        const context = createSpawnCheckContext(this, creepNum, spawnMissionNum);
 
         for (const role in RoleSpawnCheck) {
-            const current = (creepNum[role] || 0) + (spawnMissionNum[role] || 0);
-            const adjusted = shouldRecover ? Math.max(0, current - (downgradedCount[role] || 0)) : current;
+            const adjusted = getAdjustedSpawnRoleCurrent(context, role);
             if (role === 'universal') {
                 const rescueMissing = getDowngradeUniversalSpawnMissing(this, adjusted);
                 if (rescueMissing > 0) {
@@ -573,7 +620,7 @@ export default class SpawnMission extends Room {
                     continue;
                 }
             }
-            if (RoleSpawnCheck[role](this, adjusted)) {
+            if (shouldSpawnRole(role, context, adjusted)) {
                 this.SpawnMissionAdd(
                     RoleData[role].code,
                     '',

@@ -1,21 +1,22 @@
 import { outSignConstant } from "@/constant/NameConstant";
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const OUTMINE_SIGN_OVERWRITE = true;
 
-const Reserve = {
-    target: function(creep: Creep) {
-        if (!creep.moveToTargetRoom()) return false;
+const onTarget = (creep: Creep): WorkEvent => {
+    if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
         const controller = creep.room.controller;
         
-        if(!controller) return;
+        if(!controller) return WORK_EVENTS.STAY;
         if (creep.pos.inRangeTo(controller, 1)) {
             if (controller.reservation &&
                 controller.reservation.username != creep.owner.username) {
                 creep.attackController(controller)
             } else {
                 const ticksToEnd = controller.reservation?.ticksToEnd || 0;
-                if (ticksToEnd >= 4990) return false;
+                if (ticksToEnd >= 4990) return WORK_EVENTS.STAY;
                 creep.reserveController(controller);
             }
 
@@ -37,10 +38,19 @@ const Reserve = {
         else {
             creep.moveTo(controller, { visualizePathStyle: { stroke: '#ffaa00' } });
         }
-        return false;
-    },
-    source: function(creep: Creep) {
-        return true;
+        return WORK_EVENTS.STAY;
+};
+
+const onSource = (): WorkEvent => {
+    return WORK_EVENTS.TO_TARGET;
+};
+
+const Reserve = {
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     }
 }
 

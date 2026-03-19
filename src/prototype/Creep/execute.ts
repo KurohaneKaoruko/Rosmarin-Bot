@@ -1,48 +1,68 @@
-import { workRegistry, actionRegistry } from './action';
+import { getRoleHandler } from './action';
 import { RoleData } from '@/constant/CreepConstant';
+
+const creepExecuteErrorTickCache: Record<string, number> = {};
+
+// 统一执行入口的错误日志：
+// 同一类错误每 tick 只记一次，避免配置缺失时刷屏。
+const reportExecuteIssue = (key: string, message: string) => {
+    const tick = typeof Game !== 'undefined' && typeof Game.time === 'number' ? Game.time : -1;
+    if (creepExecuteErrorTickCache[key] === tick) return;
+    creepExecuteErrorTickCache[key] = tick;
+
+    const runtime = globalThis as any;
+    if (typeof runtime.log === 'function') {
+        runtime.log(message);
+        return;
+    }
+    if (typeof runtime.global?.log === 'function') {
+        runtime.global.log(message);
+        return;
+    }
+    console.log(message);
+};
 
 export default class CreepExecute extends Creep {
     exec() {
         const role = this.memory.role;
         const roledata = RoleData[role];
-        if (!roledata) return;
-
-        if (roledata.action) {
-            const actionFunc = actionRegistry[roledata.action];
-            if (actionFunc) {
-                actionFunc.run(this);
-            }
-        } else if(roledata.work) {
-            const func = workRegistry[roledata.work];
-            if (!func) return;
-            this.memory.cache = this.memory.cache || {}
-            this.memory.cacheSource = this.memory.cacheSource || {}
-            this.memory.cacheTarget = this.memory.cacheTarget || {}
-            if (func.prepare && !this.memory.ready) {
-                this.memory.ready = func.prepare(this);
-            }
-
-            const working = !!this.memory.working;
-            const currentRunner = working ? func.target : func.source;
-            const nextRunner = working ? func.source : func.target;
-
-            // 无缝工作模式：
-            // 本 tick 发生 source/target 状态切换后，立即执行一次新状态逻辑，
-            // 避免传统切换带来的 1 tick 空转。
-            let stateChange = !!currentRunner?.call(func, this);
-
-            if (stateChange) {
-                const nextWorking = !working;
-                this.memory.working = nextWorking;
-                // 清空临时缓存
-                if (working) this.memory.cacheTarget = {};
-                else this.memory.cacheSource = {};
-                this.memory.cache = {};
-
-                // 切换后立刻执行一次新状态；本 tick 不再继续连环切换。
-                nextRunner?.call(func, this);
-            }
+        if (!roledata) {
+            reportExecuteIssue(
+                `missing-role:${role}`,
+                `[CreepExecute] 未找到角色 ${role} 的 RoleData 配置，当前 creep 将跳过执行。`
+            );
+            return;
         }
-        else return;
+
+        // 新框架下，角色执行入口统一由 executor 绑定声明。
+        // 这里不再区分旧的 work/action 模式，只根据统一 id 获取处理器。
+        // 因此 role 名与 executor.id 可以不同，例如 reserver -> reserve。
+        const executor = roledata.executor;
+        if (!executor) {
+            // 没有执行器绑定的角色直接跳过：
+            return;
+        }
+
+        const handler = getRoleHandler(executor.id, (missingId) => {
+            reportExecuteIssue(
+                `missing-handler:${role}:${missingId}`,
+                `[CreepExecute] 角色 ${role} (框架:${executor.framework}) 绑定的统一处理器 ${missingId} 不存在，请检查 RoleData.executor.id 与 roleRegistry 是否一致。`
+            );
+        });
+        if (!handler) return;
+
+        this.memory.cache = this.memory.cache || {};
+        this.memory.cacheSource = this.memory.cacheSource || {};
+        this.memory.cacheTarget = this.memory.cacheTarget || {};
+
+        if (handler.prepare && !this.memory.ready) {
+            this.memory.ready = handler.prepare(this);
+            if (!this.memory.ready) return;
+        }
+
+        if (handler.run) {
+            handler.run(this);
+            return;
+        }
     }
 }

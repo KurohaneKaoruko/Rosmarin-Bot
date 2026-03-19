@@ -1,3 +1,35 @@
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+
+const onTarget = (creep: Creep): WorkEvent => {
+    if (!creep.memory.ready) return WORK_EVENTS.STAY;
+    if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
+
+    creep.runControllerUpgrade();
+    if (creep.store.getUsedCapacity() === 0) {
+        creep.say('🔄');
+        return WORK_EVENTS.TO_SOURCE;
+    }
+    return WORK_EVENTS.STAY;
+};
+
+const onSource = (creep: Creep): WorkEvent => {
+    if (!creep.memory.ready) return WORK_EVENTS.STAY;
+    if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
+
+    creep.withdrawControllerEnergy({
+        linkRange: 2,
+        containerRange: 2,
+        fallbackToTakeEnergy: true,
+    });
+
+    if (creep.store.getFreeCapacity() === 0) {
+        creep.say('⚡');
+        return WORK_EVENTS.TO_TARGET;
+    }
+    return WORK_EVENTS.STAY;
+};
+
 const aid_upgrade = {
     prepare: function (creep: Creep) {
         if (creep.memory['boostmap']) {
@@ -6,33 +38,11 @@ const aid_upgrade = {
         return creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] }) === OK;
     },
 
-    target: function (creep: Creep) {
-        if (!creep.memory.ready) return false;
-        if (!creep.moveToTargetRoom()) return;
-
-        creep.runControllerUpgrade();
-        if (creep.store.getUsedCapacity() === 0) {
-            creep.say('🔄');
-            return true;
-        }
-        return false;
-    },
-    
-    source: function (creep: Creep) {
-        if (!creep.memory.ready) return false;
-        if (!creep.moveToTargetRoom()) return;
-
-        creep.withdrawControllerEnergy({
-            linkRange: 2,
-            containerRange: 2,
-            fallbackToTakeEnergy: true,
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
         });
-
-        if (creep.store.getFreeCapacity() === 0) {
-            creep.say('⚡');
-            return true;
-        }
-        return false;
     },
 }
 

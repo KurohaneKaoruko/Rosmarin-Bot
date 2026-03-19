@@ -1,6 +1,8 @@
 import { compress, decompress } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/utils/memory';
+import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const getWorkTargetCache = (() => {
     const root: Record<string, { tick: number; [key: string]: any }> = {};
@@ -343,41 +345,46 @@ const WorkerAction = function (creep: Creep) {
     creep.runControllerUpgrade({ sign: false, pickupDropped: false });
 }
 
+const onTarget = (creep: Creep): WorkEvent => {
+    if (!creep.memory.ready) return WORK_EVENTS.STAY;
+    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+    if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
+    if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+    if (creep.store.getUsedCapacity() === 0) {
+        return WORK_EVENTS.TO_SOURCE;
+    }
+    WorkerAction(creep);
+    return WORK_EVENTS.STAY;
+};
+
+const onSource = (creep: Creep): WorkEvent => {
+    if (!creep.memory.ready) return WORK_EVENTS.STAY;
+    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+    if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
+    if (creep.store.getFreeCapacity() === 0) {
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+        WorkerAction(creep);
+        return WORK_EVENTS.TO_TARGET;
+    }
+    const fullAfterTake = creep.TakeEnergy();
+    if (fullAfterTake) {
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+        WorkerAction(creep);
+        return WORK_EVENTS.TO_TARGET;
+    }
+    return WORK_EVENTS.STAY;
+};
+
 const WorkerFunction = {
     prepare: function (creep: Creep) {
         return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
     },
-    target: function (creep: Creep) {   // 建造
-        if(!creep.memory.ready) return false;
-        if(!creep.moveHomeRoom()) return;
-        if (creep.handleRoomEdge()) return;
-        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-        if(creep.store.getUsedCapacity() === 0) {
-            return true;
-        } else {
-            WorkerAction(creep);
-            return false;
-        }
-    },
-    source: function (creep: Creep) {   // 获取能量
-        if(!creep.memory.ready) return false;
-        if(!creep.moveHomeRoom()) return;
-        if (creep.handleRoomEdge()) return;
-        if(creep.store.getFreeCapacity() === 0) {
-            if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-            WorkerAction(creep);
-            return true;
-        } else {
-            const fullAfterTake = creep.TakeEnergy();
-            if (fullAfterTake) {
-                if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-                WorkerAction(creep);
-                return true;
-            }
-            return false;
-        }
+    run: function (creep: Creep) {
+        runWorkLayer(creep, {
+            onSource: ({ creep }) => onSource(creep),
+            onTarget: ({ creep }) => onTarget(creep),
+        });
     }
 }
-
 
 export default WorkerFunction

@@ -696,6 +696,12 @@ interface CreepMemory {
         [key: string]: any;
     };
 
+    /**
+     * 分层状态机缓存
+     * @description 保存各层状态机的当前状态，格式: { [layerId: string]: StateId }
+     */
+    fsm?: Record<string, string>;
+
     cacheSource?: CreepMemory['cache'];
     cacheTarget?: CreepMemory['cache'];
     
