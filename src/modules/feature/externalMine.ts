@@ -744,7 +744,6 @@ export class ExternalMine {
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {
-            if (!ExternalMineState.isCenterRoom(roomName)) continue;
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
