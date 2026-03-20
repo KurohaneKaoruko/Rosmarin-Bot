@@ -9,8 +9,11 @@
  */
 import type {
     BetterMoveConfig,
+    BetterMoveParsedShardRoomName,
     BetterMovePath,
     BetterMovePathSearchResult,
+    BetterMoveRoomCostMatrixCache,
+    BetterMoveSameRoomEdgeCostMatrixCache,
     BetterMoveTarget,
     CreepPathCacheEntry,
     FormalizedPos,
@@ -47,11 +50,6 @@ type RuntimeMetrics = {
     cacheMissCost: number;
 };
 
-type ParsedShardRoomName = {
-    shard: string | null;
-    room: string | null | undefined;
-};
-
 type MovementDeps = {
     config: BetterMoveConfig;
     powerCreepProto?: (typeof PowerCreep.prototype & {
@@ -64,17 +62,17 @@ type MovementDeps = {
     originFindClosestByPath: typeof RoomPosition.prototype.findClosestByPath;
     getPowerCreepMoveToMethod: () => typeof PowerCreep.prototype.moveTo | undefined;
     getPowerCreepMoveMethod: () => typeof PowerCreep.prototype.move | undefined;
-    parseShardRoomName: (roomName: string | null | undefined) => ParsedShardRoomName;
+    parseShardRoomName: (roomName: string | null | undefined) => BetterMoveParsedShardRoomName;
     scanPortals: (force: boolean) => void;
     pickPortalToShard: (fromRoomName: string, targetShard: string, targetRoomName: string | null | undefined) => { x: number; y: number; roomName: string } | null | undefined;
     registerRoomBounceGuard: (creep: Creep, targetRoomName: string) => void;
     applySameRoomDetourCooldown: (creep: Creep, toPos: RoomPosition, ops: MoveToOpts) => void;
-    validateMoveToArgTypes: (ops: unknown) => ops is MoveToOpts;
+    validateMoveToArgTypes: (ops: MoveToOpts | object | null | undefined) => ops is MoveToOpts;
     getScopedAvoidSignature: (ops: MoveToOpts) => string;
     formalizeIntentPos: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
     formalizeIntentMovePos: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
     hasActiveBodypart: (body: BodyPartDefinition[] | undefined | null, type: BodyPartConstant) => boolean;
-    getPositiveConfigNumber: (value: unknown, fallback: number) => number;
+    getPositiveConfigNumber: (value: number | null | undefined, fallback: number) => number;
     formalize: (pos: { x: number; y: number; roomName?: string | null } | null | undefined) => FormalizedPos;
     inRange: (pos1: { x: number; y: number; roomName?: string | null }, pos2: { x: number; y: number; roomName?: string | null }, range: number) => boolean;
     isEqual: (pos1: { x: number; y: number; roomName?: string | null }, pos2: { x: number; y: number; roomName?: string | null }) => boolean;
@@ -117,9 +115,9 @@ type MovementDeps = {
     ) => boolean;
     creepPathCache: Record<string, CreepPathCacheEntry | undefined>;
     creepMoveCache: Record<string, number>;
-    costMatrixCache: Record<string, object | undefined>;
+    costMatrixCache: BetterMoveRoomCostMatrixCache;
     costMatrixRevision: Record<string, number>;
-    sameRoomEdgeCostMatCache: Record<string, object | undefined>;
+    sameRoomEdgeCostMatCache: BetterMoveSameRoomEdgeCostMatrixCache;
     rerouteSquad: Set<string>;
     tempArray: RoomPosition[];
     defaultVisualizePathStyle: PolyStyle;
@@ -325,7 +323,7 @@ function direction2Pos(pos, target) {
 /**
  * moveTo 同 tick 去重使用的参数签名
  * @param {Creep} creep
- * @param {IArguments | ArrayLike<unknown>} args
+ * @param {IArguments | ArrayLike<object | string | number | boolean | null | undefined>} args
  * @returns {string}
  */
 function buildMoveToDedupKey(creep, args) {

@@ -9,12 +9,14 @@ import type { BetterMoveObserverRuntime } from './types';
 
 type RoomFlagMap = Record<string, 1>;
 type AvoidExitMap = Record<string, RoomFlagMap>;
+type MemoryBypassRooms = readonly string[] | undefined;
+type ParsedRoomName = Record<string, number | string>;
 type AvoidSyncDeps = {
     observers: BetterMoveObserverRuntime[];
     avoidRooms: RoomFlagMap;
     avoidExits: AvoidExitMap;
     syncedBypassRooms: RoomFlagMap;
-    parseRoomName: (roomName: string) => object | null;
+    parseRoomName: (roomName: string) => ParsedRoomName | null;
     markAvoidRoomsChanged: () => void;
     markAvoidExitsChanged: () => void;
     getAvoidRoomsSyncTick: () => number;
@@ -62,8 +64,8 @@ export function createAvoidSyncModule(deps: AvoidSyncDeps) {
         }
     }
 
-    function normalizeBypassRooms(rawBypassRooms: unknown): string[] {
-        if (!Array.isArray(rawBypassRooms) || !rawBypassRooms.length) {
+    function normalizeBypassRooms(rawBypassRooms: MemoryBypassRooms): string[] {
+        if (!rawBypassRooms || !rawBypassRooms.length) {
             return [];
         }
 
@@ -105,7 +107,7 @@ export function createAvoidSyncModule(deps: AvoidSyncDeps) {
         }
         deps.setAvoidRoomsSyncTick(Game.time);
 
-        const bypassRooms = normalizeBypassRooms((Memory as { bypassRooms?: unknown }).bypassRooms);
+        const bypassRooms = normalizeBypassRooms((Memory as { bypassRooms?: MemoryBypassRooms }).bypassRooms);
         const nextSignature = bypassRooms.join('|');
         let needSync = !deps.getAvoidRoomsMemoryInitialized() || nextSignature !== deps.getAvoidRoomsMemorySignature();
         if (!needSync && !isBypassRoomsStateConsistent(bypassRooms)) {

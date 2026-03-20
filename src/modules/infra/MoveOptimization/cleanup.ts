@@ -5,17 +5,26 @@
  * 从主文件抽走，避免 `index.ts` 在核心移动流程中混入大量 housekeeping 细节。
  */
 import type {
+    BetterMoveEndKeyPathRefCounts,
     BetterMoveObserverRuntime,
     BetterMoveObserverTask,
     BetterMovePath,
+    BetterMovePathCache,
     BetterMovePathInsertToken,
+    BetterMovePathVariantCache,
     BetterMovePortalRegistry,
+    BetterMoveRoomCounterMap,
+    BetterMoveRoomPathRefCounts,
+    BetterMoveSameRoomPathRefs,
+    BetterMoveTileIntent,
     CreepPathCacheEntry,
 } from './types';
 
 type RoomFlagMap = Record<string, 1>;
 type AvoidExitMap = Record<string, RoomFlagMap>;
 type NumericMap = Record<string, number>;
+type ClearableValue = object | string | number | boolean | null | undefined;
+type ClearableMap = Record<string, ClearableValue>;
 type PathTimerMap = Record<number, BetterMovePath[]>;
 type CostMatrixExpiryEntry = { roomName: string; avoids: string[] };
 type CostMatrixTimerMap = Record<number, CostMatrixExpiryEntry[]>;
@@ -29,15 +38,15 @@ type DueTickQueue = {
     marks: Record<number, 1>;
 };
 type CleanupDeps = {
-    globalPathCache: object;
-    globalPathCacheByVariant: object;
-    roomSameRoomPathRefs: object;
-    roomSameRoomPathCount: NumericMap;
-    roomStartKeyRefs: object;
-    roomStartKeyCount: NumericMap;
-    endKeyStartKeyRefs: object;
-    roomEndKeyRefs: object;
-    roomEndKeyCount: NumericMap;
+    globalPathCache: BetterMovePathCache;
+    globalPathCacheByVariant: BetterMovePathVariantCache;
+    roomSameRoomPathRefs: BetterMoveSameRoomPathRefs;
+    roomSameRoomPathCount: BetterMoveRoomCounterMap;
+    roomStartKeyRefs: BetterMoveRoomPathRefCounts;
+    roomStartKeyCount: BetterMoveRoomCounterMap;
+    endKeyStartKeyRefs: BetterMoveEndKeyPathRefCounts;
+    roomEndKeyRefs: BetterMoveRoomPathRefCounts;
+    roomEndKeyCount: BetterMoveRoomCounterMap;
     creepPathCache: Record<string, CreepPathCacheEntry | undefined>;
     creepMoveCache: NumericMap;
     pathCacheTimer: PathTimerMap;
@@ -45,9 +54,9 @@ type CleanupDeps = {
     pathCacheInsertQueue: BetterMovePathInsertToken[];
     costMatrixCacheTimer: CostMatrixTimerMap;
     costMatrixCacheTimerDueQueue: DueTickQueue;
-    costMatrixCache: object;
+    costMatrixCache: ClearableMap;
     costMatrixRevision: NumericMap;
-    sameRoomEdgeCostMatCache: object;
+    sameRoomEdgeCostMatCache: ClearableMap;
     avoidRooms: RoomFlagMap;
     avoidExits: AvoidExitMap;
     syncedBypassRooms: RoomFlagMap;
@@ -58,11 +67,11 @@ type CleanupDeps = {
     routeCacheDueQueue: DueTickQueue;
     bypassRouteCacheKeysByTick: RouteKeysByTick;
     bypassRouteCacheDueQueue: DueTickQueue;
-    bypassCostMatReuseCache: object;
-    temporalAvoidExitCache: object;
+    bypassCostMatReuseCache: ClearableMap;
+    temporalAvoidExitCache: ClearableMap;
     geometryCaches: {
-        roomNameParseCache: object;
-        shardRoomNameParseCache: object;
+        roomNameParseCache: ClearableMap;
+        shardRoomNameParseCache: ClearableMap;
         tileToPosCache: Map<number, RoomPosition>;
     };
     getPathClearDelay: () => number;
@@ -73,7 +82,7 @@ type CleanupDeps = {
     setTemporalAvoidExitCacheTick: (value: number) => void;
     setTemporalAvoidRooms: (from: string, to: string) => void;
     setBounceAvoidState: (from: string, to: string, until: number) => void;
-    setSquadDerivedState: (tick: number, cache: object) => void;
+    setSquadDerivedState: (tick: number, cache: ClearableMap) => void;
     setAutoDiscoverObserverTick: (value: number) => void;
     setObTick: (value: number) => void;
     setAvoidRoomsMemoryInitialized: (value: boolean) => void;
@@ -93,7 +102,7 @@ type CleanupDeps = {
 };
 
 export function clearObjectKeys<T extends object>(obj: T) {
-    const target = obj as Record<string, unknown>;
+    const target = obj as Record<string, ClearableValue>;
     for (const key in target) {
         delete target[key];
     }

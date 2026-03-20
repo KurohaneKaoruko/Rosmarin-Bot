@@ -67,113 +67,18 @@ interface SquadMoveToOpts extends MoveToOpts {
 // global.BetterMove - BetterMove Global API
 // ============================================================
 
+type BetterMoveConfig = import('../modules/infra/MoveOptimization/types').BetterMoveConfig;
+type BetterMoveConfigPatch = import('../modules/infra/MoveOptimization/types').BetterMoveConfigPatch;
+type BetterMoveCacheStats = import('../modules/infra/MoveOptimization/types').BetterMoveCacheStats;
+type BetterMovePathCacheEntry = import('../modules/infra/MoveOptimization/types').BetterMovePathCacheEntry;
+type BetterMoveTileIntent = import('../modules/infra/MoveOptimization/types').BetterMoveTileIntent;
+type BetterMovePortalRecord = import('../modules/infra/MoveOptimization/types').BetterMovePortalRecord;
+type BetterMovePortalRegistry = import('../modules/infra/MoveOptimization/types').BetterMovePortalRegistry;
+
 /**
  * BetterMove 全局 API
  * @description moveOpt 在加载时挂载 global.BetterMove
  */
-interface BetterMoveCacheStats {
-  enabled: boolean;
-  tick: number;
-  route: {
-    lookups: number;
-    hits: number;
-    misses: number;
-    hitRate: number;
-    writes: number;
-    skipByBudget: number;
-    skipByCapacity: number;
-    skipRate: number;
-    evictTTL: number;
-    evictBypass: number;
-    size: number;
-    nonBypassSize: number;
-  };
-  path: {
-    inserts: number;
-    trimRuns: number;
-    trimScans: number;
-    trimDeletes: number;
-    trimHitRate: number;
-    size: number;
-    insertQueueSize: number;
-  };
-}
-
-interface BetterMovePathCacheEntry {
-  dst?: RoomPosition | { x: number; y: number; roomName?: string };
-  path?: {
-    start?: { x: number; y: number };
-    end?: { x: number; y: number };
-    posArray: RoomPosition[];
-    ignoreRoads?: boolean;
-    ignoreStructures?: boolean;
-    ignoreSwamps?: boolean;
-    directionArray?: Array<DirectionConstant | 0>;
-    lastTime?: number;
-  };
-  idx: number;
-  avoidSignature?: string;
-}
-
-interface BetterMoveTileIntent {
-  start: string | number;
-  isSuper: boolean;
-  targetList: Array<{
-    target: number | number[];
-    score: number;
-  }>;
-}
-
-interface BetterMovePortalRecord {
-  roomName?: string;
-  x?: number;
-  y?: number;
-  destShard?: string;
-  destRoom?: string;
-  destX?: number;
-  destY?: number;
-  lastSeen?: number;
-}
-
-interface BetterMovePortalRegistry {
-  v: number;
-  list: BetterMovePortalRecord[];
-  updated: number;
-}
-
-interface BetterMoveConfig {
-  changeMove: boolean;
-  changeMoveTo: boolean;
-  changeFindClostestByPath: boolean;
-  autoVisual: boolean;
-  enableCpuStats: boolean;
-  enableCacheStats: boolean;
-  enableFlee: boolean;
-  enableSquadPath: boolean;
-  enableRouteCache: boolean;
-  routeCacheTTL: number;
-  routeCacheMaxEntries: number;
-  routeCacheMaxNewPerTick: number;
-  enableBypassCostMatReuse: boolean;
-  enableSameRoomDetourCooldown: boolean;
-  sameRoomDetourCooldownTTL: number;
-  enableRoomBounceGuardV2: boolean;
-  roomBounceWindow: number;
-  roomBounceTTL: number;
-  enableSameRoomDetourCooldownV2: boolean;
-  sameRoomDetourBounceWindow: number;
-  enableSameRoomEdgePenalty: boolean;
-  sameRoomEdgePenaltyCost: number;
-  enableTemporalBypassRefine: boolean;
-  temporalAvoidExitCheckTTL: number;
-  temporalBypassRetryMinTicks: number;
-  temporalBypassRetryMaxTicks: number;
-  pathCacheMaxEntries: number;
-  pathCacheTrimBatch: number;
-  enableObserverQueueRefine: boolean;
-  observerTaskTTL: number;
-}
-
 interface BetterMoveAPI {
   setChangeMove(bool: boolean): ScreepsReturnCode;
   creepPathCache: Record<string, BetterMovePathCacheEntry | undefined>;
@@ -198,7 +103,7 @@ interface BetterMoveAPI {
   setEnableSquadPath(bool: boolean): ScreepsReturnCode;
   setEnableFlee(bool: boolean): ScreepsReturnCode;
   getConfig(): BetterMoveConfig;
-  setConfig(partial: Partial<BetterMoveConfig> & Record<string, unknown>): ScreepsReturnCode;
+  setConfig(partial: BetterMoveConfigPatch): ScreepsReturnCode;
   getCacheStats(): BetterMoveCacheStats;
   resetCacheStats(): ScreepsReturnCode;
   deletePathInRoom(roomName: string): ScreepsReturnCode;

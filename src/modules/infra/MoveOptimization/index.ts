@@ -30,7 +30,19 @@ import { MovementModuleApi, MovementService } from './movement';
 import { installDontPullMePolicies, updateDontPullMeForMoveTo, wrapProtoMethod } from './dontPullMe';
 import { createIntentSolverModule } from './intentSolver';
 import { createBetterMoveGlobalApi, createMoveRuntimeControlModule } from './controls';
-import type { BetterMoveConfig, BetterMoveObserverRuntime, BetterMoveObserverTask, BetterMovePath, BetterMovePathInsertToken } from './types';
+import type {
+    BetterMoveConfig,
+    BetterMoveEndKeyPathRefCounts,
+    BetterMoveObserverRuntime,
+    BetterMoveObserverTask,
+    BetterMovePath,
+    BetterMovePathCache,
+    BetterMovePathInsertToken,
+    BetterMovePathVariantCache,
+    BetterMoveRoomCounterMap,
+    BetterMoveRoomPathRefCounts,
+    BetterMoveSameRoomPathRefs,
+} from './types';
 
 /*
 creep对穿+跨房间寻路+寻路缓存 
@@ -130,7 +142,7 @@ function hasScopedAvoids(ops) {
     );
 }
 
-function validateMoveToArgTypes(ops: unknown): ops is MoveToOpts {
+function validateMoveToArgTypes(ops: MoveToOpts | object | null | undefined): ops is MoveToOpts {
     if (!ops || typeof ops !== 'object') {
         return false;
     }
@@ -285,19 +297,19 @@ let obTick = Game.time;
 
 // 4.2 路径缓存与反向索引
 /** @type {Paths} */
-let globalPathCache = Object.create(null);     // 缓存path
-let globalPathCacheByVariant = Object.create(null); // startKey -> variantKey -> combinedY -> path[]
+let globalPathCache: BetterMovePathCache = Object.create(null);     // 缓存path
+let globalPathCacheByVariant: BetterMovePathVariantCache = Object.create(null); // startKey -> variantKey -> combinedY -> path[]
 let globalPathCacheBucketCount = 0; // startKey bucket 数量（globalPathCache 的一级 key 数），用于估算全表遍历规模
 let globalPathCachePathCount = 0; // 当前缓存路径总数，空时可快速退出清理逻辑
 let pathCacheInsertQueue: BetterMovePathInsertToken[] = [];
 let pathCacheInsertHead = 0;
-let roomSameRoomPathRefs = Object.create(null); // roomName -> { pathVersion: path }，仅记录同房路径
-let roomSameRoomPathCount = Object.create(null); // roomName -> 同房路径条数
-let roomStartKeyRefs = Object.create(null); // roomName -> { startKey: refCount }，同房路径的起点引用计数
-let roomStartKeyCount = Object.create(null); // roomName -> startKey 数量，用于比较“按房间索引遍历”与“全表遍历”成本
-let endKeyStartKeyRefs = Object.create(null); // endKey -> { startKey: refCount }，用于从终点范围反向定位可能的 startKey 桶
-let roomEndKeyRefs = Object.create(null); // roomName -> { endKey: refCount }，同房路径的终点引用计数
-let roomEndKeyCount = Object.create(null); // roomName -> endKey 数量，用于评估 endKey 索引遍历成本
+let roomSameRoomPathRefs: BetterMoveSameRoomPathRefs = Object.create(null); // roomName -> { pathVersion: path }，仅记录同房路径
+let roomSameRoomPathCount: BetterMoveRoomCounterMap = Object.create(null); // roomName -> 同房路径条数
+let roomStartKeyRefs: BetterMoveRoomPathRefCounts = Object.create(null); // roomName -> { startKey: refCount }，同房路径的起点引用计数
+let roomStartKeyCount: BetterMoveRoomCounterMap = Object.create(null); // roomName -> startKey 数量，用于比较“按房间索引遍历”与“全表遍历”成本
+let endKeyStartKeyRefs: BetterMoveEndKeyPathRefCounts = Object.create(null); // endKey -> { startKey: refCount }，用于从终点范围反向定位可能的 startKey 桶
+let roomEndKeyRefs: BetterMoveRoomPathRefCounts = Object.create(null); // roomName -> { endKey: refCount }，同房路径的终点引用计数
+let roomEndKeyCount: BetterMoveRoomCounterMap = Object.create(null); // roomName -> endKey 数量，用于评估 endKey 索引遍历成本
 /** @type {MoveTimer} */
 let pathCacheTimer = Object.create(null); // 用于记录path被使用的时间，清理长期未被使用的path
 let pathCacheTimerDueQueue = createDueTickQueue();
@@ -1762,7 +1774,7 @@ let tempArray = [];
 // 12) 原型包装入口：统计、去重、每 tick 维护
 // ----------------------------------------------------------------------------
 /**
- * @param {(...args: unknown[]) => unknown} fn
+ * @param {(...args: Array<object | string | number | boolean | null | undefined>) => object | string | number | boolean | null | undefined} fn
  */
 const intentSolver = createIntentSolverModule({
     getOriginCancelOrderMethod,

@@ -6,7 +6,13 @@
  */
 import type { MovementModuleApi } from './movement';
 import type { PathingModuleApi } from './pathing';
-import type { BetterMoveConfig, BetterMoveConfigPatch, BetterMoveFleeTarget, BetterMovePortalRecord } from './types';
+import type {
+    BetterMoveCacheStats,
+    BetterMoveConfig,
+    BetterMoveConfigPatch,
+    BetterMoveFleeTarget,
+    BetterMovePortalRecord,
+} from './types';
 
 type CpuBucket = {
     sum: number;
@@ -36,6 +42,10 @@ type RuntimeMetrics = {
     cacheMissCost: number;
 };
 
+type DynamicCallValue = object | string | number | boolean | symbol | bigint | null | undefined;
+type DynamicCallArgs = DynamicCallValue[];
+type DynamicWrappedFn = (...args: DynamicCallArgs) => DynamicCallValue;
+
 type BetterMoveCreepPrototype = typeof Creep.prototype & {
     $move?: typeof Creep.prototype.move;
     $moveTo?: typeof Creep.prototype.moveTo;
@@ -59,9 +69,9 @@ type RuntimeControlDeps = {
     resetCacheRuntimeStats: () => void;
     applyConfig: () => void;
     originMoveTo: typeof Creep.prototype.moveTo;
-    wrapFn: (fn: (...args: unknown[]) => unknown, name: string) => (...args: unknown[]) => unknown;
+    wrapFn: (fn: DynamicWrappedFn, name: string) => DynamicWrappedFn;
     updateDontPullMeForMoveTo: (creep: Creep) => void;
-    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: (...args: unknown[]) => unknown) => void;
+    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: DynamicWrappedFn) => void;
     restorePowerCreepNativeMethods: () => void;
     betterMoveTo: MovementModuleApi['betterMoveTo'];
     betterMove: MovementModuleApi['betterMove'];

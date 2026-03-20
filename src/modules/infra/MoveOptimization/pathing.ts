@@ -9,19 +9,114 @@
  * - observer 校验与 tick 维护调度
  */
 import type {
+    BetterMoveCacheStats,
+    BetterMoveConfig,
+    BetterMoveEndKeyPathRefCounts,
     BetterMoveFleeTarget,
+    BetterMoveObserverRuntime,
+    BetterMoveObserverTask,
+    BetterMoveParsedShardRoomName,
     BetterMovePath,
+    BetterMovePathCache,
     BetterMovePathSearchResult,
+    BetterMovePathInsertToken,
+    BetterMovePathVariantCache,
+    BetterMoveRoomCostMatrixCache,
     BetterMoveTarget,
+    BetterMoveRoomCounterMap,
+    BetterMoveRoomPathRefCounts,
+    BetterMoveSameRoomEdgeCostMatrixCache,
+    BetterMoveSameRoomPathRefs,
     CreepPathCacheEntry,
     FormalizedPos,
 } from './types';
 
 type SquadMemberOffset = { x: number; y: number };
+type CoordLike = { x: number; y: number; roomName?: string | null };
 type RouteRoomSet = Record<string, 1>;
 type RouteStep = { room: string };
 type UserCostCallback = ((roomName: string, costMatrix: CostMatrix) => CostMatrix | boolean | void) | undefined;
 type SquadPathToOpts = MoveToOpts & { memberPos?: SquadMemberOffset[] };
+type DueTickQueue = { heap: number[]; marks: Record<number, 1> };
+type RouteCacheEntry = {
+    tick: number;
+    route: RouteStep[];
+    bypass: 0 | 1;
+};
+type RouteCacheMap = Record<string, RouteCacheEntry | undefined>;
+type RouteKeysByTick = Record<number, string[]>;
+type RouteCacheState = {
+    routeCache: RouteCacheMap;
+    routeCacheKeysByDueTick: RouteKeysByTick;
+    routeCacheDueQueue: DueTickQueue;
+    bypassRouteCacheKeysByTick: RouteKeysByTick;
+    bypassRouteCacheDueQueue: DueTickQueue;
+    trackedTtl: number;
+    entryCount: number;
+    nonBypassEntryCount: number;
+    writeTick: number;
+    writeCount: number;
+    maintainTick: number;
+    lookupCount: number;
+    hitCount: number;
+    writeStoreCount: number;
+    skipByBudgetCount: number;
+    skipByCapacityCount: number;
+    evictBypassCount: number;
+    evictTTLCount: number;
+};
+type TemporalAvoidCache = Record<string, string>;
+type TemporalAvoidState = {
+    from: string;
+    to: string;
+    bounceFrom: string;
+    bounceTo: string;
+    bounceUntil: number;
+    cacheTick: number;
+    cache: TemporalAvoidCache;
+};
+type ObserverResultMap = Record<number, BetterMoveObserverTask[]>;
+type ObserverState = {
+    observers: BetterMoveObserverRuntime[];
+    obTimer: ObserverResultMap;
+    obTimerDueQueue: DueTickQueue;
+    obTick: number;
+};
+type SquadDerivedCache = Record<string, CostMatrix>;
+type SquadDerivedState = {
+    tick: number;
+    cache: SquadDerivedCache;
+};
+type BypassCostMatrixReuseEntry = {
+    tick: number;
+    baseRev: number;
+    mat: CostMatrix;
+    changedKeys: number[];
+    oldCosts: number[];
+};
+type BypassCostMatrixReuseCache = Record<string, BypassCostMatrixReuseEntry | undefined>;
+type ParsedRoomName = { baseX: number; baseY: number } | null;
+type CacheStatsSnapshot = {
+    lookups: number;
+    hits: number;
+    writes: number;
+    skipByBudget: number;
+    skipByCapacity: number;
+    evictTTL: number;
+    evictBypass: number;
+    size: number;
+    nonBypassSize: number;
+};
+type PathCacheStatsSnapshot = {
+    inserts: number;
+    trimRuns: number;
+    trimScans: number;
+    trimDeletes: number;
+};
+type RuntimeMetrics = {
+    pathCounter: number;
+};
+type PathFinderOptsWithMaxOps = PathFinderOpts & { maxOps?: number };
 type SquadTemporalPathArgs = [
     leader: Creep,
     toPos: RoomPosition,
@@ -30,6 +125,87 @@ type SquadTemporalPathArgs = [
     severe?: boolean,
     squadNames?: Set<string>,
 ];
+type PathingDeps = {
+    config: BetterMoveConfig;
+    setPathClearDelay: (value?: number) => void;
+    setHostileCostMatrixClearDelay: (value?: number) => void;
+    parseRoomName: (roomName: string) => ParsedRoomName;
+    parseShardRoomName: (roomName: string) => BetterMoveParsedShardRoomName;
+    ensureAvoidRoomsUpToDate: () => void;
+    hasScopedAvoids: (ops: MoveToOpts | SquadMoveToOpts) => boolean;
+    withScopedAvoids: <T>(ops: MoveToOpts | SquadMoveToOpts, fn: () => T) => T;
+    isRoomAvoided: (roomName: string) => boolean;
+    isExitAvoided: (fromRoomName: string, toRoomName: string) => boolean;
+    isHighWay: (roomName: string) => boolean;
+    getCurrentAvoidScopeSignature: () => string;
+    getPositiveConfigNumber: (value: number | null | undefined, fallback: number) => number;
+    getDirection: (fromPos: CoordLike, toPos: CoordLike) => DirectionConstant | 0;
+    isNearExitDirection: (pos: CoordLike, exitDirection: ExitConstant, range?: number) => boolean;
+    createPathFinderBaseOpts: (ops: MoveToOpts | SquadMoveToOpts) => PathFinderOptsWithMaxOps;
+    applyMoveToTerrainCosts: (pathFinderOpts: PathFinderOptsWithMaxOps, ops: MoveToOpts | SquadMoveToOpts) => void;
+    applyRoomEdgePenalty: (costMat: CostMatrix, edgeCost: number) => void;
+    getSameRoomEdgeCostMatrix: (roomName: string, ignoreCondition?: boolean) => CostMatrix;
+    getSquadCostMatrixForRoom: (roomName: string, ignoreCondition?: boolean) => CostMatrix;
+    generateCostMatrix: (room: Room, pos?: RoomPosition) => void;
+    ensurePathVersion: (path: BetterMovePath) => number;
+    generateDirectionArray: (path: BetterMovePath) => void;
+    buildPathVariantKeyFromQuery: (ops: MoveToOpts, endRoomName?: string) => string;
+    formalize: (pos: CoordLike | null | undefined) => FormalizedPos;
+    isSameOps: (path: BetterMovePath, ops: MoveToOpts) => boolean;
+    isNear: (pos1: CoordLike, pos2: CoordLike) => boolean;
+    inRange: (pos1: CoordLike, pos2: CoordLike, range: number) => boolean;
+    deletePath: (path: BetterMovePath) => void;
+    emptyCostMatrix: CostMatrix;
+    unWalkableCCost: number;
+    globalPathCache: BetterMovePathCache;
+    globalPathCacheByVariant: BetterMovePathVariantCache;
+    getGlobalPathCachePathCount: () => number;
+    getGlobalPathCacheBucketCount: () => number;
+    roomSameRoomPathRefs: BetterMoveSameRoomPathRefs;
+    roomStartKeyCount: BetterMoveRoomCounterMap;
+    roomEndKeyCount: BetterMoveRoomCounterMap;
+    roomStartKeyRefs: BetterMoveRoomPathRefCounts;
+    endKeyStartKeyRefs: BetterMoveEndKeyPathRefCounts;
+    roomEndKeyRefs: BetterMoveRoomPathRefCounts;
+    costMatrixCache: BetterMoveRoomCostMatrixCache;
+    costMatrixRevision: Record<string, number>;
+    sameRoomEdgeCostMatCache: BetterMoveSameRoomEdgeCostMatrixCache;
+    pathCacheInsertQueue: BetterMovePathInsertToken[];
+    pathCacheTimer: Record<number, BetterMovePath[]>;
+    pathCacheTimerDueQueue: DueTickQueue;
+    creepPathCache: Record<string, CreepPathCacheEntry | undefined>;
+    creepMoveCache: Record<string, number>;
+    runtimeMetrics: RuntimeMetrics;
+    routeCacheState: RouteCacheState;
+    temporalAvoidState: TemporalAvoidState;
+    observerState: ObserverState;
+    squadDerivedState: SquadDerivedState;
+    creepToSquad: Map<string, number>;
+    rerouteSquad: Set<string>;
+    bypassCostMatReuseCache: BypassCostMatrixReuseCache;
+    getPathCacheInsertHead: () => number;
+    getPathClearDelay: () => number;
+    isCacheStatsEnabled: () => boolean;
+    isCpuStatsEnabled: () => boolean;
+    setStartCacheSearch: (value: number) => void;
+    getAvoidRoomsVersion: () => number;
+    getAvoidExitsVersion: () => number;
+    getRouteCacheStats: () => CacheStatsSnapshot;
+    getPathCacheStats: () => PathCacheStatsSnapshot;
+    resetCacheRuntimeStats: () => void;
+    enqueueDueTick: (queue: DueTickQueue, tick: number) => void;
+    drainDueTickQueue: (queue: DueTickQueue, now: number, visit: (tick: number) => void) => void;
+    clearDueTickQueue: (queue: DueTickQueue) => void;
+    clearObjectKeys: <T extends object>(obj: T) => void;
+    checkRoom: (room: Room | { name: string }, path: BetterMovePath, startIdx: number) => boolean;
+    getObserverQueueSize: (obData: BetterMoveObserverRuntime) => number;
+    peekObserverTask: (obData: BetterMoveObserverRuntime) => BetterMoveObserverTask | undefined;
+    dropObserverTask: (obData: BetterMoveObserverRuntime) => void;
+    isObserverTaskExpired: (task: BetterMoveObserverTask | undefined) => boolean;
+    isObserverTaskStale: (task: BetterMoveObserverTask | undefined) => boolean;
+    scanPortals: (force: boolean) => void;
+    originMove: typeof Creep.prototype.move;
+};
 
 export interface PathingModuleApi {
     // pathing 对外暴露的是“路径搜索与缓存控制面”，
@@ -79,17 +255,16 @@ export class PathingService {
     declare setPathTimer: PathingModuleApi['setPathTimer'];
     declare runMoveOptTickMaintenance: PathingModuleApi['runMoveOptTickMaintenance'];
 
-    constructor(deps) {
+    constructor(deps: PathingDeps) {
         const routeState = deps.routeCacheState;
         const temporalState = deps.temporalAvoidState;
         const observerState = deps.observerState;
-        type PathFinderOptsWithMaxOps = PathFinderOpts & { maxOps?: number };
 
         // 通过构造器闭包保存搜索期临时状态，既能形成清晰的类边界，
         // 又不破坏 `findSquadPathTo` / `flee` 这类依赖调用方 `this` 的旧接口。
         let bypassRoomName = '';
         let bypassCostMat: CostMatrix;
-        let bypassIgnoreCondition;
+        let bypassIgnoreCondition: boolean | undefined;
         let userCostCallback: UserCostCallback;
         let costMat: CostMatrix;
         let route: RouteRoomSet = Object.create(null);
@@ -97,16 +272,20 @@ export class PathingService {
         let findPathPortalMat: CostMatrix | null = null;
         let findPathAllowPortal = false;
         let findPathSameRoomEdgeRoomName = '';
-        let findPathIgnoreCondition;
+        let findPathIgnoreCondition: boolean | undefined;
         let findPathStartPos: RoomPosition | undefined;
         let findPathStartMat: CostMatrix | null | undefined;
+
+    function getRoomCostMatrix(roomCache: NonNullable<BetterMoveRoomCostMatrixCache[string]>, ignoreCondition: boolean | undefined): CostMatrix {
+        return roomCache[ignoreCondition ? 'true' : 'false'];
+    }
 
     function getCachedRoomCostMatrix(roomName: string, ignoreCondition: boolean | undefined): CostMatrix {
         if (!(roomName in deps.costMatrixCache)) {
             return deps.emptyCostMatrix;
         }
         const roomCache = deps.costMatrixCache[roomName];
-        return ignoreCondition ? roomCache.true : roomCache.false;
+        return roomCache ? getRoomCostMatrix(roomCache, ignoreCondition) : deps.emptyCostMatrix;
     }
 
     function bmSetPathClearDelay(number) {
@@ -761,7 +940,7 @@ export class PathingService {
             entry = deps.bypassCostMatReuseCache[key] = {
                 tick: Game.time,
                 baseRev,
-                mat: deps.costMatrixCache[roomName][ignoreCondition].clone(),
+                mat: getRoomCostMatrix(deps.costMatrixCache[roomName]!, ignoreCondition).clone(),
                 changedKeys: [],
                 oldCosts: []
             };
@@ -826,7 +1005,7 @@ export class PathingService {
             costMat = bypassCostMat;
         } else {
             const roomCache = deps.costMatrixCache[roomName];
-            costMat = roomCache ? roomCache[findPathIgnoreCondition] : deps.emptyCostMatrix;
+            costMat = roomCache ? getRoomCostMatrix(roomCache, findPathIgnoreCondition) : deps.emptyCostMatrix;
         }
 
         if (userCostCallback) {
@@ -845,7 +1024,7 @@ export class PathingService {
                 costMat = bypassCostMat;
             } else {
                 const roomCache = deps.costMatrixCache[roomName];
-                costMat = roomCache ? roomCache[findPathIgnoreCondition] : deps.emptyCostMatrix;
+                costMat = roomCache ? getRoomCostMatrix(roomCache, findPathIgnoreCondition) : deps.emptyCostMatrix;
             }
 
             if (userCostCallback) {
@@ -882,7 +1061,7 @@ export class PathingService {
         ) {
             return deps.getSameRoomEdgeCostMatrix(roomName, findPathIgnoreCondition);
         }
-        return deps.costMatrixCache[roomName][findPathIgnoreCondition];
+        return getRoomCostMatrix(deps.costMatrixCache[roomName]!, findPathIgnoreCondition);
     }
 
     function roomCallback(roomName) {
@@ -971,7 +1150,7 @@ export class PathingService {
                 );
             }
         } else {
-            bypassCostMat = deps.costMatrixCache[creep.room.name][bypassIgnoreCondition].clone();
+            bypassCostMat = getRoomCostMatrix(deps.costMatrixCache[creep.room.name]!, bypassIgnoreCondition).clone();
             for (let i = nearbyCreeps.length; i--;) {
                 const creepInWay = nearbyCreeps[i];
                 bypassCostMat.set(creepInWay.pos.x, creepInWay.pos.y, deps.unWalkableCCost);
@@ -1239,11 +1418,11 @@ export class PathingService {
         const pathFinderOpts = createSquadPathFinderOpts(ops, squadTemporalRoomCallback);
         const creepCache = deps.creepPathCache[key];
         const range = typeof ops.range === 'number' ? ops.range : 0;
-        let result = deps.withScopedAvoids(ops, () => PathFinder.search(leader.pos, { pos: toPos, range }, pathFinderOpts));
-        if (result.incomplete && result.path.length <= 1) {
+        const searchResult = deps.withScopedAvoids(ops, () => PathFinder.search(leader.pos, { pos: toPos, range }, pathFinderOpts));
+        if (searchResult.incomplete && searchResult.path.length <= 1) {
             return false;
         }
-        result = result.path;
+        const result = searchResult.path;
         creepCache.path = {
             end: deps.formalize(result[result.length - 1]),
             posArray: result,

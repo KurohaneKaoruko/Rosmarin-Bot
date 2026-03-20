@@ -4,7 +4,9 @@
  * 抽到独立文件后，BetterMove 的主逻辑文件可以专注于寻路与缓存，
  * dontPullMe 这类“行为层补丁”则独立维护。
  */
-type ProtoMethod = (...args: unknown[]) => unknown;
+type ProtoValue = object | string | number | boolean | symbol | bigint | null | undefined;
+type ProtoMethodArgs = ProtoValue[];
+type ProtoMethod = (...args: ProtoMethodArgs) => ProtoValue;
 type AnyProto = object;
 type CreepWithMoveMemory = Creep & {
     memory: CreepMemory & {
@@ -79,7 +81,7 @@ export function installDontPullMePolicies({
         if (CreepPrototype[backupName]) {
             return;
         }
-        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: unknown[]) {
+        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: ProtoMethodArgs) {
             const backupMethod = this[backupName];
             if (typeof backupMethod !== 'function') {
                 return ERR_INVALID_TARGET;
