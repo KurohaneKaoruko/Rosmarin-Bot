@@ -73,7 +73,7 @@ const RepairRampart = function (creep: Creep) {
     const cache = getCache(creep)
     if (cache.buildRampartId) {
         const rampart = Game.getObjectById(cache.buildRampartId) as StructureRampart;
-        if (!rampart || rampart.hits >= 5000) {
+        if (!rampart || rampart.hits >= THRESHOLDS.REPAIR.RAMPART_BUILD_BUFFER) {
             delete cache.buildRampartId;
             return false;
         } else {

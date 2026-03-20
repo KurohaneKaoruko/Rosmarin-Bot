@@ -107,6 +107,9 @@ class ExternalMineMath {
     private static readonly MAX_HARVESTERS_PER_SOURCE_LOW_LEVEL = 3;
     // 成熟房间（有效等级 >= 4）单源上限：严格 1 个采集者。
     private static readonly MAX_HARVESTERS_PER_SOURCE_STABLE = 1;
+    // high/rush 模式下把小体型搬运降一级：out-carry 8C4M -> 6C3M，out-car 1W7C4M -> 1W5C3M。
+    private static readonly SMALL_BODY_OUT_CARRY: ((BodyPartConstant | number)[])[] = [[CARRY, 6], [MOVE, 3]];
+    private static readonly SMALL_BODY_OUT_CAR: ((BodyPartConstant | number)[])[] = [[WORK, 1], [CARRY, 5], [MOVE, 3]];
     // high/rush 模式下外矿经济单位使用较小体型的能量预算上限（便于多数量）。
     private static readonly SMALL_BODY_ENERGY_CAP_HIGH = 650;
     private static readonly SMALL_BODY_ENERGY_CAP_RUSH = 650;
@@ -136,6 +139,18 @@ class ExternalMineMath {
         role: string,
         upbody?: boolean
     ): ((BodyPartConstant | number)[])[] | null {
+        if (!upbody && role === 'out-carry') {
+            const mode = ExternalMineState.getRoomMode(sourceRoom);
+            if (mode === 'high' || mode === 'rush') {
+                return this.SMALL_BODY_OUT_CARRY.map((part) => [...part]);
+            }
+        }
+        if (!upbody && role === 'out-car') {
+            const mode = ExternalMineState.getRoomMode(sourceRoom);
+            if (mode === 'high' || mode === 'rush') {
+                return this.SMALL_BODY_OUT_CAR.map((part) => [...part]);
+            }
+        }
         const budget = this.getModeLimitedEnergyBudget(sourceRoom, role, upbody);
         if (!budget) return null;
         const body = sourceRoom.GetRoleBodys(role, upbody, budget);

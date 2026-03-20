@@ -118,8 +118,67 @@ export default class MissionGet extends Room {
         }
 
         const roomNukes = this.find(FIND_NUKES) || [];
+        const referencePos = creep?.pos || this.getCenter();
+        const urgentRampartHits = THRESHOLDS.REPAIR.URGENT_RAMPART;
+        const urgentWallHits = THRESHOLDS.REPAIR.URGENT_WALL;
+        const allRamWalls = (((this as any).structures || this.find(FIND_STRUCTURES)) as Structure[])
+            .filter((s) =>
+                s &&
+                s.hits < s.hitsMax &&
+                (s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART)
+            ) as (StructureWall | StructureRampart)[];
+
+        // 弱 rampart / wall 走全量急救扫描，避免布局候选过多时轮询太慢导致低血目标烂掉。
+        let urgentBest: StructureWall | StructureRampart | null = null;
+        let urgentBestTargetHits = 0;
+        let urgentBestScore = Infinity;
+        let urgentBestNukePriority = false;
+        for (const structure of allRamWalls) {
+            let targetHits = structure.structureType === STRUCTURE_RAMPART
+                ? Math.min(structure.hitsMax, urgentRampartHits)
+                : Math.min(structure.hitsMax, urgentWallHits);
+            let nukePriority = false;
+            if (roomNukes.length > 0) {
+                const areaNukeDamage = roomNukes.filter((n) => structure.pos.inRangeTo(n.pos, 2))
+                    .reduce((hits, nuke) => structure.pos.isEqualTo(nuke.pos) ? hits + 1e7 : hits + 5e6, 0);
+                if (areaNukeDamage > 0) {
+                    const nukeTargetHits = Math.min(structure.hitsMax, areaNukeDamage + 1e6);
+                    if (structure.hits < nukeTargetHits) {
+                        targetHits = Math.max(targetHits, nukeTargetHits);
+                        nukePriority = true;
+                    }
+                }
+            }
+            if (structure.hits >= targetHits) continue;
+
+            const dist = referencePos.getRangeTo(structure.pos);
+            const score = structure.hits + dist;
+            if (
+                urgentBest == null ||
+                (nukePriority && !urgentBestNukePriority) ||
+                (nukePriority === urgentBestNukePriority && score < urgentBestScore)
+            ) {
+                urgentBest = structure;
+                urgentBestTargetHits = targetHits;
+                urgentBestScore = score;
+                urgentBestNukePriority = nukePriority;
+            }
+        }
+        if (urgentBest) {
+            const urgentTask = {
+                pos: compress(urgentBest.pos.x, urgentBest.pos.y),
+                hits: urgentBestTargetHits,
+            };
+            botMem.wallRepair.pos = urgentTask.pos;
+            botMem.wallRepair.hits = urgentTask.hits;
+            botMem.wallRepair.until = Game.time + 5;
+            roomAny._wallMissionTickCacheTick = Game.time;
+            roomAny._wallMissionTickCacheTask = urgentTask;
+            return urgentTask;
+        }
+
         const cursor = botMem.wallRepair.cursor || 0;
-        const scanLimit = 40;
+        const scanLimit = Math.min(candidates.length, 80);
         let bestPos = null;
         let bestTargetHits = 0;
         let bestScore = Infinity;
@@ -167,7 +226,7 @@ export default class MissionGet extends Room {
         if (!bestPos) {
             delete botMem.wallRepair.pos;
             delete botMem.wallRepair.hits;
-            botMem.wallRepair.until = Game.time + 10;
+            botMem.wallRepair.until = Game.time + 5;
             roomAny._wallMissionTickCacheTick = Game.time;
             roomAny._wallMissionTickCacheTask = null;
             return null;
@@ -175,7 +234,7 @@ export default class MissionGet extends Room {
 
         botMem.wallRepair.pos = bestPos;
         botMem.wallRepair.hits = bestTargetHits;
-        botMem.wallRepair.until = Game.time + 20;
+        botMem.wallRepair.until = Game.time + 10;
         botMem.wallRepair.cursor = (bestCursor + 1) % candidates.length;
         const task = { pos: bestPos, hits: bestTargetHits };
         roomAny._wallMissionTickCacheTick = Game.time;

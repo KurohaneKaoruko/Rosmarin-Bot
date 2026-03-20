@@ -450,10 +450,16 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
 
         // 3. 没有建造需求时，走刷墙逻辑
         if (!needBuilder) {
-            if (current >= 1 || room[RESOURCE_ENERGY] < REPAIR_MIN_ENERGY) return false;
+            if (current >= 1) return false;
 
-            if (room.level < 8 || Game.flags[`${room.name}/REPAIR`]) {
-                if (room.getWallMission(null as any)) return true;
+            const wallTask = room.getWallMission(null as any);
+            if (!wallTask) return false;
+            const urgentWallTask = wallTask.hits <= THRESHOLDS.REPAIR.URGENT_RAMPART;
+            const minRepairEnergy = urgentWallTask ? THRESHOLDS.ENERGY.WALL_MIN : REPAIR_MIN_ENERGY;
+            if (room[RESOURCE_ENERGY] < minRepairEnergy) return false;
+
+            if (room.level < 8 || Game.flags[`${room.name}/REPAIR`] || urgentWallTask) {
+                return true;
             }
             if (!room.tower || room.tower.length === 0) {
                 return room.getMissionNumInPool('repair') >= 20;

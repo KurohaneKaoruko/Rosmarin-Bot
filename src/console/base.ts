@@ -64,9 +64,8 @@ const Base = {
             return Memory['whitelist'] || [];
         }
     },
-
-        clear: {
-            site(roomName: string) {
+    clear: {
+        site(roomName: string) {
             const room = Game.rooms[roomName];
             if(!room) {
                 return Error(`无房间视野`);
@@ -95,16 +94,16 @@ const Base = {
                 }
                 return OK;
             }
-            },
-            mission(roomName: string, type: string) {
-                const pools = getMissionPools();
-                if (!pools[roomName]) return Error(`房间 ${roomName} 任务池不存在`);
-                sanitizeMissionPoolMemory(pools[roomName]);
-                if (!MISSION_POOL_NAME_SET.has(type as MissionPoolName)) return Error(`任务池 ${type} 不存在`);
-                pools[roomName][type as MissionPoolName] = [];
-                log('', `已清空房间 ${roomName} 的 ${type} 任务`);
-                return OK;
-            },
+        },
+        mission(roomName: string, type: string) {
+            const pools = getMissionPools();
+            if (!pools[roomName]) return Error(`房间 ${roomName} 任务池不存在`);
+            sanitizeMissionPoolMemory(pools[roomName]);
+            if (!MISSION_POOL_NAME_SET.has(type as MissionPoolName)) return Error(`任务池 ${type} 不存在`);
+            pools[roomName][type as MissionPoolName] = [];
+            log('', `已清空房间 ${roomName} 的 ${type} 任务`);
+            return OK;
+        },
         boostTask(roomName: string) {
             const boostmem = getStructData(roomName);
             if (boostmem?.boostLabs) {
@@ -116,7 +115,6 @@ const Base = {
             return OK;
         }
     },
-
     log(text: string, ...args: any[]): OK | Error {
         log(`${BASE_CONFIG.BOT_NAME}`, `${text}`, ...args);
         return OK;
