@@ -63,6 +63,14 @@ function resolveSlashPackedPos(value: string | null | undefined): RoomPosition |
     return new RoomPosition(x, y, roomName);
 }
 
+/**
+ * 将对象 ID 指向的位置候选添加到工位列表。
+ *
+ * @param candidates 候选数组。
+ * @param seen 去重集合。
+ * @param id 目标对象 ID。
+ * @param range 工位保护范围。
+ */
 function addObjectIdCandidate(
     candidates: WorkTileCandidate[],
     seen: Set<string>,
@@ -72,6 +80,15 @@ function addObjectIdCandidate(
     addCandidate(candidates, seen, resolveObjectPos(id), range);
 }
 
+/**
+ * 将压缩坐标候选添加到工位列表。
+ *
+ * @param candidates 候选数组。
+ * @param seen 去重集合。
+ * @param roomName 所在房间名。
+ * @param packed 压缩后的坐标。
+ * @param range 工位保护范围。
+ */
 function addPackedCandidate(
     candidates: WorkTileCandidate[],
     seen: Set<string>,
@@ -82,6 +99,14 @@ function addPackedCandidate(
     addCandidate(candidates, seen, resolvePackedPos(roomName, packed), range);
 }
 
+/**
+ * 将斜杠编码坐标候选添加到工位列表。
+ *
+ * @param candidates 候选数组。
+ * @param seen 去重集合。
+ * @param value 形如 `x/y/roomName` 的坐标字符串。
+ * @param range 工位保护范围。
+ */
 function addSlashPackedCandidate(
     candidates: WorkTileCandidate[],
     seen: Set<string>,
@@ -199,6 +224,12 @@ function collectWorkTileCandidates(creep: Creep): WorkTileCandidate[] {
 // PowerCreep 默认放行，避免阻挡其行动。
 function isProjectWorkTile(creep: Creep | PowerCreep, pos: RoomPosition): boolean {
     if (!(creep instanceof Creep)) return true;
+
+    // dontPullMe 是行为层给出的“本格不可让位”信号。
+    // 在移动解算阶段直接把工位收敛到当前格，避免关键位 creep 被对穿挤走。
+    if (creep.memory?.dontPullMe) {
+        return creep.pos.roomName === pos.roomName && creep.pos.x === pos.x && creep.pos.y === pos.y;
+    }
 
     const candidates = collectWorkTileCandidates(creep);
     if (candidates.length === 0) return true;

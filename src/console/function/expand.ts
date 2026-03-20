@@ -2,12 +2,21 @@ import { parseShardRoomName } from '@/modules/utils/shardRoom';
 import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/feature/interShard';
 import { getBotMemory } from '@/modules/utils/memory';
 
+/**
+ * 生成扩张计划 ID。
+ */
 const genId = () => {
     const t = Game.time.toString(16);
     const r = Math.random().toString(16).slice(2, 10);
     return `E${t}${r}`.toUpperCase();
 };
 
+/**
+ * 归一化 `shard/room` 字符串。
+ *
+ * @param spec 输入规格，支持 `W1N1` 或 `shard3/W1N1`。
+ * @returns 解析后的 shard 与房间信息。
+ */
 const normalizeShardRoom = (spec: string) => {
     const parsed = parseShardRoomName(String(spec || ''));
     const shard = parsed.shard || Game.shard.name;
@@ -22,8 +31,17 @@ type ExpandDesiredOptions = {
     upgrader?: number;
 };
 
+/**
+ * 控制台扩张命令集合。
+ *
+ * @remarks
+ * 通过 inter-shard 指令把扩张操作投递到目标 home shard。
+ */
 export default {
     expand: {
+        /**
+         * 创建并投递扩张计划。
+         */
         set(home: string, target: string, opts: ExpandDesiredOptions = {}) {
             const h = normalizeShardRoom(home);
             const t = normalizeShardRoom(target);
@@ -55,6 +73,9 @@ export default {
             return id;
         },
 
+        /**
+         * 暂停扩张计划。
+         */
         pause(idOrTarget: string) {
             const plan = findPlan(idOrTarget);
             if (!plan) return Error(`未找到扩张计划：${idOrTarget}`);
@@ -63,6 +84,9 @@ export default {
             return OK;
         },
 
+        /**
+         * 恢复扩张计划。
+         */
         resume(idOrTarget: string) {
             const plan = findPlan(idOrTarget);
             if (!plan) return Error(`未找到扩张计划：${idOrTarget}`);
@@ -71,6 +95,9 @@ export default {
             return OK;
         },
 
+        /**
+         * 删除扩张计划。
+         */
         remove(idOrTarget: string) {
             const plan = findPlan(idOrTarget);
             if (!plan) return Error(`未找到扩张计划：${idOrTarget}`);
@@ -79,6 +106,9 @@ export default {
             return OK;
         },
 
+        /**
+         * 列出当前可见的扩张计划。
+         */
         list() {
             const entries = listPlans();
             if (!entries.length) {
@@ -93,8 +123,14 @@ export default {
     }
 };
 
+/**
+ * 根据 shard 读取对应 inter-shard 根数据。
+ */
 const readRoot = (shardName: string) => shardName === Game.shard.name ? readInterShardLocalRoot() : readInterShardRemoteRoot(shardName);
 
+/**
+ * 聚合本地与远端 shard 的扩张计划视图。
+ */
 const listPlans = () => {
     const plans: any[] = [];
     const seen = new Set<string>();
@@ -124,6 +160,9 @@ const listPlans = () => {
     return plans;
 };
 
+/**
+ * 按计划 ID 或目标房间查找扩张计划。
+ */
 const findPlan = (idOrTarget: string) => {
     for (const p of listPlans()) {
         if (p.id === idOrTarget) return p;

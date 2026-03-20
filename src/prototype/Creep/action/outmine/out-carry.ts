@@ -1,5 +1,7 @@
 import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { tryOutCarryRelayHandoff, updateOutCarryMoveTrace } from '@/prototype/Creep/function/relayFunction';
+import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
@@ -12,7 +14,27 @@ const OUT_CARRY_STRATEGIES = {
 
 // collect/deliver 之间保留明显滞回，避免因为修一次路/掉 1 点能量就立刻回头。
 const OUT_CARRY_RETURN_TO_COLLECT_RATIO = 0.5;
+const OUT_CARRY_DYING_TTL = 80;
 
+/**
+ * 判断外矿搬运 creep 是否已经进入濒死返程阶段。
+ *
+ * @param creep 待判断的外矿搬运 creep。
+ * @returns `true` 表示应停止继续取货，优先把现有资源送回母房。
+ */
+const isOutCarryDying = (creep: Creep) => {
+    return typeof creep.ticksToLive === 'number' && creep.ticksToLive <= OUT_CARRY_DYING_TTL;
+};
+
+/**
+ * 统计指定掉落锚点附近一团掉落资源的有效总量。
+ *
+ * @param dropped 房间内所有待评估掉落资源。
+ * @param anchor 当前正在评分的锚点掉落。
+ * @param reservedByTarget 其他搬运 creep 已经预留的目标量。
+ * @param clusterRange 掉落团聚合半径，默认按 1 格邻接计算。
+ * @returns 扣除预留量后的有效剩余总量。
+ */
 const getDroppedClusterRemaining = (
     dropped: Resource[],
     anchor: Resource,
@@ -27,6 +49,7 @@ const getDroppedClusterRemaining = (
     }
     return total;
 };
+
 
 type OutCarryMode = typeof OUT_CARRY_STRATEGIES[keyof typeof OUT_CARRY_STRATEGIES];
 
@@ -126,7 +149,7 @@ const outCarry: OutCarryAction = {
         const exitDirection = this.getRouteExitDirection(creep, targetRoom);
         if (!exitDirection) return false;
 
-        const exits = creep.room.find(exitDirection);
+        const exits = creep.room.find(exitDirection) as RoomPosition[];
         if (!exits || exits.length <= 0) return false;
         const exitPos = creep.pos.findClosestByRange(exits);
         if (!exitPos) return false;
@@ -289,6 +312,15 @@ const outCarry: OutCarryAction = {
         return best;
     },
 
+    /**
+     * 执行 collect 态的取货流程。
+     *
+     * @remarks
+     * 先尝试已经评分完成的最佳目标；没有命中时，再按掉落、坟墓、container、
+     * storage 等回退顺序取货。坟墓回退优先级被提高，用来兜住“明明有坟墓能量却不取”的场景。
+     *
+     * @param creep 当前处于 collect 态的外矿搬运 creep。
+     */
     withdraw: function (creep: Creep) {
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         const cache = creep.memory.cacheSource as any;
@@ -377,8 +409,8 @@ const outCarry: OutCarryAction = {
 
         const droppedPickupThreshold = Math.min(500, creep.store.getCapacity());
         if (creep.collectDroppedResource(undefined, droppedPickupThreshold)) return;
+        if (creep.collectFromTombstone(undefined, 0)) return;
         if (creep.collectFromContainer(300, RESOURCE_ENERGY, false)) return;
-        if (creep.collectFromTombstone(undefined, 500)) return;
         if (creep.collectFromStorage(RESOURCE_ENERGY, 0)) return;
 
         const nearestMiner = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
@@ -425,11 +457,26 @@ const outCarry: OutCarryAction = {
         }
     },
 
+    /**
+     * 执行 deliver 态的返程与卸货流程。
+     *
+     * @remarks
+     * 返程途中会先尝试接力；若未命中接力条件，再沿既定路线回母房并把资源交给 storage/terminal。
+     *
+     * @param creep 当前处于 deliver 态的外矿搬运 creep。
+     */
     carry: function (creep: Creep) {
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         const cache = creep.memory.cacheTarget as any;
         const sourceRoom = getCreepSourceRoom(creep.memory);
         if (!sourceRoom) return;
+
+        if (tryOutCarryRelayHandoff(
+            creep,
+            (other) => this.isLikelyCollecting(other),
+            OUT_CARRY_STRATEGIES.COLLECT,
+            OUT_CARRY_STRATEGIES.DELIVER
+        )) return;
 
         if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
             if (creep.room.name != sourceRoom && !creep.pos.isRoomEdge()) {
@@ -533,7 +580,10 @@ const outCarry: OutCarryAction = {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        updateOutCarryMoveTrace(creep);
         delete creep.memory.working;
+        // 本 tick 已被接力方下发移动意图时，不再执行后续动作，避免覆盖接力移动。
+        if (hasCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_RECEIVE)) return;
 
         const cache = creep.memory.cache as any;
         const previousMode = cache.outCarryMode as OutCarryMode | undefined;
@@ -592,6 +642,19 @@ const shouldCollect = (creep: Creep): boolean => {
 // 显式态解析：
 // - 已在 deliver 态时，只有能量低于半仓才允许切回 collect
 // - 已在 collect 态时，优先把这趟货拿满；只有满仓/离开目标房/受伤时才切出去
+/**
+ * 按显式滞回规则解析外矿搬运 creep 当前应处的模式。
+ *
+ * @remarks
+ * 这里故意避免“掉 1 点能量就立刻回 collect”的抖动：
+ * - 已在 deliver 态时，只有载荷降到半仓以下才允许切回 collect。
+ * - 已在 collect 态时，优先把这趟货尽量拿满；只有满仓、离开目标房或受伤时才切去 deliver。
+ * - 濒死且身上有货时，直接锁定 deliver，优先把资源往回送。
+ *
+ * @param creep 当前外矿搬运 creep。
+ * @param previousMode 上一 tick 缓存的模式。
+ * @returns 本 tick 应执行的 collect / deliver 模式。
+ */
 const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarryMode => {
     const used = creep.store.getUsedCapacity();
     const free = creep.store.getFreeCapacity();
@@ -601,6 +664,7 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
     const collectResumeThreshold = Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
 
     if (used === 0) return OUT_CARRY_STRATEGIES.COLLECT;
+    if (isOutCarryDying(creep)) return OUT_CARRY_STRATEGIES.DELIVER;
 
     if (previousMode === OUT_CARRY_STRATEGIES.COLLECT) {
         if (!inTargetRoom || lowHealth || free === 0) return OUT_CARRY_STRATEGIES.DELIVER;
@@ -615,13 +679,28 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
     return shouldCollect(creep) ? OUT_CARRY_STRATEGIES.COLLECT : OUT_CARRY_STRATEGIES.DELIVER;
 };
 
-// 复刻原采集逻辑（包含“半仓等待”策略）
+/**
+ * 执行 collect 态主流程，并保留“半仓等待”策略。
+ *
+ * @remarks
+ * 当 creep 仍在目标房且未受伤时，会优先继续补货；若短时间内取不到更多资源，
+ * 则按等待计数决定是否提前返程。对濒死且已带货的 creep，会直接跳过等待并强制返程。
+ *
+ * @param creep 当前外矿搬运 creep。
+ */
 const runCollectMode = (creep: Creep) => {
     const sourceCache = creep.memory.cacheSource as any;
     const used = creep.store.getUsedCapacity();
     const free = creep.store.getFreeCapacity();
     const inTargetRoom = creep.room.name === creep.memory.targetRoom;
     const lowHealth = creep.hits < creep.hitsMax * 0.5;
+
+    if (used > 0 && isOutCarryDying(creep)) {
+        sourceCache.partialLeaveWait = 0;
+        outCarry.carry(creep);
+        creep.memory.dontPullMe = false;
+        return;
+    }
 
     if (inTargetRoom && !lowHealth && free > 0) {
         const before = used;

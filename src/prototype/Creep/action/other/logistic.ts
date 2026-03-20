@@ -2,12 +2,22 @@ import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
+/**
+ * 后勤角色在「取货态」下的目标缓存。
+ */
 type LogisticCache = {
     targetId?: Id<any>;
     resType?: ResourceConstant;
     actionType?: 'pickup' | 'withdraw';
 };
 
+/**
+ * 后勤角色内存扩展：
+ * - `sourceRoom` 取货房间；
+ * - `targetRoom` 送货房间；
+ * - `idleUntil` 未找到目标时的短暂休眠截止 tick；
+ * - `cacheSource` 取货目标缓存。
+ */
 type LogisticMemory = CreepMemory & {
     sourceRoom?: string;
     targetRoom?: string;
@@ -15,6 +25,12 @@ type LogisticMemory = CreepMemory & {
     cacheSource?: LogisticCache;
 };
 
+/**
+ * 从存储结构中挑选存量最大的资源类型。
+ *
+ * @param store 任意可读 Store。
+ * @returns 数量最多的资源类型；若为空则返回 `undefined`。
+ */
 const pickMostStoredResource = (store: StoreDefinition): ResourceConstant | undefined => {
     let best: ResourceConstant | undefined;
     let bestAmount = 0;
@@ -28,6 +44,14 @@ const pickMostStoredResource = (store: StoreDefinition): ResourceConstant | unde
     return best;
 };
 
+/**
+ * 校验取货缓存是否仍然有效。
+ *
+ * @param target 缓存目标对象。
+ * @param actionType 缓存动作类型。
+ * @param resType 资源类型（withdraw 场景必填）。
+ * @returns `true` 表示缓存仍可继续使用。
+ */
 const isCacheValid = (target: any, actionType: LogisticCache['actionType'], resType: ResourceConstant | undefined): boolean => {
     if (!target) return false;
     if (actionType === 'pickup') return typeof target.amount === 'number' && target.amount > 0;
@@ -38,6 +62,14 @@ const isCacheValid = (target: any, actionType: LogisticCache['actionType'], resT
     return false;
 };
 
+/**
+ * 取货逻辑：
+ * - 仅在 sourceRoom 执行；
+ * - 优先复用缓存，失效后重新选目标；
+ * - 目标优先级：掉落资源 -> 墓碑 -> 废墟 -> storage -> terminal -> container。
+ *
+ * @param creep 当前后勤 creep。
+ */
 function withdraw(creep: Creep) {
     const mem = creep.memory as LogisticMemory;
     const sourceRoom = getCreepSourceRoom(mem);
@@ -157,6 +189,14 @@ function withdraw(creep: Creep) {
     }
 }
 
+/**
+ * 送货逻辑：
+ * - 回到 targetRoom；
+ * - 优先入库 storage，其次 terminal；
+ * - 无法存放时兜底 drop。
+ *
+ * @param creep 当前后勤 creep。
+ */
 function transfer(creep: Creep) {
     const mem = creep.memory as LogisticMemory;
     if (!mem.targetRoom) return;
@@ -185,17 +225,41 @@ function transfer(creep: Creep) {
     creep.drop(resoureType);
 }
 
+/**
+ * WorkLayer 的 source 态回调。
+ *
+ * @param creep 当前后勤 creep。
+ * @returns 满仓后切换到 target 态。
+ */
 const onSource = (creep: Creep): WorkEvent => {
     withdraw(creep);
     return creep.store.getFreeCapacity() === 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
 };
 
+/**
+ * WorkLayer 的 target 态回调。
+ *
+ * @param creep 当前后勤 creep。
+ * @returns 清空后切换到 source 态。
+ */
 const onTarget = (creep: Creep): WorkEvent => {
     transfer(creep);
     return creep.store.getUsedCapacity() === 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
 };
 
+/**
+ * 通用物流角色入口。
+ *
+ * @remarks
+ * 使用 WorkLayer 双态循环实现「取货 -> 送货」。
+ */
 const logisticFunction = {
+    /**
+     * 物流角色的 boost 准备流程。
+     *
+     * @param creep 当前 creep。
+     * @returns `true` 表示准备完成。
+     */
     prepare: function (creep: Creep) {
         const boostmap = (creep.memory as any).boostmap
         if (boostmap === null) {
@@ -212,6 +276,11 @@ const logisticFunction = {
         creep.memory.boosted = result === OK
         return creep.memory.boosted
     },
+    /**
+     * 执行后勤角色状态机。
+     *
+     * @param creep 当前 creep。
+     */
     run: function (creep: Creep) {
         runWorkLayer(creep, {
             onSource: ({ creep }) => onSource(creep),

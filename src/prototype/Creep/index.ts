@@ -12,6 +12,12 @@ import HaulFunction from "./function/haulFunction"
 import ControllerFunction from "./function/controllerFunction"
 import CreepExecute from "./execute"
 
+/**
+ * Creep 原型扩展插件列表。
+ *
+ * @remarks
+ * 顺序即挂载顺序：基础能力 -> 行为能力 -> 执行器。
+ */
 const plugins = [
     BaseFunction,
     MoveFunction,
@@ -27,4 +33,7 @@ const plugins = [
     CreepExecute,
 ]
 
-export default () => plugins.forEach(plugin => assignPrototype(Creep, plugin))
+/**
+ * 挂载全部 creep 原型扩展。
+ */
+export default () => plugins.forEach(plugin => assignPrototype(Creep, plugin));

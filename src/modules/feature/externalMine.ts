@@ -92,8 +92,10 @@ class ExternalMineMath {
     private static readonly CARRY_CAPACITY = [0, 100, 150, 200, 400, 1000, 1000, 1300, 1600] as const;
     // 期望单源总 WORK 数量（用于估算采集人数）。
     private static readonly SOURCE_TARGET_WORK = 5;
-    // 单源最多允许的外矿采集者上限。
-    private static readonly MAX_HARVESTERS_PER_SOURCE = 3;
+    // 低等级阶段允许的单源外矿采集者上限（用于过渡补能）。
+    private static readonly MAX_HARVESTERS_PER_SOURCE_LOW_LEVEL = 3;
+    // 成熟房间（有效等级 >= 4）单源上限：严格 1 个采集者。
+    private static readonly MAX_HARVESTERS_PER_SOURCE_STABLE = 1;
     // high/rush 模式下外矿经济单位使用较小体型的能量预算上限（便于多数量）。
     private static readonly SMALL_BODY_ENERGY_CAP_HIGH = 650;
     private static readonly SMALL_BODY_ENERGY_CAP_RUSH = 650;
@@ -225,7 +227,11 @@ class ExternalMineMath {
         if (sourceNum <= 0) return 0;
         const workParts = this.getOutHarvesterWorkParts(sourceRoom, upbody);
         const perSource = Math.ceil(this.SOURCE_TARGET_WORK / workParts);
-        const cappedPerSource = Math.min(this.MAX_HARVESTERS_PER_SOURCE, Math.max(1, perSource));
+        const builtLevel = sourceRoom.getEffectiveRoomLevel?.() ?? sourceRoom.level;
+        const maxPerSource = (builtLevel >= 4 || upbody)
+            ? this.MAX_HARVESTERS_PER_SOURCE_STABLE
+            : this.MAX_HARVESTERS_PER_SOURCE_LOW_LEVEL;
+        const cappedPerSource = Math.min(maxPerSource, Math.max(1, perSource));
         const targetNum = sourceNum * cappedPerSource;
         if (typeof slotCap === 'number') return Math.max(0, Math.min(slotCap, targetNum));
         return targetNum;
@@ -303,8 +309,8 @@ class ExternalMineSpawner {
         return count;
     }
 
-    // 统计全局所有房间针对某目标房间的排队刷怪数量（用于避免重复刷 scout 等）。
-    private static getQueuedSpawnRoleNumByTargetGlobal(role: string, targetRoomName: string): number {
+    // 统计全局所有房间针对某目标房间的排队刷怪数量（可选按 sourceRoom 过滤）。
+    private static getQueuedSpawnRoleNumByTargetGlobal(role: string, targetRoomName: string, sourceRoomName?: string): number {
         let count = 0;
         for (const roomName in Game.rooms) {
             const room = Game.rooms[roomName] as Room | undefined;
@@ -315,6 +321,10 @@ class ExternalMineSpawner {
                 if (!memory?.role) continue;
                 if (memory.role !== role) continue;
                 if ((memory.targetRoom || '') !== targetRoomName) continue;
+                if (sourceRoomName) {
+                    const taskSourceRoom = getCreepSourceRoom(memory);
+                    if (taskSourceRoom && taskSourceRoom !== sourceRoomName) continue;
+                }
                 count++;
             }
         }
@@ -575,7 +585,8 @@ class ExternalMineSpawner {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerHarvesters = (creepByTargetRoom['out-harvest'] || [])
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
-        const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-harvest', targetRoom.name);
+        // 孵化队列要按“全局+同 sourceRoom”统计，避免跨房代孵时重复排队。
+        const queuedBySource = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name, sourceRoom.name);
         const slotCap = ExternalMineMath.getOutHarvesterSlotCap(targetRoom);
         if (slotCap > 0) {
             const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
@@ -584,7 +595,7 @@ class ExternalMineSpawner {
         }
         const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap);
         if (targetNum <= 0) return false;
-        if (outerHarvesters + spawnNum >= targetNum) return false;
+        if (outerHarvesters + queuedBySource >= targetNum) return false;
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
         if (upbody) {

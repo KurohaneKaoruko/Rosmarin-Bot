@@ -1,9 +1,17 @@
 import { getResourceManage } from '@/modules/utils/memory';
 import { BASE_CONFIG } from '@/constant/config';
 
+/**
+ * 资源控制台命令：
+ * - `resource.manage`：维护供需阈值；
+ * - `resource.transport`：手动下发运输任务。
+ */
 export default {
     resource: {
         manage: {
+            /**
+             * 设置房间资源阈值。
+             */
             set(roomName: string, resource: string, data: { source: number, target: number }) {
                 const RESOURCE_ABBREVIATIONS = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource;
@@ -14,6 +22,9 @@ export default {
                 global.log(`[资源管理] 已设置房间 ${roomName} 的 ${resource} 供应阈值为 ${source}  需求阈值为 ${target}`);
                 return OK;
             },
+            /**
+             * 删除单个资源阈值设置。
+             */
             remove(roomName: string, resource: string) {
                 const RESOURCE_ABBREVIATIONS = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource;
@@ -24,6 +35,9 @@ export default {
                 }
                 return OK;
             },
+            /**
+             * 清空房间所有资源阈值设置。
+             */
             clear(roomName: string) {
                 const mem = getResourceManage();
                 delete mem[roomName];
@@ -31,6 +45,9 @@ export default {
                 return OK;
             },
             show: {
+                /**
+                 * 输出全部房间资源阈值。
+                 */
                 all() {
                     const botmem = getResourceManage();
                     for (const roomName in botmem) {
@@ -43,6 +60,9 @@ export default {
                     }
                     return OK;
                 },
+                /**
+                 * 输出指定房间资源阈值。
+                 */
                 room(roomName: string) {
                     if (!roomName) return Error('必须指定房间');
                     const botmem = getResourceManage();
@@ -53,6 +73,9 @@ export default {
                         console.log(`   -需求阈值: ${botmem[roomName][res][0] ?? 0}`);
                     }
                 },
+                /**
+                 * 输出指定资源在全部房间中的阈值设置。
+                 */
                 res(res: string) {
                     if (!res) return Error('必须指定资源');
                     const RESOURCE_ABBREVIATIONS = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
@@ -70,6 +93,9 @@ export default {
             }
         },
         transport: {
+            /**
+             * 手动创建一次运输任务。
+             */
             task(roomName: string, source: string, target: string, resource: string, amount: number) {
                 const RESOURCE_ABBREVIATIONS = BASE_CONFIG.RESOURCE_ABBREVIATIONS;
                 resource = RESOURCE_ABBREVIATIONS[resource] || resource
@@ -98,4 +124,4 @@ export default {
             }
         }
     }
-}
+};
