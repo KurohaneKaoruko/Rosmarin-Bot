@@ -1,5 +1,5 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
-import { decompressBodyConfig } from '@/modules/utils/compress';
+import { decompress, decompressBodyConfig } from '@/modules/utils/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/utils/memory';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/utils/creepTickIndex';
@@ -38,6 +38,21 @@ const getRoomMode = (room: Room) => {
 };
 
 const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
+
+// wallTask.hits 是目标血量，不是结构当前血量。
+const isUrgentWallTask = (room: Room, wallTask: RepairTask) => {
+    const [x, y] = decompress(wallTask.pos);
+    const structure = room.lookForAt(LOOK_STRUCTURES, x, y)
+        .find((s): s is StructureWall | StructureRampart =>
+            s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART
+        );
+    if (!structure) return false;
+
+    const urgentHits = structure.structureType === STRUCTURE_RAMPART
+        ? THRESHOLDS.REPAIR.URGENT_RAMPART
+        : THRESHOLDS.REPAIR.URGENT_WALL;
+    return structure.hits <= urgentHits;
+};
 
 // 判断 controller 附近是否具备稳定的能量缓存（link/container）
 const hasControllerEnergyBuffer = (room: Room) => {
@@ -454,7 +469,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
 
             const wallTask = room.getWallMission(null as any);
             if (!wallTask) return false;
-            const urgentWallTask = wallTask.hits <= THRESHOLDS.REPAIR.URGENT_RAMPART;
+            const urgentWallTask = isUrgentWallTask(room, wallTask);
             const minRepairEnergy = urgentWallTask ? THRESHOLDS.ENERGY.WALL_MIN : REPAIR_MIN_ENERGY;
             if (room[RESOURCE_ENERGY] < minRepairEnergy) return false;
 

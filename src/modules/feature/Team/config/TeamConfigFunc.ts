@@ -65,25 +65,32 @@ export const buildFrontlineMember = (
         [MOVE, moveCount],
     ]);
 
-export const buildHealerMember = (
-    toughCount: number,
-    healCount: number,
-    rangedCount = 0,
-    moveCount = 10,
-) =>
+type HealerMemberShape = {
+    tough: number;
+    heal: number;
+    ranged?: number;
+    move?: number;
+};
+
+export const buildHealerMember = ({
+    tough,
+    heal,
+    ranged = 0,
+    move = 10,
+}: HealerMemberShape) =>
     buildBoostedMember(
         'H',
-        rangedCount > 0
+        ranged > 0
             ? [
-                [TOUGH, toughCount],
-                [RANGED_ATTACK, rangedCount],
-                [HEAL, healCount],
-                [MOVE, moveCount],
+                [TOUGH, tough],
+                [RANGED_ATTACK, ranged],
+                [HEAL, heal],
+                [MOVE, move],
             ]
             : [
-                [TOUGH, toughCount],
-                [MOVE, moveCount],
-                [HEAL, healCount],
+                [TOUGH, tough],
+                [MOVE, move],
+                [HEAL, heal],
             ],
     );
 

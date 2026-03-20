@@ -39,17 +39,17 @@ const R10T15R15M10 = buildFrontlineMember('R', 10, 15, 15);
 const A10T12A18M10 = buildFrontlineMember('A', 10, 12, 18);
 const W10T12W18M10 = buildFrontlineMember('W', 10, 12, 18);
 const R10T12R18M10 = buildFrontlineMember('R', 10, 12, 18);
-const T12M10H28 = buildHealerMember(12, 28);
+const T12M10H28 = buildHealerMember({ tough: 12, heal: 28 });
 
 const A9T11A20M10 = buildFrontlineMember('A', 9, 11, 20);
 const W9T11W20M10 = buildFrontlineMember('W', 9, 11, 20);
 const R9T11R20M10 = buildFrontlineMember('R', 9, 11, 20);
-const T10R1H29M10 = buildHealerMember(10, 29, 1);
+const T10R1H29M10 = buildHealerMember({ tough: 10, ranged: 1, heal: 29 });
 
 const A5T5A30M10 = buildFrontlineMember('A', 5, 5, 30);
 const W5T5W30M10 = buildFrontlineMember('W', 5, 5, 30);
 const R15T10R15M10 = buildFrontlineMember('R', 15, 10, 15);
-const T5M10H35 = buildHealerMember(5, 35);
+const T5M10H35 = buildHealerMember({ tough: 5, heal: 35 });
 
 const A40M10 = buildMaxedMember('A', 40);
 const W40M10 = buildMaxedMember('W', 40);
