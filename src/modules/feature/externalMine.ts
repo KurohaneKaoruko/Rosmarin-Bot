@@ -15,6 +15,8 @@ type OutMineRunState = {
     canRunSecondaryAction: boolean;
 };
 
+type LegacyRoomModeMemory = RoomMemory & Partial<Pick<RoomControlMemory, 'mode'>>;
+
 // 外矿逻辑的执行间隔设置（不同 QoS 下采用不同的 tick 间隔）。
 export type ExternalMineTiming = {
     normalInterval: number;
@@ -25,6 +27,12 @@ export type ExternalMineTiming = {
 class ExternalMineState {
     private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
     private static readonly EXACT_CENTER_ROOM_REGEX = /^[EW]\d*[5][NS]\d*[5]$/;
+
+    private static getTargetList(memory: OutMineMemory, key: OutMineTargetListKey): string[] {
+        const list = memory[key];
+        if (!Array.isArray(list) || list.length <= 0) return [];
+        return list.filter((roomName): roomName is string => typeof roomName === 'string' && !!roomName);
+    }
 
     // 从全局 QoS 中获取当前级别，缺失时默认 normal。
     static getQosLevel(): string {
@@ -41,7 +49,9 @@ class ExternalMineState {
 
     // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
     static getRoomMode(room: Room): string {
-        return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
+        const roomData = getRoomData(room.name);
+        const legacyRoomMemory = room.memory as LegacyRoomModeMemory;
+        return roomData?.mode || legacyRoomMemory.mode || 'main';
     }
 
     // 根据 QoS 与间隔判断本 tick 是否运行，返回运行状态快照。
@@ -58,14 +68,22 @@ class ExternalMineState {
         return { qosLevel, canRunSecondaryAction };
     }
 
-    // 从外矿配置中读取目标房间列表，并去重/过滤非法项。
-    static getUniqueTargets(sourceRoom: Room, key: OutMineTargetListKey): string[] {
-        const targets = getOutMineData(sourceRoom.name)?.[key];
-        if (!Array.isArray(targets) || targets.length <= 0) return [];
+    // 同一个源房的 energy / centerRoom 旧桶数据可能串味；
+    // 这里统一按“房名是否属于 center room”重新分类，避免同一目标被两条分支重复处理。
+    static getManagedTargets(sourceRoom: Room, key: OutMineTargetListKey): string[] {
+        const data = getOutMineData(sourceRoom.name);
+        const mergedTargets = [
+            ...this.getTargetList(data, 'energy'),
+            ...this.getTargetList(data, 'centerRoom'),
+        ];
+        if (mergedTargets.length <= 0) return [];
 
-        return [...new Set(targets.filter((roomName): roomName is string => (
-            typeof roomName === 'string' && !!roomName
-        )))];
+        const uniqueTargets = [...new Set(mergedTargets)];
+
+        if (key === 'centerRoom') {
+            return uniqueTargets.filter((roomName) => this.isCenterRoom(roomName));
+        }
+        return uniqueTargets.filter((roomName) => !this.isCenterRoom(roomName));
     }
 
     static createMemory(sourceRoomName: string, targetRoomName: string): CreepMemory {
@@ -319,12 +337,22 @@ class ExternalMineSpawner {
     // 触发“双人防御”模式的最低 RCL。
     private static readonly DOUBLE_DEFEND_MIN_LEVEL = 7;
 
+    private static getSpawnTaskData(task: Task | null | undefined): SpawnTask | null {
+        const data = task?.data;
+        if (!data || typeof data !== 'object' || !('memory' in data)) return null;
+        return data as SpawnTask;
+    }
+
+    private static getSpawnTaskMemory(task: Task | null | undefined): CreepMemory | null {
+        return this.getSpawnTaskData(task)?.memory || null;
+    }
+
     // 统计某房间针对某目标房间的排队刷怪数量（仅本房间任务池）。
     private static getQueuedSpawnRoleNumByTarget(sourceRoom: Room, role: string, targetRoomName: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let count = 0;
         for (const task of tasks) {
-            const memory = (task as any)?.data?.memory;
+            const memory = this.getSpawnTaskMemory(task);
             if (!memory?.role) continue;
             if (memory.role !== role) continue;
             if ((memory.targetRoom || '') !== targetRoomName) continue;
@@ -339,11 +367,11 @@ class ExternalMineSpawner {
     private static getQueuedSpawnRoleNumByTargetGlobal(role: string, targetRoomName: string, sourceRoomName?: string): number {
         let count = 0;
         for (const roomName in Game.rooms) {
-            const room = Game.rooms[roomName] as Room | undefined;
-            if (!room || typeof (room as any).getAllMissionFromPool !== 'function') continue;
+            const room = Game.rooms[roomName];
+            if (!room) continue;
             const tasks = room.getAllMissionFromPool('spawn') || [];
             for (const task of tasks) {
-                const memory = (task as any)?.data?.memory;
+                const memory = this.getSpawnTaskMemory(task);
                 if (!memory?.role) continue;
                 if (memory.role !== role) continue;
                 if ((memory.targetRoom || '') !== targetRoomName) continue;
@@ -369,12 +397,37 @@ class ExternalMineSpawner {
         return count;
     }
 
+    // 统计“本 tick 已经开始孵化，但尚未进入 Game.creeps 活体索引”的数量。
+    // Screeps 的状态结算按 tick 延后，spawn 成功后任务会先从队列移除；
+    // 若此时不补上 spawning 中的单位，就会出现 1 tick 的统计空窗，从而重复补单。
+    private static getSpawningRoleNumByTargetGlobal(role: string, targetRoomName: string, sourceRoomName?: string): number {
+        let count = 0;
+        for (const spawnName in Game.spawns) {
+            const spawn = Game.spawns[spawnName];
+            const spawning = spawn?.spawning;
+            if (!spawning?.name) continue;
+            // 下一 tick creep 已经进入 Game.creeps 时，由 active 统计接管，避免重复计数。
+            if (Game.creeps[spawning.name]) continue;
+
+            const memory = Memory.creeps?.[spawning.name] as CreepMemory | undefined;
+            if (!memory?.role) continue;
+            if (memory.role !== role) continue;
+            if ((memory.targetRoom || '') !== targetRoomName) continue;
+            if (sourceRoomName) {
+                const taskSourceRoom = getCreepSourceRoom(memory);
+                if (taskSourceRoom && taskSourceRoom !== sourceRoomName) continue;
+            }
+            count++;
+        }
+        return count;
+    }
+
     // 统计某房间自身任务池里某角色排队数量（不关心 targetRoom）。
     private static getQueuedSpawnRoleNumBySource(sourceRoom: Room, role: string): number {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let count = 0;
         for (const task of tasks) {
-            const memory = (task as any)?.data?.memory;
+            const memory = this.getSpawnTaskMemory(task);
             if (!memory?.role) continue;
             if (memory.role !== role) continue;
             if (getCreepSourceRoom(memory) !== sourceRoom.name) continue;
@@ -407,14 +460,13 @@ class ExternalMineSpawner {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         let removed = 0;
         for (const task of tasks) {
-            const data = (task as any)?.data;
-            const memory = data?.memory;
+            const memory = this.getSpawnTaskMemory(task);
             const role = memory?.role;
             if (role !== 'out-carry' && role !== 'out-car') continue;
             if (memory?.targetRoom !== targetRoomName) continue;
             const taskSourceRoom = getCreepSourceRoom(memory);
             if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
-            sourceRoom.deleteMissionFromPool('spawn', (task as any).id);
+            sourceRoom.deleteMissionFromPool('spawn', task.id);
             removed++;
         }
         return removed;
@@ -430,7 +482,7 @@ class ExternalMineSpawner {
         const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
         const invalidTargets = new Set<string>();
         for (const task of tasks) {
-            const memory = (task as any)?.data?.memory;
+            const memory = this.getSpawnTaskMemory(task);
             const role = memory?.role;
             if (role !== 'out-carry' && role !== 'out-car') continue;
             const targetRoom = memory?.targetRoom;
@@ -455,8 +507,8 @@ class ExternalMineSpawner {
         const removeIds: string[] = [];
 
         for (const task of tasks) {
-            const id = (task as any)?.id;
-            const memory = (task as any)?.data?.memory as CreepMemory | undefined;
+            const id = task.id;
+            const memory = this.getSpawnTaskMemory(task) || undefined;
             const role = memory?.role;
             if (!id || !memory || !role) continue;
             if (role !== 'out-carry' && role !== 'out-car') continue;
@@ -478,12 +530,12 @@ class ExternalMineSpawner {
     static normalizeEconomicPriority(room: Room): void {
         const tasks = room.getAllMissionFromPool('spawn') || [];
         for (const task of tasks) {
-            const role = (task as any)?.data?.memory?.role;
+            const role = this.getSpawnTaskMemory(task)?.role;
             if (!role) continue;
             const targetLevel = this.ROLE_PRIORITY_BY_ROLE[role];
             if (targetLevel == null) continue;
-            if ((task as any).level < targetLevel) {
-                (task as any).level = targetLevel;
+            if (task.level < targetLevel) {
+                task.level = targetLevel;
             }
         }
     }
@@ -608,20 +660,19 @@ class ExternalMineSpawner {
 
     // 外矿采集者：根据源数、站位上限与 body 配置决定目标数量。
     static harvester(sourceRoom: Room, targetRoom: Room, sourceNum: number, upbody?: boolean): boolean {
-        const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-        const outerHarvesters = (creepByTargetRoom['out-harvest'] || [])
-            .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
-        // 孵化队列要按“全局+同 sourceRoom”统计，避免跨房代孵时重复排队。
-        const queuedBySource = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name, sourceRoom.name);
         const slotCap = ExternalMineMath.getOutHarvesterSlotCap(targetRoom);
-        if (slotCap > 0) {
-            const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
-            const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-            if (globalActive + globalQueued >= slotCap) return false;
-        }
         const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap);
         if (targetNum <= 0) return false;
-        if (outerHarvesters + queuedBySource >= targetNum) return false;
+
+        // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
+        // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
+        const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
+        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+        const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+        if (globalActive + globalQueued + globalSpawning >= targetNum) return false;
+        if (slotCap > 0) {
+            if (globalActive + globalQueued + globalSpawning >= slotCap) return false;
+        }
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
         if (upbody) {
@@ -740,7 +791,7 @@ export class ExternalMine {
         if (!runState) return;
 
         ExternalMineSpawner.pruneLegacyAggressiveOutCarrySpawnMissions(room);
-        const targetRooms = ExternalMineState.getUniqueTargets(room, 'energy');
+        const targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {
@@ -811,7 +862,7 @@ export class ExternalMine {
         if (!runState) return;
 
         ExternalMineSpawner.pruneLegacyAggressiveOutCarrySpawnMissions(room);
-        const targetRooms = ExternalMineState.getUniqueTargets(room, 'centerRoom');
+        const targetRooms = ExternalMineState.getManagedTargets(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {

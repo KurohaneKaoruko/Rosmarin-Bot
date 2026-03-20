@@ -20,13 +20,9 @@ function getOutMineBucket(targetRoom: string): OutMineBucket {
 
 function addOutMineTarget(sourceRoom: string, targetRoom: string, verbose = true): AddOutMineResult | -1 {
     if (!sourceRoom || !targetRoom) return -1;
-    const Mem = getOutMineData(sourceRoom) as any;
+    const Mem = getOutMineData(sourceRoom);
     const targetBucket = getOutMineBucket(targetRoom);
-    const bucketName = targetBucket === 'energy'
-        ? 'energy'
-        : targetBucket === 'highway'
-            ? 'highway'
-            : 'centerRoom';
+    const bucketName: OutMineBucket = targetBucket;
 
     if (!Mem[bucketName]) Mem[bucketName] = [];
     const added = Mem[bucketName].indexOf(targetRoom) === -1;
@@ -233,7 +229,8 @@ export default {
             };
             
             // 先尝试删除旧任务（如果存在）
-            const existId = room.checkSameMissionInPool('mine', 'power', { targetRoom } as any);
+            const duplicateTask: Pick<PowerMineTask, 'targetRoom'> = { targetRoom };
+            const existId = room.checkSameMissionInPool('mine', 'power', duplicateTask);
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'power', 1, data);
@@ -253,7 +250,8 @@ export default {
             }
 
             // 先尝试删除旧任务（如果存在）
-            const existId = room.checkSameMissionInPool('mine', 'deposit', { targetRoom } as any);
+            const duplicateTask: Pick<DepositMineTask, 'targetRoom'> = { targetRoom };
+            const existId = room.checkSameMissionInPool('mine', 'deposit', duplicateTask);
             if (existId) room.deleteMissionFromPool('mine', existId);
 
             room.addMissionToPool('mine', 'deposit', 1, data);
