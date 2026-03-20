@@ -11,6 +11,10 @@ type CarryCache = {
     lastPosX?: number;
     lastPosY?: number;
     lastPosRoomName?: string;
+    backtrackTick?: number;
+    backtrackX?: number;
+    backtrackY?: number;
+    backtrackRoomName?: string;
 };
 
 type CarrySourceCache = {
@@ -26,7 +30,9 @@ type CarryTargetCache = {
 
 type RelayCandidate = {
     creep: Creep;
-    direction: DirectionConstant;
+    score: number;
+    selfFallbackDirection: DirectionConstant;
+    otherFallbackDirection: DirectionConstant;
 };
 
 /**
@@ -94,6 +100,28 @@ const getOppositeDirection = (direction: DirectionConstant): DirectionConstant =
 };
 
 /**
+ * 在 8 方向常量上做环形旋转。
+ *
+ * @param direction 基准方向。
+ * @param offset 顺时针为正、逆时针为负。
+ * @returns 旋转后的方向常量。
+ */
+const rotateDirection = (direction: DirectionConstant, offset: number): DirectionConstant => {
+    const normalized = ((direction - 1 + offset) % 8 + 8) % 8;
+    return (normalized + 1) as DirectionConstant;
+};
+
+/**
+ * 返回某个前进方向对应的“前方三格”方向集合。
+ *
+ * @param direction 当前前进方向。
+ * @returns 左前 / 正前 / 右前三个方向。
+ */
+const getForwardArcDirections = (direction: DirectionConstant): DirectionConstant[] => {
+    return [rotateDirection(direction, -1), direction, rotateDirection(direction, 1)];
+};
+
+/**
  * 计算相邻两个坐标之间的方向常量。
  *
  * @param from 起点坐标。
@@ -137,10 +165,25 @@ export const updateOutCarryMoveTrace = (creep: Creep) => {
     ) {
         const previousPos = new RoomPosition(cache.lastPosX, cache.lastPosY, creep.room.name);
         const direction = getAdjacentDirection(previousPos, creep.pos);
-        if (direction) cache.lastStepDirection = direction;
-        else delete cache.lastStepDirection;
+        if (direction) {
+            cache.lastStepDirection = direction;
+            cache.backtrackX = previousPos.x;
+            cache.backtrackY = previousPos.y;
+            cache.backtrackRoomName = previousPos.roomName;
+            cache.backtrackTick = Game.time;
+        } else {
+            delete cache.lastStepDirection;
+            delete cache.backtrackTick;
+            delete cache.backtrackX;
+            delete cache.backtrackY;
+            delete cache.backtrackRoomName;
+        }
     } else {
         delete cache.lastStepDirection;
+        delete cache.backtrackTick;
+        delete cache.backtrackX;
+        delete cache.backtrackY;
+        delete cache.backtrackRoomName;
     }
 
     cache.lastPosX = creep.pos.x;
@@ -150,37 +193,77 @@ export const updateOutCarryMoveTrace = (creep: Creep) => {
 };
 
 /**
- * 解析接力方向：
- * - 常规路径：双方都有移动方向，且满足严格对穿关系；
- * - 兜底路径：当前返程方缺失方向时，依据来车方向反推。
+ * 解析接力候选是否位于返程方“前方三格”，并给出双方接力后的回头方向兜底值。
+ *
+ * @remarks
+ * - 常规路径：返程方存在移动方向时，允许正前 / 左前 / 右前三格；
+ * - 兜底路径：返程方缺失方向时，仍要求对方上一 tick 正在朝当前 creep 靠近；
+ * - 接力后的第一步优先走各自记录的来路，下面返回的方向只作为 trace 缺失时的保底。
  *
  * @param selfPos 当前 creep 位置。
  * @param selfMoveDirection 当前 creep 上 tick 的移动方向。
  * @param otherPos 候选 creep 位置。
  * @param otherMoveDirection 候选 creep 上 tick 的移动方向。
- * @returns 成功时返回接力方向，否则返回 `null`。
+ * @returns 成功时返回双方回头兜底方向与评分，否则返回 `null`。
  */
-const resolveRelayDirection = (
+const resolveRelayCandidate = (
     selfPos: RoomPosition,
     selfMoveDirection: DirectionConstant | 0,
     otherPos: RoomPosition,
     otherMoveDirection: DirectionConstant | 0
-): DirectionConstant | null => {
+): { score: number; selfFallbackDirection: DirectionConstant; otherFallbackDirection: DirectionConstant } | null => {
     const adjacentDirection = getAdjacentDirection(selfPos, otherPos);
     if (!adjacentDirection) return null;
 
-    // 返程方有方向时严格校验双向对穿。
+    // 返程方有方向时，放宽成“前方三格”都可接力。
     if (selfMoveDirection) {
-        if (!otherMoveDirection) return null;
-        if (adjacentDirection !== selfMoveDirection) return null;
-        if (otherMoveDirection !== getOppositeDirection(selfMoveDirection)) return null;
-        return selfMoveDirection;
+        const forwardArc = getForwardArcDirections(selfMoveDirection);
+        if (!forwardArc.includes(adjacentDirection)) return null;
+        const score = adjacentDirection === selfMoveDirection ? 2 : 1;
+        return {
+            score,
+            selfFallbackDirection: getOppositeDirection(selfMoveDirection),
+            otherFallbackDirection: otherMoveDirection
+                ? getOppositeDirection(otherMoveDirection)
+                : selfMoveDirection
+        };
     }
 
     // 返程方方向缺失时，允许按来车方向反推，但仍要求对方正在朝当前 creep 移动。
     if (!otherMoveDirection) return null;
     if (otherMoveDirection !== getOppositeDirection(adjacentDirection)) return null;
-    return adjacentDirection;
+    return {
+        score: 0,
+        selfFallbackDirection: getOppositeDirection(adjacentDirection),
+        otherFallbackDirection: getOppositeDirection(otherMoveDirection)
+    };
+};
+
+/**
+ * 让 creep 优先沿“上一 tick 的实际来路”回头。
+ *
+ * @param creep 目标 creep。
+ * @param fallbackDirection 当 trace 丢失时使用的保底方向。
+ * @returns `true` 表示本 tick 已下发移动意图。
+ */
+const moveBackAlongTrace = (creep: Creep, fallbackDirection: DirectionConstant): boolean => {
+    const cache = ensureCarryCache(creep);
+    if (
+        cache.backtrackTick === Game.time &&
+        cache.backtrackRoomName === creep.room.name &&
+        typeof cache.backtrackX === 'number' &&
+        typeof cache.backtrackY === 'number'
+    ) {
+        const backtrackPos = new RoomPosition(cache.backtrackX, cache.backtrackY, creep.room.name);
+        const backtrackDirection = getAdjacentDirection(creep.pos, backtrackPos);
+        if (backtrackDirection) {
+            creep.move(backtrackDirection);
+            return true;
+        }
+    }
+
+    creep.move(fallbackDirection);
+    return true;
 };
 
 /**
@@ -218,14 +301,25 @@ const pickRelayCandidate = (
         }
     });
 
+    let best: RelayCandidate | null = null;
     for (const other of candidates) {
         const otherMoveDirection = (ensureCarryCache(other).lastStepDirection || 0) as DirectionConstant | 0;
-        const direction = resolveRelayDirection(creep.pos, selfMoveDirection, other.pos, otherMoveDirection);
-        if (!direction) continue;
-        return { creep: other, direction };
+        const resolved = resolveRelayCandidate(creep.pos, selfMoveDirection, other.pos, otherMoveDirection);
+        if (!resolved) continue;
+
+        const candidate: RelayCandidate = {
+            creep: other,
+            score: resolved.score,
+            selfFallbackDirection: resolved.selfFallbackDirection,
+            otherFallbackDirection: resolved.otherFallbackDirection
+        };
+
+        if (!best || candidate.score > best.score) {
+            best = candidate;
+        }
     }
 
-    return null;
+    return best;
 };
 
 /**
@@ -267,7 +361,7 @@ const applyRelayMemorySwitch = (
  * @param isLikelyCollecting 用于判断候选目标是否仍处于“来取货”态。
  * @param collectMode 接力后当前 creep 要切入的 collect 模式标识。
  * @param deliverMode 接力后目标 creep 要切入的 deliver 模式标识。
- * @returns `true` 表示本 tick 已完成接力和对穿移动。
+ * @returns `true` 表示本 tick 已完成接力和接力后的回头移动。
  */
 export const tryOutCarryRelayHandoff = (
     creep: Creep,
@@ -299,7 +393,7 @@ export const tryOutCarryRelayHandoff = (
     markCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_GIVE);
     markCreepTickAction(relay.creep, CREEP_TICK_ACTION.RELAY_RECEIVE);
 
-    creep.move(getOppositeDirection(relay.direction));
-    relay.creep.move(relay.direction);
+    moveBackAlongTrace(creep, relay.selfFallbackDirection);
+    moveBackAlongTrace(relay.creep, relay.otherFallbackDirection);
     return true;
 };
