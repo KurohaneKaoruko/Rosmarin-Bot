@@ -28,6 +28,7 @@ export default class HaulFunction extends Creep {
         }
         if (type === STRUCTURE_CONTAINER) {
             if (this.isCoreDepotContainer(target)) return true;
+            if (this.isControllerContainer(target)) return resource === RESOURCE_ENERGY;
             return !this.isSourceContainer(target) && !this.isMineralContainer(target);
         }
         return true;
@@ -36,6 +37,16 @@ export default class HaulFunction extends Creep {
     isCoreDepotContainer(target: AnyStoreStructure): target is StructureContainer {
         if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
         return isCoreDepotContainer(this.room, target);
+    }
+
+    isControllerContainer(target: AnyStoreStructure): target is StructureContainer {
+        if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
+        const controller = this.room.controller;
+        if (!controller) return false;
+        if (this.isCoreDepotContainer(target)) return false;
+        // 若极端布局下与 source/mineral 共用同一个箱子，存放侧仍按 controller buffer 处理：
+        // 能量可以补进去，非能量一律不允许再塞回去。
+        return target.pos.inRangeTo(controller.pos, 3);
     }
 
     /**
@@ -72,7 +83,7 @@ export default class HaulFunction extends Creep {
      * @param resource 资源类型
      * @returns 选中的存放目标，找不到则为 null
      */
-    findBestStoreTarget(resource: ResourceConstant): AnyStoreStructure | null {
+    findBestStoreTarget(resource: ResourceConstant, excludeId?: Id<AnyStoreStructure>): AnyStoreStructure | null {
         const roomAny = this.room as any;
         const placeholderStorage = this.room.storage ? null : getCoreDepotContainer(this.room, 'storage');
         const placeholderTerminal = this.room.terminal ? null : getCoreDepotContainer(this.room, 'terminal');
@@ -94,6 +105,7 @@ export default class HaulFunction extends Creep {
         let bestScore = -Infinity;
 
         for (const s of candidates) {
+            if (excludeId && s.id === excludeId) continue;
             if (visited.has(s.id)) continue;
             visited.add(s.id);
             if (!this.canAutoStore(s, resource)) continue;

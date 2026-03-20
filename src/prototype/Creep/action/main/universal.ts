@@ -29,10 +29,15 @@ const getEnergy = function (creep: Creep) {
     const minDroppedAmount = urgent ? 20 : (lowLevel ? 35 : 60);
 
     // 1) 先尝试回收已有能源，减少采矿位拥堵。
-    if (creep.smartCollect(RESOURCE_ENERGY, {
-        minContainerAmount,
-        minDroppedAmount
-    })) {
+    // UNIV 不允许把 controller buffer 当作取能来源，否则会出现
+    // “从控制器箱拿能 -> 工作态又补回控制器箱”的假死循环。
+    if (
+        creep.collectDroppedResource(RESOURCE_ENERGY, minDroppedAmount) ||
+        creep.collectFromTombstone(RESOURCE_ENERGY) ||
+        creep.collectFromRuin(RESOURCE_ENERGY) ||
+        creep.collectFromContainer(minContainerAmount, RESOURCE_ENERGY, true) ||
+        creep.collectFromStorage(RESOURCE_ENERGY)
+    ) {
         delete creep.memory.targetSourceId;
         return;
     }

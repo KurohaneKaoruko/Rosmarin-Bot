@@ -499,9 +499,10 @@ interface Creep {
      * 为指定资源选择当前房间中“最合适”的存放建筑
      * 会综合考虑结构类型优先级、剩余容量与距离等因素
      * @param resource 资源类型
+     * @param excludeId 可选，排除指定目标 id，避免把资源送回刚取出的来源
      * @returns 选中的存放目标，找不到则为 null
      */
-    findBestStoreTarget(resource: ResourceConstant): AnyStoreStructure | null;
+    findBestStoreTarget(resource: ResourceConstant, excludeId?: Id<AnyStoreStructure>): AnyStoreStructure | null;
 
     // ==================== 战斗功能 (CombatFunction) ====================
     /** 

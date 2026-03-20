@@ -5,6 +5,10 @@ import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 const CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
 const NON_HIGHWAY_ROOM_REGEX = /^[EW]\d*[1-9][NS]\d*[1-9]$/;
 type OutMineBucket = 'energy' | 'centerRoom' | 'highway';
+type AddOutMineResult = {
+    bucket: OutMineBucket;
+    added: boolean;
+};
 
 function getOutMineBucket(targetRoom: string): OutMineBucket {
     const isCenterRoom = CENTER_ROOM_REGEX.test(targetRoom);
@@ -14,49 +18,107 @@ function getOutMineBucket(targetRoom: string): OutMineBucket {
     return 'energy';
 }
 
+function addOutMineTarget(sourceRoom: string, targetRoom: string, verbose = true): AddOutMineResult | -1 {
+    if (!sourceRoom || !targetRoom) return -1;
+    const Mem = getOutMineData(sourceRoom) as any;
+    const targetBucket = getOutMineBucket(targetRoom);
+    const bucketName = targetBucket === 'energy'
+        ? 'energy'
+        : targetBucket === 'highway'
+            ? 'highway'
+            : 'centerRoom';
+
+    if (!Mem[bucketName]) Mem[bucketName] = [];
+    const added = Mem[bucketName].indexOf(targetRoom) === -1;
+    if (added) Mem[bucketName].push(targetRoom);
+
+    if (verbose) {
+        if (targetBucket === 'energy') {
+            console.log(added
+                ? `房间 ${targetRoom} 已添加到 ${sourceRoom} 的外矿列表。 `
+                : `房间 ${targetRoom} 已存在于 ${sourceRoom} 的外矿列表中。 `);
+        } else if (targetBucket === 'highway') {
+            console.log(added
+                ? `过道房间 ${targetRoom} 已添加到 ${sourceRoom} 的监控列表`
+                : `过道房间 ${targetRoom} 已存在于 ${sourceRoom} 的监控列表中。`);
+        } else {
+            console.log(added
+                ? `中间房间 ${targetRoom} 已添加到 ${sourceRoom} 的采矿列表`
+                : `中间房间 ${targetRoom} 已存在于 ${sourceRoom} 的采矿列表中。`);
+        }
+    }
+
+    return { bucket: targetBucket, added };
+}
+
+function parseRoomCoord(roomName: string): { x: number; y: number } | null {
+    const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
+    if (!match) return null;
+
+    const xNum = Number(match[2]);
+    const yNum = Number(match[4]);
+    const x = match[1] === 'E' ? xNum : -xNum - 1;
+    const y = match[3] === 'S' ? yNum : -yNum - 1;
+    return { x, y };
+}
+
+function formatRoomCoord(x: number, y: number): string {
+    const horizontal = x >= 0 ? `E${x}` : `W${-x - 1}`;
+    const vertical = y >= 0 ? `S${y}` : `N${-y - 1}`;
+    return `${horizontal}${vertical}`;
+}
+
+function getNearbyRooms(sourceRoom: string, range = 1): string[] {
+    const parsed = parseRoomCoord(sourceRoom);
+    if (!parsed) return [];
+
+    const rooms: string[] = [];
+    for (let dx = -range; dx <= range; dx++) {
+        for (let dy = -range; dy <= range; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            rooms.push(formatRoomCoord(parsed.x + dx, parsed.y + dy));
+        }
+    }
+    return rooms;
+}
+
 // 外矿设置
 export default {
     mine: {
         add(sourceRoom: string, targetRoom: string) {
-            if (!sourceRoom || !targetRoom) return -1;
-            const Mem = getOutMineData(sourceRoom) as any;
-            const targetBucket = getOutMineBucket(targetRoom);
-            // 普通房间
-            if(targetBucket === 'energy') {
-                if (!Mem['energy']) Mem['energy'] = [];
-                if (Mem['energy'].indexOf(targetRoom) === -1) {
-                    Mem['energy'].push(targetRoom);
-                    console.log(`房间 ${targetRoom} 已添加到 ${sourceRoom} 的外矿列表。 `);
-                    return OK;
+            return addOutMineTarget(sourceRoom, targetRoom) === -1 ? -1 : OK;
+        },
+        // 批量添加周围外矿
+        addarea(sourceRoom: string, range: number = 1) {
+            if (!sourceRoom) return -1;
+            if (range < 1) return ERR_INVALID_ARGS;
+
+            const nearbyRooms = getNearbyRooms(sourceRoom, Math.floor(range));
+            if (nearbyRooms.length <= 0) {
+                console.log(`房间 ${sourceRoom} 周围没有可添加的房间。`);
+                return ERR_NOT_FOUND;
+            }
+
+            const addedRooms: string[] = [];
+            const existedRooms: string[] = [];
+
+            for (const targetRoom of nearbyRooms) {
+                const result = addOutMineTarget(sourceRoom, targetRoom, false);
+                if (result === -1) continue;
+                if (result.added) {
+                    addedRooms.push(`${targetRoom}[${result.bucket}]`);
                 } else {
-                    console.log(`房间 ${targetRoom} 已存在于 ${sourceRoom} 的外矿列表中。 `);
-                    return OK;
+                    existedRooms.push(`${targetRoom}[${result.bucket}]`);
                 }
             }
-            // 过道房间
-            else if(targetBucket === 'highway') {
-                if (!Mem['highway']) Mem['highway'] = [];
-                if (Mem['highway'].indexOf(targetRoom) === -1) {
-                    Mem['highway'].push(targetRoom);
-                    console.log(`过道房间 ${targetRoom} 已添加到 ${sourceRoom} 的监控列表`);
-                    return OK;
-                } else {
-                    console.log(`过道房间 ${targetRoom} 已存在于 ${sourceRoom} 的监控列表中。`);
-                    return OK;
-                }
-            }
-            // 中间房间
-            else {
-                if (!Mem['centerRoom']) Mem['centerRoom'] = [];
-                if (Mem['centerRoom'].indexOf(targetRoom) === -1) {
-                    Mem['centerRoom'].push(targetRoom);
-                    console.log(`中间房间 ${targetRoom} 已添加到 ${sourceRoom} 的采矿列表`);
-                    return OK;
-                } else {
-                    console.log(`中间房间 ${targetRoom} 已存在于 ${sourceRoom} 的采矿列表中。`);
-                    return OK;
-                }
-            }
+
+            console.log(
+                `[mine.addarea] ${sourceRoom} 范围 ${range} 圈: ` +
+                `新增 ${addedRooms.length}, 已存在 ${existedRooms.length}`
+            );
+            if (addedRooms.length > 0) console.log(`新增: ${addedRooms.join(', ')}`);
+            if (existedRooms.length > 0) console.log(`已存在: ${existedRooms.join(', ')}`);
+            return OK;
         },
         // 删除外矿
         remove(sourceRoom: string, targetRoom: string) {

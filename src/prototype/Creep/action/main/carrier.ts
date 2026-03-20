@@ -97,10 +97,36 @@ const getPositiveStoreTypes = (store: StoreDefinition): ResourceConstant[] => {
     return (Object.keys(store) as ResourceConstant[]).filter(t => (store as any)[t] > 0);
 };
 
-const canCarryResourceSafely = (creep: Creep, resourceType: ResourceConstant): boolean => {
+type CarrierContainerTraits = {
+    isCoreDepot: boolean;
+    isController: boolean;
+    isSource: boolean;
+    isMineral: boolean;
+};
+
+const getContainerTraits = (room: Room, container: StructureContainer): CarrierContainerTraits => {
+    const isCoreDepot = !!container && isCoreDepotContainer(room, container);
+    return {
+        isCoreDepot,
+        isController: !isCoreDepot && !!room.controller && container.pos.inRangeTo(room.controller.pos, 3),
+        isSource: (room.source || []).some((source: Source) => source && container.pos.inRangeTo(source.pos, 2)),
+        isMineral: !!room.mineral && container.pos.inRangeTo(room.mineral.pos, 2),
+    };
+};
+
+const getControllerContainer = (room: Room): StructureContainer | null => {
+    const containers = room.container || [];
+    return containers.find((container) => getContainerTraits(room, container).isController) || null;
+};
+
+const canCarryResourceSafely = (
+    creep: Creep,
+    resourceType: ResourceConstant,
+    excludeTargetId?: Id<AnyStoreStructure>
+): boolean => {
     if (resourceType === RESOURCE_ENERGY) return true;
     if (!hasCoreDepotTarget(creep.room)) return false;
-    return !!creep.findBestStoreTarget(resourceType);
+    return !!creep.findBestStoreTarget(resourceType, excludeTargetId);
 };
 
 const getCreepCarryTypesSorted = (creep: Creep): ResourceConstant[] => {
@@ -147,14 +173,25 @@ const pickBestWithdrawTypeFromStore = (
     return fallback || null;
 };
 
+const pickBestContaminantTypeFromContainer = (
+    creep: Creep,
+    container: StructureContainer
+): ResourceConstant | null => {
+    const types = getPositiveStoreTypes(container.store)
+        .filter((type) => type !== RESOURCE_ENERGY && canCarryResourceSafely(creep, type, container.id));
+    if (types.length === 0) return null;
+    types.sort((a, b) => (container.store[b] || 0) - (container.store[a] || 0));
+    return types[0];
+};
+
 // 获取 storage 或 terminal 作为能量来源
 const getStorageOrTerminal = (creep: Creep) => {
-    const { storage, terminal, container, link, controller } = creep.room as any;
+    const { storage, terminal, link, controller } = creep.room as any;
     const storageFallback = storage || getCoreDepotContainer(creep.room, 'storage');
     const terminalFallback = terminal || getCoreDepotContainer(creep.room, 'terminal');
     if (!storageFallback && !terminalFallback) return null;
     
-    const controllerContainer = container?.find((c: StructureContainer) => c.pos.inRangeTo(controller, 1));
+    const controllerContainer = controller ? getControllerContainer(creep.room) : null;
     const controllerLink = link?.find((l: StructureLink) => l.pos.inRangeTo(controller, 2));
     
     const needEnergy = creep.room.CheckSpawnAndTower() ||
@@ -349,7 +386,6 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     }
 
     // 优先级3：link/container
-    const controller = room.controller;
     if (urgentEnergy || !hasStorage) {
         const links = (roomAny.link || []).filter((l: StructureLink) => l?.store[RESOURCE_ENERGY] > 0) as StructureLink[];
         for (const l of links) {
@@ -369,9 +405,41 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
     for (const c of containers) {
         if (excludeId && c.id === excludeId) continue;
         if (isNoPath(room.name, c.id)) continue;
-        if (isCoreDepotContainer(room, c)) continue;
-        if (controller && c.pos.inRangeTo(controller, 1) && (urgentEnergy || !hasStorage)) continue;
         if (claimed.has(c.id) || isLockedByOtherCarrier(room.name, c.id, creep.name)) continue;
+
+        const traits = getContainerTraits(room, c);
+        if (traits.isController) {
+            // controller/source(mineral) 重叠箱也走这里：
+            // 能量视为 controller buffer，不允许 carrier 拿走；
+            // 非能量视为异常资源或矿物产出，允许清出来。
+            const type = pickBestContaminantTypeFromContainer(creep, c);
+            if (!type) continue;
+            const amount = c.store.getUsedCapacity(type);
+            if (amount <= 0) continue;
+
+            candidates.push({
+                priority: 65,
+                range: pos.getRangeTo(c),
+                amount,
+                plan: { id: c.id, kind: 'container', resourceType: type, lockTtl: 3 }
+            });
+            continue;
+        }
+
+        if (traits.isCoreDepot) {
+            const type = pickBestContaminantTypeFromContainer(creep, c);
+            if (!type) continue;
+            const amount = c.store.getUsedCapacity(type);
+            if (amount <= 0) continue;
+
+            candidates.push({
+                priority: 35,
+                range: pos.getRangeTo(c),
+                amount,
+                plan: { id: c.id, kind: 'container', resourceType: type, lockTtl: 3 }
+            });
+            continue;
+        }
 
         const prefer = urgentEnergy || !hasStorage ? 'energy' : 'nonEnergy';
         const type = pickBestWithdrawTypeFromStore(creep, c.store, prefer);
@@ -464,19 +532,19 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     let target: AnyStoreStructure | null = (currentTarget?.store?.getFreeCapacity ? currentTarget : null);
     let resourceType: ResourceConstant = currentType || carryTypes[0];
 
-    if (needNewTarget) {
-        clearCarrierTargetCache(cache);
+        if (needNewTarget) {
+            clearCarrierTargetCache(cache);
 
-        const urgentEnergy = room.CheckSpawnAndTower();
-        const controllerContainer = roomAny.container?.find((c: StructureContainer) =>
-            c.pos.inRangeTo(room.controller, 1));
-        const controllerLink = roomAny.link?.find((l: StructureLink) =>
-            l.pos.inRangeTo(room.controller, 2));
+            const urgentEnergy = room.CheckSpawnAndTower();
+            const sourceIdToAvoid = getCarrierSourceCache(creep).sourceId as Id<AnyStoreStructure> | undefined;
+            const controllerContainer = getControllerContainer(room);
+            const controllerLink = roomAny.link?.find((l: StructureLink) =>
+                l.pos.inRangeTo(room.controller, 2));
 
         for (const t of carryTypes) {
             target = null;
-            if (t === RESOURCE_ENERGY) {
-                if (urgentEnergy) {
+                if (t === RESOURCE_ENERGY) {
+                    if (urgentEnergy) {
                     const spawnExtensions = [...(roomAny.spawn || []), ...(roomAny.extension || [])]
                         .filter((e: StructureSpawn | StructureExtension) => e?.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
 
@@ -487,14 +555,14 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
                     if (!target && roomAny.powerSpawn?.store.getFreeCapacity(RESOURCE_ENERGY) > 100) {
                         target = roomAny.powerSpawn;
                     }
-                } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
-                    target = controllerContainer;
-                }
+                    } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
+                        target = controllerContainer;
+                    }
 
-                if (!target) target = creep.findBestStoreTarget(RESOURCE_ENERGY);
-            } else {
-                target = creep.findBestStoreTarget(t);
-            }
+                    if (!target) target = creep.findBestStoreTarget(RESOURCE_ENERGY, sourceIdToAvoid);
+                } else {
+                    target = creep.findBestStoreTarget(t, sourceIdToAvoid);
+                }
 
             if (target && !isNoPath(room.name, target.id) && target.store.getFreeCapacity(t) > 0) {
                 resourceType = t;
