@@ -556,18 +556,27 @@ const selectAidBuildRepairTarget = (creep: Creep) => {
 };
 
 // 评估当前 tick 应执行的工程任务
-const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
+export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
     const controller = creep.room.controller;
     const owned = !!controller?.my;
     const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
     const isJumpMode = !!creep.memory.jumpMode;
     const canUpgrade = canAidBuildUpgrade(creep.room);
+    const cache = creep.memory.cache || (creep.memory.cache = {});
+    const downgradeUpgradeLocked = !!(cache as any).downgradeUpgradeLatch;
 
     if (!owned && sites.length === 0) return AID_BUILD_JOB_STATES.STAGE;
-    if (creep.store[RESOURCE_ENERGY] === 0) return AID_BUILD_JOB_STATES.STAGE;
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+        delete (cache as any).downgradeUpgradeLatch;
+        return AID_BUILD_JOB_STATES.STAGE;
+    }
 
     if (!owned) return AID_BUILD_JOB_STATES.BUILD;
-    if (shouldForceAidBuildDowngradeUpgrade(creep.room)) return AID_BUILD_JOB_STATES.UPGRADE;
+    if (shouldForceAidBuildDowngradeUpgrade(creep.room)) {
+        (cache as any).downgradeUpgradeLatch = true;
+        return AID_BUILD_JOB_STATES.UPGRADE;
+    }
+    if (downgradeUpgradeLocked) return AID_BUILD_JOB_STATES.UPGRADE;
 
     const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
         filter: (s) => s.structureType === STRUCTURE_SPAWN
@@ -776,30 +785,36 @@ const runAidBuildRepair = (creep: Creep) => {
 };
 
 // 升级阶段：根据缓存站位保持输出
-const runAidBuildUpgrade = (creep: Creep) => {
+export const runAidBuildUpgrade = (creep: Creep) => {
     releaseAidBuildSource(creep);
-    if (creep.store[RESOURCE_ENERGY] === 0) return;
+    const cache = creep.memory.cache || (creep.memory.cache = {});
+    if (creep.store[RESOURCE_ENERGY] === 0) {
+        delete (cache as any).downgradeUpgradeLatch;
+        return;
+    }
 
     const controller = creep.room.controller;
-    if (!controller?.my) return;
-    if (!canAidBuildUpgrade(creep.room)) return;
-
-    if (!creep.memory.cache) creep.memory.cache = {};
+    if (!controller?.my) {
+        delete (cache as any).downgradeUpgradeLatch;
+        return;
+    }
+    const downgradeUpgradeLocked = !!(cache as any).downgradeUpgradeLatch;
+    if (!canAidBuildUpgrade(creep.room) && !downgradeUpgradeLocked) return;
 
     if (creep.pos.inRangeTo(controller, 3)) {
-        (creep.memory.cache as any).upgradePos = getAidBuildPosKey(creep.pos);
+        (cache as any).upgradePos = getAidBuildPosKey(creep.pos);
         creep.upgradeController(controller);
         return;
     }
 
     const upgradePos = getStableAidBuildUpgradeTargetPos(creep, controller);
     if (upgradePos) {
-        (creep.memory.cache as any).upgradePos = getAidBuildPosKey(upgradePos);
+        (cache as any).upgradePos = getAidBuildPosKey(upgradePos);
         creep.moveTo(upgradePos, { range: 0, maxRooms: 1, reusePath: 0 });
         return;
     }
 
-    delete (creep.memory.cache as any).upgradePos;
+    delete (cache as any).upgradePos;
     creep.moveTo(controller, { maxRooms: 1, range: 3 });
 };
 

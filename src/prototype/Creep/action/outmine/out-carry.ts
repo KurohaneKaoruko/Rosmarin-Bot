@@ -10,6 +10,24 @@ const OUT_CARRY_STRATEGIES = {
     DELIVER: 'deliver'
 } as const;
 
+// collect/deliver 之间保留明显滞回，避免因为修一次路/掉 1 点能量就立刻回头。
+const OUT_CARRY_RETURN_TO_COLLECT_RATIO = 0.5;
+
+const getDroppedClusterRemaining = (
+    dropped: Resource[],
+    anchor: Resource,
+    reservedByTarget: Record<string, number>,
+    clusterRange = 1
+) => {
+    let total = 0;
+    for (const resource of dropped) {
+        if (resource.resourceType !== anchor.resourceType) continue;
+        if (!anchor.pos.inRangeTo(resource.pos, clusterRange)) continue;
+        total += Math.max(0, resource.amount - (reservedByTarget[resource.id] || 0));
+    }
+    return total;
+};
+
 type OutCarryMode = typeof OUT_CARRY_STRATEGIES[keyof typeof OUT_CARRY_STRATEGIES];
 
 type OutCarryContext = {
@@ -65,6 +83,13 @@ const outCarry: OutCarryAction = {
     isLikelyCollecting: function (creep: Creep): boolean {
         if (!creep || creep.spawning) return false;
         if (creep.store.getFreeCapacity() <= 0) return false;
+
+        const cachedMode = (creep.memory.cache as any)?.outCarryMode as OutCarryMode | undefined;
+        if (cachedMode === OUT_CARRY_STRATEGIES.DELIVER) {
+            const used = creep.store.getUsedCapacity();
+            const cap = Math.max(1, creep.store.getCapacity());
+            return used < Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
+        }
 
         const targetRoom = creep.memory.targetRoom;
         if (targetRoom && creep.room.name === targetRoom) return true;
@@ -179,6 +204,7 @@ const outCarry: OutCarryAction = {
 
         let bestScore = -Infinity;
         let best: { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null = null;
+        const carryNeed = Math.max(1, creep.store.getFreeCapacity());
 
         const consider = (id: string, type: 'dropped' | 'container' | 'tombstone' | 'ruin', pos: RoomPosition, amount: number, nonEnergyBonus = 0) => {
             if (!id || amount <= 0) return;
@@ -189,7 +215,12 @@ const outCarry: OutCarryAction = {
             if (remaining <= 0) return;
 
             const range = creep.pos.getRangeTo(pos);
-            let score = remaining + nonEnergyBonus;
+            // 评分必须按“这趟实际能搬走多少”来算：
+            // 一旦某个目标已经足够装满当前 creep，更多存量只应带来很小的额外收益，
+            // 否则就会出现远处超大堆把近处可直接装满的目标压过去的反常行为。
+            const usefulAmount = Math.min(remaining, carryNeed);
+            const overflowBonus = Math.min(carryNeed, Math.max(0, remaining - carryNeed)) * 0.1;
+            let score = usefulAmount + overflowBonus + nonEnergyBonus;
             score -= range * range * 0.5;
 
             if (score > bestScore) {
@@ -198,14 +229,29 @@ const outCarry: OutCarryAction = {
             }
         };
 
-        const droppedThreshold = Math.min(500, creep.store.getCapacity());
+        // 掉落资源不能只看单堆大小：
+        // 外矿常见情况是一圈小堆叠在采集位附近，单堆不够大，但总量足以装满一个搬运 creep。
+        // 因此这里按“当前剩余容量”和“邻近掉落簇总量”共同判断是否值得接单。
+        const droppedThreshold = Math.min(500, Math.max(1, creep.store.getFreeCapacity()));
         const dropped = room.find(FIND_DROPPED_RESOURCES, {
-            filter: (r: Resource) => r.amount >= droppedThreshold
+            filter: (r: Resource) => r.amount > 0
         });
         for (const resource of dropped) {
             if (!canStoreMinerals && resource.resourceType !== RESOURCE_ENERGY) continue;
+            const remaining = Math.max(0, resource.amount - (reservedByTarget[resource.id] || 0));
+            if (remaining <= 0) continue;
+
+            let effectiveAmount = remaining;
+            if (resource.resourceType === RESOURCE_ENERGY) {
+                const clusterRemaining = getDroppedClusterRemaining(dropped, resource, reservedByTarget);
+                if (remaining < droppedThreshold && clusterRemaining < droppedThreshold) continue;
+                // 对掉落能量使用“局部簇有效量”参与评分，优先选择能把这趟车装满的那团掉落。
+                effectiveAmount = Math.max(remaining, Math.min(clusterRemaining, creep.store.getFreeCapacity()));
+            } else if (remaining < droppedThreshold) {
+                continue;
+            }
             const bonus = resource.resourceType === RESOURCE_ENERGY ? 0 : resource.amount * 3;
-            consider(resource.id, 'dropped', resource.pos, resource.amount, bonus);
+            consider(resource.id, 'dropped', resource.pos, effectiveAmount, bonus);
         }
 
         const containers = (room.container || []).filter((c: StructureContainer) => c.store.getUsedCapacity() >= 300);
@@ -489,19 +535,37 @@ const outCarry: OutCarryAction = {
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         delete creep.memory.working;
 
-        const mode: OutCarryMode = shouldBuildRepair(creep)
+        const cache = creep.memory.cache as any;
+        const previousMode = cache.outCarryMode as OutCarryMode | undefined;
+        let mode: OutCarryMode = shouldBuildRepair(creep)
             ? OUT_CARRY_STRATEGIES.BUILD_REPAIR
-            : shouldCollect(creep)
-                ? OUT_CARRY_STRATEGIES.COLLECT
-                : OUT_CARRY_STRATEGIES.DELIVER;
+            : resolveOutCarryMode(creep, previousMode);
+
+        if (mode !== previousMode && mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
+            // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
+            if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+                const targetCache = creep.memory.cacheTarget as any;
+                if (targetCache) delete targetCache.targetId;
+            } else {
+                const sourceCache = creep.memory.cacheSource as any;
+                if (sourceCache) {
+                    delete sourceCache.targetId;
+                    delete sourceCache.targetType;
+                    delete sourceCache.waitUntil;
+                    delete sourceCache.partialLeaveWait;
+                }
+            }
+        }
+        if (mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
+            cache.outCarryMode = mode;
+        }
 
         const ctx: OutCarryContext = { creep, mode };
         const handled = runStrategy(outCarryStrategyContainer, ctx);
 
         if (mode === OUT_CARRY_STRATEGIES.BUILD_REPAIR && !handled) {
-            const fallbackMode: OutCarryMode = shouldCollect(creep)
-                ? OUT_CARRY_STRATEGIES.COLLECT
-                : OUT_CARRY_STRATEGIES.DELIVER;
+            const fallbackMode = resolveOutCarryMode(creep, previousMode);
+            cache.outCarryMode = fallbackMode;
             runStrategy(outCarryStrategyContainer, { creep, mode: fallbackMode });
         }
     },
@@ -523,6 +587,32 @@ const shouldCollect = (creep: Creep): boolean => {
     if (inTargetRoom && !lowHealth && free > 0) return true;
     if (used === 0) return true;
     return false;
+};
+
+// 显式态解析：
+// - 已在 deliver 态时，只有能量低于半仓才允许切回 collect
+// - 已在 collect 态时，优先把这趟货拿满；只有满仓/离开目标房/受伤时才切出去
+const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarryMode => {
+    const used = creep.store.getUsedCapacity();
+    const free = creep.store.getFreeCapacity();
+    const cap = Math.max(1, creep.store.getCapacity());
+    const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+    const lowHealth = creep.hits < creep.hitsMax * 0.5;
+    const collectResumeThreshold = Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
+
+    if (used === 0) return OUT_CARRY_STRATEGIES.COLLECT;
+
+    if (previousMode === OUT_CARRY_STRATEGIES.COLLECT) {
+        if (!inTargetRoom || lowHealth || free === 0) return OUT_CARRY_STRATEGIES.DELIVER;
+        return OUT_CARRY_STRATEGIES.COLLECT;
+    }
+
+    if (previousMode === OUT_CARRY_STRATEGIES.DELIVER) {
+        if (inTargetRoom && !lowHealth && used < collectResumeThreshold) return OUT_CARRY_STRATEGIES.COLLECT;
+        return OUT_CARRY_STRATEGIES.DELIVER;
+    }
+
+    return shouldCollect(creep) ? OUT_CARRY_STRATEGIES.COLLECT : OUT_CARRY_STRATEGIES.DELIVER;
 };
 
 // 复刻原采集逻辑（包含“半仓等待”策略）

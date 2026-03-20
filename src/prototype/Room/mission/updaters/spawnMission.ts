@@ -232,17 +232,26 @@ const scaleWorkerConstructionTarget = (room: Room, baseTarget: number, maxTarget
     return Math.max(baseTarget, Math.min(maxTarget, scaledTarget));
 };
 
-// 低 RCL 允许多采集位，高 RCL 默认一矿一采
+// 用已建成的 spawn/extension 容量估算“实际可用等级”，避免 controller 刚升 4 但建筑未补齐时误判。
+const getBuiltRoomLevel = (room: Room) => {
+    return room.getEffectiveRoomLevel?.() ?? room.level;
+};
+
+// 低等级允许多采集位，高等级默认一矿一采。
+// 这里必须看“已建成等级”而不是 controller 等级：
+// controller 刚升 4 但 spawn/extension 还没补满时，harvester 体型仍可能偏小；
+// 一旦房间已经具备完整 4 级产能，就不应该再让单矿超过 1 个 harvester。
 const getHarvesterTargetBySource = (room: Room): number => {
     let target = 0;
-    const lowRcl = room.level <= 3;
+    const builtLevel = getBuiltRoomLevel(room);
+    const allowMultiHarvesterPerSource = builtLevel <= 3;
     const harvesterBody = room.GenerateBodys(room.GetRoleBodys('harvester'), 'harvester');
     const workPerHarvester = Math.max(1, getWorkPartCount(harvesterBody));
     const maxByWorkCap = Math.max(1, Math.floor(HARVESTER_MAX_WORK_PER_SOURCE / workPerHarvester));
     for (const source of room.source || []) {
         const slots = getWalkableSourceSlots(room, source);
         if (slots <= 0) continue;
-        const bySlot = lowRcl ? slots : 1;
+        const bySlot = allowMultiHarvesterPerSource ? slots : 1;
         target += Math.min(bySlot, maxByWorkCap);
     }
     return target;
@@ -252,9 +261,11 @@ const getHarvesterTargetBySource = (room: Room): number => {
 export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
-        let num = getHarvesterTargetBySource(room);
-        if (num <= 0) return false;
-        if (isHighLikeMode(getRoomMode(room))) {
+        const baseTarget = getHarvesterTargetBySource(room);
+        if (baseTarget <= 0) return false;
+
+        let num = baseTarget;
+        if (isHighLikeMode(getRoomMode(room)) && getBuiltRoomLevel(room) <= 3) {
             // high/rush 下，提前补一个临近到期的 harvester
             const shouldPreSpawn = hasSoonDeadCreepByAssignedRoomRole(room.name, 'harvester', 10);
             if (shouldPreSpawn) num += 1;

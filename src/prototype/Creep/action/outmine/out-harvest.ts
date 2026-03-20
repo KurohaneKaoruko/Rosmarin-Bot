@@ -9,6 +9,14 @@ const OUT_HARVEST_SWITCH = {
     TO_SOURCE: (creep: Creep) => creep.store.getUsedCapacity() === 0
 } as const;
 
+const OUT_CARRY_DIRECT_TRANSFER_RETURN_FREE_RATIO = 0.2;
+
+const shouldCarrierReturnAfterDirectTransfer = (carrier: Creep) => {
+    const cap = Math.max(1, carrier.store.getCapacity());
+    const free = carrier.store.getFreeCapacity();
+    return free <= Math.ceil(cap * OUT_CARRY_DIRECT_TRANSFER_RETURN_FREE_RATIO);
+};
+
 // 尝试把能量就近交给 out-carry，避免卡在容器满溢上
 const transferToNearbyCarrier = (creep: Creep): boolean => {
     const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
@@ -22,20 +30,23 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     if (!nearbyCarrier) return false;
 
     if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
-        // 标记对方刚收到能量，尽快返程
         nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
-        const cache = nearbyCarrier.memory.cacheSource as any;
-        cache.receivedEnergyTick = Game.time;
-        delete cache.targetId;
-        delete cache.targetType;
+        nearbyCarrier.memory.cache = nearbyCarrier.memory.cache || {};
+        const sourceCache = nearbyCarrier.memory.cacheSource as any;
+        delete sourceCache.targetId;
+        delete sourceCache.targetType;
 
-        const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
-        if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
-            const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
-            if (Array.isArray(route) && route.length > 0 && route[0].exit) {
-                const sourceDirection = route[0].exit as DirectionConstant;
-                cache.receivedMoveDirection = sourceDirection;
-                nearbyCarrier.move(sourceDirection);
+        // 只有接近满载时才允许运输工同步转入返程。
+        // 少量直递只是减少落地损耗，不应打断当前采集周期。
+        if (shouldCarrierReturnAfterDirectTransfer(nearbyCarrier)) {
+            (nearbyCarrier.memory.cache as any).outCarryMode = 'deliver';
+            const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
+            if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
+                const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
+                if (Array.isArray(route) && route.length > 0 && route[0].exit) {
+                    const sourceDirection = route[0].exit as DirectionConstant;
+                    nearbyCarrier.move(sourceDirection);
+                }
             }
         }
         return true;
@@ -46,15 +57,20 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
 
 // 没有容器时仅负责施工：
 // container 工地放置由 externalRoad 统一管理，这里只消费既有工地。
-const buildContainerSite = (creep: Creep) => {
+const buildContainerSite = (creep: Creep): boolean => {
     let site = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, 2, {
         filter: (s) => s.structureType === STRUCTURE_CONTAINER && s.my
     })[0];
 
-    if (!site) return;
+    if (!site) return false;
 
-    if (creep.pos.inRangeTo(site, 2)) creep.build(site);
-    else creep.moveTo(site, { visualizePathStyle: { stroke: '#ffaa00' } });
+    if (creep.pos.inRangeTo(site, 2)) {
+        creep.build(site);
+        return true;
+    }
+
+    creep.moveTo(site, { visualizePathStyle: { stroke: '#ffaa00' } });
+    return false;
 };
 
 // 容器需要维修时优先维修
@@ -101,8 +117,14 @@ const handleWithContainer = (creep: Creep, container: StructureContainer) => {
 // 没有容器的情况下：回到采集位并施工已有 container 工地
 const handleNoContainer = (creep: Creep) => {
     const source = Game.getObjectById(creep.memory.targetSourceId) as Source | null;
-    if (!creep.moveToSourceWorkTile(source)) return;
-    buildContainerSite(creep);
+    creep.moveToSourceWorkTile(source);
+
+    // container 工地存在时，先施工再立刻补 harvest，
+    // 避免“满仓切 target -> 下一 tick 只 build 不 harvest”的停顿。
+    const built = buildContainerSite(creep);
+    if (built && source && source.energy > 0 && creep.pos.inRangeTo(source, 1) && creep.store.getFreeCapacity() > 0) {
+        creep.harvest(source);
+    }
 };
 
 // 目标态：把能量交给容器/运输

@@ -10,6 +10,7 @@ const CLAIM_SPAWN_PRIORITY = 0;
 const MANUAL_AID_BUILD_SPAWN_PRIORITY = 0;
 const AID_BUILD_DEFAULT_INTERVAL = 200;
 const MANUAL_AID_BUILD_TARGET_COUNT = 5;
+const CLAIM_AID_BUILD_TARGET_COUNT = 3;
 
 type SpawnMemoryMatcher = (memory: any) => boolean;
 type SpawnLiveMatcher = (creep: Creep) => boolean;
@@ -704,19 +705,22 @@ export default class AidSpawnFunction extends Flag {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === targetRoom
+            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === targetRoom,
+            isActiveAidBuildFlagCreep
         );
         const claimAidNum = claimAidLoad.total;
 
-        const desiredAidNum = 1;
-        const claimMemory = this.memory as any;
-        const aidInterval = 200;
-        const lastAidTime = typeof claimMemory['lastAidBuildTime'] === 'number' ? claimMemory['lastAidBuildTime'] : 0;
-        if (claimAidNum < desiredAidNum && Game.time - lastAidTime >= aidInterval) {
+        // CLAIM 起房阶段至少保持 3 个有效 aid-build：
+        // 1) claimer 落地后需要同时开采/起 spawn/补 extension，不足 3 个会明显拖慢起房
+        // 2) 这里沿用 flag 级 10 tick 节流，不再额外加 200 tick 间隔，避免 builder 迟迟补不齐
+        if (claimAidNum < CLAIM_AID_BUILD_TARGET_COUNT) {
             const memory = { homeRoom: room.name, sourceRoom: targetRoom, targetRoom: targetRoom, spawnFlag: flagName } as any;
-            room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'aid-build', memory);
-            claimMemory['lastAidBuildTime'] = Game.time;
-            log('CLAIM', `${room.name} 派出了一个 aid-build 援助建造 ${targetRoom}`);
+            const ret = room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'aid-build', memory);
+            if (ret === OK) {
+                log('CLAIM', `${room.name} 派出了一个 aid-build 援助建造 ${targetRoom} (${claimAidNum + 1}/${CLAIM_AID_BUILD_TARGET_COUNT})`);
+            } else {
+                log('CLAIM', `${room.name} 为 ${targetRoom} 下发 aid-build 失败 ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
+            }
         }
 
         return true;
