@@ -26,6 +26,12 @@ export const THRESHOLDS = {
         MIN_ENERGY: 200,
         EMERGENCY_ENERGY_THRESHOLD: 1000,
         BODY_REDUCTION_THRESHOLD: 1000,
+        // 是否允许 spawn 因等待更高优先级任务的能量而空转。
+        ALLOW_WAIT_FOR_PRIORITY_ENERGY: true,
+        // 当开启“等待高优先级能量”时，仅允许 level 小于该值的任务插队。
+        // 例如该值为 10，则 5 可以在 2 孵不起时先孵，而 10/11/12 不行。
+        // 注意：任务 level 数值越小，优先级越高。
+        WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL: 10,
         UNIV_EMERGENCY_CAP: {
             RCL1_2: 3,
             RCL1_2_HIGH: 4,

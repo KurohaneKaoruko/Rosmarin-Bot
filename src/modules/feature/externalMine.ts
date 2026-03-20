@@ -534,7 +534,7 @@ class ExternalMineSpawner {
             if (!role) continue;
             const targetLevel = this.ROLE_PRIORITY_BY_ROLE[role];
             if (targetLevel == null) continue;
-            if (task.level < targetLevel) {
+            if (task.level !== targetLevel) {
                 task.level = targetLevel;
             }
         }
@@ -836,7 +836,8 @@ export class ExternalMine {
             const myUserName = room.controller.owner.username;
             if (controller?.owner && controller.owner.username !== myUserName) continue;
 
-            if (room.level >= 3 && runState.canRunSecondaryAction) {
+            // 预定是外矿经济主链，不应被 secondary-action 节流掉。
+            if (room.level >= 3) {
                 ExternalMineSpawner.reserver(room, targetRoom);
             }
 

@@ -15,6 +15,36 @@ export default class MissionGet extends Room {
         return compress(creep.pos.x, creep.pos.y);
     }
 
+    private getSpawnTaskRequiredEnergy(task: Task, energyAvailable: number): number | null {
+        const data = task.data as SpawnTask;
+        const role = data?.memory?.role;
+        if (!role || !RoleData[role]) return null;
+
+        let body = data.body as ((BodyPartConstant | number)[])[] | string;
+        const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
+        let requiredEnergy = Number(data.energy || 0);
+
+        // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
+        if (!hasFixedBody) {
+            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            const allowBudgetSpawn =
+                ((state === 'LOW' || state === 'CRITICAL') &&
+                EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
+                (role === 'worker' && getMyConstructionSites(this).length > 0);
+            const budget = allowBudgetSpawn ? energyAvailable : undefined;
+            body = this.GetRoleBodys(role, data.upbody, budget);
+            const bodypart = this.GenerateBodys(body as any[], role);
+            requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
+        } else if (requiredEnergy <= 0) {
+            const normalized = typeof body === 'string' ? decompressBodyConfig(body) : body;
+            const bodypart = this.GenerateBodys(normalized as any[], role);
+            requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
+            data.energy = requiredEnergy;
+        }
+
+        return Number.isFinite(requiredEnergy) && requiredEnergy > 0 ? requiredEnergy : null;
+    }
+
     /**
      * transport 任务在取出前再做一次校验。
      * 这样能及时清理 source/target 已失效的陈旧任务，避免 creep 卡在递归重试里。
@@ -279,38 +309,71 @@ export default class MissionGet extends Room {
     getSpawnMission() {
         pruneDelayedUpgraderSpawnMissions(this);
         const energyAvailable = this.energyAvailable;
-        const filter = (task: Task) => {
-            const data = task.data as SpawnTask;
-            const role = data?.memory?.role;
-            if (!role || !RoleData[role]) return false;
+        const allowWaitForPriorityEnergy = THRESHOLDS.SPAWN.ALLOW_WAIT_FOR_PRIORITY_ENERGY;
+        const queueJumpAllowBelowLevel = THRESHOLDS.SPAWN.WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL;
+        const tasks = this.getAllMissionFromPool('spawn');
+        let highestPriority = Infinity;
+        let firstAffordableAtHighestPriority: Task | null = null;
+        let cheapestBlockedAtHighestPriority: Task | null = null;
+        let cheapestBlockedEnergy = Infinity;
+        let bestAffordableOverall: Task | null = null;
+        let bestAffordableOverallLevel = Infinity;
 
-            let body = data.body as ((BodyPartConstant | number)[])[] | string;
-            const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
-            let requiredEnergy = Number(data.energy || 0);
+        for (const task of tasks) {
+            if (!task || task.lock) continue;
 
-            // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
-            if (!hasFixedBody) {
-                const state = this.memory.energyState || this.updateEnergyState?.(false);
-                const allowBudgetSpawn =
-                    ((state === 'LOW' || state === 'CRITICAL') &&
-                    EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
-                    (role === 'worker' && getMyConstructionSites(this).length > 0);
-                const budget = allowBudgetSpawn ? energyAvailable : undefined;
-                body = this.GetRoleBodys(role, data.upbody, budget);
-                const bodypart = this.GenerateBodys(body as any[], role);
-                requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
-            } else if (requiredEnergy <= 0) {
-                const normalized = typeof body === 'string' ? decompressBodyConfig(body) : body;
-                const bodypart = this.GenerateBodys(normalized as any[], role);
-                requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
-                data.energy = requiredEnergy;
+            const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, energyAvailable);
+            if (requiredEnergy == null) continue;
+
+            if (requiredEnergy <= energyAvailable && task.level < bestAffordableOverallLevel) {
+                bestAffordableOverall = task;
+                bestAffordableOverallLevel = task.level;
             }
 
-            return (energyAvailable || 0) >= requiredEnergy;
+            if (task.level < highestPriority) {
+                highestPriority = task.level;
+                firstAffordableAtHighestPriority = requiredEnergy <= energyAvailable ? task : null;
+                cheapestBlockedAtHighestPriority = requiredEnergy > energyAvailable ? task : null;
+                cheapestBlockedEnergy = requiredEnergy > energyAvailable ? requiredEnergy : Infinity;
+                continue;
+            }
+
+            if (task.level > highestPriority) continue;
+
+            // 只在相同优先级内，才允许先挑当前能孵化的任务。
+            if (requiredEnergy <= energyAvailable) {
+                if (!firstAffordableAtHighestPriority) {
+                    firstAffordableAtHighestPriority = task;
+                }
+                continue;
+            }
+
+            if (requiredEnergy < cheapestBlockedEnergy) {
+                cheapestBlockedEnergy = requiredEnergy;
+                cheapestBlockedAtHighestPriority = task;
+            }
         }
-        const task = this.getMissionFromPool('spawn', null, filter);
-        if(!task) return null;
-        return task;
+
+        if (highestPriority === Infinity) return null;
+
+        if (!allowWaitForPriorityEnergy) {
+            return bestAffordableOverall || cheapestBlockedAtHighestPriority;
+        }
+
+        if (firstAffordableAtHighestPriority) {
+            return firstAffordableAtHighestPriority;
+        }
+
+        if (
+            bestAffordableOverall &&
+            bestAffordableOverallLevel < queueJumpAllowBelowLevel
+        ) {
+            return bestAffordableOverall;
+        }
+
+        // 严格尊重优先级：只有最高优先级层没有能孵化的任务时，才等待该层；
+        // 少数例外（例如停摆恢复 universal）仍由 SpawnControl 层处理。
+        return firstAffordableAtHighestPriority || cheapestBlockedAtHighestPriority;
     }
 
     // 获取每种role的孵化任务数量

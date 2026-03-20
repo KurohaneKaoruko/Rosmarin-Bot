@@ -242,6 +242,25 @@ export function getAidBuildWaitSlotIndex(waiterNames: string[], creepName: strin
 const releaseAidBuildSource = (creep: Creep) => {
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
 };
+
+// Aid-build 在跨房前往目标房时，先与带攻击能力的敌对 creep 拉开距离，
+// 避免直接顶着攻击单位走脸导致半路暴毙。
+const avoidAidBuildTravelThreats = (creep: Creep): boolean => {
+    return creep.fleeFromHostiles(6);
+};
+
+const moveAidBuildToTargetRoom = (creep: Creep): boolean => {
+    const targetRoom = creep.memory.targetRoom;
+    if (!targetRoom) return true;
+
+    const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
+    const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
+    if (arrived) return true;
+
+    if (avoidAidBuildTravelThreats(creep)) return false;
+    creep.moveToRoom(targetRoom, { plainCost: 2, swampCost: 10 });
+    return false;
+};
 // ==============================
 //  能量状态 / 升级策略
 // ==============================
@@ -688,15 +707,7 @@ const runAidBuildBuild = (creep: Creep) => {
     if (controller?.my && controller.level < 2 && !shouldForceSpawnFirst) return;
     if (creep.store[RESOURCE_ENERGY] === 0) return;
 
-    const targetRoom = creep.memory.targetRoom;
-    if (targetRoom) {
-        const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
-        const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
-        if (!arrived) {
-            creep.moveToRoom(targetRoom);
-            return;
-        }
-    }
+    if (!moveAidBuildToTargetRoom(creep)) return;
 
     if (creep.pos.isRoomEdge()) {
         creep.moveTo(creep.room.controller);
@@ -750,15 +761,7 @@ const runAidBuildRepair = (creep: Creep) => {
     if (controller.level < 2) return;
     if (creep.store[RESOURCE_ENERGY] === 0) return;
 
-    const targetRoom = creep.memory.targetRoom;
-    if (targetRoom) {
-        const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
-        const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
-        if (!arrived) {
-            creep.moveToRoom(targetRoom);
-            return;
-        }
-    }
+    if (!moveAidBuildToTargetRoom(creep)) return;
 
     if (creep.pos.isRoomEdge()) {
         creep.moveTo(creep.room.controller);
@@ -820,15 +823,7 @@ export const runAidBuildUpgrade = (creep: Creep) => {
 
 // stage 阶段：集中等待与能量暂存（不再负责采集）
 const runAidBuildStage = (creep: Creep) => {
-    const targetRoom = creep.memory.targetRoom;
-    if (targetRoom) {
-        const { roomName: localRoom, shard } = parseShardRoomName(targetRoom);
-        const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom;
-        if (!arrived) {
-            creep.moveToRoom(targetRoom);
-            return;
-        }
-    }
+    if (!moveAidBuildToTargetRoom(creep)) return;
 
     if (creep.pos.isRoomEdge()) {
         const center = new RoomPosition(25, 25, creep.room.name);

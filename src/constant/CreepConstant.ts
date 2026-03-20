@@ -93,13 +93,13 @@ export const RoleData: RoleConfig = {
     }), // 中央搬运
     upgrader: defineRole({
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
-        level: 10,
+        level: 8,
         code: 'U',
         executor: bindLayeredExecutor('upgrader'),
     }), // 升级
     worker: defineRole({
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
-        level: 10,
+        level: 8,
         code: 'W',
         executor: bindLayeredExecutor('worker'),
     }), // 建造、维修、刷墙
@@ -125,7 +125,7 @@ export const RoleData: RoleConfig = {
     }),
     logistic: defineRole({
         bodypart: [[CARRY, 3], [MOVE, 3]],
-        level: 10,
+        level: 11,
         code: 'L',
         executor: bindLayeredExecutor('logistic'),
     }), // 长途运输
@@ -286,13 +286,13 @@ export const RoleData: RoleConfig = {
     }),
     'out-car': defineRole({
         bodypart: [],
-        level: 13,
+        level: 15,
         code: 'OC',
         executor: bindStrategyExecutor('out-carry'),
     }),
     'out-carry': defineRole({
         bodypart: [],
-        level: 13,
+        level: 15,
         code: 'OC',
         executor: bindStrategyExecutor('out-carry'),
     }),
