@@ -2,16 +2,27 @@ import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } fro
 import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
 
+const CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
+const NON_HIGHWAY_ROOM_REGEX = /^[EW]\d*[1-9][NS]\d*[1-9]$/;
+type OutMineBucket = 'energy' | 'centerRoom' | 'highway';
+
+function getOutMineBucket(targetRoom: string): OutMineBucket {
+    const isCenterRoom = CENTER_ROOM_REGEX.test(targetRoom);
+    const isNotHighway = NON_HIGHWAY_ROOM_REGEX.test(targetRoom);
+    if (isCenterRoom) return 'centerRoom';
+    if (!isNotHighway) return 'highway';
+    return 'energy';
+}
+
 // 外矿设置
 export default {
     mine: {
         add(sourceRoom: string, targetRoom: string) {
             if (!sourceRoom || !targetRoom) return -1;
             const Mem = getOutMineData(sourceRoom) as any;
-            const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
-            const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom); // 非过道房间
+            const targetBucket = getOutMineBucket(targetRoom);
             // 普通房间
-            if(!isCenterRoom && isNotHighway) {
+            if(targetBucket === 'energy') {
                 if (!Mem['energy']) Mem['energy'] = [];
                 if (Mem['energy'].indexOf(targetRoom) === -1) {
                     Mem['energy'].push(targetRoom);
@@ -23,7 +34,7 @@ export default {
                 }
             }
             // 过道房间
-            else if(!isNotHighway) {
+            else if(targetBucket === 'highway') {
                 if (!Mem['highway']) Mem['highway'] = [];
                 if (Mem['highway'].indexOf(targetRoom) === -1) {
                     Mem['highway'].push(targetRoom);
@@ -53,39 +64,22 @@ export default {
             const BotMem = getOutMineData();
             if (!BotMem[sourceRoom]) return ERR_NOT_FOUND;
             const Mem = BotMem[sourceRoom];
-            const isCenterRoom = /^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom); // 中间房间
-            const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom); // 非过道房间
-            // 普通房间
-            if(!isCenterRoom && isNotHighway) {
-                if (!Mem['energy']) return ERR_NOT_FOUND;
-                if (Mem['energy'].indexOf(targetRoom) === -1) return Error(`房间 ${targetRoom} 不存在于 ${sourceRoom} 的外矿列表中。`);
-                else {
-                    Mem['energy'].splice(Mem['energy'].indexOf(targetRoom), 1);
-                    delete Memory.rooms[targetRoom]?.['road'];
-                    console.log(`房间 ${targetRoom} 从 ${sourceRoom} 的外矿列表中删除。`);
-                    return OK;
-                }
+            const buckets: OutMineBucket[] = ['energy', 'centerRoom', 'highway'];
+            const removedBuckets = buckets.filter((bucket) => {
+                const list = Mem[bucket];
+                if (!Array.isArray(list)) return false;
+                const index = list.indexOf(targetRoom);
+                if (index === -1) return false;
+                list.splice(index, 1);
+                return true;
+            });
+            if (removedBuckets.length <= 0) {
+                return Error(`房间 ${targetRoom} 不存在于 ${sourceRoom} 的外矿列表中。`);
             }
-            // 过道房间
-            else if(!isNotHighway) {
-                if (!Mem['highway']) return ERR_NOT_FOUND;
-                if (Mem['highway'].indexOf(targetRoom) === -1) return ERR_NOT_FOUND;
-                else {
-                    Mem['highway'].splice(Mem['highway'].indexOf(targetRoom), 1);
-                    console.log(`过道房间 ${targetRoom} 从 ${sourceRoom} 的监控列表中删除。`);
-                    return OK;
-                }
-            }
-            // 中间房间
-            else {
-                if (!Mem['centerRoom']) return ERR_NOT_FOUND;
-                if (Mem['centerRoom'].indexOf(targetRoom) === -1) return ERR_NOT_FOUND;
-                else {
-                    Mem['centerRoom'].splice(Mem['centerRoom'].indexOf(targetRoom), 1);
-                    console.log(`中间房间 ${targetRoom} 从 ${sourceRoom} 的外矿列表中删除。`);
-                    return OK;
-                }
-            }
+
+            delete Memory.rooms[targetRoom]?.['road'];
+            console.log(`房间 ${targetRoom} 已从 ${sourceRoom} 的列表中删除: ${removedBuckets.join(', ')}`);
+            return OK;
         },
         // 获取外矿列表
         list(sourceRoom: string) {

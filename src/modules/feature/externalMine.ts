@@ -23,9 +23,20 @@ export type ExternalMineTiming = {
 
 // 外矿运行的状态工具：QoS、房间模式、节流、以及视觉渲染。
 class ExternalMineState {
+    private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
+    private static readonly EXACT_CENTER_ROOM_REGEX = /^[EW]\d*[5][NS]\d*[5]$/;
+
     // 从全局 QoS 中获取当前级别，缺失时默认 normal。
     static getQosLevel(): string {
         return global.qos.getQoS()?.level || 'normal';
+    }
+
+    static isCenterRoom(roomName: string): boolean {
+        return this.CENTER_ROOM_REGEX.test(roomName);
+    }
+
+    static isExactCenterRoom(roomName: string): boolean {
+        return this.EXACT_CENTER_ROOM_REGEX.test(roomName);
     }
 
     // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
@@ -718,6 +729,7 @@ export class ExternalMine {
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {
+            if (!ExternalMineState.isCenterRoom(roomName)) continue;
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
@@ -812,7 +824,7 @@ export class ExternalMine {
                 continue;
             }
 
-            if (!(/^[EW]\d*[5][NS]\d*[5]$/.test(roomName))) {
+            if (!ExternalMineState.isExactCenterRoom(roomName)) {
                 ExternalMineSpawner.attack(room, targetRoom);
                 const hasSourceKeeper = hostiles.some((creep) => creep.owner.username === 'Source Keeper');
                 const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
@@ -820,8 +832,9 @@ export class ExternalMine {
                 if (hasSourceKeeper && outerAttackers < 1) continue;
             }
 
-            const centerSourceNum = 3;
-            ExternalMineSpawner.harvester(room, targetRoom, centerSourceNum, true);
+            const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
+            if (sourceNum <= 0) continue;
+            ExternalMineSpawner.harvester(room, targetRoom, sourceNum, true);
 
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];
             if (mineral && mineral.mineralAmount > 0) {
@@ -830,7 +843,7 @@ export class ExternalMine {
 
             const allowWorkCarry = room.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
             const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
-            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, centerSourceNum, allowWorkCarry, carryCapacity);
+            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, roomName, sourceNum, allowWorkCarry, carryCapacity);
             ExternalMineSpawner.carry(room, targetRoom, carryNum, allowWorkCarry);
 
             if (runState.qosLevel === 'normal') {
