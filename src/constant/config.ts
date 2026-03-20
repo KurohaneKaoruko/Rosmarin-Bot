@@ -8,8 +8,8 @@ export const VERSION = '1.18.0';
 export const BASE_CONFIG = {
     // bot名称
     BOT_NAME: 'Rosmarin',
-    // 默认签名
-    DEFAULT_SIGN: ``,
+    // 默认签名（花体 Rosmarin）
+    DEFAULT_SIGN: `𝓡𝓸𝓼𝓶𝓪𝓻𝓲𝓷`,
     // 长名资源缩写
     RESOURCE_ABBREVIATIONS,
 }

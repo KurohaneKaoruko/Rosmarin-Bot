@@ -20,7 +20,6 @@ import logistic from './other/logistic';
 import upUpgrade from './other/up-upgrade';
 import upRepair from './other/up-repair';
 import dismantle from './other/dismantle';
-import signer from './other/signer';
 import scout from './other/scout';
 
 // Outmine role imports
@@ -98,7 +97,6 @@ export const roleRegistry: Record<string, CreepRoleHandler> = {
     'universal': universal,
     'cleaner': dismantle,
     'dismantle': dismantle,
-    'signer': signer,
     'claimer': claimer,
     'attack-claimer': attackClaimer,
     'aid-build': aidBuild,

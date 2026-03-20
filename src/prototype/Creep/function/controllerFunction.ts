@@ -38,19 +38,42 @@ const CONTROLLER_ENERGY_PRIORITY: ControllerEnergyKind[] = ['link', 'container',
 /**
  * 解析房间应该使用的签名文本。
  * - 有自定义签名时，仅在当前文本不同的情况下返回新文本
- * - 无自定义签名时，仅在 controller 还未签名时返回默认签名
+ * - 无自定义签名时：未签名或签名不属于自己时返回默认签名
  * - 返回 undefined 表示本 tick 不需要签名
  */
 export const resolveRoomSignText = (
     customSign: string | undefined,
-    sign: { text?: string } | null | undefined,
-    defaultSign: string
+    sign: { text?: string; username?: string } | null | undefined,
+    defaultSign: string,
+    myUsername?: string
 ) => {
     if (customSign) {
         return sign?.text === customSign ? undefined : customSign;
     }
-    if (sign) return undefined;
-    return defaultSign;
+
+    if (!defaultSign) return undefined;
+    if (!sign) return defaultSign;
+    if (!myUsername) return undefined;
+    if (!sign.username) return undefined;
+    if (sign.username !== myUsername) return defaultSign;
+    return undefined;
+};
+
+/**
+ * 判断在房间未设置自定义签名时，是否需要补默认签名。
+ *
+ * @remarks
+ * 仅依据“签名归属”判断，不比较文本：
+ * - 无签名：需要补默认签名；
+ * - 非自己签名：需要补默认签名；
+ * - 自己签名：不处理（即使文本与默认签名不同也不覆盖）。
+ */
+const shouldApplyDefaultSignByOwnership = (
+    sign: { username?: string } | null | undefined,
+    myUsername: string
+) => {
+    if (!sign) return true;
+    return sign.username !== myUsername;
 };
 
 /**
@@ -204,24 +227,47 @@ export default class ControllerFunction extends Creep {
 
     /**
      * 维护本房默认签名。
-     * 优先使用房间自定义 sign，其次在无签名时补默认 sign。
+     *
+     * @remarks
+     * 规则：
+     * - 配置了自定义签名：只比较文本是否一致，不比较归属；
+     * - 未配置自定义签名：只比较归属是否为自己，不比较文本。
      */
     maintainRoomSign(): boolean {
         const controller = this.room.controller;
-        if (!controller) return false;
+        if (!controller || !controller.my) return false;
 
         const customSign = getRoomData(this.room.name)?.sign;
-        const desired = resolveRoomSignText(customSign, controller.sign, BASE_CONFIG.DEFAULT_SIGN);
-        if (!desired) return false;
+        const myUsername = this.owner.username;
 
-        return this.signControllerIfNeeded(desired, {
-            overwrite: !!customSign,
-            moveOptions: {
+        let desired: string | undefined;
+        let shouldSign = false;
+
+        if (customSign) {
+            desired = customSign;
+            // 已设置房间签名时，仅比较文本，不关心当前签名归属。
+            shouldSign = controller.sign?.text !== customSign;
+        } else {
+            desired = BASE_CONFIG.DEFAULT_SIGN;
+            if (!desired) return false;
+            // 未设置房间签名时，仅比较归属，不比较文本。
+            shouldSign = shouldApplyDefaultSignByOwnership(controller.sign, myUsername);
+        }
+
+        if (!shouldSign) return false;
+
+        // 这里不复用 signControllerIfNeeded：
+        // 未配置自定义签名时我们按“归属”判定签名，而 signControllerIfNeeded 的 overwrite 分支只比较文本。
+        if (this.pos.inRangeTo(controller, 1)) {
+            this.signController(controller, desired);
+        } else {
+            this.moveTo(controller, {
                 visualizePathStyle: { stroke: '#ffffff' },
                 range: 1,
                 maxRooms: 1,
-            }
-        });
+            });
+        }
+        return true;
     }
 
     /**

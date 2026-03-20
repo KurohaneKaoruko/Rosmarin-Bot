@@ -159,7 +159,8 @@ const doWork = function (creep: Creep) {
 
     if (forceUpgrade) {
         clearTargetCache(cache);
-        creep.goUpgrade();
+        // 自有房间签名由 universal 负责维护：走 runControllerUpgrade 可在升级流程中统一处理签名。
+        creep.runControllerUpgrade({ pickupDropped: false });
         return;
     }
 
@@ -207,7 +208,8 @@ const doWork = function (creep: Creep) {
         return;
     }
 
-    creep.goUpgrade();
+    // 无其他更高优先级工作时，进入控制器升级流程并顺带维护本房签名。
+    creep.runControllerUpgrade({ pickupDropped: false });
 }
 
 // 管道上下文：仅传递 creep 本体

@@ -1,6 +1,3 @@
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-
 type ScoutCache = {
     stompSiteId?: Id<ConstructionSite> | null;
 };
@@ -136,15 +133,54 @@ const parkInRoom = (creep: Creep) => {
     creep.moveTo(idlePos);
 };
 
-const onTarget = (creep: Creep): WorkEvent => {
-    if (creep.room.name !== creep.memory.targetRoom) {
-        creep.moveToRoom(creep.memory.targetRoom, { plainCost: 1, swampCost: 1 });
-        return WORK_EVENTS.STAY;
+/**
+ * 为无固定目标房间的 scout 选择下一个探索房间。
+ *
+ * @remarks
+ * - 优先走 normal 状态房间；
+ * - 避免在同一批房间中来回抖动（avoidRooms）；
+ * - 若全部都访问过，则允许回环重走。
+ */
+const chooseNextExploreRoom = (creep: Creep): string | undefined => {
+    const avoidRooms = new Set<string>(creep.memory['avoidRooms'] || []);
+    const currentRoom = creep.room.name;
+    if (!avoidRooms.has(currentRoom)) {
+        creep.memory['avoidRooms'] = [...avoidRooms, currentRoom];
+        avoidRooms.add(currentRoom);
     }
 
-    if (runStomp(creep)) {
-        return WORK_EVENTS.STAY;
-    }
+    const exits = Object.values(Game.map.describeExits(currentRoom) || {});
+    if (exits.length === 0) return undefined;
+    const normalExits = exits.filter((roomName) => Game.map.getRoomStatus(roomName).status === 'normal');
+    const preferredPool = normalExits.length > 0 ? normalExits : exits;
+    const unvisited = preferredPool.filter((roomName) => !avoidRooms.has(roomName));
+    const pool = unvisited.length > 0 ? unvisited : preferredPool;
+    if (pool.length === 0) return undefined;
+
+    const index = Math.floor(Math.random() * pool.length);
+    return pool[index];
+};
+
+/**
+ * 确保 scout 存在目标房间：
+ * - 若已有 targetRoom，直接复用；
+ * - 若没有 targetRoom，按巡航逻辑挑选一个出口房间。
+ */
+const ensureScoutTargetRoom = (creep: Creep): string | undefined => {
+    if (creep.memory.targetRoom) return creep.memory.targetRoom;
+    const nextRoom = chooseNextExploreRoom(creep);
+    if (nextRoom) creep.memory.targetRoom = nextRoom;
+    return creep.memory.targetRoom;
+};
+
+/**
+ * scout 到达目标房间后的行为：
+ * 1. 优先执行踩工地；
+ * 2. 若配置了签名且文本不同，执行签名；
+ * 3. 否则驻足到非边缘可站位，保持目标房视野。
+ */
+const runScoutInTargetRoom = (creep: Creep): void => {
+    if (runStomp(creep)) return;
 
     const controller = creep.room.controller;
     if (controller && creep.memory['sign'] != undefined && creep.memory['sign'] !== controller.sign?.text) {
@@ -152,24 +188,38 @@ const onTarget = (creep: Creep): WorkEvent => {
             overwrite: true,
             moveOptions: { plainCost: 1, swampCost: 1, maxRooms: 1, range: 1 }
         });
-    } else {
-        parkInRoom(creep);
+        return;
     }
 
-    return WORK_EVENTS.STAY;
-};
-
-const onSource = (): WorkEvent => {
-    return WORK_EVENTS.TO_TARGET;
+    parkInRoom(creep);
 };
 
 const Scout = {
+    /**
+     * scout 角色主循环（非状态机实现）。
+     *
+     * @remarks
+     * scout 的核心行为是“单阶段任务驱动”：
+     * - 先确保目标房间；
+     * - 再执行跨房移动；
+     * - 到房后做 stomp/sign/驻足。
+     */
     run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
+        creep.disableAttackNotificationsOnce?.();
+
+        const targetRoom = ensureScoutTargetRoom(creep);
+        if (!targetRoom) {
+            parkInRoom(creep);
+            return;
+        }
+
+        if (creep.room.name !== targetRoom) {
+            creep.moveToRoom(targetRoom, { plainCost: 1, swampCost: 1 });
+            return;
+        }
+
+        runScoutInTargetRoom(creep);
     }
-}
+};
 
 export default Scout;

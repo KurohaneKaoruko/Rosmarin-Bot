@@ -17,15 +17,11 @@ const OUT_INVADER_BT_SLOTS = {
 } as const;
 
 /**
- * 旧版 out-invader 行为实现。
- *
- * @remarks
- * 当前由行为树叶子节点承载该逻辑，
- * 后续可逐步拆分为更细粒度节点。
+ * out-invader 的主行为逻辑。
  *
  * @param creep 当前 out-invader creep。
  */
-const runLegacy = (creep: Creep) => {
+const runOutInvaderMain = (creep: Creep) => {
     if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
         creep.memory.dontPullMe = false;
         creep.moveToRoom(creep.memory.targetRoom);
@@ -72,10 +68,10 @@ const runLegacy = (creep: Creep) => {
 };
 
 /**
- * 主行为叶子：每 tick 执行 legacy 逻辑。
+ * 主行为叶子：每 tick 执行 out-invader 主逻辑。
  */
 const mainNode = leaf<OutInvaderContext>(({ creep }) => {
-    runLegacy(creep);
+    runOutInvaderMain(creep);
     return BtStatus.Running;
 });
 

@@ -7,7 +7,7 @@ export const ROLE_EXECUTOR_FRAMEWORKS = {
     PIPELINE: 'pipeline',
 } as const;
 
-// 行为实现框架：用于声明角色当前使用的重构框架。
+// 行为实现框架：用于声明角色当前使用的执行框架。
 export type RoleExecutorFramework =
     (typeof ROLE_EXECUTOR_FRAMEWORKS)[keyof typeof ROLE_EXECUTOR_FRAMEWORKS];
 
@@ -121,7 +121,7 @@ export const RoleData: RoleConfig = {
         bodypart: [[MOVE, 1]],
         level: 11,
         code: 'S',
-        executor: bindLayeredExecutor('scout'),
+        executor: bindStrategyExecutor('scout'),
     }),
     logistic: defineRole({
         bodypart: [[CARRY, 3], [MOVE, 3]],
@@ -154,12 +154,6 @@ export const RoleData: RoleConfig = {
         code: 'URE',
         executor: bindLayeredExecutor('up-repair'),
     }), // 加速维修
-    signer: defineRole({
-        bodypart: [[MOVE, 1]],
-        level: 11,
-        code: 'SIG',
-        executor: bindPipelineExecutor('signer'),
-    }), // 签名
 
     /* 占领房间 */
     claimer: defineRole({
@@ -281,8 +275,7 @@ export const RoleData: RoleConfig = {
         bodypart: [],
         level: 11,
         code: 'RSV',
-        // reserver 是历史角色名，底层 handler 仍叫 reserve。
-        // 命名例外项必须在 ROLE_EXECUTOR_ID_OVERRIDES 中登记，避免后续误判为漏绑。
+        // reserver 角色使用 reserve 处理器，映射关系由 ROLE_EXECUTOR_ID_OVERRIDES 统一维护。
         executor: bindLayeredExecutor(resolveRoleExecutorId('reserver')),
     }),
     'out-harvest': defineRole({
