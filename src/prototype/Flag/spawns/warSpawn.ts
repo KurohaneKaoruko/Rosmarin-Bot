@@ -1,7 +1,7 @@
 import { RoleData } from "@/constant/CreepConstant";
 import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
-import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./spawnConfig";
+import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
 type SpawnMemoryMatcher = (memory: any) => boolean;

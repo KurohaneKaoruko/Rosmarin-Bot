@@ -20,6 +20,15 @@ if (fs.existsSync(userConfigPath)) {
 
 const allUsers = Object.keys(userConfig);
 
+const getDeployPhaseLabel = (config) => {
+	if (!config) return '部署';
+	return config.copyPath ? '复制到本地客户端' : '上传到 Screeps';
+};
+
+const logSubmit = (message) => {
+	console.log(`[submit] ${message}`);
+};
+
 const selectUser = async () => {
 	try {
 		return await select({
@@ -37,7 +46,21 @@ const selectUser = async () => {
 };
 
 const exec = (user) => {
-	shelljs.exec(`cross-env DEST=${user} rolldown -c`);
+	const config = userConfig[user];
+	const deployPhase = getDeployPhaseLabel(config);
+
+	logSubmit(`目标: ${user}`);
+	logSubmit(`阶段 1/2: 开始打包`);
+	logSubmit(`阶段 2/2: 打包完成后将${deployPhase}`);
+
+	const result = shelljs.exec(`cross-env DEST=${user} rolldown -c`);
+	if (result.code === 0) {
+		logSubmit(`完成: ${user}`);
+		return;
+	}
+
+	logSubmit(`失败: ${user} (exit code ${result.code})`);
+	process.exit(result.code || 1);
 };
 
 const submit = async () => {

@@ -19,6 +19,19 @@ type PortalRegistry = {
     updated: number;
 };
 
+type PortalGlobalScope = {
+    _bmPortals?: PortalRegistry;
+};
+
+/**
+ * 兼容旧运行时：Screeps 某些环境没有 `globalThis`。
+ */
+const getPortalGlobalScope = (): PortalGlobalScope => {
+    if (typeof globalThis !== 'undefined') return globalThis as PortalGlobalScope;
+    if (typeof global !== 'undefined') return global as PortalGlobalScope;
+    return Function('return this')() as PortalGlobalScope;
+};
+
 export function createPortalModule() {
     let portalScanTick = -1;
     let portalPruneTick = -1;
@@ -26,7 +39,7 @@ export function createPortalModule() {
     const PORTAL_ENTRY_TTL = 50000;
 
     function getPortalRegistry(): PortalRegistry {
-        const globalState = globalThis as typeof globalThis & { _bmPortals?: PortalRegistry };
+        const globalState = getPortalGlobalScope();
         if (!globalState._bmPortals || typeof globalState._bmPortals !== 'object') {
             globalState._bmPortals = { v: 1, list: [], updated: 0 };
         }

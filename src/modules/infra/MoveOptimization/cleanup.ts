@@ -30,12 +30,21 @@ type CostMatrixExpiryEntry = { roomName: string; avoids: string[] };
 type CostMatrixTimerMap = Record<number, CostMatrixExpiryEntry[]>;
 type RouteKeysByTick = Record<number, string[]>;
 type ObserverResultMap = Record<number, BetterMoveObserverTask[]>;
-type BetterMoveGlobalState = typeof globalThis & {
+type BetterMoveGlobalState = {
     _bmPortals?: BetterMovePortalRegistry;
 };
 type DueTickQueue = {
     heap: number[];
     marks: Record<number, 1>;
+};
+
+/**
+ * 兼容旧运行时：Screeps 某些环境没有 `globalThis`。
+ */
+const getCleanupGlobalScope = (): BetterMoveGlobalState => {
+    if (typeof globalThis !== 'undefined') return globalThis as BetterMoveGlobalState;
+    if (typeof global !== 'undefined') return global as BetterMoveGlobalState;
+    return Function('return this')() as BetterMoveGlobalState;
 };
 type CleanupDeps = {
     globalPathCache: BetterMovePathCache;
@@ -247,7 +256,7 @@ export function createCleanupModule(deps: CleanupDeps) {
         }
 
         if (clearPortals) {
-            (globalThis as BetterMoveGlobalState)._bmPortals = { v: 1, list: [], updated: Game.time };
+            getCleanupGlobalScope()._bmPortals = { v: 1, list: [], updated: Game.time };
             deps.resetPortalScanState();
         }
 

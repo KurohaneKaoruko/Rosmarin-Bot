@@ -122,9 +122,18 @@ pnpm install
 | `pnpm push:main` | 构建并上传到 `.secret.json` 的 `main` 配置 |
 | `pnpm push:sim` | 构建并上传到 `.secret.json` 的 `sim` 配置 |
 | `pnpm push:local` | 构建并复制到 `.secret.json` 的 `local.copyPath` |
-| `pnpm count` | 统计代码行数 |
+| `pnpm count` | 统计代码概览（支持目录和 Top N 参数） |
 | `pnpm ver` | 更新版本号 |
 | `pnpm test` | 运行测试（Vitest） |
+
+`pnpm count` 默认统计 `src/`，也支持通过终端参数指定目录与排行数量，例如：
+
+```bash
+pnpm count
+pnpm count -- src/modules
+pnpm count -- src/modules 20
+pnpm count -- --path src/prototype --top 15
+```
 
 ### 游戏内启动
 

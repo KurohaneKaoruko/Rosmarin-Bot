@@ -10,7 +10,11 @@ const reportExecuteIssue = (key: string, message: string) => {
     if (creepExecuteErrorTickCache[key] === tick) return;
     creepExecuteErrorTickCache[key] = tick;
 
-    const runtime = globalThis as any;
+    const runtime = (typeof globalThis !== 'undefined'
+        ? globalThis
+        : typeof global !== 'undefined'
+            ? global
+            : Function('return this')()) as any;
     if (typeof runtime.log === 'function') {
         runtime.log(message);
         return;

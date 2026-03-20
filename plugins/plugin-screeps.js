@@ -127,10 +127,12 @@ async function uploadSource(config, options) {
     const usingToken = Boolean(config.token);
 
     try {
+        console.log(`[submit] 阶段 2/2: 开始上传到 Screeps -> ${endpoint} (branch: ${branch})`);
         if (!config.token) {
             await api.auth();
         }
         await runUpload(api, branch, code);
+        console.log(`[submit] 阶段 2/2: 上传完成 -> ${endpoint} (branch: ${branch})`);
     } catch (err) {
         throw new Error(formatScreepsUploadError(err, { endpoint, branch, usingToken }));
     }

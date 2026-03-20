@@ -63,7 +63,12 @@ const tryRequire = (path: string): unknown => {
 const decodeBase64ToUint8Array = (base64: string): Uint8Array => {
 	if (typeof Buffer !== 'undefined') return new Uint8Array(Buffer.from(base64, 'base64'));
 
-	const atobFn = (globalThis as typeof globalThis & { atob?: (data: string) => string }).atob;
+	const runtimeGlobal = (typeof globalThis !== 'undefined'
+		? globalThis
+		: typeof global !== 'undefined'
+			? global
+			: {}) as { atob?: (data: string) => string };
+	const atobFn = runtimeGlobal.atob;
 	if (!atobFn) throw new Error('当前环境缺少 base64 解码能力');
 
 	const bin = atobFn(base64);

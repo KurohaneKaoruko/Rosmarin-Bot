@@ -1,63 +1,16 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
 import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
-import { AidBodys } from "./spawnConfig";
-import { getSpawnRoomOrRemove, parseFlagNumber, parseSpawnRoomName, tickThrottle } from "../utils";
+import ClaimSpawnFunction from "./claimSpawn";
+import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
+import { AidBodys } from "./config";
+import { parseFlagNumber, parseSpawnRoomName, tickThrottle } from "../utils";
 
 // Spawn mission uses smaller level as higher priority; 0 is highest practical priority.
 const JUMP_SPAWN_PRIORITY = 0;
-const CLAIM_SPAWN_PRIORITY = 0;
 const MANUAL_AID_BUILD_SPAWN_PRIORITY = 0;
 const AID_BUILD_DEFAULT_INTERVAL = 200;
 const MANUAL_AID_BUILD_TARGET_COUNT = 5;
-const CLAIM_AID_BUILD_TARGET_COUNT = 3;
-
-type SpawnMemoryMatcher = (memory: any) => boolean;
-type SpawnLiveMatcher = (creep: Creep) => boolean;
-
-const matchesFlagSpawnMemory = (
-    memory: any,
-    flagName: string,
-    role: string,
-    legacyMatch: SpawnMemoryMatcher
-) => {
-    if (!memory || memory.role !== role) return false;
-    if (memory.spawnFlag) return memory.spawnFlag === flagName;
-    return legacyMatch(memory);
-};
-
-const getFlagSpawnLoad = (
-    spawnRoom: Room,
-    flagName: string,
-    role: string,
-    legacyMatch: SpawnMemoryMatcher,
-    liveMatch?: SpawnLiveMatcher
-) => {
-    let live = 0;
-    for (const creepName in Game.creeps) {
-        const creep = Game.creeps[creepName];
-        if (
-            matchesFlagSpawnMemory(creep?.memory, flagName, role, legacyMatch) &&
-            (!liveMatch || liveMatch(creep))
-        ) {
-            live++;
-        }
-    }
-
-    let queued = 0;
-    const tasks = spawnRoom.getAllMissionFromPool?.('spawn') || [];
-    for (const task of tasks as any[]) {
-        if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
-            queued++;
-        }
-    }
-
-    return {
-        live,
-        queued,
-        total: live + queued,
-    };
-};
 
 const getGlobalReserverLoad = (targetRoom: string) => {
     let live = 0;
@@ -89,13 +42,7 @@ const getGlobalReserverLoad = (targetRoom: string) => {
     };
 };
 
-const isActiveAidBuildFlagCreep = (creep: Creep) => {
-    if (creep.spawning) return true;
-    const ttl = creep.ticksToLive || 0;
-    return ttl > Math.max(120, creep.body.length * 3);
-};
-
-export default class AidSpawnFunction extends Flag {
+export default class AidSpawnFunction extends ClaimSpawnFunction {
     // 旗帜触发的孵化控制
     handleAidSpawnFlag(): boolean {
         const flagName = this.name;
@@ -621,111 +568,6 @@ export default class AidSpawnFunction extends Flag {
         };
     }
 
-    private getClaimFlagClaimerState(spawnRoom: Room, flagName: string, targetRoom: string) {
-        let live = 0;
-        const queuedTaskIds: string[] = [];
-
-        for (const name in Game.creeps) {
-            const creep = Game.creeps[name];
-            if (creep.memory?.role !== 'claimer') continue;
-            if (creep.memory?.targetRoom !== targetRoom) continue;
-            live++;
-        }
-
-        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
-        for (const task of tasks as any[]) {
-            const memory = task?.data?.memory as any;
-            if (!memory) continue;
-            if (memory.role !== 'claimer') continue;
-            if (memory.targetRoom !== targetRoom) continue;
-
-            if (memory.spawnFlag === flagName) queuedTaskIds.push(task.id);
-        }
-
-        return { live, queuedTaskIds };
-    }
-
-    private handleClaimFlag(flagName: string): boolean {
-        if (!flagName.startsWith('CLAIM/')) return false;
-
-        const room = this.getSpawnRoomFromName();
-        if (!room) return true;
-
-        const targetRoom = this.pos.roomName;
-        const isNotCenterRoom = !(/^[EW]\d*[456][NS]\d*[456]$/.test(targetRoom));
-        const isNotHighway = /^[EW]\d*[1-9][NS]\d*[1-9]$/.test(targetRoom);
-        if (!isNotCenterRoom || !isNotHighway) {
-            this.remove();
-            return true;
-        }
-
-        const targetRoomObj = Game.rooms[targetRoom];
-
-        const claimerState = this.getClaimFlagClaimerState(room, flagName, targetRoom);
-        let queuedClaimers = claimerState.queuedTaskIds.length;
-
-        // CLAIM 旗帜历史上可能已经堆出多条 claimer 任务；上线后自动压回到合理数量。
-        const redundantTaskIds = targetRoomObj?.my
-            ? claimerState.queuedTaskIds
-            : claimerState.queuedTaskIds.slice(1);
-        if (redundantTaskIds.length > 0) {
-            for (const taskId of redundantTaskIds) {
-                room.deleteMissionFromPool('spawn', taskId);
-                queuedClaimers--;
-            }
-            log('CLAIM', `${room.name} 清理了 ${redundantTaskIds.length} 个重复 claimer 任务 -> ${targetRoom}`);
-        }
-
-        // 已经完成“起房”：有 spawn 且没有工地 -> 自动关闭，避免后续误触发继续孵化
-        if (targetRoomObj?.my) {
-            const hasSpawn = targetRoomObj.find(FIND_MY_STRUCTURES, {
-                filter: (s) => s.structureType === STRUCTURE_SPAWN
-            }).length > 0;
-            const siteNum = targetRoomObj.find(FIND_MY_CONSTRUCTION_SITES).length;
-            if (hasSpawn && siteNum === 0) {
-                log('CLAIM', `${targetRoom} 已有spawn且无工地，已自动关闭CLAIM流程`);
-                this.remove();
-                return true;
-            }
-        }
-
-        // 目标房间未被占领时，确保有 claimer 在路上
-        const hasClaimer = claimerState.live > 0 || queuedClaimers > 0;
-        if (!hasClaimer && (!targetRoomObj || !targetRoomObj.my)) {
-            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { homeRoom: room.name, targetRoom, spawnFlag: flagName } as any);
-            if (ret === OK) {
-                log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
-            } else {
-                log('CLAIM', `${room.name} 为 ${targetRoom} 下发 claimer 失败 ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
-            }
-        }
-
-        // 同步孵化 aid-build 援助建造（不影响单独 AID 旗帜：只统计/控制本 CLAIM 旗帜派生的 builder）
-        const claimAidLoad = getFlagSpawnLoad(
-            room,
-            flagName,
-            'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === targetRoom,
-            isActiveAidBuildFlagCreep
-        );
-        const claimAidNum = claimAidLoad.total;
-
-        // CLAIM 起房阶段至少保持 3 个有效 aid-build：
-        // 1) claimer 落地后需要同时开采/起 spawn/补 extension，不足 3 个会明显拖慢起房
-        // 2) 这里沿用 flag 级 10 tick 节流，不再额外加 200 tick 间隔，避免 builder 迟迟补不齐
-        if (claimAidNum < CLAIM_AID_BUILD_TARGET_COUNT) {
-            const memory = { homeRoom: room.name, sourceRoom: targetRoom, targetRoom: targetRoom, spawnFlag: flagName } as any;
-            const ret = room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'aid-build', memory);
-            if (ret === OK) {
-                log('CLAIM', `${room.name} 派出了一个 aid-build 援助建造 ${targetRoom} (${claimAidNum + 1}/${CLAIM_AID_BUILD_TARGET_COUNT})`);
-            } else {
-                log('CLAIM', `${room.name} 为 ${targetRoom} 下发 aid-build 失败 ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
-            }
-        }
-
-        return true;
-    }
-
     // 预定房间
     private handleReserveFlag(flagName: string): boolean {
         if (!flagName.startsWith('RESERVE/')) return false;
@@ -757,10 +599,6 @@ export default class AidSpawnFunction extends Flag {
 
     private getSpawnIntervalFromName(Default = 500) {
         return parseFlagNumber(this.name, 'T', Default)
-    }
-
-    private getSpawnRoomFromName() {
-        return getSpawnRoomOrRemove(this)
     }
 
     private timeCheck(spawnInterval: number) {
