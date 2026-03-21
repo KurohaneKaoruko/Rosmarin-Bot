@@ -153,6 +153,8 @@ export class RoadMemory {
     private static groupPositionsCache: {
         [key: string]: { lastUpdate: number; positions: RoomPosition[] };
     } = {};
+    private static roomRoadIndexCacheTick = -1;
+    private static roomRoadIndexCache: Record<string, number[]> = {};
 
     /**
      * 获取指定目标房间的路线组
@@ -310,6 +312,58 @@ export class RoadMemory {
             };
         }
         return positions;
+    }
+
+    /**
+     * 获取某个房间内所有“已规划但未必已建成”的外矿道路坐标。
+     *
+     * @remarks
+     * - 这里直接扫描所有外矿路线，把属于 `roomName` 的路径点统一汇总；
+     * - 结果按 tick 做进程内缓存，避免同 tick 内被多次寻路回调反复扫描整份外矿内存；
+     * - 返回值是压缩后的 `(x,y)` 整数，调用方可按需解压，减少临时对象分配。
+     *
+     * @param roomName 需要查询的房间名。
+     * @returns 房间内所有已规划道路的压缩坐标数组。
+     */
+    static getPlannedRoadsInRoom(roomName: string): number[] {
+        if (this.roomRoadIndexCacheTick !== Game.time) {
+            this.rebuildRoomRoadIndexCache();
+        }
+        return this.roomRoadIndexCache[roomName] || [];
+    }
+
+    /**
+     * 重建“房间 -> 规划道路坐标”索引。
+     */
+    private static rebuildRoomRoadIndexCache(): void {
+        const nextCache: Record<string, number[]> = {};
+        const roomSeenMap: Record<string, Set<number>> = {};
+        const outMineData = getOutMineData();
+
+        for (const sourceRoom in outMineData) {
+            const roadData = outMineData[sourceRoom]?.RoadData;
+            if (!roadData?.routes) continue;
+
+            for (const targetRoom in roadData.routes) {
+                const group = roadData.routes[targetRoom] as OutMineRoadRouteGroup | undefined;
+                if (!group?.paths) continue;
+
+                for (const targetPosKey in group.paths) {
+                    const pathData = group.paths[targetPosKey];
+                    if (!Array.isArray(pathData?.path)) continue;
+
+                    for (const [pathRoomName, compressed] of pathData.path) {
+                        const seen = (roomSeenMap[pathRoomName] ||= new Set<number>());
+                        if (seen.has(compressed)) continue;
+                        seen.add(compressed);
+                        (nextCache[pathRoomName] ||= []).push(compressed);
+                    }
+                }
+            }
+        }
+
+        this.roomRoadIndexCache = nextCache;
+        this.roomRoadIndexCacheTick = Game.time;
     }
 
     /**

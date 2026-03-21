@@ -30,6 +30,8 @@ import { MovementModuleApi, MovementService } from './movement';
 import { installDontPullMePolicies, updateDontPullMeForMoveTo, wrapProtoMethod } from './dontPullMe';
 import { createIntentSolverModule } from './intentSolver';
 import { createBetterMoveGlobalApi, createMoveRuntimeControlModule } from './controls';
+import { RoadMemory } from '@/modules/feature/externalRoad';
+import { decompress } from '@/modules/utils/compress';
 import type {
     BetterMoveConfig,
     BetterMoveEndKeyPathRefCounts,
@@ -682,6 +684,51 @@ function applyRoomEdgePenalty(costMat, edgeCost) {
     }
 }
 
+/**
+ * 为“已规划但尚未建成”的外矿道路施加轻度路径偏好。
+ *
+ * @remarks
+ * 这里不把规划道路直接当成真实 road（cost=1）使用，而是只做“当前地形代价 - 1”：
+ * - plain: 2 -> 1
+ * - swamp: 10 -> 9
+ * - 已有更低代价（例如真实 road=1）时保持不变
+ *
+ * 这样能让 `out-carry` 更倾向沿既定外矿路线行走，但不会把未建 road 的 swamp
+ * 误判成“和真实 road 一样便宜”，避免寻路过度偏向未落地的沼泽路线。
+ *
+ * @param room 当前房间。
+ * @param noStructureCostMat 忽略可破坏建筑的 costMatrix。
+ * @param structureCostMat 考虑可破坏建筑的 costMatrix。
+ */
+function applyPlannedExternalRoadPreference(room, noStructureCostMat, structureCostMat) {
+    const plannedRoads = RoadMemory.getPlannedRoadsInRoom(room.name);
+    if (!plannedRoads.length) return;
+
+    const terrain = room.getTerrain();
+    const applyPreference = (costMat, x, y) => {
+        const oldCost = costMat.get(x, y);
+        if (oldCost == unWalkableCCost) return;
+
+        const terrainType = terrain.get(x, y);
+        if (terrainType == TERRAIN_MASK_WALL) return;
+
+        const terrainBaseCost = terrainType == TERRAIN_MASK_SWAMP ? 10 : 2;
+        const nextCost = oldCost > 0
+            ? Math.max(1, oldCost - 1)
+            : Math.max(1, terrainBaseCost - 1);
+
+        if (oldCost == 0 || nextCost < oldCost) {
+            costMat.set(x, y, nextCost);
+        }
+    };
+
+    for (let i = plannedRoads.length; i--;) {
+        const [x, y] = decompress(plannedRoads[i]);
+        applyPreference(noStructureCostMat, x, y);
+        applyPreference(structureCostMat, x, y);
+    }
+}
+
 function getSameRoomEdgeCostMatrix(roomName, ignoreCondition) {
     const roomMats = costMatrixCache[roomName];
     if (!roomMats) {
@@ -1012,6 +1059,9 @@ function generateCostMatrix(room, pos) {
                 break;
         }
     }
+
+    // 外矿规划中的“待建道路”只施加轻度偏好，帮助 out-carry 更稳定地贴着既定路线走。
+    applyPlannedExternalRoadPreference(room, noStructureCostMat, structureCostMat);
 
     const defaultSquadUsesStructures = !!(room.controller && room.controller.my);
     const defaultSquadData = getSquadCostMatrix(

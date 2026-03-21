@@ -134,7 +134,7 @@ const getControllerContainer = (room: Room): StructureContainer | null => {
 const isActiveCoreDepotPlaceholder = (
     room: Room,
     target: AnyStoreStructure | null | undefined
-): target is StructureContainer => {
+): boolean => {
     if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
     if (!isCoreDepotContainer(room, target)) return false;
 
