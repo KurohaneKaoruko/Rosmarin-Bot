@@ -243,13 +243,25 @@ const releaseAidBuildSource = (creep: Creep) => {
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
 };
 
-const getAidBuildTravelThreatRange = (hostile: Creep): number => (
-    hostile.getActiveBodyparts(RANGED_ATTACK) > 0 ? 6 : 4
+const hasAidBuildRangedThreat = (hostile: Creep): boolean => (
+    hostile.getActiveBodyparts(RANGED_ATTACK) > 0
 );
 
-const getAidBuildImmediateFleeRange = (hostile: Creep): number => (
-    hostile.getActiveBodyparts(RANGED_ATTACK) > 0 ? 5 : 3
+const hasAidBuildMeleeThreat = (hostile: Creep): boolean => (
+    hostile.getActiveBodyparts(ATTACK) > 0
 );
+
+const getAidBuildTravelThreatRange = (hostile: Creep): number => {
+    if (hasAidBuildRangedThreat(hostile)) return 6;
+    if (hasAidBuildMeleeThreat(hostile)) return 4;
+    return 0;
+};
+
+const getAidBuildImmediateFleeRange = (hostile: Creep): number => {
+    if (hasAidBuildRangedThreat(hostile)) return 5;
+    if (hasAidBuildMeleeThreat(hostile)) return 3;
+    return 0;
+};
 
 const findAidBuildTravelThreats = (room: Room): Creep[] => {
     return room.find(FIND_HOSTILE_CREEPS, {

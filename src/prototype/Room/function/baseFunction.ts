@@ -494,7 +494,7 @@ export default class BaseFunction extends Room {
         return !this.canUseSourceByPriority(creep, source);
     }
 
-    GetRoleBodys(role: string, upbody?:boolean, energyBudget?: number) {
+    GetRoleBodys(role: string, upbody?:boolean, energyBudget?: number, miniBody?: boolean) {
         let lv = this.level;
         let body: any[];
         const budget = energyBudget ?? this.energyCapacityAvailable;
@@ -503,7 +503,9 @@ export default class BaseFunction extends Room {
             while (lv >= 1) {
                 const bodyconfig = RoleLevelData[role][lv];
                 if (!bodyconfig) return RoleData[role]?.bodypart || [];
-                if (upbody && bodyconfig.upbodypart) {
+                if (miniBody && bodyconfig.minipart) {
+                    body = bodyconfig.minipart;
+                } else if (upbody && bodyconfig.upbodypart) {
                     body = bodyconfig.upbodypart;
                 } else {
                     body = bodyconfig.bodypart

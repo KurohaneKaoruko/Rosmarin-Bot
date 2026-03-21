@@ -23,6 +23,21 @@ export type ExternalMineTiming = {
     constrainedInterval: number;
 };
 
+// 外矿搬运数量估算常量
+const EXTERNAL_MINE_CARRY_TARGET_CONFIG = {
+    harvestPerSourceByLevel: [0, 2, 4, 6, 8, 8, 10, 20, 20] as const,
+    fallbackCarryCapacityByLevel: [0, 100, 150, 200, 400, 1000, 1000, 1300, 1600] as const,
+    routeBaseTicks: 20,
+    routeTicksPerLinearDistance: 25,
+    routeOverheadTicks: 8,
+    minEffectiveCarryCapacity: 50,
+    dynamicTargetBuffer: 1,
+    minTargetNum: 6,
+    maxTargetNumPerSource: 7,
+    noWorkCarryBaseExtraPerSource: 1,
+    noWorkCarryBaseMultiplier: 2,
+} as const;
+
 // 外矿运行的状态工具：QoS、房间模式、节流、以及视觉渲染。
 class ExternalMineState {
     private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
@@ -115,24 +130,12 @@ class ExternalMineState {
 
 // 外矿的数学/容量估算集中在此处，避免散落的魔数。
 class ExternalMineMath {
-    // 每个 RCL 对应的外矿单源工作量估计（单位：能量/tick）。
-    private static readonly HARVEST_PER_SOURCE = [0, 2, 4, 6, 8, 8, 10, 20, 20] as const;
-    // 每个 RCL 对应的单个运输队列的承载能力估计（单位：能量）。
-    private static readonly CARRY_CAPACITY = [0, 100, 150, 200, 400, 1000, 1000, 1300, 1600] as const;
     // 期望单源总 WORK 数量（用于估算采集人数）。
     private static readonly SOURCE_TARGET_WORK = 5;
     // 低等级阶段允许的单源外矿采集者上限（用于过渡补能）。
     private static readonly MAX_HARVESTERS_PER_SOURCE_LOW_LEVEL = 3;
     // 成熟房间（有效等级 >= 4）单源上限：严格 1 个采集者。
     private static readonly MAX_HARVESTERS_PER_SOURCE_STABLE = 1;
-    // high/rush 模式下把小体型搬运降一级：out-carry 8C4M -> 6C3M，out-car 1W7C4M -> 1W5C3M。
-    private static readonly SMALL_BODY_OUT_CARRY: ((BodyPartConstant | number)[])[] = [[CARRY, 6], [MOVE, 3]];
-    private static readonly SMALL_BODY_OUT_CAR: ((BodyPartConstant | number)[])[] = [[WORK, 1], [CARRY, 5], [MOVE, 3]];
-    // high/rush 模式下外矿经济单位使用较小体型的能量预算上限（便于多数量）。
-    private static readonly SMALL_BODY_ENERGY_CAP_HIGH = 650;
-    private static readonly SMALL_BODY_ENERGY_CAP_RUSH = 650;
-    // 仅这些外矿运输角色应用“小体型”策略，避免影响采集与战斗单位。
-    private static readonly SMALL_BODY_ROLE_SET = new Set<string>(['out-carry', 'out-car']);
     // 允许占位在采集点旁的可通行结构类型。
     private static readonly WALKABLE_SOURCE_STRUCTURE_SET = new Set<StructureConstant>([
         STRUCTURE_CONTAINER,
@@ -140,40 +143,17 @@ class ExternalMineMath {
         STRUCTURE_RAMPART,
     ]);
 
-    private static getModeLimitedEnergyBudget(sourceRoom: Room, role: string, upbody?: boolean): number | null {
-        if (upbody) return null;
-        if (!this.SMALL_BODY_ROLE_SET.has(role)) return null;
-        const mode = ExternalMineState.getRoomMode(sourceRoom);
-        if (mode !== 'high' && mode !== 'rush') return null;
-        const cap = mode === 'rush' ? this.SMALL_BODY_ENERGY_CAP_RUSH : this.SMALL_BODY_ENERGY_CAP_HIGH;
-        const roomCap = sourceRoom.energyCapacityAvailable || 0;
-        const budget = Math.min(cap, roomCap > 0 ? roomCap : cap);
-        return budget > 0 ? budget : null;
-    }
-
-    // 获取 high/rush 模式下的外矿角色体型配置；非高功耗模式返回 null。
+    // 获取 high/rush 模式下的外矿小体型；具体体型配置直接复用 RoleLevelData.minipart。
     static getModeLimitedBodyConfig(
         sourceRoom: Room,
         role: string,
         upbody?: boolean
     ): ((BodyPartConstant | number)[])[] | null {
-        if (!upbody && role === 'out-carry') {
-            const mode = ExternalMineState.getRoomMode(sourceRoom);
-            if (mode === 'high' || mode === 'rush') {
-                return this.SMALL_BODY_OUT_CARRY.map((part) => [...part]);
-            }
-        }
-        if (!upbody && role === 'out-car') {
-            const mode = ExternalMineState.getRoomMode(sourceRoom);
-            if (mode === 'high' || mode === 'rush') {
-                return this.SMALL_BODY_OUT_CAR.map((part) => [...part]);
-            }
-        }
-        const budget = this.getModeLimitedEnergyBudget(sourceRoom, role, upbody);
-        if (!budget) return null;
-        const body = sourceRoom.GetRoleBodys(role, upbody, budget);
-        if (!Array.isArray(body) || body.length === 0) return null;
-        return body as ((BodyPartConstant | number)[])[];
+        if (upbody) return null;
+        const mode = ExternalMineState.getRoomMode(sourceRoom);
+        if (mode !== 'high' && mode !== 'rush') return null;
+        const body = sourceRoom.GetRoleBodys(role, false, undefined, true);
+        return Array.isArray(body) && body.length > 0 ? body : null;
     }
 
     // 判断外矿资源点旁某个坐标是否可站立（不在边界、非墙、结构阻塞）。
@@ -263,7 +243,7 @@ class ExternalMineMath {
             if (capacity > 0) return capacity;
         }
         const lv = Math.max(1, Math.min(8, sourceRoom.level));
-        return this.CARRY_CAPACITY[lv];
+        return EXTERNAL_MINE_CARRY_TARGET_CONFIG.fallbackCarryCapacityByLevel[lv];
     }
 
     // 根据源数、WORK 能力与站位上限，估算采集者目标数量。
@@ -292,21 +272,31 @@ class ExternalMineMath {
         const lv = Math.max(1, Math.min(8, sourceRoom.level));
         const baseNum = allowWorkCarry
             ? sourceNum
-            : Math.max(sourceNum + 1, Math.ceil(sourceNum * 2));
+            : Math.max(
+                sourceNum + EXTERNAL_MINE_CARRY_TARGET_CONFIG.noWorkCarryBaseExtraPerSource,
+                Math.ceil(sourceNum * EXTERNAL_MINE_CARRY_TARGET_CONFIG.noWorkCarryBaseMultiplier)
+            );
 
         const linearDistance = Game.map.getRoomLinearDistance(sourceRoom.name, targetRoomName, true);
-        const oneWayTicks = 20 + linearDistance * 25;
-        const roundTripTicks = oneWayTicks * 2 + 8;
+        const oneWayTicks =
+            EXTERNAL_MINE_CARRY_TARGET_CONFIG.routeBaseTicks +
+            linearDistance * EXTERNAL_MINE_CARRY_TARGET_CONFIG.routeTicksPerLinearDistance;
+        const roundTripTicks = oneWayTicks * 2 + EXTERNAL_MINE_CARRY_TARGET_CONFIG.routeOverheadTicks;
 
-        const harvestPerSource = this.HARVEST_PER_SOURCE[lv];
+        const harvestPerSource = EXTERNAL_MINE_CARRY_TARGET_CONFIG.harvestPerSourceByLevel[lv];
         const estimatedIncomePerTick = harvestPerSource * sourceNum;
         const carryCapacity = (carryCapacityOverride && carryCapacityOverride > 0)
             ? carryCapacityOverride
-            : this.CARRY_CAPACITY[lv];
-        const throughputNeed = Math.ceil((estimatedIncomePerTick * roundTripTicks) / Math.max(50, carryCapacity));
-        const dynamicNum = throughputNeed + 1;
+            : EXTERNAL_MINE_CARRY_TARGET_CONFIG.fallbackCarryCapacityByLevel[lv];
+        const throughputNeed = Math.ceil((
+            estimatedIncomePerTick * roundTripTicks
+        ) / Math.max(EXTERNAL_MINE_CARRY_TARGET_CONFIG.minEffectiveCarryCapacity, carryCapacity));
+        const dynamicNum = throughputNeed + EXTERNAL_MINE_CARRY_TARGET_CONFIG.dynamicTargetBuffer;
 
-        const cappedMax = Math.max(6, sourceNum * 7);
+        const cappedMax = Math.max(
+            EXTERNAL_MINE_CARRY_TARGET_CONFIG.minTargetNum,
+            sourceNum * EXTERNAL_MINE_CARRY_TARGET_CONFIG.maxTargetNumPerSource
+        );
         return Math.min(cappedMax, Math.max(baseNum, dynamicNum));
     }
 }

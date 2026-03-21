@@ -343,7 +343,7 @@ interface Room {
      * @description 根据房间等级和能量容量动态生成合适的体型
      * @example const body = room.GetRoleBodys('harvester'); // [[WORK, 5], [CARRY, 1], [MOVE, 3]]
      */
-    GetRoleBodys(role: string, upbody?: boolean, energyBudget?: number): ((BodyPartConstant | number)[])[];
+    GetRoleBodys(role: string, upbody?: boolean, energyBudget?: number, miniBody?: boolean): ((BodyPartConstant | number)[])[];
     
     /** 
      * 生成creep body
