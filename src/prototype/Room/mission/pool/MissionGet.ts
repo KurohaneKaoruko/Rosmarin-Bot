@@ -308,7 +308,7 @@ export default class MissionGet extends Room {
     // 获取孵化任务
     getSpawnMission() {
         pruneDelayedUpgraderSpawnMissions(this);
-        const energyAvailable = this.energyAvailable;
+        const availableEnergy = this.energyAvailable || 0;
         const allowWaitForPriorityEnergy = THRESHOLDS.SPAWN.ALLOW_WAIT_FOR_PRIORITY_ENERGY;
         const queueJumpAllowBelowLevel = THRESHOLDS.SPAWN.WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL;
         const tasks = this.getAllMissionFromPool('spawn');
@@ -322,26 +322,26 @@ export default class MissionGet extends Room {
         for (const task of tasks) {
             if (!task || task.lock) continue;
 
-            const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, energyAvailable);
+            const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
             if (requiredEnergy == null) continue;
 
-            if (requiredEnergy <= energyAvailable && task.level < bestAffordableOverallLevel) {
+            if (requiredEnergy <= availableEnergy && task.level < bestAffordableOverallLevel) {
                 bestAffordableOverall = task;
                 bestAffordableOverallLevel = task.level;
             }
 
             if (task.level < highestPriority) {
                 highestPriority = task.level;
-                firstAffordableAtHighestPriority = requiredEnergy <= energyAvailable ? task : null;
-                cheapestBlockedAtHighestPriority = requiredEnergy > energyAvailable ? task : null;
-                cheapestBlockedEnergy = requiredEnergy > energyAvailable ? requiredEnergy : Infinity;
+                firstAffordableAtHighestPriority = requiredEnergy <= availableEnergy ? task : null;
+                cheapestBlockedAtHighestPriority = requiredEnergy > availableEnergy ? task : null;
+                cheapestBlockedEnergy = requiredEnergy > availableEnergy ? requiredEnergy : Infinity;
                 continue;
             }
 
             if (task.level > highestPriority) continue;
 
             // 只在相同优先级内，才允许先挑当前能孵化的任务。
-            if (requiredEnergy <= energyAvailable) {
+            if (requiredEnergy <= availableEnergy) {
                 if (!firstAffordableAtHighestPriority) {
                     firstAffordableAtHighestPriority = task;
                 }

@@ -477,68 +477,6 @@ class ExternalMineSpawner {
         return this.hasActiveOutHarvesterByTargetName(sourceRoom, targetRoom.name);
     }
 
-    // 清理：当目标房没有采集者时，移除其 carry 任务，避免浪费刷怪。
-    static pruneInvalidOutCarrySpawnMissions(sourceRoom: Room): number {
-        const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
-        const invalidTargets = new Set<string>();
-        for (const task of tasks) {
-            const memory = this.getSpawnTaskMemory(task);
-            const role = memory?.role;
-            if (role !== 'out-carry' && role !== 'out-car') continue;
-            const targetRoom = memory?.targetRoom;
-            if (!targetRoom) continue;
-            const taskSourceRoom = getCreepSourceRoom(memory);
-            if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
-            if (!this.hasActiveOutHarvesterByTargetName(sourceRoom, targetRoom)) {
-                invalidTargets.add(targetRoom);
-            }
-        }
-
-        let removed = 0;
-        for (const targetRoom of invalidTargets) {
-            removed += this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom);
-        }
-        return removed;
-    }
-
-    // 清理历史遗留的 aggressiveCarry 任务（可能导致经济异常）。
-    static pruneLegacyAggressiveOutCarrySpawnMissions(sourceRoom: Room): number {
-        const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
-        const removeIds: string[] = [];
-
-        for (const task of tasks) {
-            const id = task.id;
-            const memory = this.getSpawnTaskMemory(task) || undefined;
-            const role = memory?.role;
-            if (!id || !memory || !role) continue;
-            if (role !== 'out-carry' && role !== 'out-car') continue;
-            if (!memory.aggressiveCarry) continue;
-
-            const taskSourceRoom = getCreepSourceRoom(memory);
-            if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
-            removeIds.push(id);
-        }
-
-        for (const id of removeIds) {
-            sourceRoom.deleteMissionFromPool('spawn', id);
-        }
-
-        return removeIds.length;
-    }
-
-    // 统一修正外矿相关任务的优先级，避免因历史任务导致优先级偏低。
-    static normalizeEconomicPriority(room: Room): void {
-        const tasks = room.getAllMissionFromPool('spawn') || [];
-        for (const task of tasks) {
-            const role = this.getSpawnTaskMemory(task)?.role;
-            if (!role) continue;
-            const targetLevel = this.ROLE_PRIORITY_BY_ROLE[role];
-            if (targetLevel == null) continue;
-            if (task.level !== targetLevel) {
-                task.level = targetLevel;
-            }
-        }
-    }
 
     // 侦查：全局与本房均只允许 1 个 scout，以避免重复探路。
     static scout(sourceRoom: Room, targetRoomName: string): boolean {
@@ -767,9 +705,6 @@ export class ExternalMine {
         if (room.memory.defend) return null;
         if (Memory['warmode']) return null;
 
-        ExternalMineSpawner.pruneInvalidOutCarrySpawnMissions(room);
-        ExternalMineSpawner.normalizeEconomicPriority(room);
-
         const qosLevel = ExternalMineState.getQosLevel();
         if (qosLevel === 'emergency') return null;
         return qosLevel;
@@ -790,7 +725,6 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        ExternalMineSpawner.pruneLegacyAggressiveOutCarrySpawnMissions(room);
         const targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
         if (targetRooms.length <= 0) return;
 
@@ -862,7 +796,6 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        ExternalMineSpawner.pruneLegacyAggressiveOutCarrySpawnMissions(room);
         const targetRooms = ExternalMineState.getManagedTargets(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
 

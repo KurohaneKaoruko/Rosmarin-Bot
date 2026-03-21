@@ -243,10 +243,77 @@ const releaseAidBuildSource = (creep: Creep) => {
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
 };
 
-// Aid-build 在跨房前往目标房时，先与带攻击能力的敌对 creep 拉开距离，
-// 避免直接顶着攻击单位走脸导致半路暴毙。
+const getAidBuildTravelThreatRange = (hostile: Creep): number => (
+    hostile.getActiveBodyparts(RANGED_ATTACK) > 0 ? 6 : 4
+);
+
+const getAidBuildImmediateFleeRange = (hostile: Creep): number => (
+    hostile.getActiveBodyparts(RANGED_ATTACK) > 0 ? 5 : 3
+);
+
+const findAidBuildTravelThreats = (room: Room): Creep[] => {
+    return room.find(FIND_HOSTILE_CREEPS, {
+        filter: (hostile) =>
+            !hostile.isWhiteList() &&
+            (hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0)
+    }) as Creep[];
+};
+
+const createAidBuildThreatCostCallback = () => {
+    return (roomName: string, costs: CostMatrix): CostMatrix => {
+        const room = Game.rooms[roomName];
+        if (!room) return costs;
+
+        const dangerousHostiles = findAidBuildTravelThreats(room);
+        for (const hostile of dangerousHostiles) {
+            const avoidRange = getAidBuildTravelThreatRange(hostile);
+            for (let dx = -avoidRange; dx <= avoidRange; dx++) {
+                for (let dy = -avoidRange; dy <= avoidRange; dy++) {
+                    const x = hostile.pos.x + dx;
+                    const y = hostile.pos.y + dy;
+                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+
+                    const dist = Math.max(Math.abs(dx), Math.abs(dy));
+                    if (dist > avoidRange) continue;
+
+                    if (dist <= 1) {
+                        costs.set(x, y, 255);
+                        continue;
+                    }
+
+                    const currentCost = costs.get(x, y);
+                    const nextCost = Math.max(currentCost, Math.min(254, 30 + (avoidRange - dist + 1) * 25));
+                    costs.set(x, y, nextCost);
+                }
+            }
+        }
+
+        return costs;
+    };
+};
+
+// Aid-build 在跨房前往目标房时应主动绕开带攻击能力的敌对 creep；
+// 只有进入贴脸危险范围时才立刻 flee，其他情况依赖 path cost 绕行。
 const avoidAidBuildTravelThreats = (creep: Creep): boolean => {
-    return creep.fleeFromHostiles(6);
+    const dangerousHostiles = findAidBuildTravelThreats(creep.room);
+    if (dangerousHostiles.length <= 0) return false;
+
+    const immediateThreats = dangerousHostiles
+        .filter((hostile) => creep.pos.inRangeTo(hostile, getAidBuildImmediateFleeRange(hostile)))
+        .map((hostile) => ({
+            pos: hostile.pos,
+            range: getAidBuildTravelThreatRange(hostile),
+        }));
+
+    if (immediateThreats.length <= 0) return false;
+
+    const fleeResult = creep.flee(immediateThreats, {
+        maxRooms: 1,
+        plainCost: 2,
+        swampCost: 10,
+        costCallback: createAidBuildThreatCostCallback(),
+    });
+    return fleeResult === OK;
 };
 
 const moveAidBuildToTargetRoom = (creep: Creep): boolean => {
@@ -258,7 +325,11 @@ const moveAidBuildToTargetRoom = (creep: Creep): boolean => {
     if (arrived) return true;
 
     if (avoidAidBuildTravelThreats(creep)) return false;
-    creep.moveToRoom(targetRoom, { plainCost: 2, swampCost: 10 });
+    creep.moveToRoom(targetRoom, {
+        plainCost: 2,
+        swampCost: 10,
+        costCallback: createAidBuildThreatCostCallback(),
+    });
     return false;
 };
 // ==============================
