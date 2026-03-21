@@ -75,15 +75,6 @@ function findTransferLink(creep: Creep, source: Source): StructureLink | null {
     return links.find(l => l.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source.pos.inRangeTo(l, NEAR_RANGE)) ?? null;
 }
 
-function transferToLinkWhileHarvesting(creep: Creep, source: Source): void {
-    if (creep.store[RESOURCE_ENERGY] === 0) return;
-
-    const link = findTransferLink(creep, source);
-    if (!link || !creep.pos.isNearTo(link)) return;
-
-    creep.transfer(link, RESOURCE_ENERGY);
-}
-
 /**
  * 查找 Creep 附近的任意 Link
  * @description 用于交付层判断，主要关心“有没有可投递结构”
@@ -187,9 +178,6 @@ const runHarvest = (creep: Creep): boolean => {
     const result = creep.goHaverst(targetSource);
     if (!result) return false;
     if (creep.store.getCapacity() === 0) return false;
-
-    // Link 矿工应在采集态就顺手把能量送进 link，避免卡到满仓后才切交付。
-    transferToLinkWhileHarvesting(creep, targetSource);
 
     // 预测下一次采集会满仓时切换到交付阶段
     const energyIncome = creep.calculateHarvestIncomePerTick();

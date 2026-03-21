@@ -24,7 +24,9 @@ type CreepTickIndexCache = {
 
 const EMPTY_TARGET_ROOM_ROLE_MAP: TargetRoomRoleMap = Object.freeze({}) as TargetRoomRoleMap
 const EMPTY_ROLE_COUNT_MAP: RoleCountMap = Object.freeze({}) as RoleCountMap
-const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transport', 'carrier', 'manager'])
+// transport / manager 对体型吞吐更敏感，恢复期允许按“缩水体型”补正；
+// carrier 继续按真实数量统计，避免低能量恢复后长期叠出多只替代品。
+const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transport', 'manager'])
 
 let tickCache: CreepTickIndexCache | undefined
 
