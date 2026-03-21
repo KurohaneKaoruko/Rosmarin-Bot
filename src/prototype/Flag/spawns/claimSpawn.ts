@@ -1,5 +1,4 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
-import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
 import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
 import { getSpawnRoomOrRemove } from "../utils";
@@ -92,7 +91,7 @@ export default class ClaimSpawnFunction extends Flag {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === targetRoom,
+            (memory) => memory.targetRoom === targetRoom && memory.sourceRoom === targetRoom,
             isActiveAidBuildFlagCreep
         );
         const claimAidNum = claimAidLoad.total;

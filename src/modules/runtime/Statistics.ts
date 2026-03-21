@@ -1,8 +1,7 @@
 /** 统计模块 */
 import { RoleData } from '@/constant/CreepConstant';
 import { getCreepRoleCountsAll } from '@/modules/utils/creepTickIndex';
-import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
-import { hasMarketCredits, hasMarketOrderApi } from '@/modules/utils/marketUtils';
+import { getAllOrdersCached, hasMarketCredits, hasMarketOrderApi } from '@/modules/utils/marketUtils';
 
 // --- Configuration Constants ---
 const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)

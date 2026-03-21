@@ -1,7 +1,6 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadVisual } from '@/modules/feature/externalRoad';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/modules/utils/memory';
@@ -346,7 +345,7 @@ class ExternalMineSpawner {
             if (!memory?.role) continue;
             if (memory.role !== role) continue;
             if ((memory.targetRoom || '') !== targetRoomName) continue;
-            const taskSourceRoom = getCreepSourceRoom(memory);
+            const taskSourceRoom = memory.sourceRoom;
             if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
             count++;
         }
@@ -366,7 +365,7 @@ class ExternalMineSpawner {
                 if (memory.role !== role) continue;
                 if ((memory.targetRoom || '') !== targetRoomName) continue;
                 if (sourceRoomName) {
-                    const taskSourceRoom = getCreepSourceRoom(memory);
+                    const taskSourceRoom = memory.sourceRoom;
                     if (taskSourceRoom && taskSourceRoom !== sourceRoomName) continue;
                 }
                 count++;
@@ -404,7 +403,7 @@ class ExternalMineSpawner {
             if (memory.role !== role) continue;
             if ((memory.targetRoom || '') !== targetRoomName) continue;
             if (sourceRoomName) {
-                const taskSourceRoom = getCreepSourceRoom(memory);
+                const taskSourceRoom = memory.sourceRoom;
                 if (taskSourceRoom && taskSourceRoom !== sourceRoomName) continue;
             }
             count++;
@@ -420,7 +419,7 @@ class ExternalMineSpawner {
             const memory = this.getSpawnTaskMemory(task);
             if (!memory?.role) continue;
             if (memory.role !== role) continue;
-            if (getCreepSourceRoom(memory) !== sourceRoom.name) continue;
+            if (memory.sourceRoom !== sourceRoom.name) continue;
             count++;
         }
         return count;
@@ -454,9 +453,9 @@ class ExternalMineSpawner {
             const role = memory?.role;
             if (role !== 'out-carry' && role !== 'out-car') continue;
             if (memory?.targetRoom !== targetRoomName) continue;
-            const taskSourceRoom = getCreepSourceRoom(memory);
+            const taskSourceRoom = memory.sourceRoom;
             if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
-            sourceRoom.deleteMissionFromPool('spawn', task.id);
+            sourceRoom.deleteMissionFromPool?.('spawn', task.id);
             removed++;
         }
         return removed;
@@ -477,7 +476,7 @@ class ExternalMineSpawner {
         const activeSourceScouts = Object.values(Game.creeps).filter((creep) =>
             creep &&
             creep.memory?.role === 'scout' &&
-            getCreepSourceRoom(creep.memory) === sourceRoom.name
+            creep.memory.sourceRoom === sourceRoom.name
         ).length;
         const queuedSourceScouts = this.getQueuedSpawnRoleNumBySource(sourceRoom, 'scout');
         if (activeSourceScouts + queuedSourceScouts > 0) return false;

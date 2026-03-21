@@ -112,12 +112,13 @@ export const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
 // 将已入队但应该被推迟的升级类任务清理掉，避免卡队列
 export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
     if (!shouldDelayUpgraderForPrimaryBuild(room)) return 0;
-    const tasks = ((room as any).getAllMissionFromPool?.('spawn') || []) as Task[];
+    const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
     let removed = 0;
     for (const task of tasks) {
-        const role = (task as any)?.data?.memory?.role;
+        const taskData = task.data as SpawnTask
+        const role = taskData?.memory?.role;
         if (role !== 'upgrader' && role !== 'up-upgrade') continue;
-        (room as any).deleteMissionFromPool?.('spawn', task.id);
+        room.deleteMissionFromPool?.('spawn', task.id);
         removed += 1;
     }
     return removed;

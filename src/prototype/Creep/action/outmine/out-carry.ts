@@ -1,4 +1,3 @@
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
 import { tryOutCarryRelayHandoff, updateOutCarryMoveTrace } from '@/prototype/Creep/function/relayFunction';
 import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
@@ -200,7 +199,7 @@ const outCarry: OutCarryAction = {
 
     findBestWithdrawTarget: function (creep: Creep): { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null {
         const room = creep.room;
-        const sourceRoomName = getCreepSourceRoom(creep.memory);
+        const sourceRoomName = creep.memory.sourceRoom;
         const sourceRoom = sourceRoomName ? Game.rooms[sourceRoomName] : undefined;
         const canStoreMinerals = !!(sourceRoom?.storage || sourceRoom?.terminal);
 
@@ -217,7 +216,7 @@ const outCarry: OutCarryAction = {
             const other = Game.creeps[name];
             if (!other || other.id === creep.id || other.spawning) continue;
             if (other.memory.role !== 'out-carry' && other.memory.role !== 'out-car') continue;
-            if (getCreepSourceRoom(other.memory) !== sourceRoomName) continue;
+            if (other.memory.sourceRoom !== sourceRoomName) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
             if (!this.isLikelyCollecting(other)) continue;
             const targetId = other.memory.cacheSource?.targetId;
@@ -324,7 +323,7 @@ const outCarry: OutCarryAction = {
     withdraw: function (creep: Creep) {
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         const cache = creep.memory.cacheSource as any;
-        const sourceRoom = getCreepSourceRoom(creep.memory);
+        const sourceRoom = creep.memory.sourceRoom;
 
         if (cache.waitUntil && Game.time < cache.waitUntil) {
             const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
@@ -468,7 +467,7 @@ const outCarry: OutCarryAction = {
     carry: function (creep: Creep) {
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
         const cache = creep.memory.cacheTarget as any;
-        const sourceRoom = getCreepSourceRoom(creep.memory);
+        const sourceRoom = creep.memory.sourceRoom;
         if (!sourceRoom) return;
 
         if (tryOutCarryRelayHandoff(
@@ -542,7 +541,7 @@ const outCarry: OutCarryAction = {
     },
 
     buildRepair: function (creep: Creep) {
-        const sourceRoom = getCreepSourceRoom(creep.memory);
+        const sourceRoom = creep.memory.sourceRoom;
         if (sourceRoom && creep.room.name == sourceRoom) return false;
         if (!canBuildRepair(creep)) return false;
 
@@ -623,7 +622,7 @@ const outCarry: OutCarryAction = {
 
 // 判断是否满足“修路/修路肩”策略的前置条件
 const shouldBuildRepair = (creep: Creep): boolean => {
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
     if (sourceRoom && creep.room.name == sourceRoom) return false;
     return canBuildRepair(creep);
 };

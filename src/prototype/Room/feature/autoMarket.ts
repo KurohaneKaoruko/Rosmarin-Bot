@@ -2,8 +2,16 @@ import { log } from "@/utils"
 import { BASE_CONFIG } from "@/constant/config";
 import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/utils/memory";
-import { calcTransactionCostSafe, getEnergyHistoryAvgPrice, getOrderPrice, hasMarketOrderApi } from "@/modules/utils/marketUtils";
-import { findMyOrderCached, getAllOrdersCached, hasEnergyReceiverRoomCached, hasEnergySupplierRoomCached } from "@/modules/utils/marketTickCache";
+import {
+    calcTransactionCostSafe,
+    findMyOrderCached,
+    getAllOrdersCached,
+    getEnergyHistoryAvgPrice,
+    getOrderPrice,
+    hasEnergyReceiverRoomCached,
+    hasEnergySupplierRoomCached,
+    hasMarketOrderApi,
+} from "@/modules/utils/marketUtils";
 
 const br = '<br/>';
 const LOG_COLORS = {
@@ -685,4 +693,3 @@ function AutoDeal(
 
     return result;
 }
-

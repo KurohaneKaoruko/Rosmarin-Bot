@@ -1,5 +1,4 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -18,7 +17,7 @@ const getFirstCarriedResource = (creep: Creep): ResourceConstant | null => {
 const onSource = (creep: Creep): WorkEvent => {
     creep.memory.cacheSource = creep.memory.cacheSource || {}
     const cache = creep.memory.cacheSource
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
     creep.disableAttackNotificationsOnce();
     
     if((creep.memory.longMoveEnd||0) > 0 && (creep.memory.longMoveStart||0) > 0) {
@@ -129,7 +128,7 @@ const onSource = (creep: Creep): WorkEvent => {
 };
 
 const onTarget = (creep: Creep): WorkEvent => {
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
     if (!sourceRoom) return creep.store.getUsedCapacity() == 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
     if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
         let opt = {};

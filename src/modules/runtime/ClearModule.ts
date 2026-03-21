@@ -1,8 +1,7 @@
 /**
  * 清理模块
  */
-import { clearRoomRelatedMemory } from '@/modules/utils/roomMemory';
-import { getMissionPools, getRoomData } from '@/modules/utils/memory';
+import { clearRoomRelatedMemory, getMissionPools, getRoomData } from '@/modules/utils/memory';
 import { hasMarketOrderApi } from '@/modules/utils/marketUtils';
 
 export const ClearModule = {

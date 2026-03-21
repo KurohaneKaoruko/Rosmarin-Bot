@@ -1,11 +1,81 @@
-import { getAllOrdersCached } from '@/modules/utils/marketTickCache';
 import { AUTO_MARKET_CONFIG } from '@/constant/ResourceConstant';
+
+type MyOrder = Order & { resourceType: ResourceConstant };
+
+type MarketTickCacheState = {
+    time: number;
+    allOrders: Record<string, Order[]>;
+    ownOrdersReady: boolean;
+    ownOrdersByKey: Record<string, MyOrder[]>;
+    myTerminalRooms?: Room[];
+};
+
+let tickCache: MarketTickCacheState | undefined;
 
 /**
  * 市场兼容工具。
  * 赛季世界可能关闭订单相关 API，但终端传输成本仍然需要可计算。
  */
 const getMarket = () => (Game as any).market as any;
+
+const getOrderKey = (type: ORDER_BUY | ORDER_SELL, resourceType: ResourceConstant): string =>
+    `${type}:${resourceType}`;
+
+const getOwnOrderKey = (
+    roomName: string,
+    resourceType: ResourceConstant,
+    type: ORDER_BUY | ORDER_SELL,
+): string => `${roomName}:${resourceType}:${type}`;
+
+const isOrderType = (type: string): type is ORDER_BUY | ORDER_SELL =>
+    type === ORDER_BUY || type === ORDER_SELL;
+
+const getCache = (): MarketTickCacheState => {
+    // tick 级缓存：只在当前 tick 内复用，下一 tick 自动重建
+    if (!tickCache || tickCache.time !== Game.time) {
+        tickCache = {
+            time: Game.time,
+            allOrders: {},
+            ownOrdersReady: false,
+            ownOrdersByKey: {},
+        };
+    }
+    return tickCache;
+};
+
+const buildOwnOrderIndex = (cache: MarketTickCacheState): void => {
+    if (cache.ownOrdersReady) return;
+    cache.ownOrdersReady = true;
+
+    if (!Game.market || !Game.market.orders) return;
+
+    // 直接遍历 Game.market.orders，避免额外分配
+    for (const orderId in Game.market.orders) {
+        const order = Game.market.orders[orderId];
+        if (!order || !order.roomName || !order.resourceType || order.remainingAmount <= 0) continue;
+        if (!isOrderType(order.type)) continue;
+
+        const key = getOwnOrderKey(order.roomName, order.resourceType as ResourceConstant, order.type);
+        if (!cache.ownOrdersByKey[key]) {
+            cache.ownOrdersByKey[key] = [];
+        }
+        cache.ownOrdersByKey[key].push(order as MyOrder);
+    }
+};
+
+const getMyTerminalRooms = (cache: MarketTickCacheState): Room[] => {
+    if (cache.myTerminalRooms) return cache.myTerminalRooms;
+
+    const rooms: Room[] = [];
+    for (const roomName in Game.rooms) {
+        const room = Game.rooms[roomName];
+        if (!room.controller?.my) continue;
+        if (!room.terminal || room.terminal.cooldown > 0) continue;
+        rooms.push(room);
+    }
+    cache.myTerminalRooms = rooms;
+    return rooms;
+};
 
 export const hasMarketOrderApi = (): boolean => {
     const market = getMarket();
@@ -44,6 +114,47 @@ export const getEnergyHistoryAvgPrice = (fallback: number = AUTO_MARKET_CONFIG.e
     const avg = market.getHistory(RESOURCE_ENERGY)?.[0]?.avgPrice;
     if (!avg || avg < fallback) return fallback;
     return avg;
+};
+
+export const getAllOrdersCached = (type: ORDER_BUY | ORDER_SELL, resourceType: ResourceConstant): Order[] => {
+    if (!Game.market || typeof Game.market.getAllOrders !== 'function') return [];
+
+    const cache = getCache();
+    const key = getOrderKey(type, resourceType);
+    if (!cache.allOrders[key]) {
+        cache.allOrders[key] = Game.market.getAllOrders({ type, resourceType }) || [];
+    }
+    return cache.allOrders[key];
+};
+
+export const findMyOrderCached = (
+    roomName: string,
+    resourceType: ResourceConstant,
+    type: ORDER_BUY | ORDER_SELL,
+): MyOrder | null => {
+    const cache = getCache();
+    buildOwnOrderIndex(cache);
+    const key = getOwnOrderKey(roomName, resourceType, type);
+    return cache.ownOrdersByKey[key]?.[0] || null;
+};
+
+export const hasEnergySupplierRoomCached = (targetRoom: Room, balanceAt: number): boolean => {
+    const cache = getCache();
+    for (const room of getMyTerminalRooms(cache)) {
+        if (room.name === targetRoom.name) continue;
+        if (room.getResAmount(RESOURCE_ENERGY) > balanceAt) return true;
+    }
+    return false;
+};
+
+export const hasEnergyReceiverRoomCached = (sourceRoom: Room, balanceAt: number): boolean => {
+    const cache = getCache();
+    for (const room of getMyTerminalRooms(cache)) {
+        if (room.name === sourceRoom.name) continue;
+        if (room.terminal.store.getFreeCapacity() <= 0) continue;
+        if (room.getResAmount(RESOURCE_ENERGY) < balanceAt) return true;
+    }
+    return false;
 };
 
 const isBetterPrice = (a: Order, b: Order, orderType: ORDER_BUY | ORDER_SELL): boolean => {
@@ -136,4 +247,3 @@ export const getOrderPrice = (
 
     return price;
 };
-

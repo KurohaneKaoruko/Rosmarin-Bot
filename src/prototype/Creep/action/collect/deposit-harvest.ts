@@ -1,12 +1,11 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const onSource = (creep: Creep): WorkEvent => {
     creep.disableAttackNotificationsOnce();
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
 
     if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
         let opt = {};

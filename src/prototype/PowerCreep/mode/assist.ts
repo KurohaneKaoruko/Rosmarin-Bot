@@ -263,7 +263,7 @@ function hasPendingHealer(room: Room, targetPcName: string): boolean {
         }
     }
 
-    const tasks = (room as any).getAllMissionFromPool?.('spawn') as any[] | undefined;
+    const tasks = room.getAllMissionFromPool('spawn') as any[] | undefined;
     if (!tasks || tasks.length <= 0) return false;
     return tasks.some(t => t?.type === 'spawn' && t?.data?.memory?.role === 'pc-heal' && t.data.memory.targetPcName === targetPcName);
 }

@@ -1,5 +1,4 @@
 import { compressBodyConfig } from "@/modules/utils/compress";
-import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
 import ClaimSpawnFunction from "./claimSpawn";
 import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
@@ -76,7 +75,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             room,
             flagName,
             'aid-build',
-            (memory) => memory.targetRoom === targetRoom && (getCreepSourceRoom(memory) || targetRoom) === sourceRoom,
+            (memory) => memory.targetRoom === targetRoom && memory.sourceRoom === sourceRoom,
             isActiveAidBuildFlagCreep
         );
         if (spawnLoad.total >= MANUAL_AID_BUILD_TARGET_COUNT) return true;
@@ -127,7 +126,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             room,
             flagName,
             'aid-upgrade',
-            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
+            (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
@@ -172,7 +171,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             room,
             flagName,
             'up-upgrade',
-            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
+            (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
@@ -198,7 +197,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             'aid-carry',
             (memory) =>
                 memory.targetRoom === targetRoom &&
-                getCreepSourceRoom(memory) === room.name &&
+                memory.sourceRoom === room.name &&
                 memory.resource === RESOURCE_ENERGY
         );
         if (spawnLoad.total >= 1) return true;
@@ -585,7 +584,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             room,
             flagName,
             'reserver',
-            (memory) => memory.targetRoom === targetRoom && (memory.homeRoom || room.name) === room.name
+            (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 

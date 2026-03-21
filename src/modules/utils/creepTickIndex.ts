@@ -1,5 +1,3 @@
-import { getCreepAssignedRoom, getCreepSourceRoom } from './creepMemory'
-
 type TargetRoomCreepInfo = {
     ticksToLive: number | undefined
     spawning: boolean
@@ -63,7 +61,7 @@ function buildCache(): CreepTickIndexCache {
             byTargetRoom[targetRoom][role].push({
                 ticksToLive: creep.ticksToLive,
                 spawning: creep.spawning,
-                sourceRoom: getCreepSourceRoom(creep.memory),
+                sourceRoom: creep.memory.sourceRoom,
             })
         }
 
@@ -75,7 +73,7 @@ function buildCache(): CreepTickIndexCache {
             byExpandPlan[expandId][role] = (byExpandPlan[expandId][role] || 0) + 1
         }
 
-        const assignedRoom = getCreepAssignedRoom(creep.memory) || creep.room.name
+        const assignedRoom = creep.memory.home || creep.memory.homeRoom || creep.memory.sourceRoom || creep.room.name
         if (assignedRoom && typeof creep.ticksToLive === 'number') {
             if (!minRespawnGapByAssignedRoomRole[assignedRoom]) {
                 minRespawnGapByAssignedRoomRole[assignedRoom] = {}

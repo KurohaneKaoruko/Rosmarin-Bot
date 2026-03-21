@@ -1,4 +1,3 @@
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
@@ -40,7 +39,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
         // 少量直递只是减少落地损耗，不应打断当前采集周期。
         if (shouldCarrierReturnAfterDirectTransfer(nearbyCarrier)) {
             (nearbyCarrier.memory.cache as any).outCarryMode = 'deliver';
-            const sourceRoom = getCreepSourceRoom(nearbyCarrier.memory);
+            const sourceRoom = nearbyCarrier.memory.sourceRoom;
             if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
                 const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);
                 if (Array.isArray(route) && route.length > 0 && route[0].exit) {

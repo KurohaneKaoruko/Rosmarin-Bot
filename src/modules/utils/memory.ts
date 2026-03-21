@@ -248,3 +248,26 @@ export function ensureTeamData(teamID: string): any {
 	root[teamID] ??= {} as any;
 	return root[teamID];
 }
+
+/**
+ * 清理单个房间相关的所有分区内存。
+ * @remarks 用于房间被移出控制列表或失去控制权后做级联清理。
+ */
+export function clearRoomRelatedMemory(roomName: string): void {
+	if (!roomName) return;
+
+	if (Memory.rooms) delete Memory.rooms[roomName];
+
+	delete getRoomData()[roomName];
+	delete getStructData()[roomName];
+	delete getLayoutData()[roomName];
+	delete getOutMineData()[roomName];
+	delete getResourceManage()[roomName];
+	delete getMissionPools()[roomName];
+
+	const auto = getAutoData() as any;
+	if (auto?.AutoMarketData) delete auto.AutoMarketData[roomName];
+	if (auto?.AutoLabData) delete auto.AutoLabData[roomName];
+	if (auto?.AutoFactoryData) delete auto.AutoFactoryData[roomName];
+	if (auto?.AutoPowerData) delete auto.AutoPowerData[roomName];
+}

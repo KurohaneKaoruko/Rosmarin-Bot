@@ -1,4 +1,3 @@
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -72,7 +71,7 @@ const isCacheValid = (target: any, actionType: LogisticCache['actionType'], resT
  */
 function withdraw(creep: Creep) {
     const mem = creep.memory as LogisticMemory;
-    const sourceRoom = getCreepSourceRoom(mem);
+    const sourceRoom = mem.sourceRoom;
     if (!sourceRoom) return;
 
     if (creep.room.name !== sourceRoom) {

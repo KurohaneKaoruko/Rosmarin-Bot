@@ -1,5 +1,4 @@
 import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -96,7 +95,7 @@ const onSource = (creep: Creep): WorkEvent => {
 };
 
 const onTarget = (creep: Creep): WorkEvent => {
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
     if (!sourceRoom) return creep.store.getUsedCapacity(RESOURCE_POWER) === 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
     if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
         creep.moveToRoom(sourceRoom);

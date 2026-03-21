@@ -1,5 +1,4 @@
 import { RoleData } from "@/constant/CreepConstant";
-import { getCreepSourceRoom } from "@/modules/utils/creepMemory";
 import { log } from "@/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
@@ -32,7 +31,7 @@ const getFlagSpawnLoad = (
     }
 
     let queued = 0;
-    const tasks = spawnRoom.getAllMissionFromPool?.('spawn') || [];
+    const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
     for (const task of tasks as any[]) {
         if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
             queued++;
@@ -240,7 +239,7 @@ export default class WarSpawnFunction extends Flag {
             room,
             flagName,
             'logistic',
-            (memory) => getCreepSourceRoom(memory) === sourceRoom && memory.targetRoom === targetRoom
+            (memory) => memory.sourceRoom === sourceRoom && memory.targetRoom === targetRoom
         )
         if (spawnLoad.total >= 1) return true
         const bodys = config.bodypart as any

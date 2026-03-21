@@ -1,4 +1,3 @@
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { parseShardRoomName } from '@/modules/utils/shardRoom';
 
 const isRoomEdgePosition = (pos: { x: number; y: number }): boolean => (
@@ -37,8 +36,11 @@ const isOnExitEdge = (pos: { x: number; y: number }, direction: DirectionConstan
 
 export default class MoveFunction extends Creep {
     /**
-     * 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞幘椤︻偊姊虹紒姗嗘當闁绘妫濋幆浣姐亹閹烘挸鈧敻鎮峰▎蹇擃伀妞わ絾鐓￠弻娑㈠煘椤撶偞澶勯柍?     * @param roomName 闂傚倷鑳堕崕鐢稿疾閳哄懎绐楁俊銈呮噺閸嬪鏌ㄥ┑鍡╂Ц缂佺媴缍侀弻娑滎槼妞ゃ劌妫濋弫宥夋偄閸忚偐鍘卞┑顔斤供閸撴稖鍊撮柣?     * @param options 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞枤閸斿灚绻濋姀锝呯厫闁告梹鍨块崺鈧?(range, visualizePathStyle, plainCost, swampCost 缂?
-     * @returns ScreepsReturnCode - ERR_TIRED 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔筋焾閸╂牠宕戦鍫熺厵缂備焦锚缁楁帡寮介埄鍐闁瑰鍋為幆鍕煕濞嗗繒绠虫俊鍙夊姇閳规垹鈧綆浜為ˇ褔姊洪崫鍕ⅱ闁轰焦鎮傞弻褔宕掑锝嗩潔?moveTo 闂備礁鎼ˇ顐﹀疾濠婂牆钃熼柕濞垮剭濞差亜鍐€妞ゆ挾鍋熼敍?     */
+     * 跨房移动到指定房间。
+     * @param roomName 目标房间名，支持带 shard 前缀的房间名。
+     * @param options 传给 `moveTo` 的移动参数。
+     * @returns 移动结果；疲劳时返回 `ERR_TIRED`。
+     */
     moveToRoom(roomName: string, options = {}) {
         if (this.fatigue > 0) return ERR_TIRED;
 
@@ -149,8 +151,9 @@ export default class MoveFunction extends Creep {
     }
 
     /**
-     * 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞幘椤︻偊姊虹紒姗嗘當闁绘妫濋妴鍌炲蓟閵夛箑鈧爼鏌ｉ幇鐗堟锭濞寸媴绠撻弻娑㈠煘椤撶偞澶勯柍?(home)
-     * @returns boolean - true 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸擄箓宕崨瀛樼厵缂備焦锚缁楁帡鏌ｉ幘鍐测偓鍨嚕閸洖閱囬柕蹇曞С婢规洟姊洪幖鐐插Ω闁告梹鍨甸?home 闂備浇宕垫慨宕囩矆娴ｈ娅犲ù鐘差儐閸嬵亪鏌涢埄鍐姇闁哄拋鍓熼幃妤冩喆閸曨剛鐨絣se 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸擄箑顭囨导瀛樼叆婵犻潧妫欓崳娲椤掑澧扮紒杈ㄥ笚瀵板嫭鎯旈鍏碱唲濠电姵顔栭崰鎺楀疾濠婂懐鐭?     */
+     * 移动到 `memory.home` 指定的固定工作房。
+     * @returns `true` 表示已经到达，`false` 表示仍在路上。
+     */
     moveHomeRoom(): boolean {
         if(!this.memory.home) { return true; }
         const { roomName: localHome, shard } = parseShardRoomName(this.memory.home);
@@ -160,7 +163,10 @@ export default class MoveFunction extends Creep {
     }
 
     /**
-     * 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞幘椤︻偊姊虹憴鍕靛晱闁哥姵顨堢划锝呂旈崨顔惧幐閻庡箍鍎遍幊蹇斿緞閸曨垱鐓曢柍璇″幖濞诧箓鍩?     * @param options 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞枤閸斿灚绻濋姀锝呯厫闁告梹鍨块崺鈧?     * @returns boolean - true 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸擄箓宕崨瀛樼厵缂備焦锚缁楁帡鏌ｉ幘鍐测偓鍨嚕閸洖閱囨繝闈涙閹稿啫鈹戦悙璺虹处闁告鍟块锝嗙鐎ｎ亞鍊為梺闈涱焾閸庢娊宕ｉ崟顖涒拻闁稿本鑹鹃埀顒冨吹閹广垹鈹戦崼銏㈢暥闂佸搫绉查崝搴ㄥ煝閺冨倵鍋撻獮鍨姎闁瑰啿绻橀悡顒勵敆閸曨偆楠囬梺鍓插亝缁诲啰鎷归敍鍕＜濡插本鐗曞顕€鏌℃担鍝バら柍褜鍓濋～澶娾攦娣囩e 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔筋焾濞夋稓鈧艾顦伴妵鍕疀閹炬剚浠奸梺缁樻尭閸婂灝顕?     */
+     * 移动到 `memory.targetRoom` 指定的目标房间。
+     * @param options 传给 `moveToRoom` 的移动参数。
+     * @returns `true` 表示已经到达，`false` 表示仍在路上。
+     */
     moveToTargetRoom(options?: MoveToOpts): boolean {
         const targetRoom = this.memory.targetRoom;
         if (!targetRoom) { return true; }
@@ -175,9 +181,12 @@ export default class MoveFunction extends Creep {
     }
 
     /**
-     * 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞幘椤︻偊姊洪悷鏉挎Щ闁活剙銈告俊鍫曨敃閿濆洨鐦堥悷婊冮叄瀹曟繈寮介鐐存К閻熸粍鏌ㄩ～?     * @param options 缂傚倸鍊风粈渚€藝閹剁瓔鏁嬬憸搴ㄥ箞閵娾晛鐓涢柛娑卞枤閸斿灚绻濋姀锝呯厫闁告梹鍨块崺鈧?     * @returns boolean - true 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸擄箓宕崨瀛樼厵缂備焦锚缁楁帡鏌ｉ幘鍐测偓鍨嚕閸洖閱囬柣鏃堫棑椤︺劎绱撴担椋庤窗闁稿瀚伴崺鐐哄礃椤旇偐鐤€濡炪倖鎸鹃崑鐔煎矗閸曨垱鈷掗柛灞捐壘閳ь剝宕甸幑銏犫攽閸垻鐣堕梺鍝勭Р閸斿酣鍩㈤弮鍌楀亾楠炲灝鍔氶柟鍐茬箻閻擃剟顢楅崟顐ら獓闂佸壊鍋呯换鍐嫻閿涘嫮纾煎Σ灞剧墪瀵噣鏌℃担鍝バら柍褜鍓濋～澶娾攦娣囩e 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔筋焾濞夋稓鈧艾顦伴妵鍕疀閹炬剚浠奸梺缁樻尭閸婂灝顕?     */
+     * 移动到 `memory.sourceRoom` 指定的补给/来源房。
+     * @param options 传给 `moveToRoom` 的移动参数。
+     * @returns `true` 表示已经到达，`false` 表示仍在路上。
+     */
     moveToSourceRoom(options?: MoveToOpts): boolean {
-        const sourceRoom = getCreepSourceRoom(this.memory);
+        const sourceRoom = this.memory.sourceRoom;
         if (!sourceRoom) { return true; }
         
         const { roomName: localSource, shard } = parseShardRoomName(sourceRoom);
@@ -190,12 +199,13 @@ export default class MoveFunction extends Creep {
     }
 
     /**
-     * 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥婵犵鈧啿绾ч柟顔煎€搁悾鐑藉Ψ閳哄倹娅囬梺閫炲苯澧柨鏇樺灲椤㈡棃宕煎┑鍫悈闂備胶顫嬮崟鍨暦闂佹寧绋撻崰鏍ь嚕閸洖閱囨繝闈涙穿绾偓缂傚倷绶氱涵鎼佸矗閸愵喗鍋樻い鏃傚亾瀹曞銆掑鐓庣仭鐞氣晠姊?     * @returns boolean - true 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔筋焾濞夋盯骞戦崼鏇熺厪濠电偛鐏濇俊鍧楁煟濠靛棗顣崇紒杈ㄦ崌瀹曟帒霉閵忊晙閭柟宕囧枛閹垺绺芥径瀣€冮梻浣瑰缁诲倿骞婅箛娑氬彆妞ゆ巻鍋撴い顓℃硶閹瑰嫰宕崟鍏哥磻闂備浇顕栭崰鏍晝椤忓牆鏋佺€广儱娲犻崑鎾舵喆閸曨剛鐨絣se 闂備浇宕甸崑鐐电矙韫囨稑绀夐幖娣妼妗呭┑顔斤供閸橀箖鍩㈤弮鍌楀亾楠炲灝鍔氶柟鍐茬箻閻擃剟顢楅崟顐ら獓闂佸壊鍋呯换鍐嫻閿涘嫮纾?     */
+     * 处理房间边缘卡位，避免跨房移动时停在 0/49 边界。
+     * @returns `true` 表示当前在边缘并已尝试挪开，`false` 表示不在边缘。
+     */
     handleRoomEdge(): boolean {
         const x = this.pos.x;
         const y = this.pos.y;
-        
-        // 濠电姷顣藉Σ鍛村磻閳ь剟鏌涚€ｎ偅宕岄柡宀嬬磿娴狅妇鎷犻幓鎺戭潥婵犵鈧啿绾ч柟顔煎€搁悾鐑藉Ψ閳哄倹娅囬梺閫炲苯澧柨鏇樺灲椤㈡棃宕煎┑鍫悈闂備胶顫嬮崟鍨暦闂佹寧绋撻崰鏍ь嚕閸洖閱囨繝闈涙穿绾偓缂?(x/y 婵?0 闂?49)
+        // Screeps 在边界会把 creep 卡在 0/49，需要先向房间内部挪一步。
         if (x === 0 || x === 49 || y === 0 || y === 49) {
             let direction: DirectionConstant | undefined;
             
@@ -216,5 +226,4 @@ export default class MoveFunction extends Creep {
         return false;
     }
 }
-
 

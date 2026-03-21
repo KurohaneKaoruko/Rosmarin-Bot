@@ -1,6 +1,5 @@
 
 import { parseShardRoomName } from '@/modules/utils/shardRoom';
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
@@ -708,11 +707,10 @@ const prepareAidBuild = (creep: Creep) => {
 
 // 采集阶段：收集能量并判断是否进入工作阶段
 const runAidBuildHarvest = (creep: Creep): boolean => {
-    const sourceRoom = getCreepSourceRoom(creep.memory) || creep.memory.targetRoom;
+    const sourceRoom = creep.memory.sourceRoom || creep.memory.targetRoom;
     const controller = creep.room.controller;
     const isJumpMode = !!creep.memory.jumpMode;
 
-    // 兼容仅配置 targetRoom（未配置 sourceRoom）的情况：默认在 targetRoom 获取能量
     if (sourceRoom) {
         const { roomName: localRoom, shard } = parseShardRoomName(sourceRoom);
         const arrived = (!shard || shard === Game.shard.name) && creep.room.name === localRoom && !creep.pos.isRoomEdge();

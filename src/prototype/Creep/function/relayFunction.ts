@@ -1,4 +1,3 @@
-import { getCreepSourceRoom } from '@/modules/utils/creepMemory';
 import { CREEP_TICK_ACTION, hasCreepTickAction, markCreepTickAction } from './tickActionFunction';
 
 const OUT_CARRY_RELAY_EMPTY_RATIO = 0.2;
@@ -313,7 +312,7 @@ const pickRelayCandidate = (
             if (!other || other.id === creep.id || other.spawning) return false;
             if (hasRelayActionThisTick(other)) return false;
             if (!OUT_CARRY_RELAY_ROLES.has(other.memory.role)) return false;
-            if (getCreepSourceRoom(other.memory) !== sourceRoom) return false;
+            if (other.memory.sourceRoom !== sourceRoom) return false;
             if (other.memory.targetRoom !== creep.memory.targetRoom) return false;
             if (!creep.pos.isNearTo(other)) return false;
             const otherCap = Math.max(1, other.store.getCapacity());
@@ -414,7 +413,7 @@ export const tryOutCarryRelayHandoff = (
 ): boolean => {
     if (hasRelayActionThisTick(creep)) return false;
 
-    const sourceRoom = getCreepSourceRoom(creep.memory);
+    const sourceRoom = creep.memory.sourceRoom;
     if (!sourceRoom) return false;
     if (creep.pos.isRoomEdge()) return false;
 

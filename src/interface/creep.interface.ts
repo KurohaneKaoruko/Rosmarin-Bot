@@ -62,6 +62,14 @@ interface Creep {
      */
     handleRoomEdge(): boolean;
 
+    /**
+     * 远离危险目标。
+     * @param targets - 需要规避的目标或带 range 的目标描述
+     * @param options - 可选的寻路参数
+     * @returns 寻路结果状态码
+     */
+    flee(targets: Array<RoomPosition | { pos: RoomPosition; range?: number }>, options?: MoveToOpts): ScreepsReturnCode;
+
 
     // ==================== 双人小队功能 (DoubleAction) ====================
     /** 

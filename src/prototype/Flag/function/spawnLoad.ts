@@ -31,7 +31,7 @@ export const getFlagSpawnLoad = (
     }
 
     let queued = 0;
-    const tasks = spawnRoom.getAllMissionFromPool?.('spawn') || [];
+    const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
     for (const task of tasks as any[]) {
         if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
             queued++;
