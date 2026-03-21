@@ -153,6 +153,8 @@ export default class TeamController {
 
             // 小队行动
             team.exec();
+            // 保存队伍数据
+            team.save(teamData);
 
             // 将剩余的heal分配到其他不满员的队伍中
             if (team.creeps.every(creep => creep.memory.role === 'team-heal')) {

@@ -453,7 +453,7 @@ export default class TeamUtils {
      * 例如 values=[0,1,2,3], k=3 会生成 P(4,3)=24 种序列。\n
      * 该函数用于预计算 quad 集结时的“角位分配方案”，运行时只需遍历结果，避免每 tick 递归生成。\n
      */
-    private static kPermutations(values: number[], k: number): number[][] {
+    public static kPermutations(values: number[], k: number): number[][] {
         const res: number[][] = []
         const used = new Array(values.length).fill(false)
         const cur: number[] = []
@@ -475,6 +475,75 @@ export default class TeamUtils {
         return res
     }
 
-    public static QUAD_ASSIGN_PATTERNS_4 = this.kPermutations([0, 1, 2, 3], 4)
-    public static QUAD_ASSIGN_PATTERNS_3 = this.kPermutations([0, 1, 2, 3], 3)
+    /**
+     * 二分匹配算法
+     * @param left 左侧节点数组
+     * @param right 右侧节点数组
+     * @param matchSet 匹配集合，包含左侧节点与右侧节点的匹配关系
+     * @returns 匹配结果，记录右侧节点到左侧节点的映射
+     */
+    private static bipartiteMatch(left: string[], right: string[], matchSet: Set<string>): Record<string, string> {
+        const result: Record<string, string> = {}
+        const used = new Map<string, boolean>()
+        const dfs = (u: string) => {
+            for (const v of right) {
+                if (!used.get(v) && matchSet.has(u + v)) {
+                    used.set(v, true)
+                    if (!result[v] || dfs(result[v])) {
+                        result[v] = u
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+        for (const u of left) {
+            used.clear()
+            dfs(u)
+        }
+    
+        // 将 result 的 key 和 value 换位置后返回
+        const newResult: Record<string, string> = {}
+        for (const key in result) {
+            newResult[result[key]] = key
+        }
+        return newResult
+    }
+    
+    
+    /**
+     * 爬与位置的二分匹配
+     * @param creeps 爬群数组
+     * @param pos 位置数组
+     * @param range 匹配范围，默认1
+     * @returns 匹配结果，记录爬群到位置的映射
+     */
+    public static creepPosBipartiteMatch(creeps: Creep[], pos: RoomPosition[], range = 1): Record<string, RoomPosition> {
+        const matchSet = new Set<string>()
+        const left = creeps.map((creep) => creep.name)
+        const right = pos.map((p) => `${p.x}/${p.y}`)
+    
+        const getRange = (x1: number, y1: number, x2: number, y2: number) => Math.max(Math.abs(x1 - x2), Math.abs(y1 - y2))
+    
+        creeps.forEach((creep) => {
+            pos.forEach((p) => {
+                if (getRange(creep.pos.x, creep.pos.y, p.x, p.y) > range) return
+    
+                matchSet.add(`${creep.name}${p.x}/${p.y}`)
+            })
+        })
+    
+        const match = this.bipartiteMatch(left, right, matchSet)
+    
+        const posMap = new Map<string, RoomPosition>()
+        pos.forEach((p) => posMap.set(`${p.x}/${p.y}`, p))
+    
+        const result: Record<string, RoomPosition> = {}
+        for (const creepName in match) {
+            const posKey = match[creepName]
+            result[creepName] = posMap.get(posKey)!
+        }
+    
+        return result
+    }
 }

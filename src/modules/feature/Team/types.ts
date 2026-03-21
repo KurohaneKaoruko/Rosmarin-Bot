@@ -31,9 +31,9 @@ interface TeamMemory {
     homeRoom: string;    // 孵化房间
     targetRoom?: string,    // 目标房间
     creeps: Id<Creep>[],   // 成员数组
-    num: number,   // 成员数量
-    /** 该队伍由哪个孵化旗创建（用于失败后抬档） */
-    spawnFlag?: string
+    num: number,         // 成员数量
+    roomName: string,   // 小队当前所在房间
+    spawnFlag?: string  // 该队伍由哪个孵化旗创建
     cache?: TeamCacheMemory
 }
 

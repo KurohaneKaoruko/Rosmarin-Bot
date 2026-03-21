@@ -1,8 +1,7 @@
 import TeamUtils from './TeamUtils';
 import TeamAction from './TeamAction';
 import TeamBattle from './TeamBattle';
-import TeamVisual from '../core/TeamVisual';
-import { getTeamData } from '@/modules/utils/memory';
+import TeamVisual from './TeamVisual';
 
 /**
  * 小队实体（Team 状态机）。
@@ -89,12 +88,13 @@ class Team {
     /**
      * 把运行时状态写回 Memory.RosmarinBot.TeamData。
      *
+     * @param teamData - 要写入的 TeamMemory 对象。
+     *
      * @remarks
      * - creeps 会写回为 id 数组。\n
-     * - teamData.room 用于记录队伍当前所在房间（取第一个成员）。
+     * - 传入的teamData必须是一个可写的Memory对象
      */
-    save(): void {
-        const teamData = getTeamData(this.name);
+    save(teamData: TeamMemory): void {
         if (!teamData) return;
 
         teamData.status = this.status;
@@ -106,7 +106,7 @@ class Team {
         if (this.creeps) {
             teamData.creeps = this.creeps.map((c: Creep) => c.id);
             if (this.creeps.length > 0) {
-                teamData.room = this.creeps[0].room.name;
+                teamData.roomName = this.creeps[0].room.name;
             }
         }
     }
@@ -361,9 +361,6 @@ class Team {
 
         // 调整朝向
         this.execAdjust();
-
-        // 保存数据
-        this.save();
     }
 }
 

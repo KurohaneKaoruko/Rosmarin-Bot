@@ -3,10 +3,11 @@ import TeamCache from './TeamCache';
 import TeamCalc from './TeamCalc';
 import TeamVisual from './TeamVisual';
 import RoomArray from './RoomArray'
-import { creepPosBipartiteMatch } from '@/utils'
 
 const emptyCostMatrix = new PathFinder.CostMatrix()
 const tempRoomArray = new RoomArray()
+const QUAD_ASSIGN_PATTERNS_4 = TeamUtils.kPermutations([0, 1, 2, 3], 4)
+const QUAD_ASSIGN_PATTERNS_3 = TeamUtils.kPermutations([0, 1, 2, 3], 3)
 
 /**
  * 小队行动
@@ -290,7 +291,7 @@ export default class TeamAction {
             let bestSteps = Infinity
             let bestAssign: Array<[Creep, RoomPosition]> = []
 
-            const patterns = n === 4 ? TeamUtils.QUAD_ASSIGN_PATTERNS_4 : TeamUtils.QUAD_ASSIGN_PATTERNS_3
+            const patterns = n === 4 ? QUAD_ASSIGN_PATTERNS_4 : QUAD_ASSIGN_PATTERNS_3
             for (let pi = 0; pi < patterns.length; pi++) {
                 const pattern = patterns[pi]
                 let steps = 0
@@ -439,8 +440,7 @@ export default class TeamAction {
         const bipartiteMatch = (creeps: Creep[], pos: RoomPosition[]) => {
             // 检查后两个位置是否有效
             if (pos.find((p) => !creepPosHashSet.has(p.hashCode()) && !p.walkable(true))) return {}
-
-            return creepPosBipartiteMatch(creeps, pos)
+            return TeamUtils.creepPosBipartiteMatch(creeps, pos)
         }
 
         let result: Record<string, RoomPosition> = {}

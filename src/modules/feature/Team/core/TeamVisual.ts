@@ -1,6 +1,6 @@
 import TeamCache from './TeamCache'
 import RoomArray from './RoomArray'
-import TeamUtils from '../core/TeamUtils'
+import TeamUtils from './TeamUtils'
 
 const ENABLE_TEAM_MOVE_VISUAL = true
 
