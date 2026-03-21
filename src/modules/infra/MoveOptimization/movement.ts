@@ -244,6 +244,22 @@ function moveOneStep(creep, ops, toPos) {
     return registerMoveIntent(creep, formalizeIntentMovePos(pos), ops.priority);
 }
 
+function lookCreepAt(room, pos) {
+    return room.lookForAt(LOOK_CREEPS, pos).concat(room.lookForAt(LOOK_POWER_CREEPS, pos));
+}
+
+function tryStartTemporalBypass(creep, toPos, ops, creepCache, bypassHostilesOnly) {
+    const bypassOps = Object.assign({}, ops, {
+        ignoreCreeps: true,
+        bypassHostileCreeps: bypassHostilesOnly,
+    });
+    if (!findTemporalPath(creep, toPos, bypassOps)) {
+        return null;
+    }
+    if (isCpuStatsEnabled()) runtimeMetrics.testBypass++;
+    return startRoute(creep, creepCache, ops, toPos);
+}
+
 /**
  *
  * @param {Creep} creep
@@ -388,7 +404,9 @@ function handleAutoPullForSquad(pathCache, squad, targets, someOneTired) {
                 break;
             }
             if (helper.fatigue) {
-                pathCache.idx--;
+                if (pathCache) {
+                    pathCache.idx--;
+                }
                 squadMove(squad);
                 return ERR_TIRED;
             }
@@ -399,14 +417,7 @@ function handleAutoPullForSquad(pathCache, squad, targets, someOneTired) {
     return OK;
 }
 
-function moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, visualStyle, toPos, someOneTired) {
-    if (visualStyle) {
-        showVisual(leader, toPos, creepCache.path.posArray, creepCache.idx, 1, visualStyle);
-    }
-
-    const posArray = creepCache.path.posArray;
-    creepCache.idx++;
-    const leaderNextPos = posArray[creepCache.idx];
+function squadStepToPos(leaderNextPos, squad, leader, creepPosArray, leaderPos, someOneTired, pathCache, ignoreCondition) {
     const formalPos = formalizeIntentPos(leaderNextPos);
     const targets = [];
     for (let i = 0; i < squad.length; i++) {
@@ -420,7 +431,11 @@ function moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, v
             } else if (leaderNextPos.x === 49 && leader.pos.x === 0) {
                 xdiff = -1;
             }
+        } else if (xdiff === -1 && ((leader.pos.x === 1 && formalPos.x < leaderPos.x) || (leader.pos.x === 49 && formalPos.x > leaderPos.x))) {
+            squadMove(squad);
+            return OK;
         }
+
         let ydiff = creepPosArray[i].y - leaderPos.y;
         if (ydiff === -2) {
             if (leader.pos.y === 1) {
@@ -431,23 +446,39 @@ function moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, v
             } else if (leaderNextPos.y === 49 && leader.pos.y === 0) {
                 ydiff = -1;
             }
+        } else if (ydiff === -1 && ((leader.pos.y === 1 && formalPos.y < leaderPos.y) || (leader.pos.y === 49 && formalPos.y > leaderPos.y))) {
+            squadMove(squad);
+            return OK;
         }
 
         const px = formalPos.x + xdiff;
         const py = formalPos.y + ydiff;
         targets.push(tile2Pos(packIntentTile({ x: px, y: py })));
     }
-    if (isSquadNextStepBlocked(leaderNextPos, !!creepCache.path.ignoreStructures)) {
-        creepCache.idx--;
+    if (isSquadNextStepBlocked(leaderNextPos, ignoreCondition)) {
+        if (pathCache) {
+            pathCache.idx--;
+        }
         squadMove(squad);
         return ERR_FULL;
     }
-    const pullCode = handleAutoPullForSquad(creepCache, squad, targets, someOneTired);
+    const pullCode = handleAutoPullForSquad(pathCache, squad, targets, someOneTired);
     if (pullCode !== OK) {
         return pullCode;
     }
     squadMove(squad, targets);
     return OK;
+}
+
+function moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, visualStyle, toPos, someOneTired) {
+    if (visualStyle) {
+        showVisual(leader, toPos, creepCache.path.posArray, creepCache.idx, 1, visualStyle);
+    }
+
+    const posArray = creepCache.path.posArray;
+    creepCache.idx++;
+    const leaderNextPos = posArray[creepCache.idx];
+    return squadStepToPos(leaderNextPos, squad, leader, creepPosArray, leaderPos, someOneTired, creepCache, !!creepCache.path.ignoreStructures);
 }
 
 function startSquadRoute(squad, leader, creepPosArray, leaderPos, pathCache, visualStyle, toPos, someOneTired) {
@@ -466,47 +497,7 @@ function startSquadRoute(squad, leader, creepPosArray, leaderPos, pathCache, vis
     creepMoveCache[leader.name] = Game.time;
 
     const leaderNextPos = posArray[idx];
-    const formalPos = formalizeIntentPos(leaderNextPos);
-    const targets = [];
-    for (let i = 0; i < squad.length; i++) {
-        let xdiff = creepPosArray[i].x - leaderPos.x;
-        if (xdiff === -2) {
-            if (leader.pos.x === 1) {
-                if (formalPos.x > leaderPos.x) {
-                    squadMove(squad);
-                    return OK;
-                }
-            } else if (leaderNextPos.x === 49 && leader.pos.x === 0) {
-                xdiff = -1;
-            }
-        }
-        let ydiff = creepPosArray[i].y - leaderPos.y;
-        if (ydiff === -2) {
-            if (leader.pos.y === 1) {
-                if (formalPos.y > leaderPos.y) {
-                    squadMove(squad);
-                    return OK;
-                }
-            } else if (leaderNextPos.y === 49 && leader.pos.y === 0) {
-                ydiff = -1;
-            }
-        }
-
-        const px = formalPos.x + xdiff;
-        const py = formalPos.y + ydiff;
-        targets.push(tile2Pos(packIntentTile({ x: px, y: py })));
-    }
-    if (isSquadNextStepBlocked(leaderNextPos, !!pathCache.path.ignoreStructures)) {
-        pathCache.idx--;
-        squadMove(squad);
-        return ERR_FULL;
-    }
-    const pullCode = handleAutoPullForSquad(pathCache, squad, targets, someOneTired);
-    if (pullCode !== OK) {
-        return pullCode;
-    }
-    squadMove(squad, targets);
-    return OK;
+    return squadStepToPos(leaderNextPos, squad, leader, creepPosArray, leaderPos, someOneTired, pathCache, !!pathCache.path.ignoreStructures);
 }
 
 function resolveMoveToArgs(creep, firstArg, secondArg, opts) {
@@ -779,7 +770,29 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
     }
 
     if (isNear(creep.pos, curStep)) {  // 堵路了
-        if (Game.time - creepMoveCache[creep.name] >= 5) {
+        const blockedTicks = Game.time - creepMoveCache[creep.name];
+        const blockingCreep = lookCreepAt(creep.room, curStep)[0];
+        if (blockingCreep) {
+            if (!blockingCreep.my) {
+                if (blockedTicks >= 2 && ops.bypassHostileCreeps) {
+                    const bypassResult = tryStartTemporalBypass(creep, toPos, ops, creepCache, true);
+                    if (bypassResult !== null) {
+                        return bypassResult;
+                    }
+                }
+            } else if (blockedTicks >= 5) {
+                const bypassResult = tryStartTemporalBypass(creep, toPos, ops, creepCache, false);
+                if (bypassResult !== null) {
+                    return bypassResult;
+                }
+                creepMoveCache[creep.name] = Game.time;
+            }
+            if (ops.visualizePathStyle) {
+                showVisual(creep, toPos, posArray, idx, 1, ops.visualizePathStyle);
+            }
+            return registerMoveIntent(creep, formalizeIntentMovePos(curStep), ops.priority);
+        }
+        if (blockedTicks >= 5) {
             if (isObstacleStructure(creep.room, curStep, ops.ignoreDestructibleStructures)) {
                 delete costMatrixCache[creep.pos.roomName];
                 delete costMatrixRevision[creep.pos.roomName];
@@ -787,9 +800,9 @@ function tryMoveWithCreepCache(creep, toPos, ops, creepCache) {
                 deletePath(path);
                 return null;
             }
-            if (findTemporalPath(creep, toPos, ops)) {
-                if (isCpuStatsEnabled()) runtimeMetrics.testBypass++;
-                return startRoute(creep, creepCache, ops, toPos);
+            const bypassResult = tryStartTemporalBypass(creep, toPos, ops, creepCache, !!ops.bypassHostileCreeps);
+            if (bypassResult !== null) {
+                return bypassResult;
             }
             creepMoveCache[creep.name] = Game.time;
             if (ops.visualizePathStyle) {
@@ -1161,13 +1174,22 @@ function squadMoveTo(squad: Creep[], firstArg: number | BetterMoveTarget, second
     if (typeof firstArg != 'object') {
         toPos = { x: firstArg, y: secondArg, roomName: leader.room.name };
     }
-    if (leader.pos.getRangeTo(toPos) === 0) {
+    findPathIgnoreCondition = !!moveOpts.ignoreDestructibleStructures;
+    const leaderPos = { x: qx, y: qy, roomName: leader.room.name };
+    const rangeToPos = leader.pos.getRangeTo(toPos);
+    if (rangeToPos === 0) {
         squadMove(squad);
         return OK;
+    } else if (rangeToPos === 1) {
+        if (findPathIgnoreCondition && toPos.roomName === leader.room.name && !(toPos.roomName in costMatrixCache)) {
+            generateCostMatrix(leader.room);
+        }
+        if (toPos.roomName === leader.room.name && isSquadNextStepBlocked(toPos, findPathIgnoreCondition)) {
+            squadMove(squad);
+            return findPathIgnoreCondition ? ERR_FULL : OK;
+        }
+        return squadStepToPos(toPos, squad, leader, creepPosArray, leaderPos, someOneTired, undefined, findPathIgnoreCondition);
     }
-    findPathIgnoreCondition = !!moveOpts.ignoreDestructibleStructures;
-
-    const leaderPos = { x: qx, y: qy, roomName: leader.room.name };
     const key = leader.name + '_quad';
     let creepCache = creepPathCache[key];
     if (creepCache) {
@@ -1179,6 +1201,8 @@ function squadMoveTo(squad: Creep[], firstArg: number | BetterMoveTarget, second
                 if (crossRoom) {
                     if (idx + 2 < posArray.length && isNear(leader.pos, posArray[idx + 2])) {
                         creepCache.idx++;
+                    } else if (!isNear(leader.pos, posArray[idx + 1])) {
+                        creepCache.idx--;
                     }
                     if (leader.room.name in costMatrixCache || checkSquadRoom(leader.room, path, creepCache.idx)) {
                         creepMoveCache[leader.name] = Game.time;
@@ -1218,6 +1242,9 @@ function squadMoveTo(squad: Creep[], firstArg: number | BetterMoveTarget, second
                         creepCache.idx--;
                         return moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, moveOpts.visualizePathStyle, toPos, someOneTired);
                     }
+                } else if (idx - 1 >= 0 && isNear(leader.pos, posArray[idx - 1])) {
+                    creepCache.idx = Math.max(0, creepCache.idx - 2);
+                    return moveOneStepSquad(creepCache, squad, leader, creepPosArray, leaderPos, moveOpts.visualizePathStyle, toPos, someOneTired);
                 }
             }
         }

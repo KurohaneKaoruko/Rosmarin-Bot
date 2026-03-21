@@ -52,6 +52,7 @@ export function createIntentSolverModule(deps) {
     const {
         getOriginCancelOrderMethod,
         getOriginMoveMethod,
+        hasActiveBodypart,
         powerCreepProto,
         isCpuStatsEnabled,
         analyzeCPU,
@@ -202,7 +203,7 @@ export function createIntentSolverModule(deps) {
             const intent: MoveMatchTargetScore[] = [];
             const px = creep.pos.x;
             const py = creep.pos.y;
-            if (creep.fatigue) {
+            if (creep.fatigue || !hasActiveBodypart(creep.body, MOVE)) {
                 intent.push({
                     target: tile,
                     score: activeMoveScore,
@@ -346,10 +347,12 @@ export function createIntentSolverModule(deps) {
             if (idx) {
                 const curTile = IntentTiles[idx + 1];
                 const targetTile = IntentTiles[idx];
-                const targetList: MoveMatchTargetScore[] = [
-                    { target: targetTile, score: activeMoveScore << Priorities[idx] },
-                    { target: curTile, score: 0 },
-                ];
+                const targetList: MoveMatchTargetScore[] = targetTile === curTile
+                    ? [{ target: targetTile, score: activeMoveScore << Priorities[idx] }]
+                    : [
+                        { target: targetTile, score: activeMoveScore << Priorities[idx] },
+                        { target: curTile, score: 0 },
+                    ];
                 nameToIntentIdx.set(creepName, moveIntents.length);
                 moveIntents.push({
                     start: creepName,

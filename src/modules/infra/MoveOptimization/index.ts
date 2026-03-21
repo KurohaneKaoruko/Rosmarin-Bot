@@ -1779,6 +1779,7 @@ let tempArray = [];
 const intentSolver = createIntentSolverModule({
     getOriginCancelOrderMethod,
     getOriginMoveMethod,
+    hasActiveBodypart,
     powerCreepProto,
     isCpuStatsEnabled,
     analyzeCPU,
