@@ -1,5 +1,11 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getCoreDepotContainer, getCoreDepotTarget, hasCoreDepotTarget, isCoreDepotContainer } from '@/modules/utils/coreDepot';
+import {
+    getCoreDepotContainer,
+    getCoreDepotKindAtPos,
+    getCoreDepotTarget,
+    hasCoreDepotTarget,
+    isCoreDepotContainer
+} from '@/modules/utils/coreDepot';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -8,6 +14,12 @@ type CarrierCache = {
     sourceKind?: 'dropped' | 'tombstone' | 'ruin' | 'container' | 'link' | 'storage' | 'terminal';
     targetId?: Id<any>;
     resourceType?: ResourceConstant;
+    /**
+     * 记录当前载荷是从哪个“仓储型目标”借出来的，
+     * 用于避免 carrier 在中心仓/中央 container 上出现“取一下又放回去”的空转。
+     */
+    avoidReturnTargetId?: Id<any>;
+    avoidReturnResourceType?: ResourceConstant;
 };
 
 const getCarrierSourceCache = (creep: Creep): CarrierCache => {
@@ -19,6 +31,16 @@ const getCarrierTargetCache = (creep: Creep): CarrierCache => {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {}
     return creep.memory.cacheTarget as CarrierCache
 }
+
+/**
+ * 清理“避免原样放回来源仓”的借货标记。
+ *
+ * @param cache carrier 的 source 缓存。
+ */
+const clearCarrierAvoidReturnCache = (cache: CarrierCache) => {
+    cache.avoidReturnTargetId = undefined;
+    cache.avoidReturnResourceType = undefined;
+};
 
 const getRoomCarrierNoPath = (roomName: string): Record<string, number> => {
     const roomMem = ((Memory.rooms as any)[roomName] ||= {});
@@ -96,6 +118,97 @@ const getContainerTraits = (room: Room, container: StructureContainer): CarrierC
 const getControllerContainer = (room: Room): StructureContainer | null => {
     const containers = room.container || [];
     return containers.find((container) => getContainerTraits(room, container).isController) || null;
+};
+
+/**
+ * 判断某个核心仓 container 当前是否正在充当 storage / terminal 的占位结构。
+ *
+ * @remarks
+ * 这类 container 在逻辑上已经是“中心仓”，不应该再按普通箱子处理，
+ * 否则 carrier 会把其中资源当成待清理对象，出现取出后又送回的无意义循环。
+ *
+ * @param room 房间对象。
+ * @param target 待检查的结构。
+ * @returns `true` 表示它是当前仍在生效的核心仓占位 container。
+ */
+const isActiveCoreDepotPlaceholder = (
+    room: Room,
+    target: AnyStoreStructure | null | undefined
+): target is StructureContainer => {
+    if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
+    if (!isCoreDepotContainer(room, target)) return false;
+
+    const kind = getCoreDepotKindAtPos(room.name, target.pos);
+    if (kind === 'storage') return !room.storage;
+    if (kind === 'terminal') return !room.terminal;
+    return false;
+};
+
+/**
+ * 判断本次 withdraw 的来源是否属于“仓储型来源”。
+ *
+ * @param room 房间对象。
+ * @param target 实际取货目标。
+ * @param sourceKind 规划阶段的来源类型。
+ * @returns `true` 表示本次资源来自 storage / terminal / 中央仓占位 container。
+ */
+const isStorageLikeWithdrawSource = (
+    room: Room,
+    target: AnyStoreStructure,
+    sourceKind: CarrierCache['sourceKind']
+) => {
+    if (sourceKind === 'storage' || sourceKind === 'terminal') return true;
+    return isActiveCoreDepotPlaceholder(room, target);
+};
+
+/**
+ * 为当前载荷标记“不要原样塞回去的来源仓”。
+ *
+ * @param creep 当前 carrier。
+ * @param target 实际取货目标。
+ * @param resourceType 本次取出的资源类型。
+ */
+const markCarrierAvoidReturnTarget = (
+    creep: Creep,
+    target: AnyStoreStructure,
+    resourceType: ResourceConstant
+) => {
+    const cache = getCarrierSourceCache(creep);
+    cache.avoidReturnTargetId = target.id;
+    cache.avoidReturnResourceType = resourceType;
+};
+
+/**
+ * 在挑选存放目标时，同时规避“当前 source”与“本趟借货来源仓”。
+ *
+ * @param creep 当前 carrier。
+ * @param resourceType 当前计划投递的资源类型。
+ * @param primaryExcludeId 一般是 source cache 中的 sourceId。
+ * @param secondaryExcludeId 借货缓存中的 avoidReturnTargetId。
+ * @returns 满足排除条件的最佳目标；找不到则返回 `null`。
+ */
+const pickBestStoreTargetAvoiding = (
+    creep: Creep,
+    resourceType: ResourceConstant,
+    primaryExcludeId?: Id<AnyStoreStructure>,
+    secondaryExcludeId?: Id<AnyStoreStructure>
+): AnyStoreStructure | null => {
+    const firstExclude = primaryExcludeId || secondaryExcludeId;
+    let target = creep.findBestStoreTarget(resourceType, firstExclude);
+    if (!target) return null;
+
+    if (
+        secondaryExcludeId &&
+        secondaryExcludeId !== primaryExcludeId &&
+        target.id === secondaryExcludeId
+    ) {
+        target = creep.findBestStoreTarget(resourceType, secondaryExcludeId);
+        if (!target) return null;
+    }
+
+    if (primaryExcludeId && target.id === primaryExcludeId) return null;
+    if (secondaryExcludeId && target.id === secondaryExcludeId) return null;
+    return target;
 };
 
 const canCarryResourceSafely = (
@@ -278,6 +391,21 @@ const clearCarrierTargetCache = (cache: CarrierCache) => {
     cache.resourceType = undefined;
 };
 
+/**
+ * 判断当前 carrier 是否正背着一批“刚从仓储型来源借出的资源”。
+ *
+ * @param creep 当前 carrier。
+ * @returns `true` 表示这批资源暂时不应该被原样送回来源仓。
+ */
+const shouldHoldBorrowedCargo = (creep: Creep): boolean => {
+    const cache = getCarrierSourceCache(creep);
+    return !!(
+        cache.avoidReturnTargetId &&
+        cache.avoidReturnResourceType &&
+        creep.store.getUsedCapacity(cache.avoidReturnResourceType) > 0
+    );
+};
+
 const compareWithdrawCandidate = (a: WithdrawCandidate, b: WithdrawCandidate) => {
     if (a.priority !== b.priority) return b.priority - a.priority;
     if (a.range !== b.range) return a.range - b.range;
@@ -454,6 +582,8 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         }
 
         if (traits.isCoreDepot) {
+            // 中央仓占位 container 视作 storage/terminal，本身不是待清理的普通 container。
+            if (isActiveCoreDepotPlaceholder(room, c)) continue;
             const type = pickBestContaminantTypeFromContainer(creep, c);
             if (!type) continue;
             const amount = c.store.getUsedCapacity(type);
@@ -526,6 +656,8 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
 
 const cacheWithdrawPlan = (creep: Creep, plan: WithdrawPlan) => {
     const cache = getCarrierSourceCache(creep);
+    // 新一趟取货开始时，上一趟的借货来源已经失效，避免跨趟误伤正常投递。
+    clearCarrierAvoidReturnCache(cache);
     cache.sourceId = plan.id;
     cache.sourceKind = plan.kind;
     cache.resourceType = plan.resourceType;
@@ -558,9 +690,16 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     const { store, room, pos } = creep;
     const roomAny = room as any;
     const cache = getCarrierTargetCache(creep)
+    const sourceCache = getCarrierSourceCache(creep);
 
     const carryTypes = getCreepCarryTypesSorted(creep);
     if (carryTypes.length === 0) return { carryTypes, target: null as AnyStoreStructure | null, resourceType: undefined as ResourceConstant | undefined };
+    if (
+        sourceCache.avoidReturnResourceType &&
+        creep.store.getUsedCapacity(sourceCache.avoidReturnResourceType) <= 0
+    ) {
+        clearCarrierAvoidReturnCache(sourceCache);
+    }
 
     const currentType = !forceRetarget && cache.resourceType && store[cache.resourceType] > 0 ? cache.resourceType : undefined;
     const currentTarget = !forceRetarget && cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
@@ -575,19 +714,23 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     let target: AnyStoreStructure | null = (currentTarget?.store?.getFreeCapacity ? currentTarget : null);
     let resourceType: ResourceConstant = currentType || carryTypes[0];
 
-        if (needNewTarget) {
-            clearCarrierTargetCache(cache);
+    if (needNewTarget) {
+        clearCarrierTargetCache(cache);
 
-            const urgentEnergy = room.CheckSpawnAndTower();
-            const sourceIdToAvoid = getCarrierSourceCache(creep).sourceId as Id<AnyStoreStructure> | undefined;
-            const controllerContainer = getControllerContainer(room);
-            const controllerLink = roomAny.link?.find((l: StructureLink) =>
-                l.pos.inRangeTo(room.controller, 2));
+        const urgentEnergy = room.CheckSpawnAndTower();
+        const sourceIdToAvoid = sourceCache.sourceId as Id<AnyStoreStructure> | undefined;
+        const controllerContainer = getControllerContainer(room);
+        const controllerLink = roomAny.link?.find((l: StructureLink) =>
+            l.pos.inRangeTo(room.controller, 2));
 
         for (const t of carryTypes) {
             target = null;
-                if (t === RESOURCE_ENERGY) {
-                    if (urgentEnergy) {
+            const avoidReturnTargetId = sourceCache.avoidReturnResourceType === t
+                ? sourceCache.avoidReturnTargetId as Id<AnyStoreStructure> | undefined
+                : undefined;
+
+            if (t === RESOURCE_ENERGY) {
+                if (urgentEnergy) {
                     const spawnExtensions = [...(roomAny.spawn || []), ...(roomAny.extension || [])]
                         .filter((e: StructureSpawn | StructureExtension) => e?.store.getFreeCapacity(RESOURCE_ENERGY) > 0);
 
@@ -598,14 +741,16 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
                     if (!target && roomAny.powerSpawn?.store.getFreeCapacity(RESOURCE_ENERGY) > 100) {
                         target = roomAny.powerSpawn;
                     }
-                    } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
-                        target = controllerContainer;
-                    }
-
-                    if (!target) target = creep.findBestStoreTarget(RESOURCE_ENERGY, sourceIdToAvoid);
-                } else {
-                    target = creep.findBestStoreTarget(t, sourceIdToAvoid);
+                } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
+                    target = controllerContainer;
                 }
+
+                if (!target) {
+                    target = pickBestStoreTargetAvoiding(creep, RESOURCE_ENERGY, sourceIdToAvoid, avoidReturnTargetId);
+                }
+            } else {
+                target = pickBestStoreTargetAvoiding(creep, t, sourceIdToAvoid, avoidReturnTargetId);
+            }
 
             if (target && !isNoPath(room.name, target.id) && target.store.getFreeCapacity(t) > 0) {
                 resourceType = t;
@@ -627,6 +772,11 @@ const moveToNextCarryTarget = (creep: Creep) => {
     if (carryTypes.length === 0) return false;
 
     if (!target) {
+        if (shouldHoldBorrowedCargo(creep)) {
+            clearCarrierTargetCache(cache);
+            return false;
+        }
+
         const dropType = carryTypes.find(t => creep.store[t] > 0);
         if (!dropType) return false;
 
@@ -714,6 +864,9 @@ const withdraw = (creep: Creep) => {
         const available = storeTarget.store[resourceType] || 0;
         const result = creep.withdraw(storeTarget, resourceType);
         if (result === OK) {
+            if (isStorageLikeWithdrawSource(room, storeTarget, cache.sourceKind)) {
+                markCarrierAvoidReturnTarget(creep, storeTarget, resourceType);
+            }
             const fullAfterTake = available >= store.getFreeCapacity();
             if (fullAfterTake) return true;
             moveToNextWithdrawTarget(creep, storeTarget.id);
@@ -742,6 +895,13 @@ const carry = (creep: Creep) => {
     if (carryTypes.length === 0) return true;
 
     if (!target) {
+        if (shouldHoldBorrowedCargo(creep)) {
+            // 这批资源刚从仓储型来源借出，但当前没有真正需要它的目标。
+            // 直接塞回去只会制造“取一下又放回去”的空转，所以本 tick 保持等待。
+            clearCarrierTargetCache(cache);
+            return false;
+        }
+
         const dropType = carryTypes.find(t => store[t] > 0);
         if (!dropType) return true;
 
@@ -758,6 +918,13 @@ const carry = (creep: Creep) => {
     if (pos.inRangeTo(target, 1)) {
         const transferResult = creep.transfer(target, resourceType);
         if (transferResult === OK) {
+            const sourceCache = getCarrierSourceCache(creep);
+            if (
+                sourceCache.avoidReturnResourceType === resourceType &&
+                creep.store.getUsedCapacity(resourceType) <= 0
+            ) {
+                clearCarrierAvoidReturnCache(sourceCache);
+            }
             clearCarrierTargetCache(cache);
             if (creep.store.getUsedCapacity() === 0) return true;
             moveToNextCarryTarget(creep);
