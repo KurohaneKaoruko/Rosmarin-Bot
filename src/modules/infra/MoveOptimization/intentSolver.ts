@@ -13,7 +13,6 @@ import {
     packIntentTile,
     tile2Pos,
 } from './geometry';
-import { createMoveIntentLifecycle } from './lifecycle';
 
 type MoveableCreep = Creep | PowerCreep;
 type WorkTileChecker = (creep: MoveableCreep, pos: RoomPosition) => boolean;
@@ -40,6 +39,45 @@ function getTerrainBuffer(room: Room, getRoomTerrainBuffer: (roomName: string) =
 
 function getOwnedUnit(name: string): MoveableCreep | undefined {
     return Game.creeps[name] || Game.powerCreeps[name];
+}
+
+type LifecycleDeps = {
+    cachedMoveIntents: Map<string, number>;
+    creepToSquad: Map<string, number>;
+    squadToCreeps: Map<number, string[]>;
+    squadNextTile: Set<number>;
+    rerouteSquad: Set<string>;
+    checkedTiles: Map<number, string>;
+    setCreepIdx: (value: number) => void;
+    setSquadIdx: (value: number) => void;
+};
+
+/**
+ * 重置 move intent 解算期的临时状态。
+ * @description
+ * 这组状态只会被 `intentSolver` 自己读写，继续拆成单独文件只会增加跳转成本，
+ * 因此直接内聚回本模块。
+ */
+function createMoveIntentLifecycle(deps: LifecycleDeps) {
+    function resetMoveIntentState() {
+        deps.cachedMoveIntents.clear();
+        deps.creepToSquad.clear();
+        deps.squadToCreeps.clear();
+        deps.squadNextTile.clear();
+        deps.rerouteSquad.clear();
+        deps.checkedTiles.clear();
+        deps.setCreepIdx(1);
+        deps.setSquadIdx(1);
+    }
+
+    function preTickBetterMove() {
+        resetMoveIntentState();
+    }
+
+    return {
+        resetMoveIntentState,
+        preTickBetterMove,
+    };
 }
 
 /**

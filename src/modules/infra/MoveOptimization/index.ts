@@ -2,6 +2,7 @@ import {
     buildPathVariantKey,
     buildPathVariantKeyFromPath,
     buildPathVariantKeyFromQuery,
+    buildObstacleMap,
     formalize,
     formalizeIntentMovePos,
     formalizeIntentPos,
@@ -13,6 +14,8 @@ import {
     inRange,
     isEqual,
     isHighWay,
+    isClosedRampart,
+    isObstacleStructure as rawIsObstacleStructure,
     isNear,
     isNearExitDirection,
     isSameOps,
@@ -21,15 +24,12 @@ import {
     parseShardRoomName,
     tile2Pos,
 } from './geometry';
-import { buildObstacleMap, isClosedRampart, isObstacleStructure as rawIsObstacleStructure } from './obstacles';
-import { clearObjectKeys, createCleanupModule } from './cleanup';
-import { createPortalModule } from './portals';
-import { createAvoidSyncModule } from './avoidSync';
+import { clearObjectKeys, createCleanupModule, createPortalModule, createRuntimeSyncModule } from './runtimeState';
 import { PathingModuleApi, PathingService } from './pathing';
 import { MovementModuleApi, MovementService } from './movement';
-import { installDontPullMePolicies, updateDontPullMeForMoveTo, wrapProtoMethod } from './dontPullMe';
 import { createIntentSolverModule } from './intentSolver';
-import { createBetterMoveGlobalApi, createMoveRuntimeControlModule } from './controls';
+import { createBetterMoveGlobalApi, createMoveRuntimeControlModule, installDontPullMePolicies } from './controls';
+import { applySquadRoomEdgeCosts, getSquadCostMatrix } from './squad';
 import { RoadMemory } from '@/modules/feature/externalRoad';
 import { decompress } from '@/modules/utils/compress';
 import type {
@@ -253,7 +253,7 @@ export const {
     bmClearAvoidExits,
     bmAddAvoidExits,
     bmDeleteAvoidExits,
-} = createAvoidSyncModule({
+} = createRuntimeSyncModule({
     observers,
     avoidRooms,
     avoidExits,
@@ -757,219 +757,6 @@ function getSameRoomEdgeCostMatrix(roomName, ignoreCondition) {
     return edgeCostMat;
 }
 
-function buildIntentEdgeArray(room) {
-    const terrain = getRoomTerrainBuffer(room.name) || room.getTerrain().getRawBuffer();
-    const edgeArray = new Uint16Array(2500 << 3);
-    const edgeIdx = new Uint8Array(2500);
-    let u;
-    let v;
-    let w;
-
-    for (u = 0; u < 50; u++) {
-        if (terrain[u] & TERRAIN_MASK_WALL) {
-            continue;
-        }
-        v = u - 1;
-        if (v >= 0 && !(terrain[v] & TERRAIN_MASK_WALL)) {
-            edgeArray[(u << 3) + edgeIdx[u]++] = v;
-            edgeArray[(v << 3) + edgeIdx[v]++] = u;
-        }
-    }
-
-    for (let y = 1, idx = 50; y < 50; y++, idx += 50) {
-        if (terrain[idx] & TERRAIN_MASK_WALL) {
-            continue;
-        }
-        v = idx - 50;
-        if (!(terrain[v] & TERRAIN_MASK_WALL)) {
-            edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-            edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-        }
-    }
-
-    for (let y = 1, y50 = 50; y <= 49; y++, y50 += 50) {
-        for (let x = 1, idx = y50 + 1; x <= 49; x++, idx++) {
-            if (terrain[idx] & TERRAIN_MASK_WALL) {
-                continue;
-            }
-            u = idx - 1;
-            v = idx - 50;
-            w = idx - 51;
-            const uTerrain = terrain[u];
-            const vTerrain = terrain[v];
-            const wTerrain = terrain[w];
-            if (!(uTerrain & TERRAIN_MASK_WALL)) {
-                edgeArray[(idx << 3) + edgeIdx[idx]++] = u;
-                edgeArray[(u << 3) + edgeIdx[u]++] = idx;
-                if (!(vTerrain & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                    edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-                    edgeArray[(v << 3) + edgeIdx[v]++] = u;
-                    edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                }
-            } else if (!(vTerrain & TERRAIN_MASK_WALL)) {
-                edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-            }
-            if (!(wTerrain & TERRAIN_MASK_WALL)) {
-                edgeArray[(idx << 3) + edgeIdx[idx]++] = w;
-                edgeArray[(w << 3) + edgeIdx[w]++] = idx;
-            }
-        }
-    }
-
-    return edgeArray;
-}
-
-function initialMap(terrain) {
-    const squareMap = new Uint8Array(2500);
-    const squadCostMatrix = new PathFinder.CostMatrix;
-    const edgeArray = new Uint16Array(2500 << 3);
-    const edgeIdx = new Uint8Array(2500);
-
-    for (let u = 0; u < 50; u++) {
-        if (terrain[u] & TERRAIN_MASK_WALL) {
-            squareMap[u] = 0;
-        } else {
-            squareMap[u] = 1;
-            const v = u - 1;
-            if (squareMap[v] === 0) {
-                squadCostMatrix.set(u, 0, unWalkableCCost);
-            } else {
-                edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                edgeArray[(v << 3) + edgeIdx[v]++] = u;
-            }
-        }
-    }
-    for (let y = 1, u = 50; y < 50; y++, u += 50) {
-        if (terrain[u] & TERRAIN_MASK_WALL) {
-            squareMap[u] = 0;
-        } else {
-            squareMap[u] = 1;
-            const v = u - 50;
-            if (squareMap[v] === 0) {
-                squadCostMatrix.set(0, y, unWalkableCCost);
-            } else {
-                edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                edgeArray[(v << 3) + edgeIdx[v]++] = u;
-            }
-        }
-    }
-    return { squareMap, squadCostMatrix, edgeArray, edgeIdx };
-}
-
-function getSquadCostMatrix(room, costMatrix) {
-    const terrain = getRoomTerrainBuffer(room.name) || room.getTerrain().getRawBuffer();
-    const { squareMap, squadCostMatrix, edgeArray, edgeIdx } = initialMap(terrain);
-    let current, u, v, w;
-
-    for (let y = 1, y50 = 50; y <= 49; y++, y50 += 50) {
-        for (let x = 1, idx = y50 + 1; x <= 49; x++, idx++) {
-            const curTerrain = terrain[idx];
-            if (curTerrain & TERRAIN_MASK_WALL) {
-                squareMap[idx] = 0;
-
-                u = idx - 1;
-                v = idx - 50;
-                if (squareMap[u] && squareMap[v]) {
-                    edgeArray[(v << 3) + edgeIdx[v]++] = u;
-                    edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                }
-            } else if (costMatrix.get(x, y) == unWalkableCCost) {
-                squareMap[idx] = 0;
-                squadCostMatrix.set(x, y, unWalkableCCost);
-
-                u = idx - 1;
-                v = idx - 50;
-                w = idx - 51;
-                if (!(terrain[u] & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = u;
-                    edgeArray[(u << 3) + edgeIdx[u]++] = idx;
-                    if (!(terrain[v] & TERRAIN_MASK_WALL)) {
-                        edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                        edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-
-                        edgeArray[(v << 3) + edgeIdx[v]++] = u;
-                        edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                    }
-                } else if (!(terrain[v] & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                    edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-                }
-                if (!(terrain[w] & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = w;
-                    edgeArray[(w << 3) + edgeIdx[w]++] = idx;
-                }
-            } else {
-                u = idx - 1;
-                v = idx - 50;
-                w = idx - 51;
-                const uTerrain = terrain[u];
-                const vTerrain = terrain[v];
-                const wTerrain = terrain[w];
-                if (!(uTerrain & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = u;
-                    edgeArray[(u << 3) + edgeIdx[u]++] = idx;
-                    if (!(vTerrain & TERRAIN_MASK_WALL)) {
-                        edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                        edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-
-                        edgeArray[(v << 3) + edgeIdx[v]++] = u;
-                        edgeArray[(u << 3) + edgeIdx[u]++] = v;
-                    }
-                } else if (!(vTerrain & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = v;
-                    edgeArray[(v << 3) + edgeIdx[v]++] = idx;
-                }
-                if (!(wTerrain & TERRAIN_MASK_WALL)) {
-                    edgeArray[(idx << 3) + edgeIdx[idx]++] = w;
-                    edgeArray[(w << 3) + edgeIdx[w]++] = idx;
-                }
-
-                current = squareMap[w];
-                if (current > squareMap[u]) {
-                    current = squareMap[u];
-                }
-                if (current > squareMap[v]) {
-                    current = squareMap[v];
-                }
-                current = current + 1;
-                squareMap[idx] = current;
-                if (current >= 2) {
-                    if ((curTerrain & TERRAIN_MASK_SWAMP && costMatrix.get(x, y) !== 1) ||
-                        (uTerrain & TERRAIN_MASK_SWAMP && costMatrix.get(x - 1, y) !== 1) ||
-                        (vTerrain & TERRAIN_MASK_SWAMP && costMatrix.get(x, y - 1) !== 1) ||
-                        (wTerrain & TERRAIN_MASK_SWAMP && costMatrix.get(x - 1, y - 1) !== 1)) {
-                        squadCostMatrix.set(x, y, 5);
-                    }
-                } else {
-                    squadCostMatrix.set(x, y, unWalkableCCost);
-                }
-            }
-        }
-    }
-    return { squadCostMatrix, edgeArray, squareMap };
-}
-
-function applySquadRoomEdgeCosts(squareMap, squadCostMatrix) {
-    for (let i = 1, j = 50; i < 49; i++, j += 50) {
-        if (squareMap[i]) {
-            squadCostMatrix.set(i, 0, 5);
-            squadCostMatrix.set(i, 1, 5);
-        }
-        if (squareMap[i + 2450]) {
-            squadCostMatrix.set(i, 49, 5);
-        }
-        if (squareMap[j]) {
-            squadCostMatrix.set(0, i, 5);
-            squadCostMatrix.set(1, i, 5);
-        }
-        if (squareMap[j + 49]) {
-            squadCostMatrix.set(49, i, 5);
-        }
-    }
-}
-
 /**
  *  为房间保存costMatrix，ignoreDestructibleStructures这个参数的两种情况各需要一个costMatrix
  *  设置costMatrix缓存的过期时间
@@ -1063,13 +850,19 @@ function generateCostMatrix(room, pos) {
     // 外矿规划中的“待建道路”只施加轻度偏好，帮助 out-carry 更稳定地贴着既定路线走。
     applyPlannedExternalRoadPreference(room, noStructureCostMat, structureCostMat);
 
+    const terrain = getRoomTerrainBuffer(room.name) || room.getTerrain().getRawBuffer();
     const defaultSquadUsesStructures = !!(room.controller && room.controller.my);
     const defaultSquadData = getSquadCostMatrix(
-        room,
-        defaultSquadUsesStructures ? structureCostMat : noStructureCostMat
+        terrain,
+        defaultSquadUsesStructures ? structureCostMat : noStructureCostMat,
+        unWalkableCCost
     );
-    const squadFalseData = defaultSquadUsesStructures ? defaultSquadData : getSquadCostMatrix(room, structureCostMat);
-    const squadTrueData = defaultSquadUsesStructures ? getSquadCostMatrix(room, noStructureCostMat) : defaultSquadData;
+    const squadFalseData = defaultSquadUsesStructures
+        ? defaultSquadData
+        : getSquadCostMatrix(terrain, structureCostMat, unWalkableCCost);
+    const squadTrueData = defaultSquadUsesStructures
+        ? getSquadCostMatrix(terrain, noStructureCostMat, unWalkableCCost)
+        : defaultSquadData;
     const edgeArray = defaultSquadData.edgeArray;
 
     for (let i = 1, j = 50; i < 49; i++, j += 50) {
@@ -2423,8 +2216,6 @@ const runtimeControl = createMoveRuntimeControlModule({
     applyConfig,
     originMoveTo,
     wrapFn,
-    updateDontPullMeForMoveTo,
-    wrapProtoMethod,
     betterMoveTo,
     betterMove,
     betterPull,

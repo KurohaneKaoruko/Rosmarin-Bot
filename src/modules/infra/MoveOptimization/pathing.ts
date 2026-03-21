@@ -30,6 +30,7 @@ import type {
     CreepPathCacheEntry,
     FormalizedPos,
 } from './types';
+import { createSquadPathingHelpers } from './squad';
 
 type SquadMemberOffset = { x: number; y: number };
 type CoordLike = { x: number; y: number; roomName?: string | null };
@@ -370,6 +371,30 @@ export class PathingService {
         }
         return 'pos' in target ? target.pos : target;
     }
+
+    const {
+        findSquadTemporalPath,
+        findSquadPath,
+        findSquadPathTo,
+    } = createSquadPathingHelpers({
+        ensureAvoidRoomsUpToDate: deps.ensureAvoidRoomsUpToDate,
+        withScopedAvoids: deps.withScopedAvoids,
+        isRoomAvoided: deps.isRoomAvoided,
+        getSquadCostMatrixForRoom: deps.getSquadCostMatrixForRoom,
+        costMatrixCache: deps.costMatrixCache,
+        generateCostMatrix: deps.generateCostMatrix,
+        unWalkableCCost: deps.unWalkableCCost,
+        creepToSquad: deps.creepToSquad,
+        rerouteSquad: deps.rerouteSquad,
+        squadDerivedState: deps.squadDerivedState,
+        createPathFinderBaseOpts: deps.createPathFinderBaseOpts,
+        applyMoveToTerrainCosts: deps.applyMoveToTerrainCosts,
+        creepPathCache: deps.creepPathCache,
+        formalize: deps.formalize,
+    }, {
+        resolveTargetPos,
+        getCachedRoomCostMatrix,
+    });
 
     function isFleeTargetWithPos(target: BetterMoveFleeTarget): target is Extract<BetterMoveFleeTarget, { pos: RoomPosition }> {
         return !!target && typeof target === 'object' && 'pos' in target;
@@ -1352,197 +1377,6 @@ export class PathingService {
             deps.pathCacheTimer[pathDueTick].push(creepCache.path);
             creepCache.path.lastTime = Game.time;
         }
-    }
-
-    function createSquadPathFinderOpts(ops, roomCallback) {
-        const pathFinderOpts: PathFinderOptsWithMaxOps = {
-            maxRooms: typeof ops.maxRooms === 'number' ? ops.maxRooms : 10,
-            maxCost: typeof ops.maxCost === 'number' ? ops.maxCost : 1000,
-            heuristicWeight: typeof ops.heuristicWeight === 'number' ? ops.heuristicWeight : 1.2,
-            roomCallback
-        };
-        if (typeof ops.maxOps === 'number') {
-            pathFinderOpts.maxOps = ops.maxOps;
-        }
-        return pathFinderOpts;
-    }
-
-    function squadTemporalRoomCallback(roomName) {
-        if (deps.isRoomAvoided(roomName)) {
-            return false;
-        }
-        if (roomName == bypassRoomName) {
-            costMat = bypassCostMat;
-        } else {
-            costMat = deps.getSquadCostMatrixForRoom(roomName, findPathIgnoreCondition);
-        }
-        if (userCostCallback) {
-            const roomCache = deps.costMatrixCache[roomName];
-            const resultCostMat = userCostCallback(roomName, roomCache ? costMat.clone() : new PathFinder.CostMatrix);
-            if (resultCostMat instanceof PathFinder.CostMatrix) {
-                costMat = resultCostMat;
-            }
-        }
-        return costMat;
-    }
-
-    function findSquadTemporalPath(leader: Creep, toPos: RoomPosition, ops: SquadMoveToOpts, key: string, severe = false, squadNames: Set<string> = new Set()) {
-        bypassRoomName = leader.room.name;
-        if (!(bypassRoomName in deps.costMatrixCache) && bypassRoomName in Game.rooms) {
-            deps.generateCostMatrix(Game.rooms[bypassRoomName], leader.pos);
-        }
-        userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
-        findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
-        const nearbyCreeps = leader.pos.findInRange(FIND_CREEPS, 5);
-        bypassCostMat = deps.getSquadCostMatrixForRoom(bypassRoomName, findPathIgnoreCondition).clone();
-        if (severe) {
-            for (const creep of nearbyCreeps) {
-                if (!squadNames.has(creep.name)) {
-                    bypassCostMat.set(creep.pos.x, creep.pos.y, 10);
-                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y, bypassCostMat.get(creep.pos.x + 1, creep.pos.y) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
-                    bypassCostMat.set(creep.pos.x, creep.pos.y + 1, bypassCostMat.get(creep.pos.x, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
-                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y + 1, bypassCostMat.get(creep.pos.x + 1, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 10);
-                }
-            }
-        } else {
-            for (const creep of nearbyCreeps) {
-                if (deps.creepToSquad.has(creep.name) && !deps.rerouteSquad.has(creep.name)) {
-                    bypassCostMat.set(creep.pos.x, creep.pos.y, deps.unWalkableCCost);
-                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y, deps.unWalkableCCost);
-                    bypassCostMat.set(creep.pos.x, creep.pos.y + 1, deps.unWalkableCCost);
-                    bypassCostMat.set(creep.pos.x + 1, creep.pos.y + 1, bypassCostMat.get(creep.pos.x + 1, creep.pos.y + 1) === deps.unWalkableCCost ? deps.unWalkableCCost : 5);
-                    leader.room.visual.circle(creep.pos, { radius: 0.5, fill: 'red', opacity: 0.1 });
-                }
-            }
-        }
-        const pathFinderOpts = createSquadPathFinderOpts(ops, squadTemporalRoomCallback);
-        const creepCache = deps.creepPathCache[key];
-        const range = typeof ops.range === 'number' ? ops.range : 0;
-        const searchResult = deps.withScopedAvoids(ops, () => PathFinder.search(leader.pos, { pos: toPos, range }, pathFinderOpts));
-        if (searchResult.incomplete && searchResult.path.length <= 1) {
-            return false;
-        }
-        const result = searchResult.path;
-        creepCache.path = {
-            end: deps.formalize(result[result.length - 1]),
-            posArray: result,
-            ignoreStructures: findPathIgnoreCondition
-        };
-        return true;
-    }
-
-    function squadRoomCallback(roomName) {
-        if (deps.isRoomAvoided(roomName)) {
-            return false;
-        }
-        costMat = deps.getSquadCostMatrixForRoom(roomName, findPathIgnoreCondition);
-        if (userCostCallback) {
-            const roomCache = deps.costMatrixCache[roomName];
-            const resultCostMat = userCostCallback(roomName, roomCache ? costMat.clone() : new PathFinder.CostMatrix);
-            if (resultCostMat instanceof PathFinder.CostMatrix) {
-                costMat = resultCostMat;
-            }
-        }
-        return costMat;
-    }
-
-    function findSquadPath(fromPos: RoomPosition, toPos: RoomPosition, ops: SquadMoveToOpts): BetterMovePathSearchResult {
-        deps.ensureAvoidRoomsUpToDate();
-        if (!(fromPos.roomName in deps.costMatrixCache) && fromPos.roomName in Game.rooms) {
-            deps.generateCostMatrix(Game.rooms[fromPos.roomName], fromPos);
-        }
-
-        findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
-        userCostCallback = typeof ops.costCallback == 'function' ? ops.costCallback : undefined;
-        const pathFinderOpts = createSquadPathFinderOpts(ops, squadRoomCallback);
-        return deps.withScopedAvoids(ops, () => PathFinder.search(fromPos, { pos: toPos, range: ops.range }, pathFinderOpts));
-    }
-
-    function getMemberPosSignature(memberPos: SquadMemberOffset[]) {
-        if (!memberPos.length) {
-            return '';
-        }
-        return memberPos.map((p) => `${p.x},${p.y}`).sort().join('|');
-    }
-
-    function getSquadDerivedMatCacheForThisTick() {
-        if (typeof Game == 'undefined') {
-            return null;
-        }
-        if (deps.squadDerivedState.tick !== Game.time) {
-            deps.squadDerivedState.tick = Game.time;
-            deps.squadDerivedState.cache = Object.create(null);
-        }
-        return deps.squadDerivedState.cache;
-    }
-
-    function findSquadPathTo(this: RoomPosition, toPos: BetterMoveTarget, opts: SquadPathToOpts | undefined) {
-        deps.ensureAvoidRoomsUpToDate();
-        const targetPos = resolveTargetPos(toPos);
-        if (!targetPos || typeof targetPos.x != 'number' || typeof targetPos.y != 'number') {
-            return [];
-        }
-        opts = opts || {};
-
-        const range = typeof opts.range == 'number' ? opts.range : 1;
-        const ignoreCondition = !!opts.ignoreDestructibleStructures;
-        const memberPos = Array.isArray(opts.memberPos) ? opts.memberPos : [];
-        const memberPosSignature = getMemberPosSignature(memberPos);
-
-        const userCallback = typeof opts.costCallback == 'function' ? opts.costCallback : undefined;
-        const derivedMatCache = userCallback ? Object.create(null) : (getSquadDerivedMatCacheForThisTick() || Object.create(null));
-
-        const roomCallback = (roomName) => {
-            if (deps.isRoomAvoided(roomName)) {
-                return false;
-            }
-            let base = getCachedRoomCostMatrix(roomName, ignoreCondition);
-            if (userCallback) {
-                const resultCostMat = userCallback(roomName, roomName in deps.costMatrixCache ? base.clone() : new PathFinder.CostMatrix);
-                if (resultCostMat instanceof PathFinder.CostMatrix) {
-                    base = resultCostMat;
-                }
-            }
-            if (!memberPos.length) {
-                return base;
-            }
-            const cacheKey = `${roomName}|${ignoreCondition ? 1 : 0}|${memberPosSignature}`;
-            if (derivedMatCache[cacheKey]) {
-                return derivedMatCache[cacheKey];
-            }
-            const derived = new PathFinder.CostMatrix;
-            for (let y = 0; y < 50; y++) {
-                for (let x = 0; x < 50; x++) {
-                    let blocked = false;
-                    for (let i = memberPos.length; i--;) {
-                        const rel = memberPos[i];
-                        const rx = x + rel.x;
-                        const ry = y + rel.y;
-                        if (rx < 0 || ry < 0 || rx > 49 || ry > 49 || base.get(rx, ry) == deps.unWalkableCCost) {
-                            blocked = true;
-                            break;
-                        }
-                    }
-                    if (blocked) {
-                        derived.set(x, y, deps.unWalkableCCost);
-                    } else {
-                        const value = base.get(x, y);
-                        if (value) {
-                            derived.set(x, y, value);
-                        }
-                    }
-                }
-            }
-            derivedMatCache[cacheKey] = derived;
-            return derived;
-        };
-
-        const pathFinderOpts = deps.createPathFinderBaseOpts(opts);
-        deps.applyMoveToTerrainCosts(pathFinderOpts, opts);
-        pathFinderOpts.roomCallback = roomCallback;
-        pathFinderOpts.maxOps = opts.maxOps;
-
-        return deps.withScopedAvoids(opts, () => PathFinder.search(this, { pos: targetPos, range }, pathFinderOpts).path);
     }
 
     function flee(this: Creep, targets: BetterMoveFleeTarget[], opts?: MoveToOpts) {

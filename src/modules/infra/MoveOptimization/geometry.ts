@@ -1,8 +1,13 @@
 /**
- * BetterMove 基础几何/房间名工具。
+ * BetterMove 基础几何/静态空间工具。
  * @description
- * 这一层只做“纯计算”与轻量缓存，不触碰寻路状态机与原型补丁，
- * 方便在跨房路由、路径缓存、移动解算等多个功能块之间复用。
+ * 这里主要放：
+ * - 房间名 / 坐标几何换算
+ * - 轻量缓存
+ * - 与静态地形/建筑拓扑相关的小工具
+ *
+ * 这些逻辑都属于无运行时状态或弱运行时状态的底层能力，
+ * 合并后能减少模块跳转。
  */
 import type { FormalizedPos } from './types';
 
@@ -390,6 +395,54 @@ export function hasActiveBodypart(body: BodyPartDefinition[] | undefined | null,
     for (let i = body.length - 1; i >= 0; i--) {
         if (body[i].hits <= 0) break;
         if (body[i].type === type) return true;
+    }
+
+    return false;
+}
+
+export function buildObstacleMap() {
+    const obstacles: Record<string, 1> = Object.create(null);
+    for (let i = OBSTACLE_OBJECT_TYPES.length; i--;) {
+        obstacles[OBSTACLE_OBJECT_TYPES[i]] = 1;
+    }
+    return obstacles;
+}
+
+export function isClosedRampart(structure: Structure) {
+    const rampart = structure as StructureRampart & { my?: boolean; isPublic?: boolean };
+    return structure.structureType == STRUCTURE_RAMPART && !rampart.my && !rampart.isPublic;
+}
+
+/**
+ * 查看指定位置是否存在阻塞建筑。
+ * @description
+ * 和几何工具放在一起，是因为它同样属于“空间可通行性判定”的底层能力；
+ * 同时多个模块都会复用它，保留在一层更方便。
+ */
+export function isObstacleStructure(
+    room: Room,
+    pos: RoomPosition,
+    ignoreStructures: boolean,
+    obstacles: Record<string, 1>
+) {
+    const consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos) as ConstructionSite[];
+    if (0 in consSite && consSite[0].my && obstacles[consSite[0].structureType]) {
+        return true;
+    }
+
+    const structures = room.lookForAt(LOOK_STRUCTURES, pos) as Structure[];
+    for (let i = structures.length; i--;) {
+        const s = structures[i];
+        const runtimeStructure = s as Structure & { my?: boolean; ticksToDeploy?: number };
+        if (!('hits' in s) || !!runtimeStructure.ticksToDeploy) {
+            return true;
+        } else if (obstacles[s.structureType]) {
+            if (runtimeStructure.my || !ignoreStructures) {
+                return true;
+            }
+        } else if (!ignoreStructures && isClosedRampart(s)) {
+            return true;
+        }
     }
 
     return false;

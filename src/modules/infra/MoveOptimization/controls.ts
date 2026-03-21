@@ -60,6 +60,18 @@ type BetterMoveRoomPositionPrototype = typeof RoomPosition.prototype & {
     findSquadPathTo?: typeof RoomPosition.prototype.findSquadPathTo;
 };
 
+type ProtoValue = object | string | number | boolean | symbol | bigint | null | undefined;
+type ProtoMethodArgs = ProtoValue[];
+type ProtoMethod = (...args: ProtoMethodArgs) => ProtoValue;
+type AnyProto = object;
+type CreepWithMoveMemory = Creep & {
+    memory: CreepMemory & {
+        _lpv?: number;
+        _lpt?: number;
+        dontPullMe?: boolean;
+    };
+} & Record<string, ProtoMethod | undefined>;
+
 type RuntimeControlDeps = {
     config: BetterMoveConfig;
     analyzeCPU: AnalyzeCpuMap;
@@ -70,8 +82,6 @@ type RuntimeControlDeps = {
     applyConfig: () => void;
     originMoveTo: typeof Creep.prototype.moveTo;
     wrapFn: (fn: DynamicWrappedFn, name: string) => DynamicWrappedFn;
-    updateDontPullMeForMoveTo: (creep: Creep) => void;
-    wrapProtoMethod: (proto: object, originalName: string, backupName: string, wrap: DynamicWrappedFn) => void;
     restorePowerCreepNativeMethods: () => void;
     betterMoveTo: MovementModuleApi['betterMoveTo'];
     betterMove: MovementModuleApi['betterMove'];
@@ -130,6 +140,80 @@ type BetterMoveGlobalApiDeps = {
     bmClear: BetterMoveAPI['clear'];
 };
 
+export function wrapProtoMethod(proto: AnyProto, originalName: string, backupName: string, wrap: ProtoMethod) {
+    const protoMap = proto as Record<string, ProtoMethod | undefined>;
+    if (!protoMap[backupName] || protoMap[backupName] === protoMap[originalName]) {
+        protoMap[backupName] = protoMap[originalName];
+    }
+    protoMap[originalName] = wrap;
+}
+
+/**
+ * moveTo 前更新 dontPullMe 状态。
+ * @description
+ * 真正位于房间边缘时锁定 dontPullMe，避免被对穿推回出口。
+ */
+export function updateDontPullMeForMoveTo(creep: CreepWithMoveMemory) {
+    const isEdge = creep.pos.x === 0 || creep.pos.x === 49 || creep.pos.y === 0 || creep.pos.y === 49;
+    const currentPacked = (creep.pos.x << 6) | creep.pos.y;
+    if (creep.memory._lpv === currentPacked) {
+        creep.memory._lpt = (creep.memory._lpt || 0) + 1;
+    } else {
+        creep.memory._lpv = currentPacked;
+        creep.memory._lpt = 0;
+    }
+    creep.memory.dontPullMe = isEdge;
+}
+
+const YIELDABLE_ACTIONS = new Set([
+    'build',
+    'repair',
+    'upgradeController'
+]);
+const ACTION_OK = 0;
+
+function shouldLockActionPosition(actionName: string, actionResult: number) {
+    if (actionResult !== ACTION_OK) return false;
+    if (YIELDABLE_ACTIONS.has(actionName)) return false;
+    return true;
+}
+
+export function installDontPullMePolicies({
+    CreepPrototype,
+    betterCancelOrder,
+    restorePowerCreepNativeMethods,
+}: {
+    CreepPrototype: typeof Creep.prototype & AnyProto;
+    betterCancelOrder: ProtoMethod;
+    restorePowerCreepNativeMethods: () => void;
+}) {
+    wrapProtoMethod(CreepPrototype, 'cancelOrder', '$cancelOrder', betterCancelOrder);
+    restorePowerCreepNativeMethods();
+
+    const wrapActionSetDontPullMePolicy = (methodName: string) => {
+        const backupName = `$${methodName}`;
+        if (CreepPrototype[backupName]) {
+            return;
+        }
+        wrapProtoMethod(CreepPrototype, methodName, backupName, function (this: CreepWithMoveMemory, ...args: ProtoMethodArgs) {
+            const backupMethod = this[backupName];
+            if (typeof backupMethod !== 'function') {
+                return ERR_INVALID_TARGET;
+            }
+            const result = backupMethod.apply(this, args) as number;
+            this.memory.dontPullMe = shouldLockActionPosition(methodName, result);
+            return result;
+        });
+    };
+
+    wrapActionSetDontPullMePolicy('build');
+    wrapActionSetDontPullMePolicy('repair');
+    wrapActionSetDontPullMePolicy('upgradeController');
+    wrapActionSetDontPullMePolicy('dismantle');
+    wrapActionSetDontPullMePolicy('harvest');
+    wrapActionSetDontPullMePolicy('attack');
+}
+
 export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): RuntimeControlApi {
     const creepProto = Creep.prototype as BetterMoveCreepPrototype;
     const roomPositionProto = RoomPosition.prototype as BetterMoveRoomPositionPrototype;
@@ -178,10 +262,10 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
         deps.config.changeMoveTo = !!bool;
         const creepCore = bool ? deps.betterMoveTo : deps.originMoveTo;
         const creepImpl = deps.wrapFn(function (...args) {
-            deps.updateDontPullMeForMoveTo(this);
+            updateDontPullMeForMoveTo(this as CreepWithMoveMemory);
             return creepCore.apply(this, args);
         }, 'moveTo');
-        deps.wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
+        wrapProtoMethod(Creep.prototype, 'moveTo', '$moveTo', creepImpl);
         deps.restorePowerCreepNativeMethods();
         deps.analyzeCPU.moveTo = { sum: 0, calls: 0 };
         const metrics = deps.runtimeMetrics;
@@ -201,8 +285,8 @@ export function createMoveRuntimeControlModule(deps: RuntimeControlDeps): Runtim
     function bmSetChangeMove(bool) {
         deps.config.changeMove = !!bool;
         if (bool) {
-            deps.wrapProtoMethod(Creep.prototype, 'move', '$move', deps.wrapFn(deps.betterMove, 'move'));
-            deps.wrapProtoMethod(Creep.prototype, 'pull', '$pull', deps.wrapFn(deps.betterPull, 'pull'));
+            wrapProtoMethod(Creep.prototype, 'move', '$move', deps.wrapFn(deps.betterMove, 'move'));
+            wrapProtoMethod(Creep.prototype, 'pull', '$pull', deps.wrapFn(deps.betterPull, 'pull'));
         } else if (bool === false) {
             if (creepProto.$move) {
                 Creep.prototype.move = creepProto.$move;
