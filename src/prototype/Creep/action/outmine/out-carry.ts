@@ -1,4 +1,5 @@
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { RoadMemory } from '@/modules/feature/externalRoad';
 import { tryOutCarryRelayHandoff, updateOutCarryMoveTrace } from '@/prototype/Creep/function/relayFunction';
 import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
@@ -47,6 +48,60 @@ const getDroppedClusterRemaining = (
         total += Math.max(0, resource.amount - (reservedByTarget[resource.id] || 0));
     }
     return total;
+};
+
+const isSameRoomPosition = (left: RoomPosition, right: RoomPosition): boolean => (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.roomName === right.roomName
+);
+
+const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefined): RoomPosition | null => {
+    const sourceRoom = creep.memory.sourceRoom;
+    const taskTargetRoom = creep.memory.targetRoom;
+    if (!nextRoomName || !sourceRoom || !taskTargetRoom || sourceRoom === taskTargetRoom) return null;
+
+    const allPaths = RoadMemory.getAllPaths(sourceRoom, taskTargetRoom);
+    if (!(allPaths instanceof Map) || allPaths.size === 0) return null;
+
+    const towardTaskTarget = nextRoomName === taskTargetRoom;
+    let best: { pos: RoomPosition; range: number; progress: number } | null = null;
+
+    for (const path of allPaths.values()) {
+        if (!Array.isArray(path) || path.length === 0) continue;
+
+        const travelPath = towardTaskTarget ? path : [...path].reverse();
+        const roomPath = travelPath.filter((pos) => pos.roomName === creep.room.name);
+        if (roomPath.length === 0) continue;
+
+        let nearestIndex = -1;
+        let nearestRange = Infinity;
+        for (let i = 0; i < roomPath.length; i++) {
+            const range = creep.pos.getRangeTo(roomPath[i]);
+            if (range < nearestRange || (range === nearestRange && i > nearestIndex)) {
+                nearestRange = range;
+                nearestIndex = i;
+            }
+        }
+        if (nearestIndex < 0) continue;
+
+        let candidateIndex = nearestIndex;
+        if (isSameRoomPosition(creep.pos, roomPath[nearestIndex]) && nearestIndex + 1 < roomPath.length) {
+            candidateIndex = nearestIndex + 1;
+        }
+
+        const candidate = roomPath[candidateIndex];
+        const progress = roomPath.length - candidateIndex;
+        if (
+            !best ||
+            nearestRange < best.range ||
+            (nearestRange === best.range && progress < best.progress)
+        ) {
+            best = { pos: candidate, range: nearestRange, progress };
+        }
+    }
+
+    return best?.pos || null;
 };
 
 
@@ -144,6 +199,19 @@ const outCarry: OutCarryAction = {
         if (!targetRoom) return false;
         if (creep.room.name === targetRoom) return false;
         if (creep.pos.isRoomEdge()) return false;
+
+        const plannedRoadTarget = getPlannedTransitRoadTarget(creep, targetRoom);
+        if (plannedRoadTarget && !isSameRoomPosition(creep.pos, plannedRoadTarget)) {
+            creep.moveTo(plannedRoadTarget, {
+                maxRooms: 1,
+                range: 0,
+                ignoreCreeps: false,
+                plainCost: 2,
+                swampCost: 10,
+                reusePath: 3
+            });
+            return true;
+        }
 
         const exitDirection = this.getRouteExitDirection(creep, targetRoom);
         if (!exitDirection) return false;

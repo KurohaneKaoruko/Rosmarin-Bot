@@ -507,6 +507,77 @@ function chebyshev(a: { x: number; y: number }, b: { x: number; y: number }): nu
     return Math.max(Math.abs(a.x - b.x), Math.abs(a.y - b.y));
 }
 
+type OrderedLinkEntry = {
+    kind: 'source' | 'center' | 'controller' | 'other';
+    pos: XY;
+    sourceDistance?: number;
+    originalIndex: number;
+};
+
+/**
+ * 对 link 进行排序，先按距离 source 最近排序，再按距离 center 最近排序，最后按其他顺序排序。
+ * @param room 房间
+ * @param center 布局中心点
+ * @param structMap 结构点位映射（会被原地修改）
+ * @returns 排序后的 link 点位
+ */
+function reorderLinkBuildOrder(room: Room, center: LayoutCenter, structMap: LayoutStructMap): void {
+    const links = structMap.link;
+    if (!links || links.length <= 1) return;
+
+    const sources = room.source?.length ? room.source : room.find(FIND_SOURCES);
+    const controller = room.controller;
+    const centerPos = new RoomPosition(center.x, center.y, room.name);
+
+    const sourceEntries: OrderedLinkEntry[] = [];
+    const otherEntries: OrderedLinkEntry[] = [];
+    let centerEntry: OrderedLinkEntry | null = null;
+    let controllerEntry: OrderedLinkEntry | null = null;
+
+    links.forEach((pos, originalIndex) => {
+        const linkPos = new RoomPosition(pos[0], pos[1], room.name);
+        const matchedSource = sources.find((source) => linkPos.inRangeTo(source.pos, 2));
+        if (matchedSource) {
+            sourceEntries.push({
+                kind: 'source',
+                pos,
+                sourceDistance: chebyshev(matchedSource.pos, center),
+                originalIndex,
+            });
+            return;
+        }
+
+        if (linkPos.inRangeTo(centerPos, 1)) {
+            centerEntry = { kind: 'center', pos, originalIndex };
+            return;
+        }
+
+        if (controller && linkPos.inRangeTo(controller.pos, 2)) {
+            controllerEntry = { kind: 'controller', pos, originalIndex };
+            return;
+        }
+
+        otherEntries.push({ kind: 'other', pos, originalIndex });
+    });
+
+    sourceEntries.sort((a, b) => {
+        const distDelta = (b.sourceDistance || 0) - (a.sourceDistance || 0);
+        if (distDelta !== 0) return distDelta;
+        return a.originalIndex - b.originalIndex;
+    });
+    otherEntries.sort((a, b) => a.originalIndex - b.originalIndex);
+
+    const ordered: XY[] = [];
+    if (sourceEntries.length > 0) ordered.push(sourceEntries.shift()!.pos);
+    if (centerEntry) ordered.push(centerEntry.pos);
+    if (controllerEntry) ordered.push(controllerEntry.pos);
+    for (const entry of sourceEntries) ordered.push(entry.pos);
+    for (const entry of otherEntries) ordered.push(entry.pos);
+
+    if (ordered.length !== links.length) return;
+    structMap.link = ordered;
+}
+
 /**
  * 判断某个位置是否是墙体地形。
  * @param terrain RoomTerrain
@@ -788,6 +859,7 @@ function computeStatic(roomName: string, layoutType: string, center: LayoutCente
     const { structMap, minX, maxX, minY, maxY } = base;
     addStaticRampartRing(roomName, structMap, { minX, maxX, minY, maxY });
     planHarvestInfra(room, center, structMap);
+    reorderLinkBuildOrder(room, center, structMap);
     const layoutMemory = toLayoutMemory(structMap);
 
     const key = makeCacheKey(roomName, layoutType, center);
@@ -886,6 +958,7 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
 
     const center = normalized.center;
     const structMap = normalized.structMap;
+    reorderLinkBuildOrder(room, center, structMap);
     const layoutMemory = toLayoutMemory(structMap);
 
     const key = makeCacheKey(roomName, layoutType, center);
