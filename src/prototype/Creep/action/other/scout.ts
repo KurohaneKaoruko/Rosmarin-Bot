@@ -173,6 +173,12 @@ const ensureScoutTargetRoom = (creep: Creep): string | undefined => {
     return creep.memory.targetRoom;
 };
 
+const hasFriendlyNonScoutInRoom = (creep: Creep): boolean => {
+    if (typeof FIND_MY_CREEPS === 'undefined' || typeof creep.room.find !== 'function') return false;
+    const creeps = creep.room.find(FIND_MY_CREEPS) as Creep[];
+    return creeps.some((other) => other.name !== creep.name && other.memory?.role !== 'scout');
+};
+
 /**
  * scout 到达目标房间后的行为：
  * 1. 优先执行踩工地；
@@ -180,6 +186,11 @@ const ensureScoutTargetRoom = (creep: Creep): string | undefined => {
  * 3. 否则驻足到非边缘可站位，保持目标房视野。
  */
 const runScoutInTargetRoom = (creep: Creep): void => {
+    if (hasFriendlyNonScoutInRoom(creep)) {
+        creep.suicide();
+        return;
+    }
+
     if (runStomp(creep)) return;
 
     const controller = creep.room.controller;

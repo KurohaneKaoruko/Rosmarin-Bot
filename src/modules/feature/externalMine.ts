@@ -1057,8 +1057,8 @@ class ExternalMineSpawner {
         return true;
     }
 
-    // 外矿运输者：依赖采集者存在；allowWorkCarry 时允许先出 work+carry 的过渡车。
-    static carry(sourceRoom: Room, targetRoom: Room, num: number, allowWorkCarry = true): boolean {
+    // 外矿运输者：现在只孵化 out-carry；旧 out-car 仅作为存量运力统计。
+    static carry(sourceRoom: Room, targetRoom: Room, num: number): boolean {
         if (!this.hasActiveOutHarvester(sourceRoom, targetRoom)) {
             this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom.name);
             return false;
@@ -1071,25 +1071,10 @@ class ExternalMineSpawner {
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
 
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
-        const spawnCarNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-car', targetRoom.name);
         const modeCarryBody = ExternalMineMath.getModeLimitedBodyConfig(sourceRoom, 'out-carry');
-        const modeCarBody = ExternalMineMath.getModeLimitedBodyConfig(sourceRoom, 'out-car');
 
-        if (!allowWorkCarry) {
-            const totalCarry = outerCarry + spawnCarryNum + outerCar + spawnCarNum;
-            if (totalCarry < num) {
-                sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
-                return true;
-            }
-            return false;
-        }
-
-        if (outerCar + spawnCarNum === 0) {
-            sourceRoom.SpawnMissionAdd('OC', modeCarBody || [], this.PRIORITY.carry, 'out-car', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
-            return true;
-        }
-
-        if (outerCarry + spawnCarryNum < num - 1) {
+        const totalCarry = outerCarry + spawnCarryNum + outerCar;
+        if (totalCarry < num) {
             sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
@@ -1114,19 +1099,30 @@ class ExternalMineSpawner {
         return true;
     }
 
-    // 外矿建造者：仅为道路/容器施工存在时派遣。
-    static builder(sourceRoom: Room, targetRoom: Room): boolean {
+    private static getBuilderWorkCount(targetRoom: Room): number {
         const constructionSite = targetRoom.find(FIND_CONSTRUCTION_SITES, {
             filter: (site) => site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER
         });
-        if (constructionSite.length === 0) return false;
+        const repairTargets = targetRoom.find(FIND_STRUCTURES, {
+            filter: (structure) =>
+                (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) &&
+                structure.hits < structure.hitsMax * 0.8
+        });
+
+        return constructionSite.length + repairTargets.length;
+    }
+
+    // 外矿建造者：道路/容器存在施工或维修需求时派遣。
+    static builder(sourceRoom: Room, targetRoom: Room): boolean {
+        const workCount = this.getBuilderWorkCount(targetRoom);
+        if (workCount === 0) return false;
 
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerBuilder = (creepByTargetRoom['out-build'] || []).length;
         const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-build', targetRoom.name);
 
         let num = 1;
-        if (constructionSite.length > 10) num = 2;
+        if (workCount > 10) num = 2;
         if (outerBuilder + spawnNum >= num) return false;
 
         sourceRoom.SpawnMissionAdd('OB', '', this.PRIORITY.build, 'out-build', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
@@ -1216,14 +1212,11 @@ export class ExternalMine {
 
             ExternalMineSpawner.harvester(room, targetRoom, sourceNum);
 
-            const allowWorkCarry = room.level >= EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL;
             const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
-            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, allowWorkCarry, carryCapacity);
-            ExternalMineSpawner.carry(room, targetRoom, carryNum, allowWorkCarry);
+            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, false, carryCapacity);
+            ExternalMineSpawner.carry(room, targetRoom, carryNum);
 
-            if (runState.qosLevel === 'normal') {
-                ExternalMineSpawner.builder(room, targetRoom);
-            }
+            ExternalMineSpawner.builder(room, targetRoom);
         }
     }
 
@@ -1276,14 +1269,11 @@ export class ExternalMine {
                 ExternalMineSpawner.mineral(room, targetRoom);
             }
 
-            const allowWorkCarry = room.level >= EXTERNAL_ROAD_CONFIG.CENTER_ROAD_MIN_LEVEL;
             const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
-            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, allowWorkCarry, carryCapacity);
-            ExternalMineSpawner.carry(room, targetRoom, carryNum, allowWorkCarry);
+            const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, false, carryCapacity);
+            ExternalMineSpawner.carry(room, targetRoom, carryNum);
 
-            if (runState.qosLevel === 'normal') {
-                ExternalMineSpawner.builder(room, targetRoom);
-            }
+            ExternalMineSpawner.builder(room, targetRoom);
         }
     }
 }

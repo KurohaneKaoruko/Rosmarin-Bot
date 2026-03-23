@@ -37,6 +37,18 @@ const isSamePosition = (left: RoomPosition, right: RoomPosition): boolean => {
     return left.roomName === right.roomName && left.x === right.x && left.y === right.y;
 };
 
+const getManagerLockCenter = (room: Room): RoomPosition | null => {
+    const centerPos = room.getCenter?.();
+    const storage = room.storage;
+    if (!centerPos || !room.controller?.my || !storage) return null;
+    const hasManageLink = !!room.link?.some((link) =>
+        link &&
+        link.pos.inRangeTo(centerPos, 1) &&
+        link.pos.inRangeTo(storage, 2)
+    );
+    return room.terminal || hasManageLink ? centerPos : null;
+};
+
 const addCandidate = (
     candidates: MoveWorkTileCandidate[],
     seen: Set<string>,
@@ -192,7 +204,7 @@ const getProjectMoveWorkTileCandidates = (creep: Creep): MoveWorkTileCandidate[]
             }
 
             if (role === 'manager') {
-                const centerPos = creep.room.getCenter?.();
+                const centerPos = getManagerLockCenter(creep.room);
                 if (centerPos && isSamePosition(creep.pos, centerPos)) {
                     addCandidate(candidates, seen, centerPos, 0);
                 }

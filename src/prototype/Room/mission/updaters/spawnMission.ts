@@ -15,6 +15,9 @@ const WORKER_MIN_SPAWN_ENERGY = BODYPART_COST[WORK] + BODYPART_COST[CARRY] + BOD
 const HARVESTER_MAX_WORK_PER_SOURCE = 8;
 // builder 目标数的参考 work 基线
 const WORKER_BUILD_REFERENCE_WORK = 3;
+// 只有 transport 允许在恢复期按“缩水物流”扣减 current；
+// manager 是中心单点位，若扣减会把“已有缩水 manager”误判成缺口，导致反复补人堵路。
+const RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET = new Set(['transport']);
 
 // 优先使用缓存的能量状态，避免重复计算
 const getEnergyState = (room: Room) => {
@@ -596,6 +599,7 @@ export const createSpawnCheckContext = (
 export const getAdjustedSpawnRoleCurrent = (context: SpawnCheckContext, role: string): number => {
     const current = (context.creepNum[role] || 0) + (context.spawnMissionNum[role] || 0);
     if (!context.shouldRecover) return current;
+    if (!RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET.has(role)) return current;
     return Math.max(0, current - (context.downgradedCount[role] || 0));
 };
 

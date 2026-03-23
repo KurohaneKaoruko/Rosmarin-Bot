@@ -14,7 +14,6 @@ const routeExitCache: Record<string, { tick: number; exit: number | null }> = {}
 
 // 策略 ID：集中声明，避免散落字符串
 const OUT_CARRY_STRATEGIES = {
-    BUILD_REPAIR: 'build-repair',
     COLLECT: 'collect',
     DELIVER: 'deliver'
 } as const;
@@ -197,16 +196,6 @@ type OutCarryAction = {
     findBestWithdrawTarget: (creep: Creep) => { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null;
     withdraw: (creep: Creep) => void;
     carry: (creep: Creep) => void;
-    buildRepair: (creep: Creep) => boolean;
-};
-
-// Build/repair 能力判定：
-// 这里不再依赖 role 字符串，而是按 creep 是否真的还有 WORK 能力来判断。
-// 这样共享同一 handler 的不同角色或未来变体不会因为命名差异被误伤。
-const canBuildRepair = (creep: Creep): boolean => {
-    if (creep.store[RESOURCE_ENERGY] <= 0) return false;
-    if (typeof creep.getActiveBodyparts !== 'function') return false;
-    return creep.getActiveBodyparts(WORK) > 0;
 };
 
 const moveOutCarryTo = (
@@ -789,41 +778,7 @@ const outCarry: OutCarryAction = {
         }
     },
 
-    buildRepair: function (creep: Creep) {
-        const sourceRoom = creep.memory.sourceRoom;
-        if (sourceRoom && creep.room.name == sourceRoom) return false;
-        if (!canBuildRepair(creep)) return false;
-
-        const roads = creep.room.road?.filter((r: any) => {
-            if (!r || r.hits >= r.hitsMax * 0.8) return false;
-            if (!creep.pos.inRangeTo(r.pos, 1)) return false;
-            return true;
-        });
-        if (roads && roads.length > 0) {
-            const road = creep.pos.findClosestByRange(roads);
-            const result = creep.repair(road);
-            if (creep.pos.isRoomEdge()) {
-                moveOutCarryToRoom(creep, creep.room.name, { plainCost: 2, swampCost: 10 });
-            }
-            if (result == OK) return true;
-            if (result == ERR_NOT_IN_RANGE) {
-                moveOutCarryTo(creep, road);
-                return true;
-            }
-        }
-
-        if (creep.buildRoad()) {
-            if (creep.pos.isRoomEdge()) {
-                moveOutCarryToRoom(creep, creep.room.name, { plainCost: 2, swampCost: 10 });
-            }
-            return true;
-        }
-
-        creep.memory.dontPullMe = false;
-        return false;
-    },
-
-    // 统一入口：先执行 BuildRepair，若无动作则按采集/交付兜底
+    // 统一入口：只做 collect / deliver，修路与建造交给 out-build。
     run: function (creep: Creep) {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
@@ -836,46 +791,29 @@ const outCarry: OutCarryAction = {
 
         const cache = creep.memory.cache as any;
         const previousMode = cache.outCarryMode as OutCarryMode | undefined;
-        let mode: OutCarryMode = shouldBuildRepair(creep)
-            ? OUT_CARRY_STRATEGIES.BUILD_REPAIR
-            : resolveOutCarryMode(creep, previousMode);
+        const mode = resolveOutCarryMode(creep, previousMode);
 
-        if (mode !== previousMode && mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
+        if (mode !== previousMode) {
             // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
-                if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
-                    const targetCache = creep.memory.cacheTarget as any;
-                    if (targetCache) delete targetCache.targetId;
-                } else {
-                    const sourceCache = creep.memory.cacheSource as any;
+            if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+                const targetCache = creep.memory.cacheTarget as any;
+                if (targetCache) delete targetCache.targetId;
+            } else {
+                const sourceCache = creep.memory.cacheSource as any;
                 if (sourceCache) {
-                        delete sourceCache.targetId;
-                        delete sourceCache.targetType;
-                        delete sourceCache.waitUntil;
-                        delete sourceCache.partialLeaveWait;
-                        clearAssignedSourceCache(sourceCache);
-                    }
+                    delete sourceCache.targetId;
+                    delete sourceCache.targetType;
+                    delete sourceCache.waitUntil;
+                    delete sourceCache.partialLeaveWait;
+                    clearAssignedSourceCache(sourceCache);
                 }
             }
-        if (mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
-            cache.outCarryMode = mode;
         }
+        cache.outCarryMode = mode;
 
         const ctx: OutCarryContext = { creep, mode };
-        const handled = runStrategy(outCarryStrategyContainer, ctx);
-
-        if (mode === OUT_CARRY_STRATEGIES.BUILD_REPAIR && !handled) {
-            const fallbackMode = resolveOutCarryMode(creep, previousMode);
-            cache.outCarryMode = fallbackMode;
-            runStrategy(outCarryStrategyContainer, { creep, mode: fallbackMode });
-        }
+        runStrategy(outCarryStrategyContainer, ctx);
     },
-};
-
-// 判断是否满足“修路/修路肩”策略的前置条件
-const shouldBuildRepair = (creep: Creep): boolean => {
-    const sourceRoom = creep.memory.sourceRoom;
-    if (sourceRoom && creep.room.name == sourceRoom) return false;
-    return canBuildRepair(creep);
 };
 
 // 判定是否进入采集策略
@@ -999,12 +937,6 @@ const runCollectMode = (creep: Creep) => {
 
 // 策略容器：按优先级注册
 const outCarryStrategyContainer = new StrategyContainer<OutCarryContext, boolean>();
-
-outCarryStrategyContainer.register({
-    id: OUT_CARRY_STRATEGIES.BUILD_REPAIR,
-    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.BUILD_REPAIR,
-    run: (ctx) => outCarry.buildRepair(ctx.creep)
-});
 
 outCarryStrategyContainer.register({
     id: OUT_CARRY_STRATEGIES.COLLECT,

@@ -22,9 +22,10 @@ type CreepTickIndexCache = {
 
 const EMPTY_TARGET_ROOM_ROLE_MAP: TargetRoomRoleMap = Object.freeze({}) as TargetRoomRoleMap
 const EMPTY_ROLE_COUNT_MAP: RoleCountMap = Object.freeze({}) as RoleCountMap
-// transport / manager 对体型吞吐更敏感，恢复期允许按“缩水体型”补正；
-// carrier 继续按真实数量统计，避免低能量恢复后长期叠出多只替代品。
-const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transport', 'manager'])
+// 只有 transport 继续走“缩水体型补正”：
+// - transport 是纯吞吐位，恢复期补一只满体型通常是收益；
+// - manager 是中心单点位，若把缩水 manager 当作“缺口”继续补，会在中心区叠出多只堵路。
+const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transport'])
 
 let tickCache: CreepTickIndexCache | undefined
 
