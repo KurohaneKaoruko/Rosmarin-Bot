@@ -35,6 +35,15 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
         delete sourceCache.targetId;
         delete sourceCache.targetType;
 
+        const boundSourceId = creep.memory.targetSourceId as Id<Source> | undefined;
+        if (boundSourceId) {
+            sourceCache.assignedSourceId = boundSourceId;
+            const source = Game.getObjectById(boundSourceId);
+            if (source) {
+                sourceCache.assignedSourceKey = `${source.pos.x}:${source.pos.y}`;
+            }
+        }
+
         // 只有接近满载时才允许运输工同步转入返程。
         // 少量直递只是减少落地损耗，不应打断当前采集周期。
         if (shouldCarrierReturnAfterDirectTransfer(nearbyCarrier)) {

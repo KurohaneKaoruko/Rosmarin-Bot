@@ -9,6 +9,13 @@ import { RoomArray } from '@/modules/feature/Planner/utils/roomArray';
 import { compress, decompress } from '@/modules/utils/compress';
 import { getLayoutData, getOutMineData } from '@/modules/utils/memory';
 
+const hasLayoutMemory = (roomName: string): boolean => {
+    const layout = getLayoutData();
+    const roomLayout = layout?.[roomName];
+    if (!roomLayout) return false;
+    return Object.keys(roomLayout).length > 0;
+};
+
 // ============================================================
 // CostMatrix 缓存管理器
 // ============================================================
@@ -667,11 +674,21 @@ export class PathPlanner {
         const costs = new PathFinder.CostMatrix();
 
         // 将布局中的道路位置设置为 ROAD_COST
-        const layoutRoads = getLayoutData()?.[roomName]?.['road'];
-        if (layoutRoads) {
-            for (const compressed of layoutRoads) {
-                const [x, y] = decompress(compressed);
-                costs.set(x, y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
+        const layoutData = getLayoutData()?.[roomName];
+        if (layoutData) {
+            for (const structType in layoutData) {
+                const positions = layoutData[structType];
+                if (!Array.isArray(positions) || positions.length === 0) continue;
+                const isRoadLike = structType === STRUCTURE_ROAD || structType === STRUCTURE_CONTAINER || structType === STRUCTURE_RAMPART;
+                const isObstacle = (OBSTACLE_OBJECT_TYPES as string[]).includes(structType) || structType === STRUCTURE_WALL;
+                for (const compressed of positions) {
+                    const [x, y] = decompress(compressed);
+                    if (isRoadLike) {
+                        costs.set(x, y, EXTERNAL_ROAD_CONFIG.ROAD_COST);
+                    } else if (isObstacle) {
+                        costs.set(x, y, 255);
+                    }
+                }
             }
         }
 
@@ -778,6 +795,8 @@ export class RoadBuilder {
         // 检查是否已有路线数据。
         const existingPaths = RoadMemory.getAllPaths(sourceRoomName, targetRoomName);
         if (existingPaths.size > 0) return existingPaths;
+
+        if (!hasLayoutMemory(sourceRoomName)) return new Map<string, RoomPosition[]>();
 
         // 没有缓存时才重新规划路径。
         const targets = this.getTargetPositions(targetRoom);

@@ -499,6 +499,15 @@ export default class BaseFunction extends Room {
         let body: any[];
         const budget = energyBudget ?? this.energyCapacityAvailable;
 
+        if (role === 'manager' && energyBudget !== undefined) {
+            const minConfig = RoleData[role]?.bodypart;
+            if (minConfig) {
+                const minBody = this.GenerateBodys(minConfig, role);
+                const minCost = this.CalculateEnergy(minBody);
+                if (budget < minCost) return [];
+            }
+        }
+
         if (RoleLevelData[role]) {
             while (lv >= 1) {
                 const bodyconfig = RoleLevelData[role][lv];

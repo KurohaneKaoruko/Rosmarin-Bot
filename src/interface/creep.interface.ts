@@ -249,19 +249,6 @@ interface Creep {
         advanceFront?: boolean;
     }): boolean;
 
-    /**
-     * 计算本 creep 当前应保护的移动工位候选。
-     * @returns 工位候选列表（坐标 + 保护半径）。
-     */
-    getMoveWorkTileCandidates(): Array<{ pos: RoomPosition; range: number }>;
-
-    /**
-     * 判断某个位置是否属于本 creep 的工位保护范围。
-     * @param pos 要判定的位置
-     */
-    isMoveWorkTile(pos: RoomPosition): boolean;
-
-
     // ==================== 工作功能 (WorkFunction) ====================
     /** 
      * 采集资源

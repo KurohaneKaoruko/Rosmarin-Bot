@@ -10,7 +10,6 @@ import CombatFunction from "./function/combatFunction"
 import BuildFunction from "./function/buildFunction"
 import HaulFunction from "./function/haulFunction"
 import ControllerFunction from "./function/controllerFunction"
-import WorkTileFunction from "./function/workTileFunction"
 import CreepExecute from "./execute"
 
 /**
@@ -31,7 +30,6 @@ const plugins = [
     BuildFunction,
     HaulFunction,
     ControllerFunction,
-    WorkTileFunction,
     CreepExecute,
 ]
 

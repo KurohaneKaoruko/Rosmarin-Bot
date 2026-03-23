@@ -2,6 +2,7 @@ import { CREEP_TICK_ACTION, hasCreepTickAction, markCreepTickAction } from './ti
 
 const OUT_CARRY_RELAY_EMPTY_RATIO = 0.2;
 const OUT_CARRY_RELAY_RETURN_FREE_RATIO = 0.2;
+const OUT_CARRY_RELAY_MIN_TTL = 50;
 const OUT_CARRY_RELAY_ROLES = new Set(['out-carry', 'out-car']);
 
 type CarryCache = {
@@ -17,6 +18,13 @@ type CarryCache = {
     backtrackRoomName?: string;
 };
 
+type RelayIntentPos = {
+    tick: number;
+    x: number;
+    y: number;
+    roomName: string;
+};
+
 type CarrySourceCache = {
     targetId?: string;
     targetType?: string;
@@ -30,12 +38,19 @@ type CarryTargetCache = {
 
 type RelayCandidate = {
     creep: Creep;
+    resourceType: ResourceConstant;
     score: number;
     transferAmount: number;
     fullHandoff: boolean;
     selfForwardDirection: DirectionConstant | 0;
     selfFallbackDirection: DirectionConstant;
     otherFallbackDirection: DirectionConstant;
+};
+
+type RelayMemoryBlock = Record<string, any>;
+
+type RelayIntentCreep = Creep & {
+    __outCarryRelayIntentPos?: RelayIntentPos;
 };
 
 /**
@@ -69,6 +84,29 @@ const ensureCarrySourceCache = (creep: Creep): CarrySourceCache => {
 const ensureCarryTargetCache = (creep: Creep): CarryTargetCache => {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {};
     return creep.memory.cacheTarget as CarryTargetCache;
+};
+
+const cloneRelayMemoryBlock = (block: RelayMemoryBlock | undefined): RelayMemoryBlock | undefined => {
+    if (!block) return undefined;
+    return { ...block };
+};
+
+const replaceRelayMemoryBlock = (
+    creep: Creep,
+    key: 'cacheSource' | 'cacheTarget' | '_moveToRoomState',
+    block: RelayMemoryBlock | undefined,
+) => {
+    if (block && Object.keys(block).length > 0) {
+        creep.memory[key] = block;
+        return;
+    }
+
+    if (key === '_moveToRoomState') {
+        delete creep.memory._moveToRoomState;
+        return;
+    }
+
+    creep.memory[key] = {};
 };
 
 /**
@@ -147,6 +185,105 @@ const getAdjacentDirection = (from: RoomPosition, to: RoomPosition): DirectionCo
     return TOP_LEFT;
 };
 
+const isSameRoomPosition = (left: RoomPosition, right: RoomPosition): boolean => (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.roomName === right.roomName
+);
+
+const getDirectionToward = (from: RoomPosition, to: RoomPosition): DirectionConstant | null => {
+    const dx = Math.sign(to.x - from.x);
+    const dy = Math.sign(to.y - from.y);
+    if (dx === 0 && dy === 0) return null;
+
+    if (dx === 0 && dy === -1) return TOP;
+    if (dx === 1 && dy === -1) return TOP_RIGHT;
+    if (dx === 1 && dy === 0) return RIGHT;
+    if (dx === 1 && dy === 1) return BOTTOM_RIGHT;
+    if (dx === 0 && dy === 1) return BOTTOM;
+    if (dx === -1 && dy === 1) return BOTTOM_LEFT;
+    if (dx === -1 && dy === 0) return LEFT;
+    return TOP_LEFT;
+};
+
+const getAdjacentPosByDirection = (from: RoomPosition, direction: DirectionConstant): RoomPosition | null => {
+    const offsetMap: Record<DirectionConstant, [number, number]> = {
+        [TOP]: [0, -1],
+        [TOP_RIGHT]: [1, -1],
+        [RIGHT]: [1, 0],
+        [BOTTOM_RIGHT]: [1, 1],
+        [BOTTOM]: [0, 1],
+        [BOTTOM_LEFT]: [-1, 1],
+        [LEFT]: [-1, 0],
+        [TOP_LEFT]: [-1, -1]
+    };
+
+    const [dx, dy] = offsetMap[direction];
+    const x = from.x + dx;
+    const y = from.y + dy;
+    if (x < 0 || x > 49 || y < 0 || y > 49) return null;
+    return new RoomPosition(x, y, from.roomName);
+};
+
+const getRelayIntentHolder = (creep: Creep): RelayIntentCreep => creep as RelayIntentCreep;
+
+export const clearOutCarryRelayIntent = (creep: Creep) => {
+    delete getRelayIntentHolder(creep).__outCarryRelayIntentPos;
+};
+
+export const rememberOutCarryRelayIntentPos = (creep: Creep, pos: RoomPosition | null) => {
+    if (!pos) {
+        clearOutCarryRelayIntent(creep);
+        return;
+    }
+
+    getRelayIntentHolder(creep).__outCarryRelayIntentPos = {
+        tick: Game.time,
+        x: pos.x,
+        y: pos.y,
+        roomName: pos.roomName
+    };
+};
+
+export const rememberOutCarryRelayIntentDirection = (creep: Creep, direction: DirectionConstant | 0) => {
+    if (!direction) {
+        clearOutCarryRelayIntent(creep);
+        return;
+    }
+
+    rememberOutCarryRelayIntentPos(creep, getAdjacentPosByDirection(creep.pos, direction));
+};
+
+export const rememberOutCarryRelayIntentTowards = (creep: Creep, target: RoomPosition | { pos: RoomPosition } | null | undefined) => {
+    if (!target) {
+        clearOutCarryRelayIntent(creep);
+        return;
+    }
+
+    const targetPos = 'pos' in target ? target.pos : target;
+    if (targetPos.roomName !== creep.room.name) {
+        clearOutCarryRelayIntent(creep);
+        return;
+    }
+
+    const direction = getDirectionToward(creep.pos, targetPos);
+    rememberOutCarryRelayIntentDirection(creep, direction || 0);
+};
+
+const getOutCarryRelayIntentPos = (creep: Creep): RoomPosition | null => {
+    const intent = getRelayIntentHolder(creep).__outCarryRelayIntentPos;
+    if (!intent || intent.tick !== Game.time) return null;
+    return new RoomPosition(intent.x, intent.y, intent.roomName);
+};
+
+const canUseRelayAsSupplier = (creep: Creep): boolean => {
+    return typeof creep.ticksToLive !== 'number' || creep.ticksToLive > OUT_CARRY_RELAY_MIN_TTL;
+};
+
+const getFirstStoredResource = (creep: Creep): ResourceConstant | null => {
+    return Object.keys(creep.store).find((resource) => creep.store[resource as ResourceConstant] > 0) as ResourceConstant | null;
+};
+
 /**
  * 更新外矿搬运 creep 最近一步的实际移动方向。
  *
@@ -213,32 +350,42 @@ const resolveRelayCandidate = (
     selfPos: RoomPosition,
     selfMoveDirection: DirectionConstant | 0,
     otherPos: RoomPosition,
-    otherMoveDirection: DirectionConstant | 0
+    otherMoveDirection: DirectionConstant | 0,
+    otherIntentPos: RoomPosition | null
 ): { score: number; selfFallbackDirection: DirectionConstant; otherFallbackDirection: DirectionConstant } | null => {
     const adjacentDirection = getAdjacentDirection(selfPos, otherPos);
     if (!adjacentDirection) return null;
+    const otherIntentDirection = otherIntentPos ? getAdjacentDirection(otherPos, otherIntentPos) : null;
+    const otherTargetsSelf = !!otherIntentPos && isSameRoomPosition(otherIntentPos, selfPos);
 
     // 返程方有方向时，放宽成“前方三格”都可接力。
     if (selfMoveDirection) {
         const forwardArc = getForwardArcDirections(selfMoveDirection);
-        if (!forwardArc.includes(adjacentDirection)) return null;
+        if (!forwardArc.includes(adjacentDirection) && !otherTargetsSelf) return null;
         const score = adjacentDirection === selfMoveDirection ? 2 : 1;
         return {
             score,
             selfFallbackDirection: getOppositeDirection(selfMoveDirection),
             otherFallbackDirection: otherMoveDirection
                 ? getOppositeDirection(otherMoveDirection)
-                : selfMoveDirection
+                : (otherIntentDirection ? getOppositeDirection(otherIntentDirection) : selfMoveDirection)
         };
     }
 
     // 返程方方向缺失时，允许按来车方向反推，但仍要求对方正在朝当前 creep 移动。
-    if (!otherMoveDirection) return null;
-    if (otherMoveDirection !== getOppositeDirection(adjacentDirection)) return null;
+    if (otherMoveDirection === getOppositeDirection(adjacentDirection)) {
+        return {
+            score: 0,
+            selfFallbackDirection: getOppositeDirection(adjacentDirection),
+            otherFallbackDirection: getOppositeDirection(otherMoveDirection)
+        };
+    }
+
+    if (!otherTargetsSelf || !otherIntentDirection) return null;
     return {
         score: 0,
         selfFallbackDirection: getOppositeDirection(adjacentDirection),
-        otherFallbackDirection: getOppositeDirection(otherMoveDirection)
+        otherFallbackDirection: getOppositeDirection(otherIntentDirection)
     };
 };
 
@@ -260,11 +407,13 @@ const moveBackAlongTrace = (creep: Creep, fallbackDirection: DirectionConstant):
         const backtrackPos = new RoomPosition(cache.backtrackX, cache.backtrackY, creep.room.name);
         const backtrackDirection = getAdjacentDirection(creep.pos, backtrackPos);
         if (backtrackDirection) {
+            rememberOutCarryRelayIntentDirection(creep, backtrackDirection);
             creep.move(backtrackDirection);
             return true;
         }
     }
 
+    rememberOutCarryRelayIntentDirection(creep, fallbackDirection);
     creep.move(fallbackDirection);
     return true;
 };
@@ -283,10 +432,38 @@ const moveBackAlongTrace = (creep: Creep, fallbackDirection: DirectionConstant):
  */
 const moveForwardWithDirection = (creep: Creep, direction: DirectionConstant | 0): boolean => {
     if (direction) {
+        rememberOutCarryRelayIntentDirection(creep, direction);
         creep.move(direction);
         return true;
     }
     return false;
+};
+
+const completeRelayHandoff = (
+    supplier: Creep,
+    receiver: Creep,
+    resourceType: ResourceConstant,
+    transferAmount: number,
+    collectMode: string,
+    deliverMode: string,
+    fullHandoff: boolean,
+    supplierForwardDirection: DirectionConstant | 0,
+    supplierFallbackDirection: DirectionConstant,
+    receiverFallbackDirection: DirectionConstant
+): boolean => {
+    if (supplier.transfer(receiver, resourceType, transferAmount) !== OK) return false;
+
+    applyRelayMemorySwitch(supplier, receiver, collectMode, deliverMode, fullHandoff);
+    supplier.memory.dontPullMe = false;
+    receiver.memory.dontPullMe = false;
+
+    markCreepTickAction(supplier, CREEP_TICK_ACTION.RELAY_GIVE);
+    markCreepTickAction(receiver, CREEP_TICK_ACTION.RELAY_RECEIVE);
+
+    if (fullHandoff) moveBackAlongTrace(supplier, supplierFallbackDirection);
+    else moveForwardWithDirection(supplier, supplierForwardDirection);
+    moveBackAlongTrace(receiver, receiverFallbackDirection);
+    return true;
 };
 
 /**
@@ -306,6 +483,8 @@ const pickRelayCandidate = (
     amount: number,
     isLikelyCollecting: (creep: Creep) => boolean
 ): RelayCandidate | null => {
+    if (!canUseRelayAsSupplier(creep)) return null;
+
     const selfMoveDirection = (ensureCarryCache(creep).lastStepDirection || 0) as DirectionConstant | 0;
     const candidates = creep.room.find(FIND_MY_CREEPS, {
         filter: (other: Creep) => {
@@ -327,7 +506,8 @@ const pickRelayCandidate = (
     let best: RelayCandidate | null = null;
     for (const other of candidates) {
         const otherMoveDirection = (ensureCarryCache(other).lastStepDirection || 0) as DirectionConstant | 0;
-        const resolved = resolveRelayCandidate(creep.pos, selfMoveDirection, other.pos, otherMoveDirection);
+        const otherIntentPos = getOutCarryRelayIntentPos(other);
+        const resolved = resolveRelayCandidate(creep.pos, selfMoveDirection, other.pos, otherMoveDirection, otherIntentPos);
         if (!resolved) continue;
 
         const otherCap = Math.max(1, other.store.getCapacity());
@@ -347,6 +527,7 @@ const pickRelayCandidate = (
 
         const candidate: RelayCandidate = {
             creep: other,
+            resourceType,
             score: resolved.score + (fullHandoff ? 10 : 0),
             transferAmount,
             fullHandoff,
@@ -361,6 +542,86 @@ const pickRelayCandidate = (
     }
 
     return best;
+};
+
+const pickRelaySupplierCandidate = (
+    creep: Creep,
+    sourceRoom: string,
+    isLikelyCollecting: (creep: Creep) => boolean
+): RelayCandidate | null => {
+    const receiverIntentPos = getOutCarryRelayIntentPos(creep);
+    if (!receiverIntentPos) return null;
+
+    const receiverMoveDirection = (ensureCarryCache(creep).lastStepDirection || 0) as DirectionConstant | 0;
+    const candidates = creep.room.find(FIND_MY_CREEPS, {
+        filter: (other: Creep) => {
+            if (!other || other.id === creep.id || other.spawning) return false;
+            if (hasRelayActionThisTick(other)) return false;
+            if (!OUT_CARRY_RELAY_ROLES.has(other.memory.role)) return false;
+            if (other.memory.sourceRoom !== sourceRoom) return false;
+            if (other.memory.targetRoom !== creep.memory.targetRoom) return false;
+            if (!creep.pos.isNearTo(other)) return false;
+            if (!canUseRelayAsSupplier(other)) return false;
+            if (isLikelyCollecting(other)) return false;
+            return true;
+        }
+    });
+
+    let best: RelayCandidate | null = null;
+    for (const other of candidates) {
+        const resourceType = getFirstStoredResource(other);
+        if (!resourceType) continue;
+        if (creep.store.getFreeCapacity(resourceType) <= 0) continue;
+
+        const supplierMoveDirection = (ensureCarryCache(other).lastStepDirection || 0) as DirectionConstant | 0;
+        const resolved = resolveRelayCandidate(other.pos, supplierMoveDirection, creep.pos, receiverMoveDirection, receiverIntentPos);
+        if (!resolved) continue;
+
+        const otherCap = Math.max(1, creep.store.getCapacity());
+        const otherFree = creep.store.getFreeCapacity(resourceType);
+        const transferAmount = Math.min(other.store[resourceType] || 0, Math.max(0, otherFree));
+        if (transferAmount <= 0) continue;
+
+        const fullHandoff = transferAmount >= (other.store[resourceType] || 0);
+        const receiverFreeAfter = otherFree - transferAmount;
+        const receiverReadyToReturn = receiverFreeAfter <= Math.ceil(otherCap * OUT_CARRY_RELAY_RETURN_FREE_RATIO);
+        if (!fullHandoff && (!supplierMoveDirection || !receiverReadyToReturn)) continue;
+
+        const candidate: RelayCandidate = {
+            creep: other,
+            resourceType,
+            score: resolved.score + (fullHandoff ? 10 : 0),
+            transferAmount,
+            fullHandoff,
+            selfForwardDirection: supplierMoveDirection,
+            selfFallbackDirection: resolved.selfFallbackDirection,
+            otherFallbackDirection: resolved.otherFallbackDirection
+        };
+
+        if (!best || candidate.score > best.score) {
+            best = candidate;
+        }
+    }
+
+    return best;
+};
+
+const tryCollectEnergyAlongRelayIntent = (creep: Creep): boolean => {
+    const intentPos = getOutCarryRelayIntentPos(creep);
+    if (!intentPos) return false;
+    if (creep.store.getFreeCapacity(RESOURCE_ENERGY) <= 0) return false;
+
+    const tombstone = creep.room.lookForAt(LOOK_TOMBSTONES, intentPos.x, intentPos.y)[0] as Tombstone | undefined;
+    if (tombstone && (tombstone.store[RESOURCE_ENERGY] || 0) > 0) {
+        return creep.withdraw(tombstone, RESOURCE_ENERGY) === OK;
+    }
+
+    const resource = creep.room.lookForAt(LOOK_RESOURCES, intentPos.x, intentPos.y)[0] as Resource | undefined;
+    if (resource && resource.resourceType === RESOURCE_ENERGY && resource.amount > 0) {
+        return creep.pickup(resource) === OK;
+    }
+
+    return false;
 };
 
 /**
@@ -382,18 +643,29 @@ const applyRelayMemorySwitch = (
     fullHandoff: boolean
 ) => {
     const fromCache = ensureCarryCache(from);
-    const fromTargetCache = ensureCarryTargetCache(from);
     const toCache = ensureCarryCache(to);
-    const toSourceCache = ensureCarrySourceCache(to);
+    const fromTargetCache = cloneRelayMemoryBlock(ensureCarryTargetCache(from) as RelayMemoryBlock);
+    const toSourceCache = cloneRelayMemoryBlock(ensureCarrySourceCache(to) as RelayMemoryBlock);
+    const fromMoveToRoomState = cloneRelayMemoryBlock(from.memory._moveToRoomState as RelayMemoryBlock | undefined);
+    const toMoveToRoomState = cloneRelayMemoryBlock(to.memory._moveToRoomState as RelayMemoryBlock | undefined);
 
     fromCache.outCarryMode = fullHandoff ? collectMode : deliverMode;
-    if (fullHandoff) delete fromTargetCache.targetId;
-
     toCache.outCarryMode = deliverMode;
-    delete toSourceCache.targetId;
-    delete toSourceCache.targetType;
-    delete toSourceCache.waitUntil;
-    delete toSourceCache.partialLeaveWait;
+
+    if (fullHandoff) {
+        replaceRelayMemoryBlock(from, 'cacheSource', toSourceCache);
+        replaceRelayMemoryBlock(from, 'cacheTarget', undefined);
+        replaceRelayMemoryBlock(from, '_moveToRoomState', toMoveToRoomState);
+
+        replaceRelayMemoryBlock(to, 'cacheSource', undefined);
+        replaceRelayMemoryBlock(to, 'cacheTarget', fromTargetCache);
+        replaceRelayMemoryBlock(to, '_moveToRoomState', fromMoveToRoomState);
+        return;
+    }
+
+    replaceRelayMemoryBlock(to, 'cacheSource', undefined);
+    replaceRelayMemoryBlock(to, 'cacheTarget', fromTargetCache);
+    replaceRelayMemoryBlock(to, '_moveToRoomState', fromMoveToRoomState);
 };
 
 /**
@@ -426,17 +698,46 @@ export const tryOutCarryRelayHandoff = (
     const relay = pickRelayCandidate(creep, sourceRoom, resourceType, amount, isLikelyCollecting);
     if (!relay) return false;
 
-    if (creep.transfer(relay.creep, resourceType, relay.transferAmount) !== OK) return false;
+    return completeRelayHandoff(
+        creep,
+        relay.creep,
+        relay.resourceType,
+        relay.transferAmount,
+        collectMode,
+        deliverMode,
+        relay.fullHandoff,
+        relay.selfForwardDirection,
+        relay.selfFallbackDirection,
+        relay.otherFallbackDirection
+    );
+};
 
-    applyRelayMemorySwitch(creep, relay.creep, collectMode, deliverMode, relay.fullHandoff);
-    creep.memory.dontPullMe = false;
-    relay.creep.memory.dontPullMe = false;
+export const tryOutCarryRelayCollectStep = (
+    creep: Creep,
+    isLikelyCollecting: (creep: Creep) => boolean,
+    collectMode: string,
+    deliverMode: string
+): boolean => {
+    if (hasRelayActionThisTick(creep)) return false;
+    if (tryCollectEnergyAlongRelayIntent(creep)) return true;
 
-    markCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_GIVE);
-    markCreepTickAction(relay.creep, CREEP_TICK_ACTION.RELAY_RECEIVE);
+    const sourceRoom = creep.memory.sourceRoom;
+    if (!sourceRoom) return false;
+    if (creep.pos.isRoomEdge()) return false;
 
-    if (relay.fullHandoff) moveBackAlongTrace(creep, relay.selfFallbackDirection);
-    else moveForwardWithDirection(creep, relay.selfForwardDirection);
-    moveBackAlongTrace(relay.creep, relay.otherFallbackDirection);
-    return true;
+    const relay = pickRelaySupplierCandidate(creep, sourceRoom, isLikelyCollecting);
+    if (!relay) return false;
+
+    return completeRelayHandoff(
+        relay.creep,
+        creep,
+        relay.resourceType,
+        relay.transferAmount,
+        collectMode,
+        deliverMode,
+        relay.fullHandoff,
+        relay.selfForwardDirection,
+        relay.selfFallbackDirection,
+        relay.otherFallbackDirection
+    );
 };

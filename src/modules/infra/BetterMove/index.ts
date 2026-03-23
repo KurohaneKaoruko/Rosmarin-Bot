@@ -2872,7 +2872,7 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    // creep.room.visual.line(creep.pos, pos, lineStyle[0]);
+                    creep.room.visual.line(creep.pos, pos, lineStyle[0]);
                     originMove.call(creep, getDirection(creepPos, pos));
                     moveCount++;
                 }
@@ -2884,7 +2884,7 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    // creep.room.visual.line(creep.pos, pos, lineStyle[0]);
+                    creep.room.visual.line(creep.pos, pos, lineStyle[0]);
                     originMove.call(creep, getDirection(creepPos, pos));
                     moveCount++;
                 }
@@ -2899,7 +2899,7 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target[i]);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    // if (pos.roomName === creepPos.roomName) creep.room.visual.line(creep.pos, pos, lineStyle[start % lineStyle.length]);
+                    if (pos.roomName === creepPos.roomName) creep.room.visual.line(creep.pos, pos, lineStyle[start % lineStyle.length]);
                     // console.log(`squad ${creep.name} from ${JSON.stringify(creepPos)} move to ${JSON.stringify(pos)}: ${getDirection(creepPos, pos)}`);
                     originMove.call(creep, getDirection(creepPos, pos));
                     moveCount++;

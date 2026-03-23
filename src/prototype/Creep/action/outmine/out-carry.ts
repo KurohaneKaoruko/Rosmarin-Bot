@@ -1,6 +1,13 @@
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/feature/externalMine';
 import { RoadMemory } from '@/modules/feature/externalRoad';
-import { tryOutCarryRelayHandoff, updateOutCarryMoveTrace } from '@/prototype/Creep/function/relayFunction';
+import {
+    clearOutCarryRelayIntent,
+    rememberOutCarryRelayIntentTowards,
+    tryOutCarryRelayCollectStep,
+    tryOutCarryRelayHandoff,
+    updateOutCarryMoveTrace
+} from '@/prototype/Creep/function/relayFunction';
 import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
@@ -14,6 +21,19 @@ const OUT_CARRY_STRATEGIES = {
 
 // collect/deliver 之间保留明显滞回，避免因为修一次路/掉 1 点能量就立刻回头。
 const OUT_CARRY_RETURN_TO_COLLECT_RATIO = 0.5;
+
+const shouldUseOutCarryRelay = (creep: Creep): boolean => {
+    if ((Memory as any).tightCpu) return false;
+
+    const sourceRoomName = creep.memory.sourceRoom;
+    if (!sourceRoomName) return true;
+
+    const sourceRoom = Game.rooms[sourceRoomName];
+    if (!sourceRoom?.controller?.my) return true;
+
+    const effectiveLevel = sourceRoom.getEffectiveRoomLevel?.() ?? sourceRoom.controller.level;
+    return effectiveLevel < 7;
+};
 const OUT_CARRY_DYING_TTL = 80;
 
 /**
@@ -56,6 +76,55 @@ const isSameRoomPosition = (left: RoomPosition, right: RoomPosition): boolean =>
     left.roomName === right.roomName
 );
 
+const isWalkablePlannedRoadPos = (room: Room, pos: RoomPosition): boolean => {
+    if (pos.roomName !== room.name) return false;
+    const terrain = room.getTerrain();
+    if (terrain.get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
+
+    const structures = pos.lookFor(LOOK_STRUCTURES) as Structure[];
+    for (const structure of structures) {
+        if (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) continue;
+        if (structure.structureType === STRUCTURE_RAMPART) {
+            const rampart = structure as StructureRampart;
+            if (rampart.my || rampart.isPublic) continue;
+        }
+        return false;
+    }
+
+    const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES);
+    for (const site of sites) {
+        if (site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER || site.structureType === STRUCTURE_RAMPART) continue;
+        return false;
+    }
+
+    return true;
+};
+
+const clearAssignedSourceCache = (cache: Record<string, any> | undefined) => {
+    if (!cache) return;
+    delete cache.assignedSourceId;
+    delete cache.assignedSourceKey;
+};
+
+const assignPreferredSourceCache = (cache: Record<string, any>, sourceStat: ExternalMineSourceStat | null) => {
+    if (!sourceStat) {
+        clearAssignedSourceCache(cache);
+        return;
+    }
+    cache.assignedSourceId = sourceStat.sourceId;
+    cache.assignedSourceKey = sourceStat.sourceKey;
+};
+
+const isInPreferredSourceScope = (sourceStat: ExternalMineSourceStat | null, pos: RoomPosition): boolean => {
+    if (!sourceStat) return false;
+    if (pos.roomName !== sourceStat.sourcePos.roomName) return false;
+    return sourceStat.sourcePos.inRangeTo(pos, sourceStat.collectionRange);
+};
+
+const getPreferredCarrySource = (creep: Creep): ExternalMineSourceStat | null => {
+    return ExternalMineAnalysis.pickBestCarrySource(creep);
+};
+
 const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefined): RoomPosition | null => {
     const sourceRoom = creep.memory.sourceRoom;
     const taskTargetRoom = creep.memory.targetRoom;
@@ -71,13 +140,18 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
         if (!Array.isArray(path) || path.length === 0) continue;
 
         const travelPath = towardTaskTarget ? path : [...path].reverse();
-        const roomPath = travelPath.filter((pos) => pos.roomName === creep.room.name);
+        const roomPath = travelPath
+            .map((pos, idx) => ({ pos, idx }))
+            .filter((entry) => entry.pos.roomName === creep.room.name);
         if (roomPath.length === 0) continue;
+
+        const walkableRoomPath = roomPath.filter((entry) => isWalkablePlannedRoadPos(creep.room, entry.pos));
+        if (walkableRoomPath.length === 0) continue;
 
         let nearestIndex = -1;
         let nearestRange = Infinity;
-        for (let i = 0; i < roomPath.length; i++) {
-            const range = creep.pos.getRangeTo(roomPath[i]);
+        for (let i = 0; i < walkableRoomPath.length; i++) {
+            const range = creep.pos.getRangeTo(walkableRoomPath[i].pos);
             if (range < nearestRange || (range === nearestRange && i > nearestIndex)) {
                 nearestRange = range;
                 nearestIndex = i;
@@ -86,18 +160,18 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
         if (nearestIndex < 0) continue;
 
         let candidateIndex = nearestIndex;
-        if (isSameRoomPosition(creep.pos, roomPath[nearestIndex]) && nearestIndex + 1 < roomPath.length) {
+        if (isSameRoomPosition(creep.pos, walkableRoomPath[nearestIndex].pos) && nearestIndex + 1 < walkableRoomPath.length) {
             candidateIndex = nearestIndex + 1;
         }
 
-        const candidate = roomPath[candidateIndex];
-        const progress = roomPath.length - candidateIndex;
+        const candidate = walkableRoomPath[candidateIndex];
+        const progress = roomPath.length - candidate.idx;
         if (
             !best ||
             nearestRange < best.range ||
             (nearestRange === best.range && progress < best.progress)
         ) {
-            best = { pos: candidate, range: nearestRange, progress };
+            best = { pos: candidate.pos, range: nearestRange, progress };
         }
     }
 
@@ -117,7 +191,7 @@ type OutCarryAction = {
     resolveCarryDepositTarget: (creep: Creep) => StructureTerminal | StructureStorage | null;
     isLikelyCollecting: (creep: Creep) => boolean;
     getRouteExitDirection: (creep: Creep, targetRoom: string | undefined) => number | null;
-    moveAlongRouteExit: (creep: Creep, targetRoom: string | undefined) => boolean;
+    moveAlongRouteExit: (creep: Creep, targetRoom: string | undefined, collectRelay?: boolean) => boolean;
     estimateIncomingPerTick: (container: StructureContainer) => number;
     calcWaitTicksNearHarvester: (creep: Creep, container: StructureContainer) => number;
     findBestWithdrawTarget: (creep: Creep) => { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null;
@@ -133,6 +207,37 @@ const canBuildRepair = (creep: Creep): boolean => {
     if (creep.store[RESOURCE_ENERGY] <= 0) return false;
     if (typeof creep.getActiveBodyparts !== 'function') return false;
     return creep.getActiveBodyparts(WORK) > 0;
+};
+
+const moveOutCarryTo = (
+    creep: Creep,
+    target: RoomPosition | { pos: RoomPosition },
+    opts?: MoveToOpts,
+    collectRelay = false
+) => {
+    rememberOutCarryRelayIntentTowards(creep, target);
+    if (
+        collectRelay &&
+        shouldUseOutCarryRelay(creep) &&
+        tryOutCarryRelayCollectStep(
+            creep,
+            (other) => outCarry.isLikelyCollecting(other),
+            OUT_CARRY_STRATEGIES.COLLECT,
+            OUT_CARRY_STRATEGIES.DELIVER
+        )
+    ) {
+        return OK;
+    }
+    return creep.moveTo(target, opts);
+};
+
+const moveOutCarryToRoom = (
+    creep: Creep,
+    roomName: string,
+    opts?: Record<string, any>
+) => {
+    clearOutCarryRelayIntent(creep);
+    return creep.moveToRoom(roomName, opts);
 };
 
 const outCarry: OutCarryAction = {
@@ -195,21 +300,21 @@ const outCarry: OutCarryAction = {
         return exit;
     },
 
-    moveAlongRouteExit: function (creep: Creep, targetRoom: string | undefined): boolean {
+    moveAlongRouteExit: function (creep: Creep, targetRoom: string | undefined, collectRelay = false): boolean {
         if (!targetRoom) return false;
         if (creep.room.name === targetRoom) return false;
         if (creep.pos.isRoomEdge()) return false;
 
         const plannedRoadTarget = getPlannedTransitRoadTarget(creep, targetRoom);
         if (plannedRoadTarget && !isSameRoomPosition(creep.pos, plannedRoadTarget)) {
-            creep.moveTo(plannedRoadTarget, {
+            moveOutCarryTo(creep, plannedRoadTarget, {
                 maxRooms: 1,
                 range: 0,
                 ignoreCreeps: false,
                 plainCost: 2,
                 swampCost: 10,
                 reusePath: 3
-            });
+            }, collectRelay);
             return true;
         }
 
@@ -221,14 +326,14 @@ const outCarry: OutCarryAction = {
         const exitPos = creep.pos.findClosestByRange(exits);
         if (!exitPos) return false;
 
-        creep.moveTo(exitPos, {
+        moveOutCarryTo(creep, exitPos, {
             maxRooms: 1,
             range: 0,
             ignoreCreeps: false,
             plainCost: 2,
             swampCost: 10,
             reusePath: 3
-        });
+        }, collectRelay);
         return true;
     },
 
@@ -270,6 +375,7 @@ const outCarry: OutCarryAction = {
         const sourceRoomName = creep.memory.sourceRoom;
         const sourceRoom = sourceRoomName ? Game.rooms[sourceRoomName] : undefined;
         const canStoreMinerals = !!(sourceRoom?.storage || sourceRoom?.terminal);
+        const cache = (creep.memory.cacheSource ||= {}) as Record<string, any>;
 
         const dangerousHostiles = room.find(FIND_HOSTILE_CREEPS, {
             filter: (c: Creep) =>
@@ -295,6 +401,7 @@ const outCarry: OutCarryAction = {
         let bestScore = -Infinity;
         let best: { id: string; type: 'dropped' | 'container' | 'tombstone' | 'ruin' } | null = null;
         const carryNeed = Math.max(1, creep.store.getFreeCapacity());
+        const preferredSource = getPreferredCarrySource(creep);
 
         const consider = (id: string, type: 'dropped' | 'container' | 'tombstone' | 'ruin', pos: RoomPosition, amount: number, nonEnergyBonus = 0) => {
             if (!id || amount <= 0) return;
@@ -305,9 +412,6 @@ const outCarry: OutCarryAction = {
             if (remaining <= 0) return;
 
             const range = creep.pos.getRangeTo(pos);
-            // 评分必须按“这趟实际能搬走多少”来算：
-            // 一旦某个目标已经足够装满当前 creep，更多存量只应带来很小的额外收益，
-            // 否则就会出现远处超大堆把近处可直接装满的目标压过去的反常行为。
             const usefulAmount = Math.min(remaining, carryNeed);
             const overflowBonus = Math.min(carryNeed, Math.max(0, remaining - carryNeed)) * 0.1;
             let score = usefulAmount + overflowBonus + nonEnergyBonus;
@@ -319,63 +423,93 @@ const outCarry: OutCarryAction = {
             }
         };
 
-        // 掉落资源不能只看单堆大小：
-        // 外矿常见情况是一圈小堆叠在采集位附近，单堆不够大，但总量足以装满一个搬运 creep。
-        // 因此这里按“当前剩余容量”和“邻近掉落簇总量”共同判断是否值得接单。
         const droppedThreshold = Math.min(500, Math.max(1, creep.store.getFreeCapacity()));
         const dropped = room.find(FIND_DROPPED_RESOURCES, {
             filter: (r: Resource) => r.amount > 0
         });
-        for (const resource of dropped) {
-            if (!canStoreMinerals && resource.resourceType !== RESOURCE_ENERGY) continue;
-            const remaining = Math.max(0, resource.amount - (reservedByTarget[resource.id] || 0));
-            if (remaining <= 0) continue;
-
-            let effectiveAmount = remaining;
-            if (resource.resourceType === RESOURCE_ENERGY) {
-                const clusterRemaining = getDroppedClusterRemaining(dropped, resource, reservedByTarget);
-                if (remaining < droppedThreshold && clusterRemaining < droppedThreshold) continue;
-                // 对掉落能量使用“局部簇有效量”参与评分，优先选择能把这趟车装满的那团掉落。
-                effectiveAmount = Math.max(remaining, Math.min(clusterRemaining, creep.store.getFreeCapacity()));
-            } else if (remaining < droppedThreshold) {
-                continue;
-            }
-            const bonus = resource.resourceType === RESOURCE_ENERGY ? 0 : resource.amount * 3;
-            consider(resource.id, 'dropped', resource.pos, effectiveAmount, bonus);
-        }
-
         const containers = (room.container || []).filter((c: StructureContainer) => c.store.getUsedCapacity() >= 300);
-        for (const container of containers) {
-            const energyAmount = container.store[RESOURCE_ENERGY] || 0;
-            const totalAmount = container.store.getUsedCapacity();
-            const amount = canStoreMinerals ? totalAmount : energyAmount;
-            const incoming = this.estimateIncomingPerTick(container);
-            const bonus = incoming > 0 ? Math.min(creep.store.getFreeCapacity(), incoming * 5) : 0;
-            consider(container.id, 'container', container.pos, amount, bonus);
-        }
-
         const tombstones = room.find(FIND_TOMBSTONES, {
             filter: (t: Tombstone) => t.store.getUsedCapacity() > 0
         });
-        for (const tombstone of tombstones) {
-            const energyAmount = tombstone.store[RESOURCE_ENERGY] || 0;
-            const totalAmount = tombstone.store.getUsedCapacity();
-            const amount = canStoreMinerals ? totalAmount : energyAmount;
-            const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 200 : 0;
-            consider(tombstone.id, 'tombstone', tombstone.pos, amount, mixedBonus);
-        }
-
         const ruins = room.find(FIND_RUINS, {
             filter: (r: Ruin) => r.store.getUsedCapacity() > 0
         });
-        for (const ruin of ruins) {
-            const energyAmount = ruin.store[RESOURCE_ENERGY] || 0;
-            const totalAmount = ruin.store.getUsedCapacity();
-            const amount = canStoreMinerals ? totalAmount : energyAmount;
-            const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 120 : 0;
-            consider(ruin.id, 'ruin', ruin.pos, amount, mixedBonus);
+
+        const scoreDroppedTargets = (resources: Resource[]) => {
+            for (const resource of resources) {
+                if (!canStoreMinerals && resource.resourceType !== RESOURCE_ENERGY) continue;
+                const remaining = Math.max(0, resource.amount - (reservedByTarget[resource.id] || 0));
+                if (remaining <= 0) continue;
+
+                let effectiveAmount = remaining;
+                if (resource.resourceType === RESOURCE_ENERGY) {
+                    const clusterRemaining = getDroppedClusterRemaining(resources, resource, reservedByTarget);
+                    if (remaining < droppedThreshold && clusterRemaining < droppedThreshold) continue;
+                    effectiveAmount = Math.max(remaining, Math.min(clusterRemaining, creep.store.getFreeCapacity()));
+                } else if (remaining < droppedThreshold) {
+                    continue;
+                }
+                const bonus = resource.resourceType === RESOURCE_ENERGY ? 0 : resource.amount * 3;
+                consider(resource.id, 'dropped', resource.pos, effectiveAmount, bonus);
+            }
+        };
+
+        const scoreContainerTargets = (items: StructureContainer[]) => {
+            for (const container of items) {
+                const energyAmount = container.store[RESOURCE_ENERGY] || 0;
+                const totalAmount = container.store.getUsedCapacity();
+                const amount = canStoreMinerals ? totalAmount : energyAmount;
+                const incoming = this.estimateIncomingPerTick(container);
+                const bonus = incoming > 0 ? Math.min(creep.store.getFreeCapacity(), incoming * 5) : 0;
+                consider(container.id, 'container', container.pos, amount, bonus);
+            }
+        };
+
+        const scoreTombstoneTargets = (items: Tombstone[]) => {
+            for (const tombstone of items) {
+                const energyAmount = tombstone.store[RESOURCE_ENERGY] || 0;
+                const totalAmount = tombstone.store.getUsedCapacity();
+                const amount = canStoreMinerals ? totalAmount : energyAmount;
+                const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 200 : 0;
+                consider(tombstone.id, 'tombstone', tombstone.pos, amount, mixedBonus);
+            }
+        };
+
+        const scoreRuinTargets = (items: Ruin[]) => {
+            for (const ruin of items) {
+                const energyAmount = ruin.store[RESOURCE_ENERGY] || 0;
+                const totalAmount = ruin.store.getUsedCapacity();
+                const amount = canStoreMinerals ? totalAmount : energyAmount;
+                const mixedBonus = canStoreMinerals && totalAmount > energyAmount ? 120 : 0;
+                consider(ruin.id, 'ruin', ruin.pos, amount, mixedBonus);
+            }
+        };
+
+        if (preferredSource) {
+            scoreDroppedTargets(dropped.filter((resource) => isInPreferredSourceScope(preferredSource, resource.pos)));
+            scoreContainerTargets(containers.filter((container) => isInPreferredSourceScope(preferredSource, container.pos)));
+            scoreTombstoneTargets(tombstones.filter((tombstone) => isInPreferredSourceScope(preferredSource, tombstone.pos)));
+            scoreRuinTargets(ruins.filter((ruin) => isInPreferredSourceScope(preferredSource, ruin.pos)));
+            if (best) {
+                assignPreferredSourceCache(cache, preferredSource);
+                return best;
+            }
         }
 
+        // 掉落资源不能只看单堆大小：
+        // 外矿常见情况是一圈小堆叠在采集位附近，单堆不够大，但总量足以装满一个搬运 creep。
+        // 因此这里按“当前剩余容量”和“邻近掉落簇总量”共同判断是否值得接单。
+        scoreDroppedTargets(dropped);
+        scoreContainerTargets(containers);
+        scoreTombstoneTargets(tombstones);
+        scoreRuinTargets(ruins);
+
+        if (best) {
+            assignPreferredSourceCache(cache, preferredSource);
+            return best;
+        }
+
+        clearAssignedSourceCache(cache);
         return best;
     },
 
@@ -403,8 +537,8 @@ const outCarry: OutCarryAction = {
         delete cache.waitUntil;
 
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-            if (this.moveAlongRouteExit(creep, creep.memory.targetRoom)) return;
-            creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
+            if (this.moveAlongRouteExit(creep, creep.memory.targetRoom, true)) return;
+            moveOutCarryToRoom(creep, creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
 
@@ -417,7 +551,7 @@ const outCarry: OutCarryAction = {
             }
 
             if (!creep.pos.inRangeTo(target, 1)) {
-                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                moveOutCarryTo(creep, target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 }, true);
                 return;
             }
 
@@ -466,12 +600,57 @@ const outCarry: OutCarryAction = {
                 if (bestTarget.type === 'dropped' && creep.pos.isNearTo(target)) {
                     creep.pickup(target);
                 } else {
-                    creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                    moveOutCarryTo(creep, target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 }, true);
                 }
                 return;
             }
             delete cache.targetId;
             delete cache.targetType;
+        }
+
+        const preferredSource = getPreferredCarrySource(creep);
+        if (preferredSource) {
+            assignPreferredSourceCache(cache, preferredSource);
+
+            if (preferredSource.container) {
+                if (!creep.pos.inRangeTo(preferredSource.container, 1) || preferredSource.container.store.getUsedCapacity() > 0) {
+                    moveOutCarryTo(creep, preferredSource.container, {
+                        ignoreCreeps: false,
+                        range: 1,
+                        maxRooms: 1,
+                        plainCost: 2,
+                        swampCost: 10
+                    }, true);
+                }
+                return;
+            }
+
+            const assignedHarvester = creep.pos.findClosestByRange(FIND_MY_CREEPS, {
+                filter: (c) =>
+                    c.memory.role === 'out-harvest' &&
+                    c.memory.targetSourceId === preferredSource.sourceId
+            });
+            if (assignedHarvester) {
+                if (!creep.pos.inRangeTo(assignedHarvester, 2) || assignedHarvester.store[RESOURCE_ENERGY] > 0) {
+                    moveOutCarryTo(creep, assignedHarvester, {
+                        ignoreCreeps: false,
+                        range: 2,
+                        maxRooms: 1,
+                        plainCost: 2,
+                        swampCost: 10
+                    }, true);
+                }
+                return;
+            }
+
+            moveOutCarryTo(creep, preferredSource.sourcePos, {
+                ignoreCreeps: false,
+                range: Math.min(2, preferredSource.collectionRange),
+                maxRooms: 1,
+                plainCost: 2,
+                swampCost: 10
+            }, true);
+            return;
         }
 
         const droppedPickupThreshold = Math.min(500, creep.store.getCapacity());
@@ -485,13 +664,13 @@ const outCarry: OutCarryAction = {
         });
         if (nearestMiner) {
             if (!creep.pos.inRangeTo(nearestMiner, 1) || nearestMiner.store.getUsedCapacity() > 0) {
-                creep.moveTo(nearestMiner, {
+                moveOutCarryTo(creep, nearestMiner, {
                     ignoreCreeps: false,
                     range: 1,
                     maxRooms: 1,
                     plainCost: 2,
                     swampCost: 10
-                });
+                }, true);
             }
             return;
         }
@@ -501,26 +680,26 @@ const outCarry: OutCarryAction = {
         });
         if (nearestHarvester) {
             if (!creep.pos.inRangeTo(nearestHarvester, 2) || nearestHarvester.store[RESOURCE_ENERGY] > 0) {
-                creep.moveTo(nearestHarvester, {
+                moveOutCarryTo(creep, nearestHarvester, {
                     ignoreCreeps: false,
-                    range: 1,
+                    range: 2,
                     maxRooms: 1,
                     plainCost: 2,
                     swampCost: 10
-                });
+                }, true);
             }
             return;
         }
 
         const nearestSource = creep.pos.findClosestByRange(FIND_SOURCES);
         if (nearestSource) {
-            creep.moveTo(nearestSource, {
+            moveOutCarryTo(creep, nearestSource, {
                 ignoreCreeps: false,
                 range: 3,
                 maxRooms: 1,
                 plainCost: 2,
                 swampCost: 10
-            });
+            }, true);
         }
     },
 
@@ -538,18 +717,20 @@ const outCarry: OutCarryAction = {
         const sourceRoom = creep.memory.sourceRoom;
         if (!sourceRoom) return;
 
-        if (tryOutCarryRelayHandoff(
-            creep,
-            (other) => this.isLikelyCollecting(other),
-            OUT_CARRY_STRATEGIES.COLLECT,
-            OUT_CARRY_STRATEGIES.DELIVER
-        )) return;
+        if (shouldUseOutCarryRelay(creep)) {
+            if (tryOutCarryRelayHandoff(
+                creep,
+                (other) => this.isLikelyCollecting(other),
+                OUT_CARRY_STRATEGIES.COLLECT,
+                OUT_CARRY_STRATEGIES.DELIVER
+            )) return;
+        }
 
         if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
             if (creep.room.name != sourceRoom && !creep.pos.isRoomEdge()) {
                 if (this.moveAlongRouteExit(creep, sourceRoom)) return;
             }
-            creep.moveToRoom(sourceRoom, { plainCost: 2, swampCost: 10 });
+            moveOutCarryToRoom(creep, sourceRoom, { plainCost: 2, swampCost: 10 });
             return;
         }
 
@@ -564,7 +745,7 @@ const outCarry: OutCarryAction = {
                         delete cache.targetId;
                     }
                 } else {
-                    creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                    moveOutCarryTo(creep, target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
                 }
                 return;
             }
@@ -581,7 +762,7 @@ const outCarry: OutCarryAction = {
                     delete cache.targetId;
                 }
             } else {
-                creep.moveTo(target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                moveOutCarryTo(creep, target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
             }
             return;
         }
@@ -590,21 +771,21 @@ const outCarry: OutCarryAction = {
         const controller = creep.room.controller;
         if (storage) {
             if (creep.pos.inRangeTo(storage, 1)) creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
-            else creep.moveTo(storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            else moveOutCarryTo(creep, storage, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
             return;
         }
 
         if (controller && controller.level < 8) {
             if (creep.pos.inRangeTo(controller, 1)) creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
-            else creep.moveTo(controller, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+            else moveOutCarryTo(creep, controller, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
             return;
         }
 
         const centerPos = creep.room.getCenter();
         if (centerPos && creep.pos.inRangeTo(centerPos, 1)) {
             creep.drop(Object.keys(creep.store)[0] as ResourceConstant);
-        } else {
-            creep.moveTo(centerPos, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+        } else if (centerPos) {
+            moveOutCarryTo(creep, centerPos, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
         }
     },
 
@@ -622,18 +803,18 @@ const outCarry: OutCarryAction = {
             const road = creep.pos.findClosestByRange(roads);
             const result = creep.repair(road);
             if (creep.pos.isRoomEdge()) {
-                creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
+                moveOutCarryToRoom(creep, creep.room.name, { plainCost: 2, swampCost: 10 });
             }
             if (result == OK) return true;
             if (result == ERR_NOT_IN_RANGE) {
-                creep.moveTo(road);
+                moveOutCarryTo(creep, road);
                 return true;
             }
         }
 
         if (creep.buildRoad()) {
             if (creep.pos.isRoomEdge()) {
-                creep.moveToRoom(creep.room.name, { plainCost: 2, swampCost: 10 });
+                moveOutCarryToRoom(creep, creep.room.name, { plainCost: 2, swampCost: 10 });
             }
             return true;
         }
@@ -647,6 +828,7 @@ const outCarry: OutCarryAction = {
         creep.memory.cache = creep.memory.cache || {};
         creep.memory.cacheSource = creep.memory.cacheSource || {};
         creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        clearOutCarryRelayIntent(creep);
         updateOutCarryMoveTrace(creep);
         delete creep.memory.working;
         // 本 tick 已被接力方下发移动意图时，不再执行后续动作，避免覆盖接力移动。
@@ -660,19 +842,20 @@ const outCarry: OutCarryAction = {
 
         if (mode !== previousMode && mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
             // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
-            if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
-                const targetCache = creep.memory.cacheTarget as any;
-                if (targetCache) delete targetCache.targetId;
-            } else {
-                const sourceCache = creep.memory.cacheSource as any;
+                if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+                    const targetCache = creep.memory.cacheTarget as any;
+                    if (targetCache) delete targetCache.targetId;
+                } else {
+                    const sourceCache = creep.memory.cacheSource as any;
                 if (sourceCache) {
-                    delete sourceCache.targetId;
-                    delete sourceCache.targetType;
-                    delete sourceCache.waitUntil;
-                    delete sourceCache.partialLeaveWait;
+                        delete sourceCache.targetId;
+                        delete sourceCache.targetType;
+                        delete sourceCache.waitUntil;
+                        delete sourceCache.partialLeaveWait;
+                        clearAssignedSourceCache(sourceCache);
+                    }
                 }
             }
-        }
         if (mode !== OUT_CARRY_STRATEGIES.BUILD_REPAIR) {
             cache.outCarryMode = mode;
         }
@@ -715,7 +898,7 @@ const shouldCollect = (creep: Creep): boolean => {
  * @remarks
  * 这里故意避免“掉 1 点能量就立刻回 collect”的抖动：
  * - 已在 deliver 态时，只有载荷降到半仓以下才允许切回 collect。
- * - 已在 collect 态时，优先把这趟货尽量拿满；只有满仓、离开目标房或受伤时才切去 deliver。
+ * - 已在 collect 态时，优先把这趟货尽量拿满；只有满仓、已回到母房或受伤时才切去 deliver。
  * - 濒死且身上有货时，直接锁定 deliver，优先把资源往回送。
  *
  * @param creep 当前外矿搬运 creep。
@@ -727,6 +910,7 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
     const free = creep.store.getFreeCapacity();
     const cap = Math.max(1, creep.store.getCapacity());
     const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+    const inSourceRoom = creep.room.name === creep.memory.sourceRoom;
     const lowHealth = creep.hits < creep.hitsMax * 0.5;
     const collectResumeThreshold = Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
 
@@ -734,12 +918,14 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
     if (isOutCarryDying(creep)) return OUT_CARRY_STRATEGIES.DELIVER;
 
     if (previousMode === OUT_CARRY_STRATEGIES.COLLECT) {
-        if (!inTargetRoom || lowHealth || free === 0) return OUT_CARRY_STRATEGIES.DELIVER;
-        return OUT_CARRY_STRATEGIES.COLLECT;
+        if (lowHealth || free === 0) return OUT_CARRY_STRATEGIES.DELIVER;
+        if (inTargetRoom) return OUT_CARRY_STRATEGIES.COLLECT;
+        if (!inSourceRoom && used < collectResumeThreshold) return OUT_CARRY_STRATEGIES.COLLECT;
+        return OUT_CARRY_STRATEGIES.DELIVER;
     }
 
     if (previousMode === OUT_CARRY_STRATEGIES.DELIVER) {
-        if (inTargetRoom && !lowHealth && used < collectResumeThreshold) return OUT_CARRY_STRATEGIES.COLLECT;
+        if (!inSourceRoom && !lowHealth && used < collectResumeThreshold) return OUT_CARRY_STRATEGIES.COLLECT;
         return OUT_CARRY_STRATEGIES.DELIVER;
     }
 
@@ -759,8 +945,11 @@ const runCollectMode = (creep: Creep) => {
     const sourceCache = creep.memory.cacheSource as any;
     const used = creep.store.getUsedCapacity();
     const free = creep.store.getFreeCapacity();
+    const cap = Math.max(1, creep.store.getCapacity());
     const inTargetRoom = creep.room.name === creep.memory.targetRoom;
+    const inSourceRoom = creep.room.name === creep.memory.sourceRoom;
     const lowHealth = creep.hits < creep.hitsMax * 0.5;
+    const collectResumeThreshold = Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
 
     if (used > 0 && isOutCarryDying(creep)) {
         sourceCache.partialLeaveWait = 0;
@@ -793,6 +982,12 @@ const runCollectMode = (creep: Creep) => {
 
     sourceCache.partialLeaveWait = 0;
     if (used === 0) {
+        outCarry.withdraw(creep);
+        creep.memory.dontPullMe = false;
+        return;
+    }
+
+    if (!inSourceRoom && !lowHealth && free > 0 && used < collectResumeThreshold) {
         outCarry.withdraw(creep);
         creep.memory.dontPullMe = false;
         return;
