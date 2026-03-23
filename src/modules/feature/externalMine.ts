@@ -15,6 +15,24 @@ type OutMineRunState = {
 };
 
 type LegacyRoomModeMemory = RoomMemory & Partial<Pick<RoomControlMemory, 'mode'>>;
+type ExternalMineEnergyState = NonNullable<RoomMemory['energyState']> | 'UNKNOWN';
+type ExternalMineTargetPolicy = {
+    mode: string;
+    energyState: ExternalMineEnergyState;
+    remoteBudget: number;
+    energyTargetLimit: number;
+    allowCenterRoom: boolean;
+};
+type ExternalMineTargetSelectionStat = {
+    roomName: string;
+    kind: OutMineTargetListKey;
+    distance: number;
+    sourceCount: number;
+    value: number;
+    weight: number;
+    score: number;
+};
+type ExternalMineManagedTargetSelection = Record<OutMineTargetListKey, string[]>;
 
 // 外矿逻辑的执行间隔设置（不同 QoS 下采用不同的 tick 间隔）。
 export type ExternalMineTiming = {
@@ -41,6 +59,44 @@ const EXTERNAL_MINE_CARRY_TARGET_CONFIG = {
 class ExternalMineState {
     private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
     private static readonly EXACT_CENTER_ROOM_REGEX = /^[EW]\d*[5][NS]\d*[5]$/;
+    private static readonly DEFAULT_LOCAL_SOURCE_COUNT = 2;
+    private static readonly SPAWN_USAGE_PER_SPAWN =
+        (typeof CREEP_LIFE_TIME === 'number' && typeof CREEP_SPAWN_TIME === 'number')
+            ? CREEP_LIFE_TIME / CREEP_SPAWN_TIME
+            : 500;
+    private static readonly LOCAL_SOURCE_BASE_WEIGHT = 42;
+    private static readonly LOCAL_PORTER_WEIGHT_PER_SPAWN = 23;
+    private static readonly LOCAL_CONTROLLER_WEIGHT = 18;
+    private static readonly LOCAL_QUEUE_WEIGHT_PER_TASK = 18;
+    private static readonly REMOTE_RESERVER_WEIGHT = 5;
+    private static readonly REMOTE_RESERVER_VALUE_COST = 1.3;
+    private static readonly KEEPER_REMOTE_WEIGHT = typeof MAX_CREEP_SIZE === 'number' ? MAX_CREEP_SIZE : 50;
+    private static readonly KEEPER_REMOTE_VALUE_COST = 4.5;
+    private static readonly DEFAULT_KEEPER_ATTACK_COST = 4270;
+    private static readonly DEFAULT_ENERGY_TARGET_LIMIT = Number.POSITIVE_INFINITY;
+    private static readonly LOW_MODE_ENERGY_TARGET_LIMIT = 1;
+    private static readonly LOW_STATE_HIGH_MODE_ENERGY_TARGET_LIMIT = 2;
+    private static readonly LOW_STATE_DEFAULT_ENERGY_TARGET_LIMIT = 1;
+    private static readonly CRITICAL_STATE_ENERGY_TARGET_LIMIT = 1;
+    private static readonly LOW_MODE_MAX_REMOTE_BUDGET = 140;
+    private static readonly LOW_STATE_REMOTE_BUDGET_MULTIPLIER = 0.7;
+    private static readonly CRITICAL_STATE_REMOTE_BUDGET_MULTIPLIER = 0.4;
+    private static readonly SURPLUS_STATE_REMOTE_BUDGET_MULTIPLIER = 1.1;
+    private static readonly REMOTE_QUEUE_ROLE_SET = new Set([
+        'scout',
+        'reserver',
+        'out-harvest',
+        'out-carry',
+        'out-car',
+        'out-build',
+        'out-mineral',
+        'out-attack',
+        'out-ranged',
+        'out-defend',
+        'out-invader',
+        'out-2attack',
+        'out-2heal',
+    ]);
 
     private static getTargetList(memory: OutMineMemory, key: OutMineTargetListKey): string[] {
         const list = memory[key];
@@ -59,6 +115,414 @@ class ExternalMineState {
 
     static isExactCenterRoom(roomName: string): boolean {
         return this.EXACT_CENTER_ROOM_REGEX.test(roomName);
+    }
+
+    static isKeeperCenterRoom(roomName: string): boolean {
+        return this.isCenterRoom(roomName) && !this.isExactCenterRoom(roomName);
+    }
+
+    private static isHighLikeMode(mode: string): boolean {
+        return mode === 'high' || mode === 'rush';
+    }
+
+    private static getEnergyState(room: Room): ExternalMineEnergyState {
+        return room.getEnergyState?.() || room.updateEnergyState?.(false) || room.memory.energyState || 'UNKNOWN';
+    }
+
+    private static getTargetPriorityDistance(sourceRoom: Room, targetRoomName: string): number {
+        if (typeof Game.map?.getRoomLinearDistance === 'function') {
+            return Math.max(1, Game.map.getRoomLinearDistance(sourceRoom.name, targetRoomName, true));
+        }
+        return 1;
+    }
+
+    private static getTargetKind(targetRoomName: string): OutMineTargetListKey {
+        return this.isCenterRoom(targetRoomName) ? 'centerRoom' : 'energy';
+    }
+
+    private static getSourceRoomLevel(sourceRoom: Room): number {
+        return sourceRoom.getEffectiveRoomLevel?.() ?? sourceRoom.level ?? 1;
+    }
+
+    private static getBodyConfigCost(bodyConfig: ((BodyPartConstant | number)[])[] | undefined): number {
+        if (!Array.isArray(bodyConfig) || bodyConfig.length <= 0) return 0;
+        let total = 0;
+        for (const part of bodyConfig) {
+            if (!Array.isArray(part) || part.length < 2) continue;
+            const type = part[0];
+            const count = typeof part[1] === 'number' ? part[1] : 0;
+            if (count <= 0) continue;
+            switch (type) {
+            case WORK:
+                total += count * 100;
+                break;
+            case CARRY:
+            case MOVE:
+                total += count * 50;
+                break;
+            case ATTACK:
+                total += count * 80;
+                break;
+            case RANGED_ATTACK:
+                total += count * 150;
+                break;
+            case HEAL:
+                total += count * 250;
+                break;
+            case CLAIM:
+                total += count * 600;
+                break;
+            case TOUGH:
+                total += count * 10;
+                break;
+            default:
+                break;
+            }
+        }
+        return total;
+    }
+
+    private static getKeeperRemoteAttackCost(sourceRoom: Room): number {
+        const roleBody = sourceRoom.GetRoleBodys?.('out-attack');
+        const roleBodyCost = this.getBodyConfigCost(roleBody);
+        if (roleBodyCost > 0) return roleBodyCost;
+        const fallbackBody = RoleData['out-attack']?.bodypart as ((BodyPartConstant | number)[])[] | undefined;
+        const fallbackCost = this.getBodyConfigCost(fallbackBody);
+        return fallbackCost > 0 ? fallbackCost : this.DEFAULT_KEEPER_ATTACK_COST;
+    }
+
+    private static canRunKeeperRemote(sourceRoom: Room): boolean {
+        const requiredCost = this.getKeeperRemoteAttackCost(sourceRoom);
+        return (sourceRoom.energyCapacityAvailable || 0) >= requiredCost;
+    }
+
+    private static getSpawnUsageCapacity(sourceRoom: Room): number {
+        const spawnCount = Math.max(1, sourceRoom.spawn?.length || 0);
+        return Math.floor(spawnCount * this.SPAWN_USAGE_PER_SPAWN);
+    }
+
+    private static getLocalSourceCount(sourceRoom: Room): number {
+        const indexed = Array.isArray(sourceRoom.source) ? sourceRoom.source.length : 0;
+        if (indexed > 0) return indexed;
+        if (typeof sourceRoom.find === 'function') {
+            try {
+                const found = sourceRoom.find(FIND_SOURCES).length;
+                if (found > 0) return found;
+            }
+            catch { }
+        }
+        return this.DEFAULT_LOCAL_SOURCE_COUNT;
+    }
+
+    private static getLocalSpawnQueuePressure(sourceRoom: Room): number {
+        const tasks = sourceRoom.getAllMissionFromPool?.('spawn') || [];
+        let localQueued = 0;
+        for (const task of tasks) {
+            const data = task?.data;
+            const memory = (data && typeof data === 'object' && 'memory' in data)
+                ? (data.memory as Partial<CreepMemory> | undefined)
+                : undefined;
+            const role = memory?.role;
+            if (typeof role !== 'string' || !role) continue;
+            if (this.REMOTE_QUEUE_ROLE_SET.has(role) && (!memory.sourceRoom || memory.sourceRoom === sourceRoom.name)) {
+                continue;
+            }
+            localQueued++;
+        }
+        return localQueued * this.LOCAL_QUEUE_WEIGHT_PER_TASK;
+    }
+
+    private static getLocalSpawnReserve(sourceRoom: Room): number {
+        const spawnCount = Math.max(1, sourceRoom.spawn?.length || 0);
+        const localSourceCount = this.getLocalSourceCount(sourceRoom);
+        let reserve =
+            localSourceCount * this.LOCAL_SOURCE_BASE_WEIGHT +
+            spawnCount * this.LOCAL_PORTER_WEIGHT_PER_SPAWN;
+        if (this.getSourceRoomLevel(sourceRoom) <= 4) {
+            reserve += this.LOCAL_CONTROLLER_WEIGHT;
+        }
+        reserve += this.getLocalSpawnQueuePressure(sourceRoom);
+        return reserve;
+    }
+
+    private static canReserveRemote(sourceRoom: Room, kind: OutMineTargetListKey): boolean {
+        return kind === 'energy' && this.getSourceRoomLevel(sourceRoom) >= 3;
+    }
+
+    private static isRemoteConstructed(sourceRoom: Room, targetRoom: Room | undefined, source: Source | undefined): boolean {
+        const builtLevel = this.getSourceRoomLevel(sourceRoom);
+        if (builtLevel >= 4) return true;
+        if (!targetRoom || !source) return false;
+        return !!getExternalMineNearbyContainer(targetRoom, source);
+    }
+
+    private static getSelectionEnergyPerTick(
+        sourceRoom: Room,
+        targetRoomName: string,
+        kind: OutMineTargetListKey,
+        targetRoom?: Room,
+        source?: Source,
+    ): number {
+        const baseCapacity = typeof source?.energyCapacity === 'number' && source.energyCapacity > 0
+            ? source.energyCapacity
+            : EXTERNAL_MINE_ANALYSIS_DEFAULTS.sourceEnergyCapacity;
+        let energyPerTick = baseCapacity / EXTERNAL_MINE_ANALYSIS_DEFAULTS.energyRegenTime;
+
+        if (kind === 'centerRoom') return energyPerTick;
+
+        const canReserve = this.canReserveRemote(sourceRoom, kind);
+        if (!targetRoom?.controller) {
+            return canReserve ? energyPerTick : energyPerTick * 0.5;
+        }
+
+        const myUserName = sourceRoom.controller?.owner?.username;
+        if (!myUserName) return energyPerTick;
+        if (targetRoom.controller.owner && targetRoom.controller.owner.username !== myUserName) return 0;
+        if (targetRoom.controller.reservation && targetRoom.controller.reservation.username !== myUserName) {
+            return canReserve ? energyPerTick : energyPerTick * 0.5;
+        }
+        if (targetRoom.controller.owner || (targetRoom.controller.reservation && targetRoom.controller.reservation.username === myUserName)) {
+            return energyPerTick;
+        }
+        return canReserve ? energyPerTick : energyPerTick * 0.5;
+    }
+
+    private static estimateSourceSelectionStat(
+        sourceRoom: Room,
+        targetRoomName: string,
+        kind: OutMineTargetListKey,
+        targetRoom?: Room,
+        source?: Source,
+    ): { distance: number; value: number; weight: number } {
+        const distance = targetRoom && source
+            ? getExternalMineSourceDistance(sourceRoom, targetRoom, source)
+            : (
+                EXTERNAL_MINE_ANALYSIS.ROUTE_BASE_TICKS +
+                this.getTargetPriorityDistance(sourceRoom, targetRoomName) * EXTERNAL_MINE_ANALYSIS.ROUTE_TICKS_PER_LINEAR_DISTANCE +
+                EXTERNAL_MINE_ANALYSIS.ROUTE_LOCAL_APPROACH_TICKS
+            );
+        const energyPerTick = this.getSelectionEnergyPerTick(sourceRoom, targetRoomName, kind, targetRoom, source);
+        if (energyPerTick <= 0) {
+            return { distance, value: 0, weight: Number.POSITIVE_INFINITY };
+        }
+
+        const constructed = this.isRemoteConstructed(sourceRoom, targetRoom, source);
+        const workParts = Math.max(1, Math.ceil(energyPerTick / EXTERNAL_MINE_ANALYSIS_DEFAULTS.harvestPower));
+        const carryParts = 1;
+        const moveParts = Math.max(1, constructed ? Math.ceil((workParts + carryParts) / 2) : (workParts + carryParts));
+        const minerBodyLength = workParts + carryParts + moveParts;
+        const minerBodyCost = workParts * 100 + (carryParts + moveParts) * 50;
+        const creepLifeTime = typeof CREEP_LIFE_TIME === 'number' ? CREEP_LIFE_TIME : 1500;
+        const remainingLife = Math.max(200, creepLifeTime - Math.min(distance, creepLifeTime - 100));
+        const minerCost = minerBodyCost / remainingLife;
+        const minerSpawnUsage = minerBodyLength * (creepLifeTime / remainingLife);
+        const haulerCost = (distance * energyPerTick * 0.04 * (constructed ? 75 : 100)) / creepLifeTime;
+        const haulerSpawnUsage = distance * energyPerTick * 0.04 * (constructed ? 1.5 : 2);
+        const repairLoss = constructed ? EXTERNAL_MINE_ANALYSIS.SOURCE_CONTAINER_REPAIR_LOSS : 1;
+
+        return {
+            distance,
+            value: Math.max(0.1, energyPerTick - minerCost - haulerCost - repairLoss),
+            weight: Math.max(1, minerSpawnUsage + haulerSpawnUsage),
+        };
+    }
+
+    private static estimateTargetSelectionStat(sourceRoom: Room, targetRoomName: string): ExternalMineTargetSelectionStat {
+        const targetRoom = Game.rooms[targetRoomName];
+        const kind = this.getTargetKind(targetRoomName);
+        const fallbackSourceCount = kind === 'centerRoom' ? 3 : 2;
+        const sources = targetRoom ? getExternalMineTargetSources(targetRoom) : [];
+        const sourceCount = Math.max(fallbackSourceCount, sources.length || 0);
+
+        let value = 0;
+        let weight = 0;
+        let distanceSum = 0;
+
+        if (sources.length > 0 && targetRoom) {
+            for (const source of sources) {
+                const sourceStat = this.estimateSourceSelectionStat(sourceRoom, targetRoomName, kind, targetRoom, source);
+                distanceSum += sourceStat.distance;
+                value += sourceStat.value;
+                weight += sourceStat.weight;
+            }
+        } else {
+            for (let index = 0; index < sourceCount; index += 1) {
+                const sourceStat = this.estimateSourceSelectionStat(sourceRoom, targetRoomName, kind);
+                distanceSum += sourceStat.distance;
+                value += sourceStat.value;
+                weight += sourceStat.weight;
+            }
+        }
+
+        if (this.canReserveRemote(sourceRoom, kind)) {
+            value -= this.REMOTE_RESERVER_VALUE_COST;
+            weight += this.REMOTE_RESERVER_WEIGHT;
+        }
+        if (this.isKeeperCenterRoom(targetRoomName)) {
+            value -= this.KEEPER_REMOTE_VALUE_COST;
+            weight += this.KEEPER_REMOTE_WEIGHT;
+        }
+
+        const avgDistance = Math.max(1, distanceSum / Math.max(1, sourceCount));
+        const safeValue = Math.max(0.1, value);
+        const safeWeight = Math.max(1, weight);
+        return {
+            roomName: targetRoomName,
+            kind,
+            distance: avgDistance,
+            sourceCount,
+            value: safeValue,
+            weight: safeWeight,
+            score: safeValue / safeWeight,
+        };
+    }
+
+    private static compareTargetStats(left: ExternalMineTargetSelectionStat, right: ExternalMineTargetSelectionStat): number {
+        const scoreDiff = right.score - left.score;
+        if (Math.abs(scoreDiff) > 0.0001) return scoreDiff;
+        const valueDiff = right.value - left.value;
+        if (Math.abs(valueDiff) > 0.0001) return valueDiff;
+        const distanceDiff = left.distance - right.distance;
+        if (Math.abs(distanceDiff) > 0.0001) return distanceDiff;
+        return left.roomName.localeCompare(right.roomName);
+    }
+
+    private static selectTargetStats(
+        sourceRoom: Room,
+        stats: ExternalMineTargetSelectionStat[],
+        policy: ExternalMineTargetPolicy,
+    ): ExternalMineManagedTargetSelection {
+        const allowedStats = stats
+            .filter((stat) => {
+                if (stat.kind !== 'centerRoom') return true;
+                if (!policy.allowCenterRoom) return false;
+                if (!this.isKeeperCenterRoom(stat.roomName)) return true;
+                return this.canRunKeeperRemote(sourceRoom);
+            })
+            .sort((left, right) => this.compareTargetStats(left, right));
+        if (allowedStats.length <= 0) {
+            return { energy: [], centerRoom: [] };
+        }
+
+        type KnapsackEntry = {
+            value: number;
+            totalWeight: number;
+            energyCount: number;
+            rooms: string[];
+        };
+
+        const budget = Math.max(0, Math.floor(policy.remoteBudget));
+        const table: Array<KnapsackEntry | null> = Array.from({ length: budget + 1 }, () => null);
+        table[0] = { value: 0, totalWeight: 0, energyCount: 0, rooms: [] };
+
+        const betterThan = (candidate: KnapsackEntry, current: KnapsackEntry | null): boolean => {
+            if (!current) return true;
+            if (candidate.value > current.value + 0.0001) return true;
+            if (current.value > candidate.value + 0.0001) return false;
+            if (candidate.totalWeight < current.totalWeight) return true;
+            if (candidate.totalWeight > current.totalWeight) return false;
+            if (candidate.rooms.length > current.rooms.length) return true;
+            if (candidate.rooms.length < current.rooms.length) return false;
+            return candidate.rooms.join(',') < current.rooms.join(',');
+        };
+
+        for (const stat of allowedStats) {
+            const requiredWeight = Math.max(1, Math.ceil(stat.weight));
+            if (requiredWeight > budget) continue;
+            for (let currentBudget = budget; currentBudget >= requiredWeight; currentBudget -= 1) {
+                const previous = table[currentBudget - requiredWeight];
+                if (!previous) continue;
+                const nextEnergyCount = previous.energyCount + (stat.kind === 'energy' ? 1 : 0);
+                if (Number.isFinite(policy.energyTargetLimit) && nextEnergyCount > policy.energyTargetLimit) continue;
+                const candidate: KnapsackEntry = {
+                    value: previous.value + stat.value,
+                    totalWeight: previous.totalWeight + requiredWeight,
+                    energyCount: nextEnergyCount,
+                    rooms: [...previous.rooms, stat.roomName],
+                };
+                if (betterThan(candidate, table[currentBudget])) {
+                    table[currentBudget] = candidate;
+                }
+            }
+        }
+
+        let best = table.find((entry) => !!entry) || null;
+        for (const entry of table) {
+            if (entry && betterThan(entry, best)) best = entry;
+        }
+
+        const selectedSet = new Set(best?.rooms || []);
+        const selection: ExternalMineManagedTargetSelection = { energy: [], centerRoom: [] };
+        for (const stat of allowedStats) {
+            if (!selectedSet.has(stat.roomName)) continue;
+            selection[stat.kind].push(stat.roomName);
+        }
+
+        if (selection.energy.length > 0 || selection.centerRoom.length > 0) {
+            return selection;
+        }
+
+        const fallbackStats = [...allowedStats].sort((left, right) => {
+            const valueDiff = right.value - left.value;
+            if (Math.abs(valueDiff) > 0.0001) return valueDiff;
+            const weightDiff = left.weight - right.weight;
+            if (Math.abs(weightDiff) > 0.0001) return weightDiff;
+            const distanceDiff = left.distance - right.distance;
+            if (Math.abs(distanceDiff) > 0.0001) return distanceDiff;
+            return left.roomName.localeCompare(right.roomName);
+        });
+        for (const stat of fallbackStats) {
+            if (stat.kind === 'energy' && Number.isFinite(policy.energyTargetLimit) && selection.energy.length >= policy.energyTargetLimit) {
+                continue;
+            }
+            selection[stat.kind].push(stat.roomName);
+            break;
+        }
+        return selection;
+    }
+
+    private static getTargetPolicy(sourceRoom: Room): ExternalMineTargetPolicy {
+        const mode = this.getRoomMode(sourceRoom);
+        const energyState = this.getEnergyState(sourceRoom);
+        const spawnUsageCapacity = this.getSpawnUsageCapacity(sourceRoom);
+        const localSpawnReserve = this.getLocalSpawnReserve(sourceRoom);
+        let remoteBudget = Math.max(0, spawnUsageCapacity - localSpawnReserve);
+
+        if (energyState === 'LOW') {
+            remoteBudget = Math.floor(remoteBudget * this.LOW_STATE_REMOTE_BUDGET_MULTIPLIER);
+        } else if (energyState === 'CRITICAL') {
+            remoteBudget = Math.floor(remoteBudget * this.CRITICAL_STATE_REMOTE_BUDGET_MULTIPLIER);
+        } else if (energyState === 'SURPLUS') {
+            remoteBudget = Math.floor(remoteBudget * this.SURPLUS_STATE_REMOTE_BUDGET_MULTIPLIER);
+        }
+
+        if (mode === 'low') {
+            remoteBudget = Math.min(remoteBudget, this.LOW_MODE_MAX_REMOTE_BUDGET);
+        }
+
+        let energyTargetLimit = this.DEFAULT_ENERGY_TARGET_LIMIT;
+        if (mode === 'low') {
+            energyTargetLimit = this.LOW_MODE_ENERGY_TARGET_LIMIT;
+        }
+
+        if (energyState === 'LOW') {
+            const lowStateLimit = this.isHighLikeMode(mode)
+                ? this.LOW_STATE_HIGH_MODE_ENERGY_TARGET_LIMIT
+                : this.LOW_STATE_DEFAULT_ENERGY_TARGET_LIMIT;
+            energyTargetLimit = Math.min(energyTargetLimit, lowStateLimit);
+        }
+
+        if (energyState === 'CRITICAL') {
+            energyTargetLimit = Math.min(energyTargetLimit, this.CRITICAL_STATE_ENERGY_TARGET_LIMIT);
+        }
+
+        return {
+            mode,
+            energyState,
+            remoteBudget,
+            energyTargetLimit,
+            allowCenterRoom: energyState !== 'LOW' && energyState !== 'CRITICAL',
+        };
     }
 
     // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
@@ -93,15 +557,53 @@ class ExternalMineState {
         if (mergedTargets.length <= 0) return [];
 
         const uniqueTargets = [...new Set(mergedTargets)];
-
-        if (key === 'centerRoom') {
-            return uniqueTargets.filter((roomName) => this.isCenterRoom(roomName));
-        }
-        return uniqueTargets.filter((roomName) => !this.isCenterRoom(roomName));
+        const policy = this.getTargetPolicy(sourceRoom);
+        const stats = uniqueTargets.map((roomName) => this.estimateTargetSelectionStat(sourceRoom, roomName));
+        const selectedTargets = this.selectTargetStats(sourceRoom, stats, policy);
+        return selectedTargets[key];
     }
 
     static createMemory(sourceRoomName: string, targetRoomName: string): CreepMemory {
         return { sourceRoom: sourceRoomName, targetRoom: targetRoomName } as CreepMemory;
+    }
+
+    static getTargetKeeperLairIds(targetRoom: Room): string[] {
+        if (typeof STRUCTURE_KEEPER_LAIR === 'undefined') return [];
+        let lairs: StructureKeeperLair[] = [];
+        try {
+            lairs = targetRoom.find(FIND_STRUCTURES, {
+                filter: (structure) => structure.structureType === STRUCTURE_KEEPER_LAIR,
+            }) as StructureKeeperLair[];
+        }
+        catch {
+            lairs = [];
+        }
+        if (lairs.length <= 0) return [];
+
+        const resources: { pos: RoomPosition }[] = [];
+        for (const source of getExternalMineTargetSources(targetRoom)) {
+            resources.push(source);
+        }
+        if (typeof FIND_MINERALS !== 'undefined') {
+            try {
+                const minerals = (targetRoom.find(FIND_MINERALS) || []) as Mineral[];
+                resources.push(...minerals);
+            }
+            catch { }
+        }
+        if (resources.length <= 0) return lairs.map((lair) => lair.id);
+
+        return lairs
+            .filter((lair) => resources.some((resource) => {
+                if (resource.pos && typeof resource.pos.inRangeTo === 'function') {
+                    return resource.pos.inRangeTo(lair.pos, 5);
+                }
+                if (lair.pos && typeof lair.pos.getRangeTo === 'function') {
+                    return lair.pos.getRangeTo(resource.pos) <= 5;
+                }
+                return false;
+            }))
+            .map((lair) => lair.id);
     }
 
     // 外矿基础设施建造入口。
@@ -329,7 +831,7 @@ const getExternalMineSourceDistance = (sourceRoom: Room, targetRoom: Room, sourc
         ? Math.max(1, Game.map.getRoomLinearDistance(sourceRoom.name, targetRoom.name, true))
         : 1;
     const targetCenter = new RoomPosition(25, 25, targetRoom.name);
-    const localApproach = typeof source.pos.getRangeTo === 'function'
+    const localApproach = source.pos && typeof source.pos.getRangeTo === 'function'
         ? Math.max(0, source.pos.getRangeTo(targetCenter) - 1)
         : EXTERNAL_MINE_ANALYSIS.ROUTE_LOCAL_APPROACH_TICKS;
 
@@ -940,14 +1442,23 @@ class ExternalMineSpawner {
 
     // 常规外矿攻击者（单目标房最多 1 个）。
     static attack(sourceRoom: Room, targetRoom: Room): boolean {
-        const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-        const outerAttackers = (creepByTargetRoom['out-attack'] || [])
-            .filter((c: any) => c.ticksToLive > 300 || c.spawning);
-        const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-attack', targetRoom.name);
-        if (outerAttackers.length + spawnNum >= 1) return false;
+        const globalActive = this.getActiveRoleNumByTarget('out-attack', targetRoom.name);
+        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-attack', targetRoom.name);
+        const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-attack', targetRoom.name);
+        if (globalActive + globalQueued + globalSpawning >= 1) return false;
 
-        sourceRoom.SpawnMissionAdd('OA', [], -1, 'out-attack', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name) as CreepMemory & { keeperLairIds?: string[] };
+        const keeperLairIds = ExternalMineState.getTargetKeeperLairIds(targetRoom);
+        if (keeperLairIds.length > 0) memory.keeperLairIds = keeperLairIds;
+        sourceRoom.SpawnMissionAdd('OA', [], -1, 'out-attack', memory);
         return true;
+    }
+
+    static hasKeeperAttackCoverage(targetRoomName: string): boolean {
+        const active = this.getActiveRoleNumByTarget('out-attack', targetRoomName);
+        const queued = this.getQueuedSpawnRoleNumByTargetGlobal('out-attack', targetRoomName);
+        const spawning = this.getSpawningRoleNumByTargetGlobal('out-attack', targetRoomName);
+        return active + queued + spawning > 0;
     }
 
     // 远程攻击者（单目标房最多 1 个）。
@@ -1099,33 +1610,139 @@ class ExternalMineSpawner {
         return true;
     }
 
-    private static getBuilderWorkCount(targetRoom: Room): number {
-        const constructionSite = targetRoom.find(FIND_CONSTRUCTION_SITES, {
+    private static getBuilderConstructionTargets(targetRoom: Room): ConstructionSite[] {
+        return targetRoom.find(FIND_CONSTRUCTION_SITES, {
             filter: (site) => site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER
-        });
-        const repairTargets = targetRoom.find(FIND_STRUCTURES, {
+        }) as ConstructionSite[];
+    }
+
+    private static getBuilderRepairTargets(targetRoom: Room): Structure[] {
+        return targetRoom.find(FIND_STRUCTURES, {
             filter: (structure) =>
                 (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) &&
                 structure.hits < structure.hitsMax * 0.8
-        });
+        }) as Structure[];
+    }
 
-        return constructionSite.length + repairTargets.length;
+    private static getBuilderWorkCount(targetRoom: Room): number {
+        return this.getBuilderConstructionTargets(targetRoom).length + this.getBuilderRepairTargets(targetRoom).length;
+    }
+
+    private static getBuilderWorkTargets(targetRoom: Room, repairOnly = false): Array<{ pos: RoomPosition; structureType: StructureConstant }> {
+        const repairTargets = this.getBuilderRepairTargets(targetRoom);
+        if (repairOnly) return repairTargets;
+        return [...this.getBuilderConstructionTargets(targetRoom), ...repairTargets];
+    }
+
+    private static getBuilderTargetDistance(source: Source, target: { pos: RoomPosition }): number {
+        if (source.pos && typeof source.pos.getRangeTo === 'function') {
+            return source.pos.getRangeTo(target);
+        }
+        const sourcePos = source.pos;
+        const targetPos = target.pos;
+        return Math.max(
+            Math.abs((sourcePos?.x || 0) - (targetPos?.x || 0)),
+            Math.abs((sourcePos?.y || 0) - (targetPos?.y || 0))
+        );
+    }
+
+    private static getAssignedBuilderCount(sourceRoom: Room, targetRoomName: string, sourceId: Id<Source>): number {
+        let count = 0;
+
+        for (const creep of Object.values(Game.creeps || {})) {
+            if (!creep?.my || creep.spawning) continue;
+            if (creep.memory?.role !== 'out-build') continue;
+            if (creep.memory.sourceRoom !== sourceRoom.name) continue;
+            if (creep.memory.targetRoom !== targetRoomName) continue;
+            if (creep.memory.targetSourceId !== sourceId) continue;
+            count++;
+        }
+
+        const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
+        for (const task of tasks) {
+            const memory = this.getSpawnTaskMemory(task);
+            if (!memory?.role || memory.role !== 'out-build') continue;
+            if (memory.sourceRoom !== sourceRoom.name) continue;
+            if (memory.targetRoom !== targetRoomName) continue;
+            if (memory.targetSourceId !== sourceId) continue;
+            count++;
+        }
+
+        return count;
+    }
+
+    private static getBuilderTargetSourceId(
+        sourceRoom: Room,
+        targetRoom: Room,
+        repairOnly = false,
+    ): Id<Source> | undefined {
+        const sources = getExternalMineTargetSources(targetRoom);
+        if (sources.length <= 0) return undefined;
+
+        const workTargets = this.getBuilderWorkTargets(targetRoom, repairOnly);
+        if (workTargets.length <= 0) return sources[0]?.id;
+
+        let bestSource: Source | null = null;
+        let bestBuilderCount = Infinity;
+        let bestNearbyWorkScore = -1;
+        let bestDistance = Infinity;
+
+        for (const source of sources) {
+            const builderCount = this.getAssignedBuilderCount(sourceRoom, targetRoom.name, source.id);
+            let nearbyWorkScore = 0;
+            let nearestDistance = Infinity;
+
+            for (const target of workTargets) {
+                const distance = this.getBuilderTargetDistance(source, target);
+                nearestDistance = Math.min(nearestDistance, distance);
+                if (distance > 5) continue;
+                nearbyWorkScore += target.structureType === STRUCTURE_CONTAINER ? 2 : 1;
+            }
+
+            const hasBetterLocalCoverage = nearbyWorkScore > bestNearbyWorkScore;
+            const hasSameCoverageButFewerBuilders =
+                nearbyWorkScore === bestNearbyWorkScore && builderCount < bestBuilderCount;
+            const hasSameCoverageAndBuilderCountButCloser =
+                nearbyWorkScore === bestNearbyWorkScore &&
+                builderCount === bestBuilderCount &&
+                nearestDistance < bestDistance;
+
+            if (!bestSource || hasBetterLocalCoverage || hasSameCoverageButFewerBuilders || hasSameCoverageAndBuilderCountButCloser) {
+                bestSource = source;
+                bestBuilderCount = builderCount;
+                bestNearbyWorkScore = nearbyWorkScore;
+                bestDistance = nearestDistance;
+            }
+        }
+
+        return bestSource?.id;
     }
 
     // 外矿建造者：道路/容器存在施工或维修需求时派遣。
     static builder(sourceRoom: Room, targetRoom: Room): boolean {
-        const workCount = this.getBuilderWorkCount(targetRoom);
+        const constructionTargets = this.getBuilderConstructionTargets(targetRoom);
+        const repairTargets = this.getBuilderRepairTargets(targetRoom);
+        const workCount = constructionTargets.length + repairTargets.length;
         if (workCount === 0) return false;
+        const repairOnly = constructionTargets.length === 0 && repairTargets.length > 0;
 
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerBuilder = (creepByTargetRoom['out-build'] || []).length;
         const spawnNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-build', targetRoom.name);
 
         let num = 1;
-        if (workCount > 10) num = 2;
+        if (!repairOnly && workCount > 10) num = 2;
         if (outerBuilder + spawnNum >= num) return false;
 
-        sourceRoom.SpawnMissionAdd('OB', '', this.PRIORITY.build, 'out-build', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name) as CreepMemory & {
+            outBuildMode?: 'repair';
+            targetSourceId?: Id<Source>;
+        };
+        if (repairOnly) memory.outBuildMode = 'repair';
+        const targetSourceId = this.getBuilderTargetSourceId(sourceRoom, targetRoom, repairOnly);
+        if (targetSourceId) memory.targetSourceId = targetSourceId;
+
+        sourceRoom.SpawnMissionAdd('OB', '', this.PRIORITY.build, 'out-build', memory);
         return true;
     }
 }
@@ -1252,12 +1869,10 @@ export class ExternalMine {
                 continue;
             }
 
-            if (!ExternalMineState.isExactCenterRoom(roomName)) {
+            if (ExternalMineState.isKeeperCenterRoom(roomName)) {
+                const hasKeeperCoverage = ExternalMineSpawner.hasKeeperAttackCoverage(targetRoom.name);
                 ExternalMineSpawner.attack(room, targetRoom);
-                const hasSourceKeeper = hostiles.some((creep) => creep.owner.username === 'Source Keeper');
-                const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-                const outerAttackers = (creepByTargetRoom['out-attack'] || []).length;
-                if (hasSourceKeeper && outerAttackers < 1) continue;
+                if (!hasKeeperCoverage) continue;
             }
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;

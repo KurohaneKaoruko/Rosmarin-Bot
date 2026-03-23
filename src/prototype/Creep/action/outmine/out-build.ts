@@ -5,12 +5,18 @@ const BUILD_PRIORITY = [STRUCTURE_CONTAINER, STRUCTURE_ROAD] as StructureConstan
 const ENERGY_DROP_MIN = 20;
 const ENERGY_CONTAINER_MIN = 50;
 const REPAIR_RATIO = 0.8;
+const SOURCE_FETCH_START_RANGE = 3;
+const SOURCE_WORK_PREFER_RANGE = 6;
+const SOURCE_KEEPER_RANGE = 5;
 
-// 迁移条件集中声明：满能 -> 切建造，空能 -> 回采集
 const OUT_BUILD_SWITCH = {
     TO_TARGET: (creep: Creep) => creep.store.getFreeCapacity() === 0,
     TO_SOURCE: (creep: Creep) => creep.store.getUsedCapacity() === 0
 } as const;
+
+type OutBuildIndexedRoom = Room & {
+    source?: Source[];
+};
 
 const inTargetRoom = (creep: Creep): boolean =>
     creep.room.name === creep.memory.targetRoom && !creep.pos.isRoomEdge();
@@ -20,12 +26,18 @@ const moveToTargetRoom = (creep: Creep): void => {
     creep.moveToRoom(creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
 };
 
+const moveToSourceRoom = (creep: Creep): void => {
+    creep.memory.dontPullMe = false;
+    creep.moveToRoom(creep.memory.sourceRoom, { plainCost: 2, swampCost: 10 });
+};
+
+const isRepairOnlyMode = (creep: Creep): boolean => creep.memory.outBuildMode === 'repair';
+
 const isRoadPos = (pos: RoomPosition): boolean => {
     const structures = pos.lookFor(LOOK_STRUCTURES) as Structure[];
     return structures.some((s) => s.structureType === STRUCTURE_ROAD);
 };
 
-// 让出道路，避免外矿建造/采集占道
 const stepAsideFromRoad = (creep: Creep): boolean => {
     if (creep.fatigue > 0) return false;
     if (!isRoadPos(creep.pos)) return false;
@@ -46,7 +58,6 @@ const stepAsideFromRoad = (creep: Creep): boolean => {
             if ((pos.lookFor(LOOK_CREEPS) as Creep[]).length > 0) continue;
             if ((pos.lookFor(LOOK_POWER_CREEPS) as PowerCreep[]).length > 0) continue;
 
-            // 优先离开道路，其次就近。
             const score = (isRoadPos(pos) ? 100 : 0) + creep.pos.getRangeTo(pos);
             if (score < bestScore) {
                 bestScore = score;
@@ -61,8 +72,201 @@ const stepAsideFromRoad = (creep: Creep): boolean => {
     return true;
 };
 
-// 选择建造目标（仅道路/容器）
-const findBuildTarget = (creep: Creep): ConstructionSite | null => {
+const getBuildTypePriority = (structureType: StructureConstant | undefined): number => {
+    if (!structureType) return BUILD_PRIORITY.length;
+    const index = BUILD_PRIORITY.indexOf(structureType);
+    return index >= 0 ? index : BUILD_PRIORITY.length;
+};
+
+const getRoomSources = (room: Room): Source[] => {
+    const indexedRoom = room as OutBuildIndexedRoom;
+    if (Array.isArray(indexedRoom.source) && indexedRoom.source.length > 0) return indexedRoom.source;
+    try {
+        return (room.find(FIND_SOURCES) || []) as Source[];
+    }
+    catch {
+        return [];
+    }
+};
+
+const pickClosestByRange = <T extends { pos: RoomPosition }>(origin: RoomPosition, targets: T[]): T | null => {
+    let best: T | null = null;
+    let bestRange = Infinity;
+    for (const target of targets) {
+        const range = origin.getRangeTo(target);
+        if (range < bestRange) {
+            bestRange = range;
+            best = target;
+        }
+    }
+    return best;
+};
+
+const getAssignedSource = (creep: Creep): Source | null => {
+    const boundSourceId = creep.memory.targetSourceId as Id<Source> | undefined;
+    if (boundSourceId) {
+        const boundSource = Game.getObjectById(boundSourceId) as Source | null;
+        if (boundSource && boundSource.pos?.roomName === creep.memory.targetRoom) return boundSource;
+        if (inTargetRoom(creep)) delete creep.memory.targetSourceId;
+    }
+
+    if (!inTargetRoom(creep)) return null;
+    const sources = getRoomSources(creep.room);
+    if (sources.length <= 0) return null;
+
+    const source = creep.pos.findClosestByRange(sources) || pickClosestByRange(creep.pos, sources);
+    if (source) creep.memory.targetSourceId = source.id;
+    return source || null;
+};
+
+const getBestBy = <T>(items: T[], scorer: (item: T) => number): T | null => {
+    let best: T | null = null;
+    let bestScore = -Infinity;
+    for (const item of items) {
+        const score = scorer(item);
+        if (score > bestScore) {
+            bestScore = score;
+            best = item;
+        }
+    }
+    return best;
+};
+
+const moveToLocalTarget = (creep: Creep, target: { pos: RoomPosition }, range: number): void => {
+    creep.moveTo(target, {
+        visualizePathStyle: { stroke: '#ffaa00' },
+        maxRooms: 1,
+        range,
+        plainCost: 2,
+        swampCost: 10
+    });
+};
+
+const tryPickupNearbyEnergy = (creep: Creep, source: Source): boolean => {
+    const dropped = source.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
+        filter: (resource: Resource) =>
+            resource.resourceType === RESOURCE_ENERGY &&
+            resource.amount >= ENERGY_DROP_MIN
+    }) as Resource[];
+    const target = getBestBy(dropped, (resource) => resource.amount);
+    if (!target) return false;
+
+    if (!creep.pos.inRangeTo(target, 1)) {
+        moveToLocalTarget(creep, target, 1);
+        return true;
+    }
+    creep.pickup(target);
+    return true;
+};
+
+const tryWithdrawNearbyStore = (
+    creep: Creep,
+    source: Source,
+    lookType: FindConstant,
+    energyReader: (target: Tombstone | Ruin) => number,
+): boolean => {
+    const targets = source.pos.findInRange(lookType, 1, {
+        filter: (target: Tombstone | Ruin) => energyReader(target) > 0
+    }) as (Tombstone | Ruin)[];
+    const target = getBestBy(targets, energyReader);
+    if (!target) return false;
+
+    if (!creep.pos.inRangeTo(target, 1)) {
+        moveToLocalTarget(creep, target, 1);
+        return true;
+    }
+    creep.withdraw(target, RESOURCE_ENERGY);
+    return true;
+};
+
+const tryWithdrawNearbyContainer = (creep: Creep, source: Source): boolean => {
+    const containers = source.pos.findInRange(FIND_STRUCTURES, 1, {
+        filter: (structure: Structure) =>
+            structure.structureType === STRUCTURE_CONTAINER &&
+            (structure as StructureContainer).store.getUsedCapacity(RESOURCE_ENERGY) >= ENERGY_CONTAINER_MIN
+    }) as StructureContainer[];
+    const target = getBestBy(containers, (container) => container.store.getUsedCapacity(RESOURCE_ENERGY));
+    if (!target) return false;
+
+    if (!creep.pos.inRangeTo(target, 1)) {
+        moveToLocalTarget(creep, target, 1);
+        return true;
+    }
+    creep.withdraw(target, RESOURCE_ENERGY);
+    return true;
+};
+
+const tryWithdrawEnergyNearSource = (creep: Creep, source: Source | null): boolean => {
+    if (!source || source.pos.roomName !== creep.room.name) return false;
+    if (tryPickupNearbyEnergy(creep, source)) return true;
+    if (tryWithdrawNearbyStore(creep, source, FIND_TOMBSTONES, (target) => target.store.getUsedCapacity(RESOURCE_ENERGY))) return true;
+    if (tryWithdrawNearbyStore(creep, source, FIND_RUINS, (target) => target.store.getUsedCapacity(RESOURCE_ENERGY))) return true;
+    if (tryWithdrawNearbyContainer(creep, source)) return true;
+    return false;
+};
+
+const getSourceKeeper = (creep: Creep, source: Source | null): Creep | null => {
+    if (!source || source.pos.roomName !== creep.room.name) return null;
+    try {
+        const keepers = creep.room.find(FIND_HOSTILE_CREEPS, {
+            filter: (hostile) => hostile.owner.username === 'Source Keeper'
+        }) as Creep[];
+        return keepers.find((keeper) =>
+            source.pos.inRangeTo(keeper.pos, SOURCE_KEEPER_RANGE) &&
+            (creep.pos.inRangeTo(keeper.pos, 4) || creep.pos.inRangeTo(source.pos, SOURCE_KEEPER_RANGE))
+        ) || null;
+    }
+    catch {
+        return null;
+    }
+};
+
+const avoidKeeper = (creep: Creep, source: Source | null): boolean => {
+    const keeper = getSourceKeeper(creep, source);
+    if (!keeper) return false;
+
+    const safeAnchor = new RoomPosition(25, 25, creep.room.name);
+    moveToLocalTarget(creep, { pos: safeAnchor }, 12);
+    return true;
+};
+
+const pickPreferredTarget = <T extends { pos: RoomPosition; structureType?: StructureConstant }>(
+    creep: Creep,
+    source: Source | null,
+    targets: T[],
+): T | null => {
+    if (targets.length <= 0) return null;
+
+    const scopedTargets = source
+        ? targets.filter((target) => source.pos.getRangeTo(target) <= SOURCE_WORK_PREFER_RANGE)
+        : [];
+    const candidates = scopedTargets.length > 0 ? scopedTargets : targets;
+
+    let best: T | null = null;
+    let bestTypePriority = Infinity;
+    let bestSourceRange = Infinity;
+    let bestCreepRange = Infinity;
+
+    for (const target of candidates) {
+        const typePriority = getBuildTypePriority(target.structureType);
+        const sourceRange = source ? source.pos.getRangeTo(target) : 0;
+        const creepRange = creep.pos.getRangeTo(target);
+        if (
+            typePriority < bestTypePriority ||
+            (typePriority === bestTypePriority && sourceRange < bestSourceRange) ||
+            (typePriority === bestTypePriority && sourceRange === bestSourceRange && creepRange < bestCreepRange)
+        ) {
+            best = target;
+            bestTypePriority = typePriority;
+            bestSourceRange = sourceRange;
+            bestCreepRange = creepRange;
+        }
+    }
+
+    return best;
+};
+
+const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite | null => {
     const cache = (creep.memory.cacheTarget ||= {}) as any;
     if (cache.targetId) {
         const cached = Game.getObjectById(cache.targetId as Id<ConstructionSite>) as ConstructionSite | null;
@@ -76,22 +280,12 @@ const findBuildTarget = (creep: Creep): ConstructionSite | null => {
         filter: (site) =>
             site.my && (site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER)
     });
-    if (sites.length <= 0) return null;
-
-    let target: ConstructionSite | null = null;
-    for (const type of BUILD_PRIORITY) {
-        const typed = sites.filter((s) => s.structureType === type);
-        if (typed.length <= 0) continue;
-        target = creep.pos.findClosestByRange(typed);
-        if (target) break;
-    }
-    if (!target) target = creep.pos.findClosestByRange(sites);
+    const target = pickPreferredTarget(creep, source, sites);
     if (target) cache.targetId = target.id;
     return target;
 };
 
-// 选择维修目标（道路/容器）
-const findRepairTarget = (creep: Creep): Structure | null => {
+const findRepairTarget = (creep: Creep, source: Source | null): Structure | null => {
     const cache = (creep.memory.cacheTarget ||= {}) as any;
     if (cache.repairId) {
         const cached = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
@@ -106,27 +300,37 @@ const findRepairTarget = (creep: Creep): Structure | null => {
     }
 
     const targets = creep.room.find(FIND_STRUCTURES, {
-        filter: (s) =>
-            (s.structureType === STRUCTURE_ROAD || s.structureType === STRUCTURE_CONTAINER) &&
-            s.hits < s.hitsMax * REPAIR_RATIO
+        filter: (structure) =>
+            (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) &&
+            structure.hits < structure.hitsMax * REPAIR_RATIO
     });
-    if (targets.length <= 0) return null;
-
-    const target = creep.pos.findClosestByRange(targets);
+    const target = pickPreferredTarget(creep, source, targets);
     if (target) cache.repairId = target.id;
     return target;
 };
 
-// 优先回收掉落能量，减少抢矿点
-const tryWithdrawEnergy = (creep: Creep): boolean => {
-    if (creep.collectDroppedResource(RESOURCE_ENERGY, ENERGY_DROP_MIN)) return true;
-    if (creep.collectFromTombstone(RESOURCE_ENERGY, ENERGY_DROP_MIN)) return true;
-    if (creep.collectFromRuin(RESOURCE_ENERGY)) return true;
-    if (creep.collectFromContainer(ENERGY_CONTAINER_MIN, RESOURCE_ENERGY, false)) return true;
-    return false;
+const findBlockingObstacle = (target: { pos: RoomPosition }): Structure | null => {
+    const structures = target.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+    return structures.find((structure) => {
+        if ('my' in structure && structure.my) return false;
+        if (typeof STRUCTURE_INVADER_CORE !== 'undefined' && structure.structureType === STRUCTURE_INVADER_CORE) return false;
+        if (structure.structureType === STRUCTURE_RAMPART) {
+            const rampart = structure as StructureRampart;
+            return !rampart.my && !rampart.isPublic;
+        }
+        if (typeof OBSTACLE_OBJECT_TYPES === 'undefined') return false;
+        return (OBSTACLE_OBJECT_TYPES as readonly StructureConstant[]).includes(structure.structureType);
+    }) || null;
 };
 
-// 采集阶段
+const findRepairableStructureUnderfoot = (creep: Creep): Structure | null => {
+    const structures = creep.pos.lookFor(LOOK_STRUCTURES) as Structure[];
+    return structures.find((structure) =>
+        (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) &&
+        structure.hits < structure.hitsMax
+    ) || null;
+};
+
 const runHarvestPhase = (creep: Creep): boolean => {
     if (!inTargetRoom(creep)) {
         moveToTargetRoom(creep);
@@ -134,87 +338,101 @@ const runHarvestPhase = (creep: Creep): boolean => {
     }
     creep.memory.dontPullMe = false;
 
-    if (tryWithdrawEnergy(creep)) return OUT_BUILD_SWITCH.TO_TARGET(creep);
-
-    const source = creep.pos.findClosestByRange(FIND_SOURCES_ACTIVE) || creep.pos.findClosestByRange(FIND_SOURCES);
-    if (source) {
-        const result = creep.harvest(source);
-        if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(source, {
-                visualizePathStyle: { stroke: '#ffaa00' },
-                maxRooms: 1,
-                range: 1,
-                plainCost: 2,
-                swampCost: 10
-            });
-        }
+    const source = getAssignedSource(creep);
+    if (!source) {
+        stepAsideFromRoad(creep);
+        return false;
     }
 
-    // 没有可拿资源时让路，避免外矿道路拥堵。
-    stepAsideFromRoad(creep);
+    if (creep.store.getUsedCapacity(RESOURCE_ENERGY) <= 0) creep.memory.startFetch = false;
+    if (avoidKeeper(creep, source)) return false;
+
+    if (!creep.memory.startFetch && creep.pos.getRangeTo(source) > SOURCE_FETCH_START_RANGE) {
+        moveToLocalTarget(creep, source, 1);
+        return false;
+    }
+
+    creep.memory.startFetch = true;
+    if (tryWithdrawEnergyNearSource(creep, source)) return OUT_BUILD_SWITCH.TO_TARGET(creep);
+
+    const result = creep.harvest(source);
+    if (result === ERR_NOT_IN_RANGE) {
+        moveToLocalTarget(creep, source, 1);
+    }
+    if (result !== OK && result !== ERR_NOT_IN_RANGE) {
+        stepAsideFromRoad(creep);
+    }
     return OUT_BUILD_SWITCH.TO_TARGET(creep);
 };
 
-// 建造/维修阶段
+const runRepairPhase = (creep: Creep, source: Source | null): boolean => {
+    if (!creep.memory.startWorking) {
+        if (!source) {
+            moveToTargetRoom(creep);
+            return false;
+        }
+        if (!creep.pos.inRangeTo(source, 1)) {
+            moveToLocalTarget(creep, source, 1);
+            return false;
+        }
+        creep.memory.startWorking = true;
+    }
+
+    if (creep.room.name === creep.memory.sourceRoom) {
+        creep.memory.startWorking = false;
+        creep.memory.startFetch = false;
+        return true;
+    }
+
+    const repairTarget = findRepairableStructureUnderfoot(creep);
+    if (repairTarget) {
+        creep.repair(repairTarget);
+        return OUT_BUILD_SWITCH.TO_SOURCE(creep);
+    }
+
+    moveToSourceRoom(creep);
+    return OUT_BUILD_SWITCH.TO_SOURCE(creep);
+};
+
 const runBuildPhase = (creep: Creep): boolean => {
+    const repairOnlyMode = isRepairOnlyMode(creep);
     if (!inTargetRoom(creep)) {
+        if (repairOnlyMode && creep.memory.startWorking) return runRepairPhase(creep, null);
         moveToTargetRoom(creep);
         return false;
     }
     creep.memory.dontPullMe = false;
 
+    const source = getAssignedSource(creep);
+    if (avoidKeeper(creep, source)) return false;
+    if (repairOnlyMode) return runRepairPhase(creep, source);
+
     if (creep.store.getFreeCapacity() > 0) {
         creep.collectDroppedResource(RESOURCE_ENERGY, ENERGY_DROP_MIN, 3);
     }
 
-    const buildTarget = findBuildTarget(creep);
+    const buildTarget = findBuildTarget(creep, source);
     if (buildTarget) {
+        const obstacle = findBlockingObstacle(buildTarget);
+        if (obstacle) {
+            if (!creep.pos.inRangeTo(obstacle, 1)) moveToLocalTarget(creep, obstacle, 1);
+            else creep.dismantle(obstacle);
+            return false;
+        }
+
         const result = creep.build(buildTarget);
         if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(buildTarget, {
-                visualizePathStyle: { stroke: '#ffaa00' },
-                maxRooms: 1,
-                range: 3,
-                plainCost: 2,
-                swampCost: 10
-            });
+            moveToLocalTarget(creep, buildTarget, 3);
         }
         return OUT_BUILD_SWITCH.TO_SOURCE(creep);
     }
 
-    const repairTarget = findRepairTarget(creep);
+    const repairTarget = findRepairTarget(creep, source);
     if (repairTarget) {
         const result = creep.repair(repairTarget);
         if (result === ERR_NOT_IN_RANGE) {
-            creep.moveTo(repairTarget, {
-                visualizePathStyle: { stroke: '#ffaa00' },
-                maxRooms: 1,
-                range: 3,
-                plainCost: 2,
-                swampCost: 10
-            });
+            moveToLocalTarget(creep, repairTarget, 3);
         }
-        return OUT_BUILD_SWITCH.TO_SOURCE(creep);
-    }
-
-    // 没有工地时把能量回灌，避免满能量长期占道。
-    const nearContainer = creep.pos.findInRange(FIND_STRUCTURES, 1, {
-        filter: (s: Structure) =>
-            s.structureType === STRUCTURE_CONTAINER &&
-            (s as StructureContainer).store.getFreeCapacity(RESOURCE_ENERGY) > 0
-    })[0] as StructureContainer | undefined;
-    if (nearContainer && creep.store[RESOURCE_ENERGY] > 0) {
-        creep.transfer(nearContainer, RESOURCE_ENERGY);
-        return OUT_BUILD_SWITCH.TO_SOURCE(creep);
-    }
-
-    const nearCarrier = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
-        filter: (c: Creep) =>
-            (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
-            c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-    })[0];
-    if (nearCarrier && creep.store[RESOURCE_ENERGY] > 0) {
-        creep.transfer(nearCarrier, RESOURCE_ENERGY);
         return OUT_BUILD_SWITCH.TO_SOURCE(creep);
     }
 
