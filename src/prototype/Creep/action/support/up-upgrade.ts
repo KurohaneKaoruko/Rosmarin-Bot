@@ -3,6 +3,11 @@ import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
+// 测试环境有时不会预置 Screeps 全局常量，这里保留一个最小兜底，
+// 避免模块在 import 阶段因为 `MOVE` 缺失直接抛错。
+const WORK_PART: BodyPartConstant = typeof WORK === 'undefined' ? 'work' : WORK;
+const MOVE_PART: BodyPartConstant = typeof MOVE === 'undefined' ? 'move' : MOVE;
+
 
 const upgrade = function (creep: Creep) {
     if (creep.room.level == 8) {
@@ -177,7 +182,7 @@ const onTarget = (creep: Creep): WorkEvent => {
 const onSource = (creep: Creep): WorkEvent => {
     if(!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
     if(!creep.memory.boosted) {
-        const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
+        const result = creep.goBoost({ [WORK_PART]: ['XGH2O', 'GH2O', 'GH'] });
         creep.memory.boosted = result === OK;
         if(result !== OK) return WORK_EVENTS.STAY;
     }
@@ -210,7 +215,7 @@ const upUpgradeWork = createWorkLayerRole({
 });
 
 const UpUpgradeFunction = createBoostedRole({
-    boost: { [WORK]: ['XGH2O'], [MOVE]: ['XZHO2'] },
+    boost: { [WORK_PART]: ['XGH2O'], [MOVE_PART]: ['XZHO2'] },
     run: upUpgradeWork.run
 })
 

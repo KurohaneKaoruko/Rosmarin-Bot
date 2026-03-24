@@ -34,22 +34,6 @@ type WorkLayerRoleDefinition = {
     reenter?: boolean;
 };
 
-type StrategyRoleDefinition<Ctx> = {
-    prepare?: (creep: Creep) => boolean;
-    createContext: (creep: Creep) => Ctx;
-    strategies: Array<{
-        canRun: (ctx: Ctx) => boolean;
-        run: (ctx: Ctx) => void;
-    }>;
-};
-
-type PipelineRoleDefinition<Ctx, Value> = {
-    prepare?: (creep: Creep) => boolean;
-    createContext: (creep: Creep) => Ctx;
-    initial: (ctx: Ctx) => Value;
-    steps: Array<(value: any, ctx: Ctx) => any>;
-};
-
 // 统一处理 prepare：
 // 准备未完成时直接返回，完成后同 tick 继续执行 run。
 const runPrepare = (creep: Creep, prepare?: (creep: Creep) => boolean) => {
@@ -114,31 +98,5 @@ export const createWorkLayerRole = (definition: WorkLayerRoleDefinition): CreepR
                 };
 
             runWorkLayer(creep, handlers, { reenter: definition.reenter });
-        }
-    });
-
-// 简单策略分发包装：
-// action 侧只给上下文构造和策略列表，框架负责按顺序挑第一个可执行策略。
-export const createStrategyRole = <Ctx>(definition: StrategyRoleDefinition<Ctx>): CreepRoleHandler =>
-    createCreepRole({
-        prepare: definition.prepare,
-        run(creep: Creep) {
-            const ctx = definition.createContext(creep);
-            const strategy = definition.strategies.find((candidate) => candidate.canRun(ctx));
-            strategy?.run(ctx);
-        }
-    });
-
-// 轻量管道包装：
-// action 侧只保留一串按顺序执行的转换步骤，不再直接依赖 Effect/pipeEffect。
-export const createPipelineRole = <Ctx, Value>(definition: PipelineRoleDefinition<Ctx, Value>): CreepRoleHandler =>
-    createCreepRole({
-        prepare: definition.prepare,
-        run(creep: Creep) {
-            const ctx = definition.createContext(creep);
-            let value: any = definition.initial(ctx);
-            for (const step of definition.steps) {
-                value = step(value, ctx);
-            }
         }
     });

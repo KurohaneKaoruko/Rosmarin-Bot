@@ -1,10 +1,3 @@
-import { createStrategyRole } from '@/framework/ai/creepRole';
-
-type TransportContext = {
-    creep: Creep;
-    hasMission: boolean;
-};
-
 // 兜底：没有任务时把身上资源送回中心建筑
 const runFallback = (creep: Creep) => {
     if (creep.store.getUsedCapacity() === 0) return;
@@ -133,28 +126,19 @@ const runMission = (creep: Creep) => {
 };
 
 // 中央搬运 creep：依赖任务系统在 storage/terminal 等建筑间搬运指定资源
-const Transport = createStrategyRole<TransportContext>({
-    createContext: (creep) => {
-        // 如果没有任务，则接取任务；如果即将死亡，则不再接新任务
+const Transport = {
+    run: function (creep: Creep) {
+        // 如果没有任务，则接取任务；如果即将死亡，则不再接新任务。
         if (!creep.memory.mission && creep.ticksToLive > 20) {
             creep.memory.mission = creep.room.getTransportMission(creep);
         }
 
-        return {
-            creep,
-            hasMission: !!creep.memory.mission && creep.ticksToLive > 20
-        };
-    },
-    strategies: [
-        {
-            canRun: (ctx) => ctx.hasMission,
-            run: (ctx) => runMission(ctx.creep)
-        },
-        {
-            canRun: () => true,
-            run: (ctx) => runFallback(ctx.creep)
+        if (creep.memory.mission && creep.ticksToLive > 20) {
+            runMission(creep);
+            return;
         }
-    ]
-});
+        runFallback(creep);
+    }
+};
 
 export default Transport;

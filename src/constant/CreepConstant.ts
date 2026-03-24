@@ -1,21 +1,7 @@
-// 角色执行框架常量：所有角色都走统一入口，
-// 这里只保留“当前角色采用哪种行为框架”的元信息。
-export const ROLE_EXECUTOR_FRAMEWORKS = {
-    LAYERED_FSM: 'layered-fsm',
-    BEHAVIOR_TREE: 'behavior-tree',
-    STRATEGY: 'strategy',
-    PIPELINE: 'pipeline',
-} as const;
-
-// 行为实现框架：用于声明角色当前使用的执行框架。
-export type RoleExecutorFramework =
-    (typeof ROLE_EXECUTOR_FRAMEWORKS)[keyof typeof ROLE_EXECUTOR_FRAMEWORKS];
-
-// 角色执行器绑定：集中声明统一入口 id 与框架类型。
+// 角色执行器绑定：只保留统一 handler id。
 // id 必须与 roleRegistry 中的键保持一致，避免分发时出现隐式映射。
 export type RoleExecutorBinding = {
     id: string;
-    framework: RoleExecutorFramework;
 };
 
 type RoleBoostConfig = {
@@ -33,12 +19,8 @@ export type RoleDefinition = {
 
 export type RoleConfig = Record<string, RoleDefinition>;
 
-// 统一执行器绑定：角色配置只描述“由谁执行”“采用什么框架”，
-// 实际调度统一在 roleRegistry 中完成。
-const bindExecutor = (id: string, framework: RoleExecutorFramework): RoleExecutorBinding => ({
-    id,
-    framework,
-});
+// 统一执行器绑定：角色配置只描述“由谁执行”，实际调度统一在 roleRegistry 中完成。
+const bindExecutor = (id: string): RoleExecutorBinding => ({ id });
 
 // 默认命名约定：role 名与 executor.id 保持一致。
 // 只有这里登记的角色允许偏离默认约定，用于兼容历史 handler 名称并集中记录例外。
@@ -51,18 +33,6 @@ export const ROLE_EXECUTOR_ID_OVERRIDES = {
 export const resolveRoleExecutorId = (role: string): string =>
     ROLE_EXECUTOR_ID_OVERRIDES[role as keyof typeof ROLE_EXECUTOR_ID_OVERRIDES] || role;
 
-const bindLayeredExecutor = (id: string): RoleExecutorBinding =>
-    bindExecutor(id, ROLE_EXECUTOR_FRAMEWORKS.LAYERED_FSM);
-
-const bindBehaviorTreeExecutor = (id: string): RoleExecutorBinding =>
-    bindExecutor(id, ROLE_EXECUTOR_FRAMEWORKS.BEHAVIOR_TREE);
-
-const bindStrategyExecutor = (id: string): RoleExecutorBinding =>
-    bindExecutor(id, ROLE_EXECUTOR_FRAMEWORKS.STRATEGY);
-
-const bindPipelineExecutor = (id: string): RoleExecutorBinding =>
-    bindExecutor(id, ROLE_EXECUTOR_FRAMEWORKS.PIPELINE);
-
 const defineRole = (role: RoleDefinition): RoleDefinition => role;
 
 export const RoleData: RoleConfig = {
@@ -71,49 +41,49 @@ export const RoleData: RoleConfig = {
         bodypart: [[WORK, 2], [MOVE, 2]],
         level: 3,
         code: 'H',
-        executor: bindLayeredExecutor('harvester'),
+        executor: bindExecutor('harvester'),
     }), // 采集
     carrier: defineRole({
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 3,
         code: 'C',
-        executor: bindLayeredExecutor('carrier'),
+        executor: bindExecutor('carrier'),
     }), // 通用搬运
     transport: defineRole({
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 2,
         code: 'T',
-        executor: bindStrategyExecutor('transport'),
+        executor: bindExecutor('transport'),
     }), // 资源搬运
     manager: defineRole({
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 1,
         code: 'M',
-        executor: bindStrategyExecutor('manager'),
+        executor: bindExecutor('manager'),
     }), // 中央搬运
     upgrader: defineRole({
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'U',
-        executor: bindLayeredExecutor('upgrader'),
+        executor: bindExecutor('upgrader'),
     }), // 升级
     worker: defineRole({
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'W',
-        executor: bindLayeredExecutor('worker'),
+        executor: bindExecutor('worker'),
     }), // 建造、维修、刷墙
     mineral: defineRole({
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 6,
         code: 'MR',
-        executor: bindLayeredExecutor('mineral'),
+        executor: bindExecutor('mineral'),
     }), // 矿工
     universal: defineRole({
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 0,
         code: 'UNIV',
-        executor: bindPipelineExecutor('universal'),
+        executor: bindExecutor('universal'),
     }), // 采集搬运通用机，处理停摆与新房起步
 
     /* 特殊用途 */
@@ -121,38 +91,38 @@ export const RoleData: RoleConfig = {
         bodypart: [[MOVE, 1]],
         level: 11,
         code: 'S',
-        executor: bindStrategyExecutor('scout'),
+        executor: bindExecutor('scout'),
     }),
     logistic: defineRole({
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 11,
         code: 'L',
-        executor: bindLayeredExecutor('logistic'),
+        executor: bindExecutor('logistic'),
     }), // 长途运输
     cleaner: defineRole({
         bodypart: [[WORK, 25], [MOVE, 25]],
         level: 11,
         code: 'CLE',
-        executor: bindStrategyExecutor('cleaner'),
+        executor: bindExecutor('cleaner'),
     }), // 清理者
     dismantle: defineRole({
         bodypart: [[WORK, 40], [MOVE, 10]],
         boostmap: { [WORK]: 'XZH2O', [MOVE]: 'XZHO2' },
         level: 11,
         code: 'DIS',
-        executor: bindStrategyExecutor('dismantle'),
+        executor: bindExecutor('dismantle'),
     }), // 拆除者
     'up-upgrade': defineRole({
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 11,
         code: 'UUP',
-        executor: bindLayeredExecutor('up-upgrade'),
+        executor: bindExecutor('up-upgrade'),
     }), // 加速升级
     'up-repair': defineRole({
         bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]],
         level: 11,
         code: 'URE',
-        executor: bindLayeredExecutor('up-repair'),
+        executor: bindExecutor('up-repair'),
     }), // 加速维修
 
     /* 占领房间 */
@@ -160,13 +130,13 @@ export const RoleData: RoleConfig = {
         bodypart: [[MOVE, 5], [CLAIM, 1]],
         level: 10,
         code: 'CL',
-        executor: bindBehaviorTreeExecutor('claimer'),
+        executor: bindExecutor('claimer'),
     }),
     'attack-claimer': defineRole({
         bodypart: [[MOVE, 16], [CLAIM, 16]],
         level: 10,
         code: 'ACL',
-        executor: bindBehaviorTreeExecutor('attack-claimer'),
+        executor: bindExecutor('attack-claimer'),
     }),
 
     /* 援建 */
@@ -174,19 +144,19 @@ export const RoleData: RoleConfig = {
         bodypart: [[WORK, 20], [CARRY, 5], [MOVE, 25]],
         level: 10,
         code: 'AIDB',
-        executor: bindLayeredExecutor('aid-build'),
+        executor: bindExecutor('aid-build'),
     }),
     'aid-carry': defineRole({
         bodypart: [[CARRY, 25], [MOVE, 25]],
         level: 10,
         code: 'AIDC',
-        executor: bindLayeredExecutor('aid-carry'),
+        executor: bindExecutor('aid-carry'),
     }),
     'aid-upgrade': defineRole({
         bodypart: [[WORK, 20], [CARRY, 5], [MOVE, 25]],
         level: 10,
         code: 'AIDU',
-        executor: bindLayeredExecutor('aid-upgrade'),
+        executor: bindExecutor('aid-upgrade'),
     }),
 
     /* 战斗相关 */
@@ -195,19 +165,19 @@ export const RoleData: RoleConfig = {
         bodypart: [[TOUGH, 10], [RANGED_ATTACK, 10], [MOVE, 10], [HEAL, 20]],
         level: 10,
         code: '1R',
-        executor: bindBehaviorTreeExecutor('one-ranged'),
+        executor: bindExecutor('one-ranged'),
     }),
     aio: defineRole({
         bodypart: [[RANGED_ATTACK, 13], [MOVE, 25], [HEAL, 12]],
         level: 10,
         code: 'AIO',
-        executor: bindBehaviorTreeExecutor('aio'),
+        executor: bindExecutor('aio'),
     }), // 进攻一体机
     saio: defineRole({
         bodypart: [[RANGED_ATTACK, 10], [MOVE, 25], [HEAL, 15]],
         level: 10,
         code: 'SAIO',
-        executor: bindBehaviorTreeExecutor('aio'),
+        executor: bindExecutor('aio'),
     }), // 支援一体机
 
     /* 二人队 */
@@ -216,21 +186,21 @@ export const RoleData: RoleConfig = {
         boostmap: { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' },
         level: 10,
         code: '2A',
-        executor: bindBehaviorTreeExecutor('double-attack'),
+        executor: bindExecutor('double-attack'),
     }),
     'double-dismantle': defineRole({
         bodypart: [[WORK, 8], [TOUGH, 12], [WORK, 20], [MOVE, 10]],
         boostmap: { [WORK]: 'XZH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' },
         level: 10,
         code: '2D',
-        executor: bindBehaviorTreeExecutor('double-dismantle'),
+        executor: bindExecutor('double-dismantle'),
     }),
     'double-heal': defineRole({
         bodypart: [[TOUGH, 12], [HEAL, 28], [MOVE, 10]],
         boostmap: { [TOUGH]: 'XGHO2', [HEAL]: 'XLHO2', [MOVE]: 'XZHO2' },
         level: 10,
         code: '2H',
-        executor: bindBehaviorTreeExecutor('double-heal'),
+        executor: bindExecutor('double-heal'),
     }),
 
     /* 四人队 */
@@ -246,28 +216,28 @@ export const RoleData: RoleConfig = {
         level: 8,
         code: 'DFA',
         must: true,
-        executor: bindBehaviorTreeExecutor('defend-attack'),
+        executor: bindExecutor('defend-attack'),
     }),
     'defend-ranged': defineRole({
         bodypart: [[RANGED_ATTACK, 40], [MOVE, 10]],
         level: 8,
         code: 'DFR',
         must: true,
-        executor: bindBehaviorTreeExecutor('defend-ranged'),
+        executor: bindExecutor('defend-ranged'),
     }),
     'defend-2attack': defineRole({
         bodypart: [[TOUGH, 5], [ATTACK, 35], [MOVE, 10]],
         level: 7,
         code: 'D2A',
         must: true,
-        executor: bindBehaviorTreeExecutor('defend-2attack'),
+        executor: bindExecutor('defend-2attack'),
     }),
     'defend-2heal': defineRole({
         bodypart: [[TOUGH, 10], [HEAL, 30], [MOVE, 10]],
         level: 7,
         code: 'D2H',
         must: true,
-        executor: bindBehaviorTreeExecutor('defend-2heal'),
+        executor: bindExecutor('defend-2heal'),
     }),
 
     /* 外矿相关 */
@@ -276,73 +246,73 @@ export const RoleData: RoleConfig = {
         level: 11,
         code: 'RSV',
         // reserver 角色使用 reserve 处理器，映射关系由 ROLE_EXECUTOR_ID_OVERRIDES 统一维护。
-        executor: bindLayeredExecutor(resolveRoleExecutorId('reserver')),
+        executor: bindExecutor(resolveRoleExecutorId('reserver')),
     }),
     'out-harvest': defineRole({
         bodypart: [],
         level: 12,
         code: 'OH',
-        executor: bindLayeredExecutor('out-harvest'),
+        executor: bindExecutor('out-harvest'),
     }),
     'out-car': defineRole({
         bodypart: [],
         level: 15,
         code: 'OC',
-        executor: bindStrategyExecutor('out-carry'),
+        executor: bindExecutor('out-carry'),
     }),
     'out-carry': defineRole({
         bodypart: [],
         level: 15,
         code: 'OC',
-        executor: bindStrategyExecutor('out-carry'),
+        executor: bindExecutor('out-carry'),
     }),
     'out-build': defineRole({
         bodypart: [],
         level: 12,
         code: 'OB',
-        executor: bindLayeredExecutor('out-build'),
+        executor: bindExecutor('out-build'),
     }),
     'out-defend': defineRole({
         bodypart: [],
         level: 8,
         code: 'OD',
-        executor: bindBehaviorTreeExecutor('out-defend'),
+        executor: bindExecutor('out-defend'),
     }),
     'out-2attack': defineRole({
         bodypart: [],
         level: 8,
         code: 'O2A',
-        executor: bindBehaviorTreeExecutor('out-2attack'),
+        executor: bindExecutor('out-2attack'),
     }),
     'out-2heal': defineRole({
         bodypart: [],
         level: 8,
         code: 'O2H',
-        executor: bindBehaviorTreeExecutor('out-2heal'),
+        executor: bindExecutor('out-2heal'),
     }),
     'out-invader': defineRole({
         bodypart: [],
         level: 10,
         code: 'OI',
-        executor: bindBehaviorTreeExecutor('out-invader'),
+        executor: bindExecutor('out-invader'),
     }),
     'out-attack': defineRole({
         bodypart: [[ATTACK, 19], [MOVE, 25], [HEAL, 6]],
         level: 9,
         code: 'OA',
-        executor: bindBehaviorTreeExecutor('out-attack'),
+        executor: bindExecutor('out-attack'),
     }),
     'out-ranged': defineRole({
         bodypart: [[RANGED_ATTACK, 15], [MOVE, 25], [HEAL, 10]],
         level: 9,
         code: 'OR',
-        executor: bindBehaviorTreeExecutor('out-ranged'),
+        executor: bindExecutor('out-ranged'),
     }),
     'out-mineral': defineRole({
         bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]],
         level: 12,
         code: 'OMR',
-        executor: bindLayeredExecutor('out-mineral'),
+        executor: bindExecutor('out-mineral'),
     }),
 
     /* 沉积物 */
@@ -350,31 +320,31 @@ export const RoleData: RoleConfig = {
         bodypart: [[WORK, 20], [ATTACK, 2], [CARRY, 6], [MOVE, 22]],
         level: 11,
         code: 'DH',
-        executor: bindLayeredExecutor('deposit-harvest'),
+        executor: bindExecutor('deposit-harvest'),
     }),
     'deposit-transfer': defineRole({
         bodypart: [[CARRY, 25], [MOVE, 25]],
         level: 11,
         code: 'DT',
-        executor: bindLayeredExecutor('deposit-transfer'),
+        executor: bindExecutor('deposit-transfer'),
     }),
     'deposit-attack': defineRole({
         bodypart: [[ATTACK, 25], [MOVE, 25]],
         level: 8,
         code: 'DPA',
-        executor: bindBehaviorTreeExecutor('deposit-attack'),
+        executor: bindExecutor('deposit-attack'),
     }),
     'deposit-heal': defineRole({
         bodypart: [[HEAL, 25], [MOVE, 25]],
         level: 8,
         code: 'DPH',
-        executor: bindBehaviorTreeExecutor('deposit-heal'),
+        executor: bindExecutor('deposit-heal'),
     }),
     'deposit-ranged': defineRole({
         bodypart: [[RANGED_ATTACK, 17], [MOVE, 25], [HEAL, 8]],
         level: 8,
         code: 'DPR',
-        executor: bindBehaviorTreeExecutor('deposit-ranged'),
+        executor: bindExecutor('deposit-ranged'),
     }),
 
     /* Power */
@@ -382,31 +352,31 @@ export const RoleData: RoleConfig = {
         bodypart: [[TOUGH, 5], [MOVE, 25], [ATTACK, 20]],
         level: 10,
         code: 'PA',
-        executor: bindBehaviorTreeExecutor('power-attack'),
+        executor: bindExecutor('power-attack'),
     }),
     'power-heal': defineRole({
         bodypart: [[MOVE, 25], [HEAL, 25]],
         level: 10,
         code: 'PH',
-        executor: bindBehaviorTreeExecutor('power-heal'),
+        executor: bindExecutor('power-heal'),
     }),
     'pc-heal': defineRole({
         bodypart: [[MOVE, 25], [HEAL, 25]],
         level: 10,
         code: 'PCH',
-        executor: bindBehaviorTreeExecutor('pc-heal'),
+        executor: bindExecutor('pc-heal'),
     }),
     'power-carry': defineRole({
         bodypart: [[MOVE, 25], [CARRY, 25]],
         level: 9,
         code: 'PC',
-        executor: bindLayeredExecutor('power-carry'),
+        executor: bindExecutor('power-carry'),
     }),
     'power-ranged': defineRole({
         bodypart: [[MOVE, 25], [RANGED_ATTACK, 17], [HEAL, 8]],
         level: 11,
         code: 'PR',
-        executor: bindBehaviorTreeExecutor('power-ranged'),
+        executor: bindExecutor('power-ranged'),
     }),
 };
 
@@ -684,3 +654,4 @@ export const RoleBodys = {
         }
     }
 }
+

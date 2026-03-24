@@ -4,6 +4,7 @@ import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 // ==============================
 //  Aid-Build 多层 FSM 状态常量
@@ -688,6 +689,9 @@ const selectAidBuildRepairTarget = (creep: Creep) => {
     return repairTargets.reduce((a, b) => a.hits < b.hits ? a : b);
 };
 
+// aid-build 的临时状态统一挂在 cache 根，避免文件内到处手写 `memory.cache ||= {}`。
+const getAidBuildCache = (creep: Creep) => ensureMemoryCache(creep.memory) as Record<string, any>;
+
 // 评估当前 tick 应执行的工程任务
 export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
     const controller = creep.room.controller;
@@ -695,18 +699,18 @@ export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
     const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
     const isJumpMode = !!creep.memory.jumpMode;
     const canUpgrade = canAidBuildUpgrade(creep.room);
-    const cache = creep.memory.cache || (creep.memory.cache = {});
-    const downgradeUpgradeLocked = !!(cache as any).downgradeUpgradeLatch;
+    const cache = getAidBuildCache(creep);
+    const downgradeUpgradeLocked = !!cache.downgradeUpgradeLatch;
 
     if (!owned && sites.length === 0) return AID_BUILD_JOB_STATES.STAGE;
     if (creep.store[RESOURCE_ENERGY] === 0) {
-        delete (cache as any).downgradeUpgradeLatch;
+        delete cache.downgradeUpgradeLatch;
         return AID_BUILD_JOB_STATES.STAGE;
     }
 
     if (!owned) return AID_BUILD_JOB_STATES.BUILD;
     if (shouldForceAidBuildDowngradeUpgrade(creep.room)) {
-        (cache as any).downgradeUpgradeLatch = true;
+        cache.downgradeUpgradeLatch = true;
         return AID_BUILD_JOB_STATES.UPGRADE;
     }
     if (downgradeUpgradeLocked) return AID_BUILD_JOB_STATES.UPGRADE;
@@ -905,22 +909,22 @@ const runAidBuildRepair = (creep: Creep) => {
 // 升级阶段：根据缓存站位保持输出
 export const runAidBuildUpgrade = (creep: Creep) => {
     releaseAidBuildSource(creep);
-    const cache = creep.memory.cache || (creep.memory.cache = {});
+    const cache = getAidBuildCache(creep);
     if (creep.store[RESOURCE_ENERGY] === 0) {
-        delete (cache as any).downgradeUpgradeLatch;
+        delete cache.downgradeUpgradeLatch;
         return;
     }
 
     const controller = creep.room.controller;
     if (!controller?.my) {
-        delete (cache as any).downgradeUpgradeLatch;
+        delete cache.downgradeUpgradeLatch;
         return;
     }
-    const downgradeUpgradeLocked = !!(cache as any).downgradeUpgradeLatch;
+    const downgradeUpgradeLocked = !!cache.downgradeUpgradeLatch;
     if (!canAidBuildUpgrade(creep.room) && !downgradeUpgradeLocked) return;
 
     if (creep.pos.inRangeTo(controller, 3)) {
-        (cache as any).upgradePos = getAidBuildPosKey(creep.pos);
+        cache.upgradePos = getAidBuildPosKey(creep.pos);
         creep.upgradeController(controller);
         syncAidBuildMoveWork(creep);
         return;
@@ -928,13 +932,13 @@ export const runAidBuildUpgrade = (creep: Creep) => {
 
     const upgradePos = getStableAidBuildUpgradeTargetPos(creep, controller);
     if (upgradePos) {
-        (cache as any).upgradePos = getAidBuildPosKey(upgradePos);
+        cache.upgradePos = getAidBuildPosKey(upgradePos);
         creep.moveTo(upgradePos, { range: 0, maxRooms: 1, reusePath: 0 });
         syncAidBuildMoveWork(creep);
         return;
     }
 
-    delete (cache as any).upgradePos;
+    delete cache.upgradePos;
     creep.moveTo(controller, { maxRooms: 1, range: 3 });
     syncAidBuildMoveWork(creep);
 };
@@ -1054,8 +1058,7 @@ const createAidBuildJobMachine = (creep: Creep) => {
                     onEnter: (ctx) => {
                         const target = selectAidBuildRepairTarget(ctx.creep);
                         if (target) {
-                            if (!ctx.creep.memory.cache) ctx.creep.memory.cache = {};
-                            ctx.creep.memory.cache.repairTarget = target.id;
+                            getAidBuildCache(ctx.creep).repairTarget = target.id;
                         }
                     },
                     onTick: (ctx) => {

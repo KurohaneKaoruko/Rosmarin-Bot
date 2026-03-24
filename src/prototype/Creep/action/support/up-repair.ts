@@ -4,10 +4,15 @@ import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+
+const getUpRepairTargetCache = (creep: Creep): Record<string, any> => {
+    const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
+    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as Record<string, any>;
+};
 
 export const syncUpRepairMoveWork = (creep: Creep) => {
-    const targetId = getMemoryCacheSection<Record<string, any>>(creep.memory, 'target')?.targetId as Id<StructureRampart | StructureWall> | undefined;
+    const targetId = (ensureMemoryCache(creep.memory).target as Record<string, any> | undefined)?.targetId as Id<StructureRampart | StructureWall> | undefined;
     if (!targetId) {
         writeMoveWorkTileCandidates(creep, []);
         return;
@@ -18,7 +23,7 @@ export const syncUpRepairMoveWork = (creep: Creep) => {
 };
 
 const RepairWork = function (creep: Creep) {
-    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
+    const cache = getUpRepairTargetCache(creep);
     let target = Game.getObjectById(cache.targetId) as StructureRampart | StructureWall | null;
 
     if (!target || target.hits == target.hitsMax) {

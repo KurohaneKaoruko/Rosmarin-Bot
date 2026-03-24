@@ -1,5 +1,5 @@
 import { CREEP_TICK_ACTION, hasCreepTickAction, markCreepTickAction } from './tickActionFunction';
-import { ensureMemoryCache, ensureMemoryCacheSection, replaceMemoryCacheSection } from './cache';
+import { ensureMemoryCache } from './cacheFunction';
 
 const OUT_CARRY_RELAY_EMPTY_RATIO = 0.2;
 // 接力后是否值得“立刻返程”，统一按 out-carry 的半仓滞回判断。
@@ -71,6 +71,11 @@ const ensureCarryCache = (creep: Creep): CarryCache => {
     return ensureMemoryCache(creep.memory) as CarryCache;
 };
 
+const ensureCarrySectionCache = <T extends Record<string, any>>(creep: Creep, key: 'source' | 'target'): T => {
+    const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
+    return (cache[key] && typeof cache[key] === 'object' ? cache[key] : (cache[key] = {})) as T;
+};
+
 /**
  * 确保并返回外矿搬运「取货态」缓存分区。
  *
@@ -78,7 +83,7 @@ const ensureCarryCache = (creep: Creep): CarryCache => {
  * @returns 可读写的 source 缓存对象。
  */
 const ensureCarrySourceCache = (creep: Creep): CarrySourceCache => {
-    return ensureMemoryCacheSection<CarrySourceCache>(creep.memory, 'source');
+    return ensureCarrySectionCache<CarrySourceCache>(creep, 'source');
 };
 
 /**
@@ -88,7 +93,7 @@ const ensureCarrySourceCache = (creep: Creep): CarrySourceCache => {
  * @returns 可读写的 target 缓存对象。
  */
 const ensureCarryTargetCache = (creep: Creep): CarryTargetCache => {
-    return ensureMemoryCacheSection<CarryTargetCache>(creep.memory, 'target');
+    return ensureCarrySectionCache<CarryTargetCache>(creep, 'target');
 };
 
 const cloneRelayMemoryBlock = (block: RelayMemoryBlock | undefined): RelayMemoryBlock | undefined => {
@@ -106,7 +111,7 @@ const replaceRelayMemoryBlock = (
             creep.memory._moveToRoomState = block;
             return;
         }
-        replaceMemoryCacheSection(creep.memory, key, block);
+        ensureMemoryCache(creep.memory)[key] = block;
         return;
     }
 
@@ -115,7 +120,7 @@ const replaceRelayMemoryBlock = (
         return;
     }
 
-    replaceMemoryCacheSection(creep.memory, key, undefined);
+    delete ensureMemoryCache(creep.memory)[key];
 };
 
 /**

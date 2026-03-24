@@ -4,7 +4,7 @@ import { getRoomData } from '@/shared/memory';
 import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const getWorkTargetCache = (() => {
     const root: Record<string, { tick: number; [key: string]: any }> = {};
@@ -15,7 +15,8 @@ const getWorkTargetCache = (() => {
 })();
 
 const getCache = (creep: Creep) => {
-    return ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
+    const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
+    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as Record<string, any>;
 }
 
 const resetCacheIfRoomChanged = (creep: Creep, cache: any) => {

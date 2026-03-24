@@ -1,5 +1,5 @@
 import { getRoleHandler } from './action';
-import { ensureMemoryCache } from './function/cache';
+import { ensureMemoryCache } from './function/cacheFunction';
 import { RoleData } from '@/constant/CreepConstant';
 
 const creepExecuteErrorTickCache: Record<string, number> = {};
@@ -51,7 +51,7 @@ export default class CreepExecute extends Creep {
         const handler = getRoleHandler(executor.id, (missingId) => {
             reportExecuteIssue(
                 `missing-handler:${role}:${missingId}`,
-                `[CreepExecute] 角色 ${role} (框架:${executor.framework}) 绑定的统一处理器 ${missingId} 不存在，请检查 RoleData.executor.id 与 roleRegistry 是否一致。`
+                `[CreepExecute] 角色 ${role} 绑定的统一处理器 ${missingId} 不存在，请检查 RoleData.executor.id 与 roleRegistry 是否一致。`
             );
         });
         if (!handler) return;

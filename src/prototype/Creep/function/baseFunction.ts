@@ -1,6 +1,7 @@
 /**
  * 一些基础的功能
  */
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { inWhitelist } from '@/shared/whitelist';
 
 type TakeTargetType = 'dropped' | 'structure' | 'ruin';
@@ -85,7 +86,7 @@ export default class BaseFunction extends Creep {
      * 获取能量
      */
     TakeEnergy(pickup: boolean = true) {   // worker、upgrader 的能量获取
-        const cache = (this.memory.cache || (this.memory.cache = {} as any)) as any;
+        const cache = ensureMemoryCache(this.memory) as any;
         const clearBoundSource = () => {
             delete this.memory.targetSourceId;
         };

@@ -1,6 +1,6 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { createPipelineRole } from '@/framework/ai/creepRole';
-import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { createCreepRole } from '@/framework/ai/creepRole';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
 
@@ -10,6 +10,11 @@ type UniversalTargetCache = {
     targetStall?: number;
     lastTargetId?: string;
     lastPosKey?: string;
+};
+
+const getUniversalTargetCache = (creep: Creep): UniversalTargetCache => {
+    const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
+    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as UniversalTargetCache;
 };
 
 const isUrgentRefill = (room: Room) => room.CheckSpawnAndTower();
@@ -157,10 +162,8 @@ const resolveTransferTarget = (creep: Creep, cache: UniversalTargetCache) => {
     return { target: picked.target, kind: picked.kind };
 };
 
-const doWork = function (creep: Creep) {
-    const cache = ensureMemoryCacheSection<UniversalTargetCache>(creep.memory, 'target');
-    const urgent = isUrgentRefill(creep.room);
-    const forceUpgrade = shouldForceUpgrade(creep.room);
+const runWorkTasks = (creep: Creep, urgent: boolean, forceUpgrade: boolean) => {
+    const cache = getUniversalTargetCache(creep);
 
     if (forceUpgrade) {
         clearTargetCache(cache);
@@ -215,100 +218,46 @@ const doWork = function (creep: Creep) {
 
     // 无其他更高优先级工作时，进入控制器升级流程并顺带维护本房签名。
     creep.runControllerUpgrade({ pickupDropped: false });
-}
-
-// 管道上下文：仅传递 creep 本体
-type UniversalContext = { creep: Creep };
-
-type UniversalSnapshot = {
-    creep: Creep;
-    used: number;
-    free: number;
-    cap: number;
-    urgentRefill: boolean;
-    forceUpgrade: boolean;
 };
 
-type UniversalPayload = UniversalSnapshot & {
-    minWorkPayload: number;
-};
-
-type UniversalDecision = UniversalPayload & {
-    mode: 'gather' | 'work';
-};
-
-type UniversalPlan = UniversalDecision & {
-    shouldClearSource: boolean;
-};
-
-// 纯计算：快照当前能量状态
-const snapshotEnergy = (ctx: UniversalContext): UniversalSnapshot => {
-    const { creep } = ctx;
-    return {
-        creep,
-        used: creep.store.getUsedCapacity(),
-        free: creep.store.getFreeCapacity(),
-        cap: creep.store.getCapacity(),
-        urgentRefill: isUrgentRefill(creep.room),
-        forceUpgrade: shouldForceUpgrade(creep.room)
-    };
-};
-
-// 纯计算：计算进入工作态所需的最小载荷阈值
-const attachMinWorkPayload = (snapshot: UniversalSnapshot): UniversalPayload => {
-    const { cap, urgentRefill, forceUpgrade } = snapshot;
-    const minWorkPayload = forceUpgrade
+const getMinWorkPayload = (cap: number, urgent: boolean, forceUpgrade: boolean) => {
+    return forceUpgrade
         ? 1
-        : urgentRefill
+        : urgent
             ? Math.min(cap, Math.max(50, Math.floor(cap * 0.5)))
             : cap;
-    return { ...snapshot, minWorkPayload };
 };
 
-// 纯计算：决定进入采集态还是工作态
-const decideMode = (payload: UniversalPayload): UniversalDecision => {
-    const { used, free, minWorkPayload } = payload;
-    const shouldGather = used === 0 || (free > 0 && used < minWorkPayload);
-    return { ...payload, mode: shouldGather ? 'gather' : 'work' };
+const shouldGatherBeforeWork = (creep: Creep, urgent: boolean, forceUpgrade: boolean) => {
+    const used = creep.store.getUsedCapacity();
+    const free = creep.store.getFreeCapacity();
+    const cap = creep.store.getCapacity();
+    const minWorkPayload = getMinWorkPayload(cap, urgent, forceUpgrade);
+    return used === 0 || (free > 0 && used < minWorkPayload);
 };
 
-// 纯计算：补齐执行标记
-const finalizePlan = (decision: UniversalDecision): UniversalPlan => ({
-    ...decision,
-    shouldClearSource: decision.mode === 'work'
-});
-
-// 最后一步统一落副作用：
-// 前面几步只做计算，这里才真正执行移动/采集/建造。
-const executePlan = (plan: UniversalPlan) => {
-    const { creep } = plan;
-
-    if (!creep.moveHomeRoom()) return plan;
-    if (creep.handleRoomEdge()) return plan;
+// 通用机不再走“管道框架”，直接按顺序执行 Screeps 场景所需的判断。
+const runUniversal = (creep: Creep) => {
+    if (!creep.moveHomeRoom()) return;
+    if (creep.handleRoomEdge()) return;
 
     delete creep.memory.working;
+    const urgent = isUrgentRefill(creep.room);
+    const forceUpgrade = shouldForceUpgrade(creep.room);
 
-    if (plan.mode === 'gather') {
+    if (shouldGatherBeforeWork(creep, urgent, forceUpgrade)) {
         getEnergy(creep);
-        return plan;
+        return;
     }
 
-    if (plan.shouldClearSource && creep.memory.targetSourceId) {
+    if (creep.memory.targetSourceId) {
         delete creep.memory.targetSourceId;
     }
-    doWork(creep);
-    return plan;
+    runWorkTasks(creep, urgent, forceUpgrade);
 };
 
-const UniversalFunction = createPipelineRole<UniversalContext, UniversalSnapshot>({
-    createContext: (creep) => ({ creep }),
-    initial: snapshotEnergy,
-    steps: [
-        (snapshot) => attachMinWorkPayload(snapshot),
-        (payload) => decideMode(payload),
-        (decision) => finalizePlan(decision),
-        (plan) => executePlan(plan)
-    ]
+const UniversalFunction = createCreepRole({
+    run: runUniversal
 });
 
 export default UniversalFunction;

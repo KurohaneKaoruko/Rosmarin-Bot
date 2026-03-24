@@ -1,4 +1,3 @@
-import { createStrategyRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
 type LinkPlan =
@@ -10,11 +9,6 @@ type ManagerPlan = {
     linkPlan: LinkPlan | null;
     missionTask: Task | null;
     depositTarget: { target: AnyStoreStructure | null; resourceType: ResourceConstant } | null;
-};
-
-type ManagerContext = {
-    creep: Creep;
-    plan: ManagerPlan;
 };
 
 const getManagerLockCenter = (room: Room): RoomPosition | null => {
@@ -219,48 +213,43 @@ function buildManagerPlan(creep: Creep): ManagerPlan {
     return { linkPlan, missionTask, depositTarget };
 }
 
-const runDepositPlan = (ctx: ManagerContext) => {
-    const plan = ctx.plan.depositTarget;
+const runDepositPlan = (creep: Creep, plan: ManagerPlan['depositTarget']) => {
     if (!plan) return;
     if (plan.target) {
-        ctx.creep.goTransfer(plan.target, plan.resourceType);
+        creep.goTransfer(plan.target, plan.resourceType);
         return;
     }
-    ctx.creep.drop(plan.resourceType);
+    creep.drop(plan.resourceType);
 };
 
-const runIdle = (ctx: ManagerContext) => {
-    const pos = ctx.creep.room.getCenter();
-    if (!ctx.creep.pos.isEqualTo(pos)) {
-        ctx.creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
+const runIdle = (creep: Creep) => {
+    const pos = creep.room.getCenter();
+    if (!creep.pos.isEqualTo(pos)) {
+        creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
     }
 };
 
-const ManagerAction = createStrategyRole<ManagerContext>({
-    createContext: (creep) => {
+const ManagerAction = {
+    run: function (creep: Creep) {
         const centerPos = getManagerLockCenter(creep.room);
         creep.memory.dontPullMe = !!centerPos && creep.pos.isEqualTo(centerPos);
         syncManagerMoveWork(creep, centerPos);
-        return { creep, plan: buildManagerPlan(creep) };
-    },
-    strategies: [
-        {
-            canRun: (ctx) => !!ctx.plan.linkPlan,
-            run: (ctx) => executeLinkPlan(ctx.creep, ctx.plan.linkPlan!)
-        },
-        {
-            canRun: (ctx) => !!ctx.plan.missionTask,
-            run: (ctx) => executeManagerMission(ctx.creep, ctx.plan.missionTask!)
-        },
-        {
-            canRun: (ctx) => !!ctx.plan.depositTarget,
-            run: runDepositPlan
-        },
-        {
-            canRun: () => true,
-            run: runIdle
+        const plan = buildManagerPlan(creep);
+
+        if (plan.linkPlan) {
+            executeLinkPlan(creep, plan.linkPlan);
+            return;
         }
-    ]
-});
+        if (plan.missionTask) {
+            executeManagerMission(creep, plan.missionTask);
+            return;
+        }
+        if (plan.depositTarget) {
+            runDepositPlan(creep, plan.depositTarget);
+            return;
+        }
+        runIdle(creep);
+    }
+};
 
 export default ManagerAction;

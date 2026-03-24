@@ -4,7 +4,7 @@ import { RoadBuilder, RoadMemory, RoadVisual } from '@/features/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/shared/memory';
-import { getMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 // 目标房间列表的类型：普通外矿（能量）与中心房（SK/中心区）外矿。
 type OutMineTargetListKey = 'energy' | 'centerRoom';
@@ -919,7 +919,7 @@ const isExternalMineLikelyCollecting = (creep: Creep): boolean => {
 };
 
 const getExternalMineAssignedSourceKeyFromCarry = (creep: Creep): string | null => {
-    const sourceCache = getMemoryCacheSection<Record<string, any>>(creep.memory, 'source');
+    const sourceCache = ensureMemoryCache(creep.memory).source as Record<string, any> | undefined;
     const assignedSourceKey = sourceCache?.assignedSourceKey;
     if (typeof assignedSourceKey === 'string' && assignedSourceKey) return assignedSourceKey;
 

@@ -1,5 +1,3 @@
-import { createStrategyRole } from '@/framework/ai/creepRole';
-
 type DismantleMode = 'clean' | 'route';
 
 type DismantleMemory = CreepMemory & {
@@ -15,12 +13,6 @@ type DismantleMemory = CreepMemory & {
     boosted?: boolean;
     boostRetryAt?: number;
     boostmap?: any;
-};
-
-type DismantleContext = {
-    creep: Creep;
-    mem: DismantleMemory;
-    mode: DismantleMode;
 };
 
 const isEdge = (pos: RoomPosition) => pos.x === 0 || pos.x === 49 || pos.y === 0 || pos.y === 49;
@@ -244,27 +236,12 @@ const resolveTargetAndDismantle = (creep: Creep, mem: DismantleMemory) => {
     }
 };
 
-const dismantleModeRunner = createStrategyRole<DismantleContext>({
-    createContext: (creep) => {
-        const mem = creep.memory as DismantleMemory;
-        return { creep, mem, mode: getMode(creep, mem) };
-    },
-    strategies: [
-        {
-            canRun: (ctx) => ctx.mode === 'route',
-            run: (ctx) => {
-                updateRouteTarget(ctx.creep, ctx.mem);
-                resolveTargetAndDismantle(ctx.creep, ctx.mem);
-            }
-        },
-        {
-            canRun: () => true,
-            run: (ctx) => {
-                resolveTargetAndDismantle(ctx.creep, ctx.mem);
-            }
-        }
-    ]
-});
+const runDismantleMode = (creep: Creep, mem: DismantleMemory, mode: DismantleMode) => {
+    if (mode === 'route') {
+        updateRouteTarget(creep, mem);
+    }
+    resolveTargetAndDismantle(creep, mem);
+};
 
 const dismantle = {
     run: function (creep: Creep) {
@@ -279,7 +256,7 @@ const dismantle = {
 
         const mode = getMode(creep, mem);
         if (!ensureBoostIfNeeded(creep, mem, mode)) return;
-        dismantleModeRunner.run(creep);
+        runDismantleMode(creep, mem, mode);
     }
 };
 

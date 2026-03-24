@@ -1,4 +1,3 @@
-import { createStrategyRole } from '@/framework/ai/creepRole';
 import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/features/externalMine';
 import { RoadMemory } from '@/features/externalRoad';
 import {
@@ -8,7 +7,7 @@ import {
     tryOutCarryRelayHandoff,
     updateOutCarryMoveTrace
 } from '@/prototype/Creep/function/relayFunction';
-import { ensureMemoryCache, ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
@@ -17,11 +16,16 @@ const routeExitCache: Record<string, { tick: number; exit: number | null }> = {}
 const getOutCarryCache = (creep: Creep): Record<string, any> =>
     ensureMemoryCache(creep.memory) as Record<string, any>;
 
+const getOutCarrySectionCache = (creep: Creep, key: 'source' | 'target'): Record<string, any> => {
+    const cache = getOutCarryCache(creep);
+    return (cache[key] && typeof cache[key] === 'object' ? cache[key] : (cache[key] = {})) as Record<string, any>;
+};
+
 const getOutCarrySourceCache = (creep: Creep): Record<string, any> =>
-    ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'source');
+    getOutCarrySectionCache(creep, 'source');
 
 const getOutCarryTargetCache = (creep: Creep): Record<string, any> =>
-    ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
+    getOutCarrySectionCache(creep, 'target');
 
 // 策略 ID：集中声明，避免散落字符串
 const OUT_CARRY_STRATEGIES = {
@@ -190,11 +194,6 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
 
 
 type OutCarryMode = typeof OUT_CARRY_STRATEGIES[keyof typeof OUT_CARRY_STRATEGIES];
-
-type OutCarryContext = {
-    creep: Creep;
-    mode: OutCarryMode;
-};
 
 type OutCarryAction = {
     run: (creep: Creep) => void;
@@ -393,7 +392,7 @@ const outCarry: OutCarryAction = {
             if (other.memory.sourceRoom !== sourceRoomName) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
             if (!this.isLikelyCollecting(other)) continue;
-            const targetId = getMemoryCacheSection<Record<string, any>>(other.memory, 'source')?.targetId;
+            const targetId = (ensureMemoryCache(other.memory).source as Record<string, any> | undefined)?.targetId;
             if (!targetId) continue;
             reservedByTarget[targetId] = (reservedByTarget[targetId] || 0) + other.store.getFreeCapacity();
         }
@@ -815,7 +814,7 @@ const outCarry: OutCarryAction = {
         }
         cache.outCarryMode = mode;
 
-        outCarryModeRunner.run(creep);
+        runOutCarryMode(creep, mode);
     },
 };
 
@@ -938,27 +937,13 @@ const runCollectMode = (creep: Creep) => {
     creep.memory.dontPullMe = false;
 };
 
-const outCarryModeRunner = createStrategyRole<OutCarryContext>({
-    createContext: (creep) => {
-        const cache = getOutCarryCache(creep);
-        return {
-            creep,
-            mode: cache.outCarryMode as OutCarryMode
-        };
-    },
-    strategies: [
-        {
-            canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.COLLECT,
-            run: (ctx) => runCollectMode(ctx.creep)
-        },
-        {
-            canRun: () => true,
-            run: (ctx) => {
-                outCarry.carry(ctx.creep);
-                ctx.creep.memory.dontPullMe = false;
-            }
-        }
-    ]
-});
+const runOutCarryMode = (creep: Creep, mode: OutCarryMode) => {
+    if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+        runCollectMode(creep);
+        return;
+    }
+    outCarry.carry(creep);
+    creep.memory.dontPullMe = false;
+};
 
 export default outCarry;

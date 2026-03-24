@@ -2,7 +2,7 @@ import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { ensureMemoryCache, ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 // 迁移条件集中声明：采集满 -> 转交付，背包空 -> 转采集
 const OUT_HARVEST_SWITCH = {
@@ -18,6 +18,11 @@ const shouldCarrierReturnAfterDirectTransfer = (carrier: Creep) => {
     return free <= Math.ceil(cap * OUT_CARRY_DIRECT_TRANSFER_RETURN_FREE_RATIO);
 };
 
+const getOutHarvestSourceCache = (creep: Creep): Record<string, any> => {
+    const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
+    return (cache.source && typeof cache.source === 'object' ? cache.source : (cache.source = {})) as Record<string, any>;
+};
+
 // 尝试把能量就近交给 out-carry，避免卡在容器满溢上
 const transferToNearbyCarrier = (creep: Creep): boolean => {
     const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
@@ -31,7 +36,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     if (!nearbyCarrier) return false;
 
     if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
-        const sourceCache = ensureMemoryCacheSection<Record<string, any>>(nearbyCarrier.memory, 'source');
+        const sourceCache = getOutHarvestSourceCache(nearbyCarrier);
         const cache = ensureMemoryCache(nearbyCarrier.memory) as Record<string, any>;
         delete sourceCache.targetId;
         delete sourceCache.targetType;

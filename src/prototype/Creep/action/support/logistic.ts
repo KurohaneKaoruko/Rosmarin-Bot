@@ -1,6 +1,6 @@
 import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
+import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 /**
  * 后勤角色在「取货态」下的目标缓存。
@@ -22,6 +22,11 @@ type LogisticMemory = CreepMemory & {
     sourceRoom?: string;
     targetRoom?: string;
     idleUntil?: number;
+};
+
+const getLogisticSourceCache = (memory: LogisticMemory): LogisticCache => {
+    const cache = ensureMemoryCache(memory) as Record<string, any>;
+    return (cache.source && typeof cache.source === 'object' ? cache.source : (cache.source = {})) as LogisticCache;
 };
 
 /**
@@ -82,7 +87,7 @@ function withdraw(creep: Creep) {
     if (mem.idleUntil && Game.time < mem.idleUntil) return;
 
     const room = creep.room;
-    const cache = ensureMemoryCacheSection<LogisticCache>(mem, 'source');
+    const cache = getLogisticSourceCache(mem);
     let target = cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
     let resType = cache.resType;
     let actionType = cache.actionType;
