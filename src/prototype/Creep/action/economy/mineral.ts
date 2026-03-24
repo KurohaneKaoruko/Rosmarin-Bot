@@ -1,5 +1,15 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+
+export const syncMineralMoveWork = (creep: Creep) => {
+    const mineral = creep.room.mineral || creep.room.find(FIND_MINERALS)[0];
+    if (!creep.memory.working && mineral) {
+        writeMoveWorkTileCandidates(creep, [{ pos: mineral.pos, range: 1 }]);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
+};
 
 const onSource = (creep: Creep): WorkEvent => {
     const mineral = creep.room.mineral;
@@ -10,12 +20,16 @@ const onSource = (creep: Creep): WorkEvent => {
     // 检查矿物点是否有提取器
     if (!creep.room.extractor) {
         creep.say('无提取器');
+        syncMineralMoveWork(creep);
         return WORK_EVENTS.STAY;
     }
 
     // 移动到矿物存储桶
     const mineralContainer = creep.room.container.find(c => c.pos.inRangeTo(creep.room.mineral, 1)) || null;
-    if (!mineralContainer) return WORK_EVENTS.STAY;
+    if (!mineralContainer) {
+        syncMineralMoveWork(creep);
+        return WORK_EVENTS.STAY;
+    }
     if (!creep.pos.isEqualTo(mineralContainer)) {
         creep.moveTo(mineralContainer, { maxRooms: 1, range: 0 });
     } else {
@@ -33,6 +47,7 @@ const onSource = (creep: Creep): WorkEvent => {
     }
 
     const full = creep.store.getFreeCapacity() === 0 && creep.store.getUsedCapacity() > 0;
+    if (!full) syncMineralMoveWork(creep);
     return full ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
 };
 

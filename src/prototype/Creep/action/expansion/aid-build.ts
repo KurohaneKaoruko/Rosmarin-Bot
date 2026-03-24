@@ -1,5 +1,6 @@
 
 import { parseShardRoomName } from '@/shared/shardRoom';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
@@ -150,6 +151,11 @@ const isAidBuildFlowState = (state: unknown): state is AidBuildFlowState => {
 const isAidBuildJobState = (state: unknown): state is AidBuildJobState => {
     // 防御非法 memory 注入，确保只接受 job 层声明过的状态值
     return typeof state === 'string' && Object.values(AID_BUILD_JOB_STATES).includes(state as AidBuildJobState);
+};
+
+const getAidBuildJobState = (creep: Creep): AidBuildJobState => {
+    const rawJobState = creep.memory.fsm?.[AID_BUILD_LAYERS.JOB];
+    return isAidBuildJobState(rawJobState) ? rawJobState : AID_BUILD_JOB_STATES.STAGE;
 };
 
 const AID_BUILD_WAITABLE_STRUCTURES = new Set<StructureConstant>([
@@ -421,6 +427,32 @@ const parseAidBuildPosKey = (key?: string): RoomPosition | null => {
     const y = Number(yRaw);
     if (!Number.isInteger(x) || !Number.isInteger(y) || !roomName) return null;
     return new RoomPosition(x, y, roomName);
+};
+
+const resolveAidBuildRepairTargetPos = (creep: Creep): RoomPosition | null => {
+    const repairTargetId = (creep.memory.cache as any)?.repairTarget as Id<Structure> | undefined;
+    if (!repairTargetId) return null;
+    const repairTarget = Game.getObjectById(repairTargetId) as Structure | null;
+    return repairTarget?.pos || null;
+};
+
+export const syncAidBuildMoveWork = (creep: Creep) => {
+    const candidates = [];
+    const repairTargetPos = resolveAidBuildRepairTargetPos(creep);
+    if (repairTargetPos) {
+        candidates.push({ pos: repairTargetPos, range: 3 });
+    }
+
+    const upgradePos = parseAidBuildPosKey((creep.memory.cache as any)?.upgradePos);
+    if (upgradePos) {
+        candidates.push({ pos: upgradePos, range: 1 });
+    }
+
+    if (creep.room.controller?.my && getAidBuildJobState(creep) === AID_BUILD_JOB_STATES.UPGRADE) {
+        candidates.push({ pos: creep.room.controller.pos, range: 3 });
+    }
+
+    writeMoveWorkTileCandidates(creep, candidates);
 };
 
 const isBlockingAidBuildWaitPos = (pos: RoomPosition): boolean => {
@@ -858,6 +890,7 @@ const runAidBuildRepair = (creep: Creep) => {
                 return;
             }
             creep.goRepair(repairTarget);
+            syncAidBuildMoveWork(creep);
             return;
         }
     }
@@ -866,6 +899,7 @@ const runAidBuildRepair = (creep: Creep) => {
     creep.findAndRepair({
         maxHitsRatio: 0.8
     });
+    syncAidBuildMoveWork(creep);
 };
 
 // 升级阶段：根据缓存站位保持输出
@@ -888,6 +922,7 @@ export const runAidBuildUpgrade = (creep: Creep) => {
     if (creep.pos.inRangeTo(controller, 3)) {
         (cache as any).upgradePos = getAidBuildPosKey(creep.pos);
         creep.upgradeController(controller);
+        syncAidBuildMoveWork(creep);
         return;
     }
 
@@ -895,11 +930,13 @@ export const runAidBuildUpgrade = (creep: Creep) => {
     if (upgradePos) {
         (cache as any).upgradePos = getAidBuildPosKey(upgradePos);
         creep.moveTo(upgradePos, { range: 0, maxRooms: 1, reusePath: 0 });
+        syncAidBuildMoveWork(creep);
         return;
     }
 
     delete (cache as any).upgradePos;
     creep.moveTo(controller, { maxRooms: 1, range: 3 });
+    syncAidBuildMoveWork(creep);
 };
 
 // stage 阶段：集中等待与能量暂存（不再负责采集）

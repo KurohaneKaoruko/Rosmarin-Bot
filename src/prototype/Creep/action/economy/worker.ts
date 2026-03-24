@@ -2,6 +2,7 @@ import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const getWorkTargetCache = (() => {
@@ -69,7 +70,12 @@ const getBuildSitePriority = (room: Room, site: ConstructionSite) => {
     return level * 100 + remainingBucket;
 }
 
-const RepairRampart = function (creep: Creep) {
+const pushWorkerCandidate = (candidates: MoveWorkTileCandidate[], pos: RoomPosition | null | undefined, range = 3) => {
+    if (!pos) return;
+    candidates.push({ pos, range });
+};
+
+const RepairRampart = function (creep: Creep, candidates: MoveWorkTileCandidate[]) {
     const cache = getCache(creep)
     if (cache.buildRampartId) {
         const rampart = Game.getObjectById(cache.buildRampartId) as StructureRampart;
@@ -77,6 +83,7 @@ const RepairRampart = function (creep: Creep) {
             delete cache.buildRampartId;
             return false;
         } else {
+            pushWorkerCandidate(candidates, rampart.pos);
             creep.goRepair(rampart);
             return true;
         }
@@ -86,7 +93,10 @@ const RepairRampart = function (creep: Creep) {
         const [x, y] = decompress(cache.posInfo);
         const Pos = new RoomPosition(x, y, creep.room.name);
         const rampart = Pos.lookFor(LOOK_STRUCTURES).find((s) => s.structureType == STRUCTURE_RAMPART);
-        if (rampart) cache.buildRampartId = rampart.id;
+        if (rampart) {
+            cache.buildRampartId = rampart.id;
+            pushWorkerCandidate(candidates, rampart.pos);
+        }
         delete cache.posInfo;
         delete cache.buildRampart;
         return true;
@@ -95,7 +105,7 @@ const RepairRampart = function (creep: Creep) {
     return false;
 }
 
-const BuildRepairWork = function (creep: Creep) {
+const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidate[]) {
     const LOCAL_BUILD_TASK_ID = '__local_build__';
     const cache = getCache(creep)
     resetCacheIfRoomChanged(creep, cache);
@@ -105,7 +115,7 @@ const BuildRepairWork = function (creep: Creep) {
     const sites = (creep.room as any).constructionSite || creep.room.find(FIND_CONSTRUCTION_SITES);
     const hasBuildTarget = sites.some((s: ConstructionSite) => s && (s as any).my);
 
-    if (RepairRampart(creep)) return true;
+    if (RepairRampart(creep, candidates)) return true;
 
     // 工地出现时，立即抢占非 build 缓存任务，避免 worker 被 repair 长时间占用。
     if (hasBuildTarget && cache.task && cache.tasktype !== 'build') {
@@ -297,10 +307,12 @@ const BuildRepairWork = function (creep: Creep) {
 
     if (taskType && target){
         if(taskType === 'build'){
+            pushWorkerCandidate(candidates, target.pos);
             creep.goBuild(target);
             return true;
         }
         if(taskType === 'repair'){
+            pushWorkerCandidate(candidates, target.pos);
             creep.goRepair(target);
             return true;
         }
@@ -309,7 +321,7 @@ const BuildRepairWork = function (creep: Creep) {
     return false;
 }
 
-const RepairWallWork = function (creep: Creep) {
+const RepairWallWork = function (creep: Creep, candidates: MoveWorkTileCandidate[]) {
     const cache = getCache(creep)
     if (!cache.wallPos) {
         const task = creep.room.getWallMission(creep);
@@ -331,21 +343,43 @@ const RepairWallWork = function (creep: Creep) {
         delete cache.targetHits;
         return true;
     }
+    pushWorkerCandidate(candidates, target.pos);
     creep.goRepair(target);
     return true;
 }
 
-const WorkerAction = function (creep: Creep) {
+const hasWorkerBuildOrRepairTarget = (cache: any): boolean => {
+    return !!(
+        cache?.task?.target ||
+        cache?.buildRampartId ||
+        cache?.repairId ||
+        cache?.wallPos ||
+        cache?.posInfo ||
+        cache?.tasktype === 'build' ||
+        cache?.tasktype === 'repair'
+    );
+};
+
+const resolveWorkerPackedPos = (roomName: string, packed: number | null | undefined): RoomPosition | null => {
+    if (typeof packed !== 'number') return null;
+    const [x, y] = decompress(packed);
+    return new RoomPosition(x, y, roomName);
+};
+
+const WorkerAction = function (creep: Creep): MoveWorkTileCandidate[] {
+    const candidates: MoveWorkTileCandidate[] = [];
     // 如果有任务执行，则执行后退出
-    if (BuildRepairWork(creep)) return;
-    if (RepairWallWork(creep)) return;
+    if (BuildRepairWork(creep, candidates)) return candidates;
+    if (RepairWallWork(creep, candidates)) return candidates;
     
     // 如果没有任务，则升级控制器
-    if (!creep.room.controller?.my) return;
+    if (!creep.room.controller?.my) return candidates;
+    pushWorkerCandidate(candidates, creep.room.controller.pos);
     creep.runControllerUpgrade({ sign: false, pickupDropped: false });
+    return candidates;
 }
 
-const onTarget = (creep: Creep): WorkEvent => {
+const onTarget = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandidate[]) => void): WorkEvent => {
     if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
@@ -353,26 +387,67 @@ const onTarget = (creep: Creep): WorkEvent => {
     if (creep.store.getUsedCapacity() === 0) {
         return WORK_EVENTS.TO_SOURCE;
     }
-    WorkerAction(creep);
+    publishMoveWork(WorkerAction(creep));
     return WORK_EVENTS.STAY;
 };
 
-const onSource = (creep: Creep): WorkEvent => {
+const onSource = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandidate[]) => void): WorkEvent => {
     if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
     if (creep.store.getFreeCapacity() === 0) {
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-        WorkerAction(creep);
+        publishMoveWork(WorkerAction(creep));
         return WORK_EVENTS.TO_TARGET;
     }
     const fullAfterTake = creep.TakeEnergy();
     if (fullAfterTake) {
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-        WorkerAction(creep);
+        publishMoveWork(WorkerAction(creep));
         return WORK_EVENTS.TO_TARGET;
     }
     return WORK_EVENTS.STAY;
+};
+
+export const syncWorkerMoveWork = (creep: Creep) => {
+    const cache = getCache(creep);
+    const candidates = [];
+
+    if (cache?.task?.target) {
+        const target = Game.getObjectById(cache.task.target as Id<any>) as { pos?: RoomPosition } | null;
+        if (target?.pos) candidates.push({ pos: target.pos, range: 3 });
+    }
+
+    if (cache?.buildRampartId) {
+        const rampart = Game.getObjectById(cache.buildRampartId as Id<StructureRampart>) as StructureRampart | null;
+        if (rampart?.pos) candidates.push({ pos: rampart.pos, range: 3 });
+    }
+
+    if (cache?.repairId) {
+        const repairTarget = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
+        if (repairTarget?.pos) candidates.push({ pos: repairTarget.pos, range: 3 });
+    }
+
+    const wallPos = resolveWorkerPackedPos(creep.room.name, cache?.wallPos);
+    if (wallPos) candidates.push({ pos: wallPos, range: 3 });
+
+    const posInfo = resolveWorkerPackedPos(creep.room.name, cache?.posInfo);
+    if (posInfo) candidates.push({ pos: posInfo, range: 3 });
+
+    if (
+        creep.room.controller?.my &&
+        creep.memory.working &&
+        creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 &&
+        !hasWorkerBuildOrRepairTarget(cache)
+    ) {
+        candidates.push({ pos: creep.room.controller.pos, range: 3 });
+    }
+
+    if (candidates.length > 0) {
+        writeMoveWorkTileCandidates(creep, candidates);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
 };
 
 const WorkerFunction = {
@@ -380,9 +455,13 @@ const WorkerFunction = {
         return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
     },
     run: function (creep: Creep) {
+        const publishMoveWork = (candidates: MoveWorkTileCandidate[]) => {
+            writeMoveWorkTileCandidates(creep, candidates);
+        };
+        publishMoveWork([]);
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
+            onSource: ({ creep }) => onSource(creep, publishMoveWork),
+            onTarget: ({ creep }) => onTarget(creep, publishMoveWork),
         });
     }
 }

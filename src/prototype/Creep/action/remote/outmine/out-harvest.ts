@@ -1,5 +1,6 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 // 迁移条件集中声明：采集满 -> 转交付，背包空 -> 转采集
@@ -186,7 +187,10 @@ const runSourcePhase = (creep: Creep): boolean => {
     }
 
     if (creep.pos.isNear(targetSource.pos)) {
-        if (!creep.moveToSourceWorkTile(targetSource)) return false;
+        if (!creep.moveToSourceWorkTile(targetSource)) {
+            syncOutHarvestMoveWork(creep);
+            return false;
+        }
         // source 枯竭时不能提前 return，否则会跳过“满载切换 target”判定。
         if (targetSource.energy > 0) creep.harvest(targetSource);
     } else {
@@ -197,12 +201,17 @@ const runSourcePhase = (creep: Creep): boolean => {
                     (c.getActiveBodyparts(ATTACK) > 0 || c.getActiveBodyparts(RANGED_ATTACK) > 0)
             }) as Creep[]
         );
-        if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource!.pos, 3))) return false;
+        if (dangerousHostiles.some((h) => h.pos.inRangeTo(targetSource!.pos, 3))) {
+            syncOutHarvestMoveWork(creep);
+            return false;
+        }
         creep.moveToSourceWorkTile(targetSource);
     }
 
     if (creep.store.getCapacity() === 0) return false;
-    return OUT_HARVEST_SWITCH.TO_TARGET(creep);
+    const shouldSwitch = OUT_HARVEST_SWITCH.TO_TARGET(creep);
+    if (!shouldSwitch) syncOutHarvestMoveWork(creep);
+    return shouldSwitch;
 };
 
 const onTarget = (creep: Creep): WorkEvent => {
@@ -213,6 +222,17 @@ const onTarget = (creep: Creep): WorkEvent => {
 const onSource = (creep: Creep): WorkEvent => {
     const shouldSwitch = runSourcePhase(creep);
     return shouldSwitch ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
+
+export const syncOutHarvestMoveWork = (creep: Creep) => {
+    if (creep.memory.working) {
+        writeMoveWorkTileCandidates(creep, []);
+        return;
+    }
+
+    const targetSourceId = creep.memory.targetSourceId as Id<Source> | undefined;
+    const targetSource = targetSourceId ? Game.getObjectById(targetSourceId) as Source | null : null;
+    writeMoveWorkTileCandidates(creep, targetSource ? [{ pos: targetSource.pos, range: 1 }] : []);
 };
 
 const outHarvest = {

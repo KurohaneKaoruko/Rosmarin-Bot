@@ -1,4 +1,5 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 /**
@@ -24,6 +25,7 @@ const onTarget = (creep: Creep): WorkEvent => {
         creep.say('🔄');
         return WORK_EVENTS.TO_SOURCE;
     }
+    syncUpgraderMoveWork(creep);
     return WORK_EVENTS.STAY;
 };
 
@@ -58,6 +60,18 @@ const onSource = (creep: Creep): WorkEvent => {
         return WORK_EVENTS.TO_TARGET;
     }
     return WORK_EVENTS.STAY;
+};
+
+export const syncUpgraderMoveWork = (creep: Creep) => {
+    if (
+        creep.room.controller?.my &&
+        creep.memory.working &&
+        creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+    ) {
+        writeMoveWorkTileCandidates(creep, [{ pos: creep.room.controller.pos, range: 3 }]);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
 };
 
 /**

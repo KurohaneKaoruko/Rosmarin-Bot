@@ -1,5 +1,6 @@
 import { compress, decompress} from '@/shared/compress';
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 
@@ -170,6 +171,7 @@ const onTarget = (creep: Creep): WorkEvent => {
         creep.memory.dontPullMe = true;
     }
     upgrade(creep);
+    syncUpUpgradeMoveWork(creep);
     return WORK_EVENTS.STAY;
 };
 
@@ -190,6 +192,18 @@ const onSource = (creep: Creep): WorkEvent => {
     }
     withdrawEnergy(creep);
     return WORK_EVENTS.STAY;
+};
+
+export const syncUpUpgradeMoveWork = (creep: Creep) => {
+    if (
+        creep.room.controller?.my &&
+        creep.memory.working &&
+        creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0
+    ) {
+        writeMoveWorkTileCandidates(creep, [{ pos: creep.room.controller.pos, range: 3 }]);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
 };
 
 const UpUpgradeFunction = {

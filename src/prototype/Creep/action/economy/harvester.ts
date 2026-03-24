@@ -1,5 +1,6 @@
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
 const NEAR_RANGE = 2;
 const SOURCE_RANGE = 1;
@@ -57,6 +58,22 @@ type HarvesterContext = {
 
 const getHarvesterFlowState = (creep: Creep): HarvesterFlowState => {
     return (creep.memory.fsm?.[HARVESTER_LAYERS.FLOW] as HarvesterFlowState | undefined) || HARVESTER_FLOW_STATES.COLLECT;
+};
+
+const getHarvesterDeliverState = (creep: Creep): HarvesterDeliverState => {
+    return (creep.memory.fsm?.[HARVESTER_LAYERS.DELIVER] as HarvesterDeliverState | undefined) || HARVESTER_DELIVER_STATES.TRANSFER;
+};
+
+export const syncHarvesterMoveWork = (creep: Creep) => {
+    const candidates = [];
+    const source = creep.getBoundSource();
+    if (source && (
+        getHarvesterFlowState(creep) === HARVESTER_FLOW_STATES.COLLECT ||
+        getHarvesterDeliverState(creep) === HARVESTER_DELIVER_STATES.BUILD
+    )) {
+        candidates.push({ pos: source.pos, range: SOURCE_RANGE });
+    }
+    writeMoveWorkTileCandidates(creep, candidates);
 };
 
 const shouldRunDeliverLayer = (ctx: HarvesterContext): boolean => {
@@ -238,6 +255,7 @@ const createHarvesterFlowMachine = (creep: Creep) => {
                         const readyToDeliver = runHarvest(ctx.creep);
                         ctx.allowDeliver = readyToDeliver || shouldSwitchToDeliver(ctx.creep);
                         if (ctx.allowDeliver) return [HARVESTER_FLOW_EVENTS.HAS_ENERGY];
+                        syncHarvesterMoveWork(ctx.creep);
                     }
                 },
                 [HARVESTER_FLOW_STATES.DELIVER]: {
@@ -297,6 +315,7 @@ const createHarvesterDeliverMachine = (creep: Creep) => {
                         if (!shouldDeliverByBuild(ctx.creep)) {
                             return [HARVESTER_DELIVER_EVENTS.NEED_TRANSFER];
                         }
+                        syncHarvesterMoveWork(ctx.creep);
                     }
                 }
             },

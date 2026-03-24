@@ -1,4 +1,5 @@
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
 // 策略 ID 常量：集中管理，避免散落字符串
 const MANAGER_STRATEGIES = {
@@ -24,6 +25,26 @@ type ManagerPlan = {
 type ManagerContext = {
     creep: Creep;
     plan: ManagerPlan;
+};
+
+const getManagerLockCenter = (room: Room): RoomPosition | null => {
+    const centerPos = room.getCenter?.();
+    const storage = room.storage;
+    if (!centerPos || !room.controller?.my || !storage) return null;
+    const hasManageLink = !!room.link?.some((link) =>
+        link &&
+        link.pos.inRangeTo(centerPos, 1) &&
+        link.pos.inRangeTo(storage, 2)
+    );
+    return room.terminal || hasManageLink ? centerPos : null;
+};
+
+export const syncManagerMoveWork = (creep: Creep, centerPos = getManagerLockCenter(creep.room)) => {
+    if (centerPos) {
+        writeMoveWorkTileCandidates(creep, [{ pos: centerPos, range: 0 }]);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
 };
 
 // 处理 creep 身上的其他资源（优先存储）
@@ -256,7 +277,9 @@ managerStrategyContainer.register({
 
 const ManagerAction = {
     run: function (creep: Creep) {
-        if (!creep.memory.dontPullMe) creep.memory.dontPullMe = true;
+        const centerPos = getManagerLockCenter(creep.room);
+        creep.memory.dontPullMe = !!centerPos && creep.pos.isEqualTo(centerPos);
+        syncManagerMoveWork(creep, centerPos);
         const plan = buildManagerPlan(creep);
         const ctx: ManagerContext = { creep, plan };
         runStrategy(managerStrategyContainer, ctx);

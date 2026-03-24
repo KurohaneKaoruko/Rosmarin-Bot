@@ -1,8 +1,20 @@
 import { compress } from '@/shared/compress';
 import { getLayoutData } from '@/shared/memory';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+
+export const syncUpRepairMoveWork = (creep: Creep) => {
+    const targetId = (creep.memory.cacheTarget as any)?.targetId as Id<StructureRampart | StructureWall> | undefined;
+    if (!targetId) {
+        writeMoveWorkTileCandidates(creep, []);
+        return;
+    }
+
+    const target = Game.getObjectById(targetId) as StructureRampart | StructureWall | null;
+    writeMoveWorkTileCandidates(creep, target ? [{ pos: target.pos, range: 3 }] : []);
+};
 
 const RepairWork = function (creep: Creep) {
     creep.memory.cacheTarget = creep.memory.cacheTarget || {}
@@ -150,6 +162,7 @@ const onTarget = (creep: Creep): WorkEvent => {
         return WORK_EVENTS.TO_SOURCE;
     }
     RepairWork(creep);
+    syncUpRepairMoveWork(creep);
     return WORK_EVENTS.STAY;
 };
 

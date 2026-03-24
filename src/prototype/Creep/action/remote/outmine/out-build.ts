@@ -1,4 +1,5 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const BUILD_PRIORITY = [STRUCTURE_CONTAINER, STRUCTURE_ROAD] as StructureConstant[];
@@ -413,6 +414,7 @@ const runBuildPhase = (creep: Creep): boolean => {
 
     const buildTarget = findBuildTarget(creep, source);
     if (buildTarget) {
+        syncOutBuildMoveWork(creep);
         const obstacle = findBlockingObstacle(buildTarget);
         if (obstacle) {
             if (!creep.pos.inRangeTo(obstacle, 1)) moveToLocalTarget(creep, obstacle, 1);
@@ -429,6 +431,7 @@ const runBuildPhase = (creep: Creep): boolean => {
 
     const repairTarget = findRepairTarget(creep, source);
     if (repairTarget) {
+        syncOutBuildMoveWork(creep);
         const result = creep.repair(repairTarget);
         if (result === ERR_NOT_IN_RANGE) {
             moveToLocalTarget(creep, repairTarget, 3);
@@ -450,6 +453,23 @@ const onSource = (creep: Creep): WorkEvent => {
     const shouldSwitch = runHarvestPhase(creep);
     if (shouldSwitch) creep.say('BLD');
     return shouldSwitch ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
+
+export const syncOutBuildMoveWork = (creep: Creep) => {
+    const cache = (creep.memory.cacheTarget || {}) as any;
+    const candidates = [];
+
+    if (cache.targetId) {
+        const target = Game.getObjectById(cache.targetId as Id<ConstructionSite>) as ConstructionSite | null;
+        if (target) candidates.push({ pos: target.pos, range: 3 });
+    }
+
+    if (cache.repairId) {
+        const target = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
+        if (target) candidates.push({ pos: target.pos, range: 3 });
+    }
+
+    writeMoveWorkTileCandidates(creep, candidates);
 };
 
 const outBuild = {

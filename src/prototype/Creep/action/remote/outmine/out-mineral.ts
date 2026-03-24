@@ -1,5 +1,6 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 // 迁移条件集中声明：采满 -> 交付，空包 -> 继续采集
@@ -85,6 +86,7 @@ const runSourcePhase = (creep: Creep): boolean => {
                 }) as Creep[]
             );
             if (dangerousHostiles.some((h) => h.pos.inRangeTo(mineral!, 3))) {
+                syncOutMineralMoveWork(creep);
                 if (creep.pos.x <= 1) creep.move(RIGHT);
                 else if (creep.pos.x >= 48) creep.move(LEFT);
                 else if (creep.pos.y <= 1) creep.move(BOTTOM);
@@ -95,7 +97,9 @@ const runSourcePhase = (creep: Creep): boolean => {
         }
     }
 
-    return OUT_MINERAL_SWITCH.TO_TARGET(creep);
+    const shouldSwitch = OUT_MINERAL_SWITCH.TO_TARGET(creep);
+    if (!shouldSwitch) syncOutMineralMoveWork(creep);
+    return shouldSwitch;
 };
 
 // 交付阶段
@@ -120,6 +124,15 @@ const onTarget = (creep: Creep): WorkEvent => {
 const onSource = (creep: Creep): WorkEvent => {
     const shouldSwitch = runSourcePhase(creep);
     return shouldSwitch ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
+};
+
+export const syncOutMineralMoveWork = (creep: Creep) => {
+    const mineral = creep.room.mineral || creep.room.find(FIND_MINERALS)[0];
+    if (!creep.memory.working && mineral) {
+        writeMoveWorkTileCandidates(creep, [{ pos: mineral.pos, range: 1 }]);
+        return;
+    }
+    writeMoveWorkTileCandidates(creep, []);
 };
 
 const outMineral = {
