@@ -1,133 +1,107 @@
-// Main role imports
-import harvester from './main/harvester';
-import carrier from './main/carrier';
-import transport from './main/transport';
-import manager from './main/manager';
-import upgrader from './main/upgrader';
-import worker from './main/worker';
-import mineral from './main/mineral';
-import universal from './main/universal';
-
-// Aid role imports
-import aidBuild from './aid/aid-build';
-import aidCarry from './aid/aid-carry';
-import aidUpgrade from './aid/aid-upgrade';
-import claimer from './aid/claimer';
-import attackClaimer from './aid/attack-claimer';
-
-// Other role imports
-import logistic from './other/logistic';
-import upUpgrade from './other/up-upgrade';
-import upRepair from './other/up-repair';
-import dismantle from './other/dismantle';
-import scout from './other/scout';
-
-// Outmine role imports
-import outHarvest from './outmine/out-harvest';
-import outCarry from './outmine/out-carry';
-import outBuild from './outmine/out-build';
-import reserve from './outmine/reserve';
-import outDefend from './outmine/out-defend';
-import outInvader from './outmine/out-invader';
-import outAttack from './outmine/out-attack';
-import outRanged from './outmine/out-ranged';
-import outMineral from './outmine/out-mineral';
-import out2Attack from './outmine/out-2attack';
-import out2Heal from './outmine/out-2heal';
-
-// Power role imports
-import powerAttack from './collect/power-attack';
-import powerHeal from './collect/power-heal';
-import powerCarry from './collect/power-carry';
-import powerRanged from './collect/power-ranged';
-
-// Deposit role imports
-import depositHarvest from './collect/deposit-harvest';
-import depositTransfer from './collect/deposit-transfer';
-import depositRanged from './collect/deposit-ranged';
-import depositAttack from './collect/deposit-attack';
-import depositHeal from './collect/deposit-heal';
-
-// War role imports
-import oneRanged from './war/one-ranged';
-import aio from './war/aio';
-import doubleAttack from './war/double-attack';
-import doubleDismantle from './war/double-dismantle';
-import doubleHeal from './war/double-heal';
-import pcHeal from './war/pc-heal';
-
-// Defend role imports
-import defendAttack from './defend/defend-attack';
-import defendRanged from './defend/defend-ranged';
-import defend2Attack from './defend/defend-2attack';
-import defend2Heal from './defend/defend-2heal';
-
-// 统一角色执行器接口：
-// prepare 用于一次性准备阶段，run 负责每 tick 的实际执行。
-export type CreepRoleHandler = {
-    prepare?: (creep: Creep) => boolean;
-    run: (creep: Creep) => void;
-};
+import type { CreepRoleHandler } from './types';
+import harvester from './economy/harvester';
+import carrier from './economy/carrier';
+import transport from './economy/transport';
+import manager from './economy/manager';
+import upgrader from './economy/upgrader';
+import worker from './economy/worker';
+import mineral from './economy/mineral';
+import universal from './economy/universal';
+import aidBuild from './expansion/aid-build';
+import aidCarry from './expansion/aid-carry';
+import aidUpgrade from './expansion/aid-upgrade';
+import claimer from './expansion/claimer';
+import attackClaimer from './expansion/attack-claimer';
+import logistic from './support/logistic';
+import upUpgrade from './support/up-upgrade';
+import upRepair from './support/up-repair';
+import dismantle from './support/dismantle';
+import scout from './support/scout';
+import outHarvest from './remote/outmine/out-harvest';
+import outCarry from './remote/outmine/out-carry';
+import outBuild from './remote/outmine/out-build';
+import reserve from './remote/outmine/reserve';
+import outDefend from './remote/outmine/out-defend';
+import outInvader from './remote/outmine/out-invader';
+import outAttack from './remote/outmine/out-attack';
+import outRanged from './remote/outmine/out-ranged';
+import outMineral from './remote/outmine/out-mineral';
+import out2Attack from './remote/outmine/out-2attack';
+import out2Heal from './remote/outmine/out-2heal';
+import powerAttack from './remote/power/power-attack';
+import powerHeal from './remote/power/power-heal';
+import powerCarry from './remote/power/power-carry';
+import powerRanged from './remote/power/power-ranged';
+import depositHarvest from './remote/deposit/deposit-harvest';
+import depositTransfer from './remote/deposit/deposit-transfer';
+import depositRanged from './remote/deposit/deposit-ranged';
+import depositAttack from './remote/deposit/deposit-attack';
+import depositHeal from './remote/deposit/deposit-heal';
+import oneRanged from './combat/assault/one-ranged';
+import aio from './combat/assault/aio';
+import doubleAttack from './combat/assault/double-attack';
+import doubleDismantle from './combat/assault/double-dismantle';
+import doubleHeal from './combat/assault/double-heal';
+import pcHeal from './combat/assault/pc-heal';
+import defendAttack from './combat/defense/defend-attack';
+import defendRanged from './combat/defense/defend-ranged';
+import defend2Attack from './combat/defense/defend-2attack';
+import defend2Heal from './combat/defense/defend-2heal';
 
 type MissingRoleHandlerReporter = (id: string) => void;
 
-// 统一角色执行器注册表：
-// 所有角色都通过同一个入口分发，不再区分 work / action 命名空间。
 export const roleRegistry: Record<string, CreepRoleHandler> = {
     'carrier': carrier,
+    'harvester': harvester,
+    'manager': manager,
+    'mineral': mineral,
+    'transport': transport,
+    'universal': universal,
     'upgrader': upgrader,
     'worker': worker,
-    'mineral': mineral,
-    'scout': scout,
-    'logistic': logistic,
-    'up-upgrade': upUpgrade,
-    'up-repair': upRepair,
-    'reserve': reserve,
-    'out-harvest': outHarvest,
-    'out-build': outBuild,
-    'out-mineral': outMineral,
-    'deposit-harvest': depositHarvest,
-    'deposit-transfer': depositTransfer,
-    'power-carry': powerCarry,
+    'aid-build': aidBuild,
     'aid-carry': aidCarry,
     'aid-upgrade': aidUpgrade,
-    'harvester': harvester,
-    'transport': transport,
-    'manager': manager,
-    'universal': universal,
+    'attack-claimer': attackClaimer,
+    'claimer': claimer,
     'cleaner': dismantle,
     'dismantle': dismantle,
-    'claimer': claimer,
-    'attack-claimer': attackClaimer,
-    'aid-build': aidBuild,
-    'one-ranged': oneRanged,
+    'logistic': logistic,
+    'scout': scout,
+    'up-repair': upRepair,
+    'up-upgrade': upUpgrade,
+    'deposit-attack': depositAttack,
+    'deposit-harvest': depositHarvest,
+    'deposit-heal': depositHeal,
+    'deposit-ranged': depositRanged,
+    'deposit-transfer': depositTransfer,
+    'out-2attack': out2Attack,
+    'out-2heal': out2Heal,
+    'out-attack': outAttack,
+    'out-build': outBuild,
+    'out-carry': outCarry,
+    'out-defend': outDefend,
+    'out-harvest': outHarvest,
+    'out-invader': outInvader,
+    'out-mineral': outMineral,
+    'out-ranged': outRanged,
+    'power-attack': powerAttack,
+    'power-carry': powerCarry,
+    'power-heal': powerHeal,
+    'power-ranged': powerRanged,
+    'reserve': reserve,
     'aio': aio,
     'double-attack': doubleAttack,
     'double-dismantle': doubleDismantle,
     'double-heal': doubleHeal,
-    'defend-attack': defendAttack,
-    'defend-ranged': defendRanged,
+    'one-ranged': oneRanged,
+    'pc-heal': pcHeal,
     'defend-2attack': defend2Attack,
     'defend-2heal': defend2Heal,
-    'out-defend': outDefend,
-    'out-carry': outCarry,
-    'out-2attack': out2Attack,
-    'out-2heal': out2Heal,
-    'out-invader': outInvader,
-    'out-attack': outAttack,
-    'out-ranged': outRanged,
-    'deposit-attack': depositAttack,
-    'deposit-heal': depositHeal,
-    'deposit-ranged': depositRanged,
-    'power-attack': powerAttack,
-    'power-heal': powerHeal,
-    'power-ranged': powerRanged,
-    'pc-heal': pcHeal,
+    'defend-attack': defendAttack,
+    'defend-ranged': defendRanged,
 };
 
-// 统一处理器解析函数：
-// 让 execute 层只关心“按 id 取 handler”，不再感知注册表细节。
-// 当调用方提供 onMissing 时，这里会把缺失事件显式抛回上层做日志或监控。
 export const getRoleHandler = (id: string, onMissing?: MissingRoleHandlerReporter): CreepRoleHandler | null => {
     const handler = roleRegistry[id];
     if (handler) return handler;

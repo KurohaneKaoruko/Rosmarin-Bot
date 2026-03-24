@@ -1,6 +1,6 @@
 import { decompress } from '@/shared/compress';
-import { AID_BUILD_LAYERS, AID_BUILD_JOB_STATES } from '@/prototype/Creep/action/aid/aid-build';
-import { HARVESTER_DELIVER_STATES, HARVESTER_FLOW_STATES, HARVESTER_LAYERS } from '@/prototype/Creep/action/main/harvester';
+import { AID_BUILD_LAYERS, AID_BUILD_JOB_STATES } from '@/prototype/Creep/action/expansion/aid-build';
+import { HARVESTER_DELIVER_STATES, HARVESTER_FLOW_STATES, HARVESTER_LAYERS } from '@/prototype/Creep/action/economy/harvester';
 
 type MoveWorkTileCandidate = {
     pos: RoomPosition;
