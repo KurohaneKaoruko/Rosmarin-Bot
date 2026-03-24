@@ -1,3 +1,5 @@
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
+
 type ScoutCache = {
     stompSiteId?: Id<ConstructionSite> | null;
 };
@@ -22,8 +24,7 @@ const getStompSiteWeight = (site: ConstructionSite): number => {
 };
 
 const getStompTarget = (creep: Creep): ConstructionSite | null => {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {};
-    const cache = creep.memory.cacheTarget as ScoutCache;
+    const cache = ensureMemoryCacheSection<ScoutCache>(creep.memory, 'target');
 
     if (cache.stompSiteId) {
         const cached = Game.getObjectById(cache.stompSiteId);

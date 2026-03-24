@@ -1,6 +1,7 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 export const syncMineralMoveWork = (creep: Creep) => {
     const mineral = creep.room.mineral || creep.room.find(FIND_MINERALS)[0];
@@ -52,8 +53,7 @@ const onSource = (creep: Creep): WorkEvent => {
 };
 
 const onTarget = (creep: Creep): WorkEvent => {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
-    const cache = creep.memory.cacheTarget
+    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
     // 如果没有缓存存储目标，则寻找存储目标
     if (!cache.targetId) {
         const mineralContainer = creep.room.container.find(c => c.pos.inRangeTo(creep.room.mineral, 1)) || null;

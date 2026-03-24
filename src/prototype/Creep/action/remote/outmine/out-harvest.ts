@@ -2,6 +2,7 @@ import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCache, ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 // 迁移条件集中声明：采集满 -> 转交付，背包空 -> 转采集
 const OUT_HARVEST_SWITCH = {
@@ -30,9 +31,8 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     if (!nearbyCarrier) return false;
 
     if (creep.transfer(nearbyCarrier, RESOURCE_ENERGY) === OK) {
-        nearbyCarrier.memory.cacheSource = nearbyCarrier.memory.cacheSource || {};
-        nearbyCarrier.memory.cache = nearbyCarrier.memory.cache || {};
-        const sourceCache = nearbyCarrier.memory.cacheSource as any;
+        const sourceCache = ensureMemoryCacheSection<Record<string, any>>(nearbyCarrier.memory, 'source');
+        const cache = ensureMemoryCache(nearbyCarrier.memory) as Record<string, any>;
         delete sourceCache.targetId;
         delete sourceCache.targetType;
 
@@ -48,7 +48,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
         // 只有接近满载时才允许运输工同步转入返程。
         // 少量直递只是减少落地损耗，不应打断当前采集周期。
         if (shouldCarrierReturnAfterDirectTransfer(nearbyCarrier)) {
-            (nearbyCarrier.memory.cache as any).outCarryMode = 'deliver';
+            cache.outCarryMode = 'deliver';
             const sourceRoom = nearbyCarrier.memory.sourceRoom;
             if (sourceRoom && nearbyCarrier.room.name !== sourceRoom) {
                 const route = Game.map.findRoute(nearbyCarrier.room.name, sourceRoom);

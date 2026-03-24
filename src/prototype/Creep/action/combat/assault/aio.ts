@@ -1,5 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
 const getRoomNonWhitelistHostiles = (creep: Creep) =>
     getRoomTickCacheValue(creep.room, 'aio_room_non_whitelist_hostiles', () =>
@@ -125,35 +125,14 @@ let autoAttack = (creep) => {
     }
 }
 
-type WarCtx = { creep: Creep };
-
-// 行为树注册表：支持 AIO 战斗逻辑热插拔
-export const aioRegistry = new BehaviorTreeRegistry<WarCtx>();
-
-// boost 逻辑节点：未完成时返回 Running，完成后返回 Success
-const ensureBoost = leaf<WarCtx>(({ creep }) => {
-    creep.disableAttackNotificationsOnce();
-    if (creep.memory.boosted) return BtStatus.Success;
-    if (creep.memory['boostmap']) {
-        const result = creep.goBoost(creep.memory['boostmap']);
-        if (result === OK) {
-            creep.memory.boosted = true;
-            return BtStatus.Success;
-        }
-        return BtStatus.Running;
-    }
-    const ok = creep.goBoost({
+const aioBoost = {
         [TOUGH]: ['XGHO2'],
         [HEAL]: ['XLHO2'],
         [RANGED_ATTACK]: ['XKHO2'],
         [MOVE]: ['XZHO2']
-    }) === OK;
-    if (ok) creep.memory.boosted = true;
-    return ok ? BtStatus.Success : BtStatus.Running;
-});
+};
 
-// 主战斗节点：执行一次即可，保持 Running 让行为树持续驱动
-const runCombat = leaf<WarCtx>(({ creep }) => {
+const runCombat = (creep: Creep) => {
     creep.heal(creep);
 
     // 躲避
@@ -179,7 +158,7 @@ const runCombat = leaf<WarCtx>(({ creep }) => {
                 }
             }
         }
-        return BtStatus.Running;
+        return;
     }
 
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
@@ -189,7 +168,7 @@ const runCombat = leaf<WarCtx>(({ creep }) => {
             creep.memory.targetRoom = moveflag.pos.roomName;
         }
         creep.moveTo(moveflag.pos, { visualizePathStyle: { stroke: '#0000ff' } });
-        return BtStatus.Running;
+        return;
     }
 
     const rangedAttack = (c: Creep) => {
@@ -227,21 +206,14 @@ const runCombat = leaf<WarCtx>(({ creep }) => {
             creep.moveTo(new RoomPosition(25, 25, creep.room.name));
         }
     }
-    return BtStatus.Running;
-});
-
-// 行为树：可被 hotSwap 替换根节点，默认执行 boost -> 战斗
-const tree = new BehaviorTree<WarCtx>(
-    selector(
-        hotSwap(aioRegistry, 'root', fail()),
-        sequence(ensureBoost, runCombat)
-    )
-);
-
-const aio = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
 };
+
+const aio = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || aioBoost,
+    run: (creep) => {
+        creep.disableAttackNotificationsOnce();
+        runCombat(creep);
+    }
+});
 
 export default aio

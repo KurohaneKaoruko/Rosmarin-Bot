@@ -1,28 +1,9 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 /** 双人小队 heal */
-type WarCtx = { creep: Creep };
-
-// 行为树注册表：支持双人治疗逻辑热插拔
-export const doubleHealRegistry = new BehaviorTreeRegistry<WarCtx>();
 
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
-    if (!creep.memory.boosted) {
-        if (creep.memory['boostmap']) {
-            const result = creep.goBoost(creep.memory['boostmap']);
-            if (result === OK) {
-                creep.memory.boosted = true;
-            }
-        } else {
-            creep.memory.boosted = creep.goBoost({
-                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-                [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-                [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
-            }) === OK;
-        }
-        return;
-    }
 
     if (creep.ticksToLive < 100 && creep.room.my) {
         creep.unBoost();
@@ -92,20 +73,13 @@ const runLegacy = (creep: Creep) => {
     }
 };
 
-const tree = new BehaviorTree<WarCtx>(
-    selector(
-        hotSwap(doubleHealRegistry, 'root', fail()),
-        leaf<WarCtx>(({ creep }) => {
-            runLegacy(creep);
-            return BtStatus.Running;
-        })
-    )
-);
-
-const double_heal = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
-}
+const double_heal = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || {
+        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+        [HEAL]: ['XLHO2', 'LHO2', 'LO'],
+        [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
+    },
+    run: runLegacy
+})
 
 export default double_heal

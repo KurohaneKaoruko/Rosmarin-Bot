@@ -1,4 +1,4 @@
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
 function isDoubleAttackDangerHostile(hostile: Creep, creep: Creep): boolean {
     return (!hostile.my &&
@@ -162,28 +162,9 @@ function AutoActionAttack(creep: Creep) {
 }
 
 
-type WarCtx = { creep: Creep };
-
-// 行为树注册表：支持双人进攻逻辑热插拔
-export const doubleAttackRegistry = new BehaviorTreeRegistry<WarCtx>();
-
 // 旧逻辑封装为叶子节点，保持原有行为
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
-    if (!creep.memory.boosted) {
-        if (creep.memory['boostmap']) {
-            const result = creep.goBoost(creep.memory['boostmap']);
-            if (result === OK) {
-                creep.memory.boosted = true;
-            }
-        } else {
-            creep.memory.boosted = creep.goBoost({
-                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-                [ATTACK]: ['XUH2O', 'UH2O', 'UH']
-            }) === OK;
-        }
-        return;
-    }
 
     // 等待绑定
     if (!creep.memory.bind) return;
@@ -219,21 +200,13 @@ const runLegacy = (creep: Creep) => {
     }
 };
 
-const tree = new BehaviorTree<WarCtx>(
-    selector(
-        hotSwap(doubleAttackRegistry, 'root', fail()),
-        leaf<WarCtx>(({ creep }) => {
-            runLegacy(creep);
-            return BtStatus.Running;
-        })
-    )
-);
-
 /** 双人小队 进攻小队 */
-const double_attack = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
-}
+const double_attack = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || {
+        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+        [ATTACK]: ['XUH2O', 'UH2O', 'UH']
+    },
+    run: runLegacy
+})
 
 export default double_attack;

@@ -1,27 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
 import type { CreepRoleHandler } from '../../types';
-
-type SimpleBehaviorContext = { creep: Creep };
-
-const createSimpleBehaviorRole = (run: (creep: Creep) => void): CreepRoleHandler => {
-    const registry = new BehaviorTreeRegistry<SimpleBehaviorContext>();
-    const mainNode = leaf<SimpleBehaviorContext>(({ creep }) => {
-        run(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree(
-        sequence(
-            hotSwap(registry, 'main', mainNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
@@ -225,8 +203,16 @@ const runDepositRanged = (creep: Creep) => {
     }
 };
 
-const depositAttack = createSimpleBehaviorRole(runDepositAttack);
-const depositHeal = createSimpleBehaviorRole(runDepositHeal);
-const depositRanged = createSimpleBehaviorRole(runDepositRanged);
+const depositAttack: CreepRoleHandler = {
+    run: runDepositAttack
+};
+
+const depositHeal: CreepRoleHandler = {
+    run: runDepositHeal
+};
+
+const depositRanged: CreepRoleHandler = {
+    run: runDepositRanged
+};
 
 export { depositAttack, depositHeal, depositRanged };

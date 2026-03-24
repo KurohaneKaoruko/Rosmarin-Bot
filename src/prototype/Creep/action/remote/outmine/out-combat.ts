@@ -1,27 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
 import type { CreepRoleHandler } from '../../types';
-
-type SimpleBehaviorContext = { creep: Creep };
-
-const createSimpleBehaviorRole = (run: (creep: Creep) => void): CreepRoleHandler => {
-    const registry = new BehaviorTreeRegistry<SimpleBehaviorContext>();
-    const mainNode = leaf<SimpleBehaviorContext>(({ creep }) => {
-        run(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree(
-        sequence(
-            hotSwap(registry, 'main', mainNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
 
 const ensureInTargetRoom = (creep: Creep, resetDontPullMe = false): boolean => {
     if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -311,9 +289,20 @@ const runOutInvader = (creep: Creep) => {
     if (creep.memory['suicideCount'] >= 10) creep.suicide();
 };
 
-const outAttack = createSimpleBehaviorRole(runOutAttack);
-const outRanged = createSimpleBehaviorRole(runOutRanged);
-const outDefend = createSimpleBehaviorRole(runOutDefend);
-const outInvader = createSimpleBehaviorRole(runOutInvader);
+const outAttack: CreepRoleHandler = {
+    run: runOutAttack
+};
+
+const outRanged: CreepRoleHandler = {
+    run: runOutRanged
+};
+
+const outDefend: CreepRoleHandler = {
+    run: runOutDefend
+};
+
+const outInvader: CreepRoleHandler = {
+    run: runOutInvader
+};
 
 export { outAttack, outDefend, outInvader, outRanged };

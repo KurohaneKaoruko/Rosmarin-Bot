@@ -1,6 +1,7 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 const BUILD_PRIORITY = [STRUCTURE_CONTAINER, STRUCTURE_ROAD] as StructureConstant[];
 const ENERGY_DROP_MIN = 20;
@@ -268,7 +269,7 @@ const pickPreferredTarget = <T extends { pos: RoomPosition; structureType?: Stru
 };
 
 const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite | null => {
-    const cache = (creep.memory.cacheTarget ||= {}) as any;
+    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
     if (cache.targetId) {
         const cached = Game.getObjectById(cache.targetId as Id<ConstructionSite>) as ConstructionSite | null;
         if (cached && cached.my && (cached.structureType === STRUCTURE_ROAD || cached.structureType === STRUCTURE_CONTAINER)) {
@@ -287,7 +288,7 @@ const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite 
 };
 
 const findRepairTarget = (creep: Creep, source: Source | null): Structure | null => {
-    const cache = (creep.memory.cacheTarget ||= {}) as any;
+    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
     if (cache.repairId) {
         const cached = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
         if (
@@ -456,7 +457,7 @@ const onSource = (creep: Creep): WorkEvent => {
 };
 
 export const syncOutBuildMoveWork = (creep: Creep) => {
-    const cache = (creep.memory.cacheTarget || {}) as any;
+    const cache = getMemoryCacheSection<Record<string, any>>(creep.memory, 'target') || {};
     const candidates = [];
 
     if (cache.targetId) {

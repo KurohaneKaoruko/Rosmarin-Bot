@@ -698,6 +698,10 @@ interface CreepMemory {
         takeTarget?: { id: string; type: string } | null;
         /** 目标Source的ID */
         targetSourceId?: Id<Source> | null;
+        /** 旧 cacheSource 合并后的 source 分区 */
+        source?: { [key: string]: any };
+        /** 旧 cacheTarget 合并后的 target 分区 */
+        target?: { [key: string]: any };
         /** 缓存的路径 */
         path?: RoomPosition[];
         /** 其他缓存数据 */
@@ -710,7 +714,9 @@ interface CreepMemory {
      */
     fsm?: Record<string, string>;
 
+    /** @deprecated 兼容旧内存数据，运行时统一迁移到 cache.source */
     cacheSource?: CreepMemory['cache'];
+    /** @deprecated 兼容旧内存数据，运行时统一迁移到 cache.target */
     cacheTarget?: CreepMemory['cache'];
     
     /** 

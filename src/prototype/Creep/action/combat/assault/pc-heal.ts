@@ -1,13 +1,4 @@
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
-
-// 行为树上下文：统一传递 creep
-type PcHealContext = { creep: Creep };
-
-const registry = new BehaviorTreeRegistry<PcHealContext>();
-
-const PC_HEAL_BT_SLOTS = {
-    MAIN: 'main'
-} as const;
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -81,21 +72,10 @@ const runLegacy = (creep: Creep) => {
     creep.moveTo(pc as any, { range: 1, maxRooms: 1, ignoreCreeps: true, reusePath: 5, plainCost: 1, swampCost: 5 });
 };
 
-const mainNode = leaf<PcHealContext>(({ creep }) => {
-    runLegacy(creep);
-    return BtStatus.Running;
+const pc_heal = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || null,
+    must: (creep) => !!creep.memory['mustBoost'],
+    run: runLegacy
 });
-
-const tree = new BehaviorTree(
-    sequence(
-        hotSwap(registry, PC_HEAL_BT_SLOTS.MAIN, mainNode)
-    )
-);
-
-const pc_heal = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
-};
 
 export default pc_heal;

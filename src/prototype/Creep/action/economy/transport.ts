@@ -1,10 +1,4 @@
-import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
-
-// 策略 ID 常量
-const TRANSPORT_STRATEGIES = {
-    MISSION: 'mission',
-    FALLBACK: 'fallback'
-} as const;
+import { createStrategyRole } from '@/framework/ai/creepRole';
 
 type TransportContext = {
     creep: Creep;
@@ -138,33 +132,29 @@ const runMission = (creep: Creep) => {
     }
 };
 
-// 策略容器
-const transportStrategyContainer = new StrategyContainer<TransportContext, void>();
-
-transportStrategyContainer.register({
-    id: TRANSPORT_STRATEGIES.MISSION,
-    canRun: (ctx) => ctx.hasMission,
-    run: (ctx) => runMission(ctx.creep)
-});
-
-transportStrategyContainer.register({
-    id: TRANSPORT_STRATEGIES.FALLBACK,
-    canRun: () => true,
-    run: (ctx) => runFallback(ctx.creep)
-});
-
 // 中央搬运 creep：依赖任务系统在 storage/terminal 等建筑间搬运指定资源
-const Transport = {
-    run: function (creep: Creep) {
+const Transport = createStrategyRole<TransportContext>({
+    createContext: (creep) => {
         // 如果没有任务，则接取任务；如果即将死亡，则不再接新任务
         if (!creep.memory.mission && creep.ticksToLive > 20) {
             creep.memory.mission = creep.room.getTransportMission(creep);
         }
 
-        const hasMission = !!creep.memory.mission && creep.ticksToLive > 20;
-        const ctx: TransportContext = { creep, hasMission };
-        runStrategy(transportStrategyContainer, ctx);
-    }
-};
+        return {
+            creep,
+            hasMission: !!creep.memory.mission && creep.ticksToLive > 20
+        };
+    },
+    strategies: [
+        {
+            canRun: (ctx) => ctx.hasMission,
+            run: (ctx) => runMission(ctx.creep)
+        },
+        {
+            canRun: () => true,
+            run: (ctx) => runFallback(ctx.creep)
+        }
+    ]
+});
 
 export default Transport;

@@ -1,4 +1,4 @@
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 function withdraw(creep: Creep) {
@@ -83,7 +83,6 @@ function transfer(creep: Creep) {
 
 
 const onSource = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if (creep.store.getFreeCapacity() === 0) {
         transfer(creep);
         return WORK_EVENTS.TO_TARGET;
@@ -93,7 +92,6 @@ const onSource = (creep: Creep): WorkEvent => {
 };
 
 const onTarget = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if (creep.store.getUsedCapacity() === 0) {
         withdraw(creep);
         return WORK_EVENTS.TO_SOURCE;
@@ -102,22 +100,14 @@ const onTarget = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-const AidCarryFunction = {
-    prepare: function (creep: Creep) {
-        if (creep.memory['boostmap']) {
-            return creep.goBoost(creep.memory['boostmap']) === OK;
-        } else {
-            return creep.goBoost({ [CARRY]: ['XKH2O', 'KH2O', 'KH'] }) === OK;
-        }
-        
-    },
+const aidCarryWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
 
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    },
-};
+const AidCarryFunction = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] },
+    run: aidCarryWork.run
+});
 
 export default AidCarryFunction;

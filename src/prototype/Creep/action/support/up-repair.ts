@@ -2,11 +2,12 @@ import { compress } from '@/shared/compress';
 import { getLayoutData } from '@/shared/memory';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 export const syncUpRepairMoveWork = (creep: Creep) => {
-    const targetId = (creep.memory.cacheTarget as any)?.targetId as Id<StructureRampart | StructureWall> | undefined;
+    const targetId = getMemoryCacheSection<Record<string, any>>(creep.memory, 'target')?.targetId as Id<StructureRampart | StructureWall> | undefined;
     if (!targetId) {
         writeMoveWorkTileCandidates(creep, []);
         return;
@@ -17,8 +18,7 @@ export const syncUpRepairMoveWork = (creep: Creep) => {
 };
 
 const RepairWork = function (creep: Creep) {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
-    const cache = creep.memory.cacheTarget as any
+    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
     let target = Game.getObjectById(cache.targetId) as StructureRampart | StructureWall | null;
 
     if (!target || target.hits == target.hitsMax) {
@@ -155,7 +155,6 @@ const WithdrawLink = function (creep: Creep) {
 }
 
 const onTarget = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if(!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if(creep.store.getUsedCapacity() === 0) {
         creep.say('🔄');
@@ -167,7 +166,6 @@ const onTarget = (creep: Creep): WorkEvent => {
 };
 
 const onSource = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if(!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if(creep.ticksToLive < 30 && creep.body.some(part => part.boost)) {
         if(creep.unBoost()) creep.suicide();
@@ -181,16 +179,14 @@ const onSource = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-const UpRepairFunction = {
-    prepare: function (creep: Creep) {
-        return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
-    },
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    }
-}
+const upRepairWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
+
+const UpRepairFunction = createBoostedRole({
+    boost: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
+    run: upRepairWork.run
+})
 
 export default UpRepairFunction;

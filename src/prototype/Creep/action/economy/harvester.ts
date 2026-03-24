@@ -1,5 +1,6 @@
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
+import { createCreepRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
 const NEAR_RANGE = 2;
@@ -342,17 +343,24 @@ const createHarvesterDeliverMachine = (creep: Creep) => {
     );
 };
 
-const HarvesterAction = {
+const HarvesterAction = createCreepRole({
+    prepare: function (creep: Creep) {
+        if (!creep.room.source || creep.room.source.length === 0) return false;
+        const boundSource = creep.getBoundSource();
+        if (boundSource) {
+            creep.setBoundSourceId(boundSource.id);
+            return true;
+        }
+        const targetSource = creep.room.closestSource(creep);
+        if (!targetSource) return false;
+        creep.setBoundSourceId(targetSource.id);
+        return true;
+    },
     /**
      * Harvester 主运行逻辑（已迁移到多层 FSM）
      */
     run: function (creep: Creep) {
         if (!creep.moveHomeRoom()) return;
-
-        if (!creep.memory.ready) {
-            creep.memory.ready = this.prepare(creep);
-            return;
-        }
 
         const ctx: HarvesterContext = {
             creep,
@@ -374,22 +382,7 @@ const HarvesterAction = {
         if (getHarvesterFlowState(creep) === HARVESTER_FLOW_STATES.COLLECT) {
             deliverMachine.setState(HARVESTER_DELIVER_STATES.TRANSFER);
         }
-    },
-    /**
-     * 准备阶段：绑定 Source
-     */
-    prepare: function (creep: Creep) {
-        if (!creep.room.source || creep.room.source.length === 0) return false;
-        const boundSource = creep.getBoundSource();
-        if (boundSource) {
-            creep.setBoundSourceId(boundSource.id);
-            return true;
-        }
-        const targetSource = creep.room.closestSource(creep);
-        if (!targetSource) return false;
-        creep.setBoundSourceId(targetSource.id);
-        return true;
     }
-}
+})
 
 export default HarvesterAction;

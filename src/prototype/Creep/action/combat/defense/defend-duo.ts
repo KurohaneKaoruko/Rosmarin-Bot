@@ -1,8 +1,6 @@
 import { pickDefenseAnchorRampart } from '@/shared/defenseUtils';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
-
-type DefendCtx = { creep: Creep };
+import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
@@ -39,58 +37,31 @@ const tryBindNearestPartner = (
     return partner;
 };
 
-const createDefenseRole = (
-    registry: BehaviorTreeRegistry<DefendCtx>,
-    ensureBoost: any,
-    runDefense: (creep: Creep) => void
-) => {
-    const runNode = leaf<DefendCtx>(({ creep }) => {
-        runDefense(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree<DefendCtx>(
-        selector(
-            hotSwap(registry, 'root', fail()),
-            sequence(ensureBoost, runNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
-
-const ensureDoubleAttackBoost = leaf<DefendCtx>(({ creep }) => {
-    if (creep.memory.boosted) return BtStatus.Success;
-    const ok = creep.goBoost({
+const getDefend2AttackBoost = () => ({
         [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
         [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
         [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
-    }, { must: true }) === OK;
-    if (ok) creep.memory.boosted = true;
-    return ok ? BtStatus.Success : BtStatus.Running;
-});
+    });
 
-const ensureDoubleHealBoost = leaf<DefendCtx>(({ creep }) => {
-    if (creep.memory.boosted) return BtStatus.Success;
+const defend2HealPrepare = (creep: Creep) => {
+    if (creep.memory.boosted) return true;
     if (creep.memory['boostmap']) {
         const result = creep.goBoost(creep.memory['boostmap']);
         if (result === OK) {
             creep.memory.boosted = true;
-            return BtStatus.Success;
+            return true;
         }
-        return BtStatus.Running;
+        return false;
     }
-    const ok = creep.goBoost({
+
+    const result = creep.goBoost({
         [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
         [HEAL]: ['XLHO2', 'LHO2', 'LO'],
         [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
-    }, { must: true }) === OK;
-    if (ok) creep.memory.boosted = true;
-    return ok ? BtStatus.Success : BtStatus.Running;
-});
+    }) === OK;
+    if (result) creep.memory.boosted = true;
+    return result;
+};
 
 const runDefend2Attack = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -219,10 +190,14 @@ const runDefend2Heal = (creep: Creep) => {
     }
 };
 
-export const defend2AttackRegistry = new BehaviorTreeRegistry<DefendCtx>();
-export const defend2HealRegistry = new BehaviorTreeRegistry<DefendCtx>();
+const defend2Attack = createBoostedRole({
+    boost: getDefend2AttackBoost(),
+    run: runDefend2Attack
+});
 
-const defend2Attack = createDefenseRole(defend2AttackRegistry, ensureDoubleAttackBoost, runDefend2Attack);
-const defend2Heal = createDefenseRole(defend2HealRegistry, ensureDoubleHealBoost, runDefend2Heal);
+const defend2Heal = createCreepRole({
+    prepare: defend2HealPrepare,
+    run: runDefend2Heal
+});
 
 export { defend2Attack, defend2Heal };

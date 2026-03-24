@@ -8,6 +8,7 @@ import {
 } from '@/shared/coreDepot';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 type CarrierCache = {
     sourceId?: Id<any>;
@@ -23,13 +24,11 @@ type CarrierCache = {
 };
 
 const getCarrierSourceCache = (creep: Creep): CarrierCache => {
-    creep.memory.cacheSource = creep.memory.cacheSource || {}
-    return creep.memory.cacheSource as CarrierCache
+    return ensureMemoryCacheSection<CarrierCache>(creep.memory, 'source');
 }
 
 const getCarrierTargetCache = (creep: Creep): CarrierCache => {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
-    return creep.memory.cacheTarget as CarrierCache
+    return ensureMemoryCacheSection<CarrierCache>(creep.memory, 'target');
 }
 
 /**
@@ -80,13 +79,14 @@ const getReservedWithdrawCapacityByCarrier = (() => {
                 const creep = Game.creeps[creepName];
                 if (!creep) continue;
                 if (creep.memory?.role !== 'carrier') continue;
-                const sourceId = creep.memory.cacheSource?.sourceId;
+                const sourceCache = getMemoryCacheSection<CarrierCache>(creep.memory, 'source');
+                const sourceId = sourceCache?.sourceId;
                 if (!sourceId) continue;
                 const freeCapacity = creep.store.getFreeCapacity();
                 if (freeCapacity <= 0) continue;
                 const creepRoom = creep.room.name;
                 if (!byRoom[creepRoom]) byRoom[creepRoom] = {};
-                const key = getCarrierWithdrawReservationKey(sourceId, creep.memory.cacheSource?.resourceType);
+                const key = getCarrierWithdrawReservationKey(sourceId, sourceCache?.resourceType);
                 byRoom[creepRoom][key] = (byRoom[creepRoom][key] || 0) + freeCapacity;
             }
         }

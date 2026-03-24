@@ -1,15 +1,5 @@
-import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { createStrategyRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
-
-// 策略 ID 常量：集中管理，避免散落字符串
-const MANAGER_STRATEGIES = {
-    LINK: 'link-transfer',
-    MISSION: 'mission',
-    DEPOSIT: 'deposit',
-    IDLE: 'idle'
-} as const;
-
-type ManagerStrategyId = typeof MANAGER_STRATEGIES[keyof typeof MANAGER_STRATEGIES];
 
 type LinkPlan =
     | { type: 'transfer-to-manage'; target: StructureLink }
@@ -229,61 +219,48 @@ function buildManagerPlan(creep: Creep): ManagerPlan {
     return { linkPlan, missionTask, depositTarget };
 }
 
-// 策略容器：顺序即优先级
-const managerStrategyContainer = new StrategyContainer<ManagerContext, void>();
-
-managerStrategyContainer.register({
-    id: MANAGER_STRATEGIES.LINK,
-    canRun: (ctx) => !!ctx.plan.linkPlan,
-    run: (ctx) => {
-        if (!ctx.plan.linkPlan) return;
-        executeLinkPlan(ctx.creep, ctx.plan.linkPlan);
+const runDepositPlan = (ctx: ManagerContext) => {
+    const plan = ctx.plan.depositTarget;
+    if (!plan) return;
+    if (plan.target) {
+        ctx.creep.goTransfer(plan.target, plan.resourceType);
+        return;
     }
-});
+    ctx.creep.drop(plan.resourceType);
+};
 
-managerStrategyContainer.register({
-    id: MANAGER_STRATEGIES.MISSION,
-    canRun: (ctx) => !!ctx.plan.missionTask,
-    run: (ctx) => {
-        if (!ctx.plan.missionTask) return;
-        executeManagerMission(ctx.creep, ctx.plan.missionTask);
+const runIdle = (ctx: ManagerContext) => {
+    const pos = ctx.creep.room.getCenter();
+    if (!ctx.creep.pos.isEqualTo(pos)) {
+        ctx.creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
     }
-});
+};
 
-managerStrategyContainer.register({
-    id: MANAGER_STRATEGIES.DEPOSIT,
-    canRun: (ctx) => !!ctx.plan.depositTarget,
-    run: (ctx) => {
-        const plan = ctx.plan.depositTarget;
-        if (!plan) return;
-        if (plan.target) {
-            ctx.creep.goTransfer(plan.target, plan.resourceType);
-            return;
-        }
-        ctx.creep.drop(plan.resourceType);
-    }
-});
-
-managerStrategyContainer.register({
-    id: MANAGER_STRATEGIES.IDLE,
-    canRun: () => true,
-    run: (ctx) => {
-        const pos = ctx.creep.room.getCenter();
-        if (!ctx.creep.pos.isEqualTo(pos)) {
-            ctx.creep.moveTo(pos, { visualizePathStyle: { stroke: '#ffffff' } });
-        }
-    }
-});
-
-const ManagerAction = {
-    run: function (creep: Creep) {
+const ManagerAction = createStrategyRole<ManagerContext>({
+    createContext: (creep) => {
         const centerPos = getManagerLockCenter(creep.room);
         creep.memory.dontPullMe = !!centerPos && creep.pos.isEqualTo(centerPos);
         syncManagerMoveWork(creep, centerPos);
-        const plan = buildManagerPlan(creep);
-        const ctx: ManagerContext = { creep, plan };
-        runStrategy(managerStrategyContainer, ctx);
-    }
-};
+        return { creep, plan: buildManagerPlan(creep) };
+    },
+    strategies: [
+        {
+            canRun: (ctx) => !!ctx.plan.linkPlan,
+            run: (ctx) => executeLinkPlan(ctx.creep, ctx.plan.linkPlan!)
+        },
+        {
+            canRun: (ctx) => !!ctx.plan.missionTask,
+            run: (ctx) => executeManagerMission(ctx.creep, ctx.plan.missionTask!)
+        },
+        {
+            canRun: (ctx) => !!ctx.plan.depositTarget,
+            run: runDepositPlan
+        },
+        {
+            canRun: () => true,
+            run: runIdle
+        }
+    ]
+});
 
 export default ManagerAction;

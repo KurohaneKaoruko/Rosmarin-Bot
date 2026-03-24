@@ -1,4 +1,4 @@
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -12,7 +12,6 @@ import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
  * @returns 工作层状态机事件。
  */
 const onTarget = (creep: Creep): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
     if (creep.store.getUsedCapacity() === 0) {
@@ -39,7 +38,6 @@ const onTarget = (creep: Creep): WorkEvent => {
  * @returns 工作层状态机事件。
  */
 const onSource = (creep: Creep): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
     if (creep.store.getFreeCapacity() === 0) {
@@ -81,31 +79,14 @@ export const syncUpgraderMoveWork = (creep: Creep) => {
  * 使用 WorkLayer 统一驱动「取能 -> 升级」循环，
  * 并在 prepare 阶段执行升级加速 boost。
  */
-const Upgrader = {
-    /**
-     * 升级工准备阶段：
-     * - RCL8 不再强制 boost；
-     * - 其余等级尝试按优先级执行 WORK boost。
-     *
-     * @param creep 当前 creep。
-     * @returns `true` 表示准备完成。
-     */
-    prepare: function (creep: Creep) {
-        if (creep.room.level == 8) return true;
-        return creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] }) === OK;
-    },
+const upgraderWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
 
-    /**
-     * 执行升级工工作层状态机。
-     *
-     * @param creep 当前 creep。
-     */
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    },
-};
+const Upgrader = createBoostedRole({
+    boost: (creep) => creep.room.level == 8 ? null : { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
+    run: upgraderWork.run
+});
 
 export default Upgrader;

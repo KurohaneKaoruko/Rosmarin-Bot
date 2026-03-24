@@ -1,4 +1,4 @@
-import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { createStrategyRole } from '@/framework/ai/creepRole';
 
 type DismantleMode = 'clean' | 'route';
 
@@ -16,12 +16,6 @@ type DismantleMemory = CreepMemory & {
     boostRetryAt?: number;
     boostmap?: any;
 };
-
-// 策略 ID 常量
-const DISMANTLE_STRATEGIES = {
-    ROUTE: 'route',
-    CLEAN: 'clean'
-} as const;
 
 type DismantleContext = {
     creep: Creep;
@@ -250,24 +244,26 @@ const resolveTargetAndDismantle = (creep: Creep, mem: DismantleMemory) => {
     }
 };
 
-// 策略容器：route 优先
-const dismantleStrategyContainer = new StrategyContainer<DismantleContext, void>();
-
-dismantleStrategyContainer.register({
-    id: DISMANTLE_STRATEGIES.ROUTE,
-    canRun: (ctx) => ctx.mode === 'route',
-    run: (ctx) => {
-        updateRouteTarget(ctx.creep, ctx.mem);
-        resolveTargetAndDismantle(ctx.creep, ctx.mem);
-    }
-});
-
-dismantleStrategyContainer.register({
-    id: DISMANTLE_STRATEGIES.CLEAN,
-    canRun: (ctx) => ctx.mode === 'clean',
-    run: (ctx) => {
-        resolveTargetAndDismantle(ctx.creep, ctx.mem);
-    }
+const dismantleModeRunner = createStrategyRole<DismantleContext>({
+    createContext: (creep) => {
+        const mem = creep.memory as DismantleMemory;
+        return { creep, mem, mode: getMode(creep, mem) };
+    },
+    strategies: [
+        {
+            canRun: (ctx) => ctx.mode === 'route',
+            run: (ctx) => {
+                updateRouteTarget(ctx.creep, ctx.mem);
+                resolveTargetAndDismantle(ctx.creep, ctx.mem);
+            }
+        },
+        {
+            canRun: () => true,
+            run: (ctx) => {
+                resolveTargetAndDismantle(ctx.creep, ctx.mem);
+            }
+        }
+    ]
 });
 
 const dismantle = {
@@ -283,9 +279,7 @@ const dismantle = {
 
         const mode = getMode(creep, mem);
         if (!ensureBoostIfNeeded(creep, mem, mode)) return;
-
-        const ctx: DismantleContext = { creep, mem, mode };
-        runStrategy(dismantleStrategyContainer, ctx);
+        dismantleModeRunner.run(creep);
     }
 };
 

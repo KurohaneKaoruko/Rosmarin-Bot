@@ -1,4 +1,4 @@
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -12,7 +12,6 @@ import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
  * @returns 工作层状态机事件。
  */
 const onTarget = (creep: Creep): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
     creep.runControllerUpgrade();
@@ -34,7 +33,6 @@ const onTarget = (creep: Creep): WorkEvent => {
  * @returns 工作层状态机事件。
  */
 const onSource = (creep: Creep): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
     creep.withdrawControllerEnergy({
@@ -70,31 +68,14 @@ export const syncAidUpgradeMoveWork = (creep: Creep) => {
  * - `onSource` 负责补能；
  * - `onTarget` 负责升级。
  */
-const aid_upgrade = {
-    /**
-     * 出生后执行 boost 准备流程。
-     *
-     * @param creep 当前 creep。
-     * @returns `true` 表示可进入 run 流程。
-     */
-    prepare: function (creep: Creep) {
-        if (creep.memory['boostmap']) {
-            return creep.goBoost(creep.memory['boostmap']) === OK;
-        }
-        return creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] }) === OK;
-    },
+const aidUpgradeWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
 
-    /**
-     * 执行 AID 升级工作层状态机。
-     *
-     * @param creep 当前 creep。
-     */
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    },
-};
+const aid_upgrade = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
+    run: aidUpgradeWork.run
+});
 
 export default aid_upgrade;

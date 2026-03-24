@@ -2,6 +2,7 @@ import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/shared/memory";
 import { parseShardRoomName } from "@/shared/shardRoom";
+import { ensureMemoryCache } from "@/prototype/Creep/function/cache";
 
 // 房间控制
 export default {
@@ -204,9 +205,10 @@ export default {
             let matched = 0;
             const clearRoomLocalCache = (mem: any) => {
                 // 清理跨房后容易失效的临时缓存/路径，避免继续追旧目标卡边缘
-                if (mem.cache && typeof mem.cache === 'object') mem.cache = {};
-                if (mem.cacheSource && typeof mem.cacheSource === 'object') mem.cacheSource = {};
-                if (mem.cacheTarget && typeof mem.cacheTarget === 'object') mem.cacheTarget = {};
+                ensureMemoryCache(mem);
+                mem.cache = {};
+                delete mem.cacheSource;
+                delete mem.cacheTarget;
                 delete mem._moveToRoomState;
             };
 

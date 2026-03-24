@@ -1,5 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
 function FlagActionMove(creep: Creep) {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
@@ -124,28 +124,8 @@ function AutoActionDismantle(creep: Creep) {
 }
 
 
-type WarCtx = { creep: Creep };
-
-// 行为树注册表：支持双人拆除逻辑热插拔
-export const doubleDismantleRegistry = new BehaviorTreeRegistry<WarCtx>();
-
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
-
-    if (!creep.memory.boosted) {
-        if (creep.memory['boostmap']) {
-            const result = creep.goBoost(creep.memory['boostmap']);
-            if (result === OK) {
-                creep.memory.boosted = true;
-            }
-        } else {
-            creep.memory.boosted = creep.goBoost({
-                [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-                [WORK]: ['XZH2O', 'ZH2O', 'ZH']
-            }) === OK;
-        }
-        return;
-    }
 
     // 等待绑定
     if (!creep.memory.bind) return;
@@ -176,20 +156,12 @@ const runLegacy = (creep: Creep) => {
     AutoFindTarget(creep);
 };
 
-const tree = new BehaviorTree<WarCtx>(
-    selector(
-        hotSwap(doubleDismantleRegistry, 'root', fail()),
-        leaf<WarCtx>(({ creep }) => {
-            runLegacy(creep);
-            return BtStatus.Running;
-        })
-    )
-);
-
-const double_dismantle = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
-}
+const double_dismantle = createBoostedRole({
+    boost: (creep) => creep.memory['boostmap'] || {
+        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+        [WORK]: ['XZH2O', 'ZH2O', 'ZH']
+    },
+    run: runLegacy
+})
 
 export default double_dismantle;

@@ -1,26 +1,4 @@
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
 import type { CreepRoleHandler } from '../types';
-
-type SimpleBehaviorContext = { creep: Creep };
-
-const createSimpleBehaviorRole = (run: (creep: Creep) => void): CreepRoleHandler => {
-    const registry = new BehaviorTreeRegistry<SimpleBehaviorContext>();
-    const mainNode = leaf<SimpleBehaviorContext>(({ creep }) => {
-        run(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree(
-        sequence(
-            hotSwap(registry, 'main', mainNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
 
 const runClaimer = (creep: Creep) => {
     if (!creep.memory.targetRoom) {
@@ -119,7 +97,12 @@ const runAttackClaimer = (creep: Creep) => {
     creep.moveTo(controller, { range: 1 });
 };
 
-const claimer = createSimpleBehaviorRole(runClaimer);
-const attackClaimer = createSimpleBehaviorRole(runAttackClaimer);
+const claimer: CreepRoleHandler = {
+    run: runClaimer
+};
+
+const attackClaimer: CreepRoleHandler = {
+    run: runAttackClaimer
+};
 
 export { attackClaimer, claimer };

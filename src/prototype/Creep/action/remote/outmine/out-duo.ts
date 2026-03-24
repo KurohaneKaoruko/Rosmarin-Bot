@@ -1,27 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
 import type { CreepRoleHandler } from '../../types';
-
-type SimpleBehaviorContext = { creep: Creep };
-
-const createSimpleBehaviorRole = (run: (creep: Creep) => void): CreepRoleHandler => {
-    const registry = new BehaviorTreeRegistry<SimpleBehaviorContext>();
-    const mainNode = leaf<SimpleBehaviorContext>(({ creep }) => {
-        run(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree(
-        sequence(
-            hotSwap(registry, 'main', mainNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
@@ -122,7 +100,12 @@ const runOut2Heal = (creep: Creep) => {
     }
 };
 
-const out2Attack = createSimpleBehaviorRole(runOut2Attack);
-const out2Heal = createSimpleBehaviorRole(runOut2Heal);
+const out2Attack: CreepRoleHandler = {
+    run: runOut2Attack
+};
+
+const out2Heal: CreepRoleHandler = {
+    run: runOut2Heal
+};
 
 export { out2Attack, out2Heal };

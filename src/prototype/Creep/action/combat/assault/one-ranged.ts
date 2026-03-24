@@ -1,32 +1,22 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
-type WarCtx = { creep: Creep };
-
-// 行为树注册表：支持单体远程战斗逻辑热插拔
-export const oneRangedRegistry = new BehaviorTreeRegistry<WarCtx>();
-
-// boost 逻辑节点：未完成时返回 Running，完成后返回 Success
-const ensureBoost = leaf<WarCtx>(({ creep }) => {
-    if (creep.memory.boosted) return BtStatus.Success;
-    const ok = creep.goBoost({
+const oneRangedBoost = {
         [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
         [HEAL]: ['XLHO2', 'LHO2', 'LO'],
         [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
         [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
-    }) === OK;
-    if (ok) creep.memory.boosted = true;
-    return ok ? BtStatus.Success : BtStatus.Running;
-});
+};
 
-// 主战斗节点：执行一次即可，保持 Running 让行为树持续驱动
-const runCombat = leaf<WarCtx>(({ creep }) => {
+// 这一类单体战斗 creep 没有实际热插拔入口，
+// 直接走“boost 完成后执行战斗逻辑”即可。
+const runCombat = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
     creep.heal(creep);
 
     if (creep.ticksToLive < 100 && creep.room.my) {
         creep.unBoost();
-        return BtStatus.Running;
+        return;
     }
 
     let moveOK = false;
@@ -44,7 +34,7 @@ const runCombat = leaf<WarCtx>(({ creep }) => {
 
     if (creep.room.name !== creep.memory.targetRoom && !moveOK) {
         creep.moveToRoom(creep.memory.targetRoom);
-        return BtStatus.Running;
+        return;
     }
 
     const creepTarget = getRoomTickCacheValue(creep.room, 'one_ranged_hostile_creeps', () =>
@@ -83,21 +73,11 @@ const runCombat = leaf<WarCtx>(({ creep }) => {
             creep.rangedAttack(target);
         }
     }
-    return BtStatus.Running;
-});
-
-// 行为树：可被 hotSwap 替换根节点，默认执行 boost -> 战斗
-const tree = new BehaviorTree<WarCtx>(
-    selector(
-        hotSwap(oneRangedRegistry, 'root', fail()),
-        sequence(ensureBoost, runCombat)
-    )
-);
-
-const one_ranged = {
-    run: function (creep: Creep) {
-        tree.tick({ creep });
-    }
 };
+
+const one_ranged = createBoostedRole({
+    boost: oneRangedBoost,
+    run: runCombat
+});
 
 export default one_ranged;

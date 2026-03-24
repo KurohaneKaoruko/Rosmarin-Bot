@@ -1,6 +1,7 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 // 提取 store 中第一个非能量资源，避免 Object.keys 直接退化成 string。
 const getFirstNonEnergyResource = (store: StoreDefinition): ResourceConstant | null => {
@@ -15,8 +16,7 @@ const getFirstCarriedResource = (creep: Creep): ResourceConstant | null => {
 };
 
 const onSource = (creep: Creep): WorkEvent => {
-    creep.memory.cacheSource = creep.memory.cacheSource || {}
-    const cache = creep.memory.cacheSource
+    const cache = ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'source');
     const sourceRoom = creep.memory.sourceRoom;
     creep.disableAttackNotificationsOnce();
     

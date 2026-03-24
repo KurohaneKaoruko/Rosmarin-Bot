@@ -6,13 +6,12 @@ import {
     scoreRampart,
     shouldSwitchDefenseRampart
 } from '@/shared/defenseUtils';
-import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
+import { createBoostedRole } from '@/framework/ai/creepRole';
 
 const DEFENSE_RAMPART_LOCK_TTL = 25;
 const DEFEND_ATTACK_SWITCH_THRESHOLD = 2;
 const DEFEND_RANGED_SWITCH_THRESHOLD = 0.6;
 
-type DefendCtx = { creep: Creep };
 type DefenseMode = 'melee' | 'ranged';
 
 const clearDefenseRampartLock = (creep: Creep) => {
@@ -214,42 +213,7 @@ const runDefendRanged = (creep: Creep) => {
     }
 };
 
-const createBoostNode = (getBoostConfig: (creep: Creep) => { must: boolean; boostmap: Record<string, string[]> }) =>
-    leaf<DefendCtx>(({ creep }) => {
-        if (creep.memory.boosted) return BtStatus.Success;
-        const { must, boostmap } = getBoostConfig(creep);
-        const ok = creep.goBoost(boostmap as any, { must }) === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok ? BtStatus.Success : BtStatus.Running;
-    });
-
-const createDefenseRole = (
-    registry: BehaviorTreeRegistry<DefendCtx>,
-    ensureBoost: any,
-    runDefense: (creep: Creep) => void
-) => {
-    const runNode = leaf<DefendCtx>(({ creep }) => {
-        runDefense(creep);
-        return BtStatus.Running;
-    });
-    const tree = new BehaviorTree<DefendCtx>(
-        selector(
-            hotSwap(registry, 'root', fail()),
-            sequence(ensureBoost, runNode)
-        )
-    );
-
-    return {
-        run(creep: Creep) {
-            tree.tick({ creep });
-        }
-    };
-};
-
-export const defendAttackRegistry = new BehaviorTreeRegistry<DefendCtx>();
-export const defendRangedRegistry = new BehaviorTreeRegistry<DefendCtx>();
-
-const defendAttackEnsureBoost = createBoostNode((creep) => {
+const getDefendAttackBoost = (creep: Creep) => {
     const must = !!creep.memory['mustBoost'];
     return {
         must,
@@ -261,9 +225,9 @@ const defendAttackEnsureBoost = createBoostNode((creep) => {
             [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
         }
     };
-});
+};
 
-const defendRangedEnsureBoost = createBoostNode((creep) => {
+const getDefendRangedBoost = (creep: Creep) => {
     const must = !!creep.memory['mustBoost'];
     return {
         must,
@@ -275,9 +239,18 @@ const defendRangedEnsureBoost = createBoostNode((creep) => {
             [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
         }
     };
+};
+
+const defendAttack = createBoostedRole({
+    boost: (creep) => getDefendAttackBoost(creep).boostmap,
+    must: (creep) => getDefendAttackBoost(creep).must,
+    run: runDefendAttack
 });
 
-const defendAttack = createDefenseRole(defendAttackRegistry, defendAttackEnsureBoost, runDefendAttack);
-const defendRanged = createDefenseRole(defendRangedRegistry, defendRangedEnsureBoost, runDefendRanged);
+const defendRanged = createBoostedRole({
+    boost: (creep) => getDefendRangedBoost(creep).boostmap,
+    must: (creep) => getDefendRangedBoost(creep).must,
+    run: runDefendRanged
+});
 
 export { defendAttack, defendRanged };

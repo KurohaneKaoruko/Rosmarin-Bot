@@ -1,4 +1,1 @@
-export type CreepRoleHandler = {
-    prepare?: (creep: Creep) => boolean;
-    run: (creep: Creep) => void;
-};
+export type { CreepRoleDefinition, CreepRoleHandler } from '@/framework/ai/creepRole';

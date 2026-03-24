@@ -1,5 +1,6 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { Effect, pipeEffect } from '@/framework/ai/pipeline';
+import { createPipelineRole } from '@/framework/ai/creepRole';
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
 
@@ -157,8 +158,7 @@ const resolveTransferTarget = (creep: Creep, cache: UniversalTargetCache) => {
 };
 
 const doWork = function (creep: Creep) {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {};
-    const cache = creep.memory.cacheTarget as UniversalTargetCache;
+    const cache = ensureMemoryCacheSection<UniversalTargetCache>(creep.memory, 'target');
     const urgent = isUrgentRefill(creep.room);
     const forceUpgrade = shouldForceUpgrade(creep.room);
 
@@ -278,40 +278,37 @@ const finalizePlan = (decision: UniversalDecision): UniversalPlan => ({
     shouldClearSource: decision.mode === 'work'
 });
 
-// 副作用集中执行：移动/采集/建造/升级全部在此进行
-const executePlan = (plan: UniversalPlan) =>
-    Effect.perform<UniversalContext, UniversalPlan>('execute-universal-plan', () => {
-        const { creep } = plan;
+// 最后一步统一落副作用：
+// 前面几步只做计算，这里才真正执行移动/采集/建造。
+const executePlan = (plan: UniversalPlan) => {
+    const { creep } = plan;
 
-        if (!creep.moveHomeRoom()) return plan;
-        if (creep.handleRoomEdge()) return plan;
+    if (!creep.moveHomeRoom()) return plan;
+    if (creep.handleRoomEdge()) return plan;
 
-        delete creep.memory.working;
+    delete creep.memory.working;
 
-        if (plan.mode === 'gather') {
-            getEnergy(creep);
-            return plan;
-        }
-
-        if (plan.shouldClearSource && creep.memory.targetSourceId) {
-            delete creep.memory.targetSourceId;
-        }
-        doWork(creep);
+    if (plan.mode === 'gather') {
+        getEnergy(creep);
         return plan;
-    });
-
-const UniversalFunction = {
-    run: function (creep: Creep) {
-        // 管道式执行：前四步纯计算，最后一步执行副作用
-        pipeEffect(
-            Effect.of<UniversalContext, UniversalContext>({ creep }),
-            (eff) => eff.map(snapshotEnergy),
-            (eff) => eff.map(attachMinWorkPayload),
-            (eff) => eff.map(decideMode),
-            (eff) => eff.map(finalizePlan),
-            (eff) => eff.flatMap(executePlan)
-        ).run({ creep });
     }
+
+    if (plan.shouldClearSource && creep.memory.targetSourceId) {
+        delete creep.memory.targetSourceId;
+    }
+    doWork(creep);
+    return plan;
 };
+
+const UniversalFunction = createPipelineRole<UniversalContext, UniversalSnapshot>({
+    createContext: (creep) => ({ creep }),
+    initial: snapshotEnergy,
+    steps: [
+        (snapshot) => attachMinWorkPayload(snapshot),
+        (payload) => decideMode(payload),
+        (decision) => finalizePlan(decision),
+        (plan) => executePlan(plan)
+    ]
+});
 
 export default UniversalFunction;

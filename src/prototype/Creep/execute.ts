@@ -1,4 +1,5 @@
 import { getRoleHandler } from './action';
+import { ensureMemoryCache } from './function/cache';
 import { RoleData } from '@/constant/CreepConstant';
 
 const creepExecuteErrorTickCache: Record<string, number> = {};
@@ -55,18 +56,10 @@ export default class CreepExecute extends Creep {
         });
         if (!handler) return;
 
-        this.memory.cache = this.memory.cache || {};
-        this.memory.cacheSource = this.memory.cacheSource || {};
-        this.memory.cacheTarget = this.memory.cacheTarget || {};
+        ensureMemoryCache(this.memory);
 
-        if (handler.prepare && !this.memory.ready) {
-            this.memory.ready = handler.prepare(this);
-            if (!this.memory.ready) return;
-        }
-
-        if (handler.run) {
-            handler.run(this);
-            return;
-        }
+        // 角色自己的准备阶段（如 boost / 绑定初始化）已经收回到框架包装器内部，
+        // 统一执行入口只负责把 creep 交给 handler.run。
+        handler.run(this);
     }
 }

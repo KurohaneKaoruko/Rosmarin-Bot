@@ -1,5 +1,6 @@
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 /**
  * 后勤角色在「取货态」下的目标缓存。
@@ -15,13 +16,12 @@ type LogisticCache = {
  * - `sourceRoom` 取货房间；
  * - `targetRoom` 送货房间；
  * - `idleUntil` 未找到目标时的短暂休眠截止 tick；
- * - `cacheSource` 取货目标缓存。
+ * - `cache.source` 取货目标缓存。
  */
 type LogisticMemory = CreepMemory & {
     sourceRoom?: string;
     targetRoom?: string;
     idleUntil?: number;
-    cacheSource?: LogisticCache;
 };
 
 /**
@@ -82,7 +82,7 @@ function withdraw(creep: Creep) {
     if (mem.idleUntil && Game.time < mem.idleUntil) return;
 
     const room = creep.room;
-    const cache = (mem.cacheSource ||= {});
+    const cache = ensureMemoryCacheSection<LogisticCache>(mem, 'source');
     let target = cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
     let resType = cache.resType;
     let actionType = cache.actionType;
@@ -252,40 +252,18 @@ const onTarget = (creep: Creep): WorkEvent => {
  * @remarks
  * 使用 WorkLayer 双态循环实现「取货 -> 送货」。
  */
-const logisticFunction = {
-    /**
-     * 物流角色的 boost 准备流程。
-     *
-     * @param creep 当前 creep。
-     * @returns `true` 表示准备完成。
-     */
-    prepare: function (creep: Creep) {
-        const boostmap = (creep.memory as any).boostmap
-        if (boostmap === null) {
-            creep.memory.boosted = true
-            return true
-        }
-        if (boostmap) {
-            const ret = creep.goBoost(boostmap)
-            creep.memory.boosted = ret === OK
-            return creep.memory.boosted
-        }
-        const boosts = ['XKH2O', 'KH2O', 'KH'] as MineralBoostConstant[]
-        const result = creep.goBoost({ [CARRY]: boosts })
-        creep.memory.boosted = result === OK
-        return creep.memory.boosted
+const logisticWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
+
+const logisticFunction = createBoostedRole({
+    boost: (creep) => {
+        const boostmap = (creep.memory as any).boostmap;
+        if (boostmap === null) return null;
+        return boostmap || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] as MineralBoostConstant[] };
     },
-    /**
-     * 执行后勤角色状态机。
-     *
-     * @param creep 当前 creep。
-     */
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    }
-};
+    run: logisticWork.run
+});
 
 export default logisticFunction;

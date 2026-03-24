@@ -1,4 +1,4 @@
-import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
+import { createStrategyRole } from '@/framework/ai/creepRole';
 import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/features/externalMine';
 import { RoadMemory } from '@/features/externalRoad';
 import {
@@ -8,9 +8,20 @@ import {
     tryOutCarryRelayHandoff,
     updateOutCarryMoveTrace
 } from '@/prototype/Creep/function/relayFunction';
+import { ensureMemoryCache, ensureMemoryCacheSection, getMemoryCacheSection } from '@/prototype/Creep/function/cache';
 import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
+
+// 外矿搬运统一只保留一个 cache 根，source / target 作为其中的分区使用。
+const getOutCarryCache = (creep: Creep): Record<string, any> =>
+    ensureMemoryCache(creep.memory) as Record<string, any>;
+
+const getOutCarrySourceCache = (creep: Creep): Record<string, any> =>
+    ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'source');
+
+const getOutCarryTargetCache = (creep: Creep): Record<string, any> =>
+    ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
 
 // 策略 ID：集中声明，避免散落字符串
 const OUT_CARRY_STRATEGIES = {
@@ -255,7 +266,7 @@ const outCarry: OutCarryAction = {
         if (!creep || creep.spawning) return false;
         if (creep.store.getFreeCapacity() <= 0) return false;
 
-        const cachedMode = (creep.memory.cache as any)?.outCarryMode as OutCarryMode | undefined;
+        const cachedMode = getOutCarryCache(creep).outCarryMode as OutCarryMode | undefined;
         if (cachedMode === OUT_CARRY_STRATEGIES.DELIVER) {
             const used = creep.store.getUsedCapacity();
             const cap = Math.max(1, creep.store.getCapacity());
@@ -364,7 +375,7 @@ const outCarry: OutCarryAction = {
         const sourceRoomName = creep.memory.sourceRoom;
         const sourceRoom = sourceRoomName ? Game.rooms[sourceRoomName] : undefined;
         const canStoreMinerals = !!(sourceRoom?.storage || sourceRoom?.terminal);
-        const cache = (creep.memory.cacheSource ||= {}) as Record<string, any>;
+        const cache = getOutCarrySourceCache(creep);
 
         const dangerousHostiles = room.find(FIND_HOSTILE_CREEPS, {
             filter: (c: Creep) =>
@@ -382,7 +393,7 @@ const outCarry: OutCarryAction = {
             if (other.memory.sourceRoom !== sourceRoomName) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
             if (!this.isLikelyCollecting(other)) continue;
-            const targetId = other.memory.cacheSource?.targetId;
+            const targetId = getMemoryCacheSection<Record<string, any>>(other.memory, 'source')?.targetId;
             if (!targetId) continue;
             reservedByTarget[targetId] = (reservedByTarget[targetId] || 0) + other.store.getFreeCapacity();
         }
@@ -512,8 +523,7 @@ const outCarry: OutCarryAction = {
      * @param creep 当前处于 collect 态的外矿搬运 creep。
      */
     withdraw: function (creep: Creep) {
-        creep.memory.cacheSource = creep.memory.cacheSource || {};
-        const cache = creep.memory.cacheSource as any;
+        const cache = getOutCarrySourceCache(creep);
         const sourceRoom = creep.memory.sourceRoom;
 
         if (cache.waitUntil && Game.time < cache.waitUntil) {
@@ -701,8 +711,7 @@ const outCarry: OutCarryAction = {
      * @param creep 当前处于 deliver 态的外矿搬运 creep。
      */
     carry: function (creep: Creep) {
-        creep.memory.cacheTarget = creep.memory.cacheTarget || {};
-        const cache = creep.memory.cacheTarget as any;
+        const cache = getOutCarryTargetCache(creep);
         const sourceRoom = creep.memory.sourceRoom;
         if (!sourceRoom) return;
 
@@ -780,39 +789,33 @@ const outCarry: OutCarryAction = {
 
     // 统一入口：只做 collect / deliver，修路与建造交给 out-build。
     run: function (creep: Creep) {
-        creep.memory.cache = creep.memory.cache || {};
-        creep.memory.cacheSource = creep.memory.cacheSource || {};
-        creep.memory.cacheTarget = creep.memory.cacheTarget || {};
+        const cache = getOutCarryCache(creep);
+        const sourceCache = getOutCarrySourceCache(creep);
+        const targetCache = getOutCarryTargetCache(creep);
         clearOutCarryRelayIntent(creep);
         updateOutCarryMoveTrace(creep);
         delete creep.memory.working;
         // 本 tick 已被接力方下发移动意图时，不再执行后续动作，避免覆盖接力移动。
         if (hasCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_RECEIVE)) return;
 
-        const cache = creep.memory.cache as any;
         const previousMode = cache.outCarryMode as OutCarryMode | undefined;
         const mode = resolveOutCarryMode(creep, previousMode);
 
         if (mode !== previousMode) {
             // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
             if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
-                const targetCache = creep.memory.cacheTarget as any;
-                if (targetCache) delete targetCache.targetId;
+                delete targetCache.targetId;
             } else {
-                const sourceCache = creep.memory.cacheSource as any;
-                if (sourceCache) {
-                    delete sourceCache.targetId;
-                    delete sourceCache.targetType;
-                    delete sourceCache.waitUntil;
-                    delete sourceCache.partialLeaveWait;
-                    clearAssignedSourceCache(sourceCache);
-                }
+                delete sourceCache.targetId;
+                delete sourceCache.targetType;
+                delete sourceCache.waitUntil;
+                delete sourceCache.partialLeaveWait;
+                clearAssignedSourceCache(sourceCache);
             }
         }
         cache.outCarryMode = mode;
 
-        const ctx: OutCarryContext = { creep, mode };
-        runStrategy(outCarryStrategyContainer, ctx);
+        outCarryModeRunner.run(creep);
     },
 };
 
@@ -880,7 +883,7 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
  * @param creep 当前外矿搬运 creep。
  */
 const runCollectMode = (creep: Creep) => {
-    const sourceCache = creep.memory.cacheSource as any;
+    const sourceCache = getOutCarrySourceCache(creep);
     const used = creep.store.getUsedCapacity();
     const free = creep.store.getFreeCapacity();
     const cap = Math.max(1, creep.store.getCapacity());
@@ -935,26 +938,27 @@ const runCollectMode = (creep: Creep) => {
     creep.memory.dontPullMe = false;
 };
 
-// 策略容器：按优先级注册
-const outCarryStrategyContainer = new StrategyContainer<OutCarryContext, boolean>();
-
-outCarryStrategyContainer.register({
-    id: OUT_CARRY_STRATEGIES.COLLECT,
-    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.COLLECT,
-    run: (ctx) => {
-        runCollectMode(ctx.creep);
-        return true;
-    }
-});
-
-outCarryStrategyContainer.register({
-    id: OUT_CARRY_STRATEGIES.DELIVER,
-    canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.DELIVER,
-    run: (ctx) => {
-        outCarry.carry(ctx.creep);
-        ctx.creep.memory.dontPullMe = false;
-        return true;
-    }
+const outCarryModeRunner = createStrategyRole<OutCarryContext>({
+    createContext: (creep) => {
+        const cache = getOutCarryCache(creep);
+        return {
+            creep,
+            mode: cache.outCarryMode as OutCarryMode
+        };
+    },
+    strategies: [
+        {
+            canRun: (ctx) => ctx.mode === OUT_CARRY_STRATEGIES.COLLECT,
+            run: (ctx) => runCollectMode(ctx.creep)
+        },
+        {
+            canRun: () => true,
+            run: (ctx) => {
+                outCarry.carry(ctx.creep);
+                ctx.creep.memory.dontPullMe = false;
+            }
+        }
+    ]
 });
 
 export default outCarry;

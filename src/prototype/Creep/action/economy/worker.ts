@@ -1,9 +1,10 @@
 import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { ensureMemoryCacheSection } from '@/prototype/Creep/function/cache';
 
 const getWorkTargetCache = (() => {
     const root: Record<string, { tick: number; [key: string]: any }> = {};
@@ -14,8 +15,7 @@ const getWorkTargetCache = (() => {
 })();
 
 const getCache = (creep: Creep) => {
-    creep.memory.cacheTarget = creep.memory.cacheTarget || {}
-    return creep.memory.cacheTarget as any
+    return ensureMemoryCacheSection<Record<string, any>>(creep.memory, 'target');
 }
 
 const resetCacheIfRoomChanged = (creep: Creep, cache: any) => {
@@ -380,7 +380,6 @@ const WorkerAction = function (creep: Creep): MoveWorkTileCandidate[] {
 }
 
 const onTarget = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandidate[]) => void): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
@@ -392,7 +391,6 @@ const onTarget = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandid
 };
 
 const onSource = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandidate[]) => void): WorkEvent => {
-    if (!creep.memory.ready) return WORK_EVENTS.STAY;
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.handleRoomEdge()) return WORK_EVENTS.STAY;
     if (creep.store.getFreeCapacity() === 0) {
@@ -450,20 +448,23 @@ export const syncWorkerMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const WorkerFunction = {
-    prepare: function (creep: Creep) {
-        return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
-    },
-    run: function (creep: Creep) {
+const workerWork = createWorkLayerRole({
+    beforeRun: (creep) => writeMoveWorkTileCandidates(creep, []),
+    createHandlers: (creep) => {
         const publishMoveWork = (candidates: MoveWorkTileCandidate[]) => {
             writeMoveWorkTileCandidates(creep, candidates);
         };
-        publishMoveWork([]);
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep, publishMoveWork),
-            onTarget: ({ creep }) => onTarget(creep, publishMoveWork),
-        });
+
+        return {
+            onSource: ({ creep: current }) => onSource(current, publishMoveWork),
+            onTarget: ({ creep: current }) => onTarget(current, publishMoveWork),
+        };
     }
-}
+});
+
+const WorkerFunction = createBoostedRole({
+    boost: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
+    run: workerWork.run
+})
 
 export default WorkerFunction

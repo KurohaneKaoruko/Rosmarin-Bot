@@ -1,5 +1,5 @@
 import { compress, decompress} from '@/shared/compress';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -157,7 +157,6 @@ function withdrawEnergy(creep) {
 
 
 const onTarget = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if(creep.ticksToLive < 10) {
         if(creep.unBoost()) creep.suicide();
         return WORK_EVENTS.STAY;
@@ -176,7 +175,6 @@ const onTarget = (creep: Creep): WorkEvent => {
 };
 
 const onSource = (creep: Creep): WorkEvent => {
-    if(!creep.memory.ready) return WORK_EVENTS.STAY;
     if(!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
     if(!creep.memory.boosted) {
         const result = creep.goBoost({ [WORK]: ['XGH2O', 'GH2O', 'GH'] });
@@ -206,17 +204,14 @@ export const syncUpUpgradeMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const UpUpgradeFunction = {
-    prepare: function (creep: Creep) {
-        return creep.goBoost({ [WORK]: ['XGH2O'], [MOVE]: ['XZHO2'] }) === OK;
-    },
+const upUpgradeWork = createWorkLayerRole({
+    onSource,
+    onTarget
+});
 
-    run: function (creep: Creep) {
-        runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
-        });
-    },
-}
+const UpUpgradeFunction = createBoostedRole({
+    boost: { [WORK]: ['XGH2O'], [MOVE]: ['XZHO2'] },
+    run: upUpgradeWork.run
+})
 
 export default UpUpgradeFunction;
