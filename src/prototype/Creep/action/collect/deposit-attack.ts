@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, hotSwap, sequence } from '@/framework/ai/behaviorTree';
 
 // 行为树上下文：统一传递 creep，便于热插拔扩展

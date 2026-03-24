@@ -1,6 +1,6 @@
-import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/feature/externalRoad';
-import { HighwayMineVisual } from '@/modules/utils/highwayMineVisual';
-import { getOutMineData, getRoomData } from '@/modules/utils/memory';
+import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/features/externalRoad';
+import { HighwayMineVisual } from '@/shared/highwayMineVisual';
+import { getOutMineData, getRoomData } from '@/shared/memory';
 
 const CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
 const NON_HIGHWAY_ROOM_REGEX = /^[EW]\d*[1-9][NS]\d*[1-9]$/;
@@ -229,7 +229,7 @@ export default {
             };
             
             // 先尝试删除旧任务（如果存在）
-            const duplicateTask: Pick<PowerMineTask, 'targetRoom'> = { targetRoom };
+            const duplicateTask = { targetRoom } as any;
             const existId = room.checkSameMissionInPool('mine', 'power', duplicateTask);
             if (existId) room.deleteMissionFromPool('mine', existId);
 
@@ -250,7 +250,7 @@ export default {
             }
 
             // 先尝试删除旧任务（如果存在）
-            const duplicateTask: Pick<DepositMineTask, 'targetRoom'> = { targetRoom };
+            const duplicateTask = { targetRoom } as any;
             const existId = room.checkSameMissionInPool('mine', 'deposit', duplicateTask);
             if (existId) room.deleteMissionFromPool('mine', existId);
 

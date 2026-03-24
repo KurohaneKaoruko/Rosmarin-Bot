@@ -1,6 +1,6 @@
 import { BASE_CONFIG } from '@/constant/config';
 import { log } from '@/utils';
-import { getMissionPools, getStructData } from "@/modules/utils/memory";
+import { getMissionPools, getStructData } from "@/shared/memory";
 import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';
 
 const MISSION_POOL_NAME_SET = new Set<MissionPoolName>(['transport', 'build', 'repair', 'terminal', 'spawn', 'mine', 'boost']);

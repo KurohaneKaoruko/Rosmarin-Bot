@@ -1,4 +1,4 @@
-import { compressBodyConfig } from "@/modules/utils/compress";
+import { compressBodyConfig } from "@/shared/compress";
 import { THRESHOLDS } from "@/constant/Thresholds";
 
 export default class UpSpawnFunction extends Flag {

@@ -5,7 +5,7 @@ import {
     isPosOccupiedByOtherCreep,
     scoreRampart,
     shouldSwitchDefenseRampart
-} from '@/modules/utils/defenseUtils';
+} from '@/shared/defenseUtils';
 import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
 
 const DEFENSE_RAMPART_LOCK_TTL = 25;

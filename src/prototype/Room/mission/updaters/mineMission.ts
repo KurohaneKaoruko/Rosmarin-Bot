@@ -1,6 +1,6 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
-import { getOutMineData, getRoomData } from '@/modules/utils/memory';
-import { getCreepByTargetRoom } from '@/modules/utils/creepTickIndex';
+import { getOutMineData, getRoomData } from '@/shared/memory';
+import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 
 const SURROUNDING_OFFSETS: Array<[number, number]> = [
     [-1, -1], [0, -1], [1, -1],

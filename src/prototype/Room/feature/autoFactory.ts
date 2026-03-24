@@ -1,5 +1,5 @@
 import { AUTO_FACTORY_CONFIG, AUTO_FACTORY_FALLBACK, Goods, PRODUCTION_MIN, zipMap } from "@/constant/ResourceConstant";
-import { getAutoFactoryData, getMissionPools, getStructData } from "@/modules/utils/memory";
+import { getAutoFactoryData, getMissionPools, getStructData } from "@/shared/memory";
 import { sanitizeMissionPoolMemory } from "../mission/pool/MissionPools";
 
 export default class AutoFactory extends Room {

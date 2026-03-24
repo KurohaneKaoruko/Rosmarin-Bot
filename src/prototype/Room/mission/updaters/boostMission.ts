@@ -1,6 +1,6 @@
 import TransportMission from "./transportMission";
-import { getLabAB, ensureBoostLabs } from '@/modules/utils/labReservations';
-import { getStructData, getTeamData } from '@/modules/utils/memory';
+import { getLabAB, ensureBoostLabs } from '@/shared/labReservations';
+import { getStructData, getTeamData } from '@/shared/memory';
 
 export default class BoostMission extends TransportMission {
     /**

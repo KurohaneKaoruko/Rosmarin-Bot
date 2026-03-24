@@ -5,7 +5,7 @@ import {
     getCoreDepotTarget,
     hasCoreDepotTarget,
     isCoreDepotContainer
-} from '@/modules/utils/coreDepot';
+} from '@/shared/coreDepot';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 

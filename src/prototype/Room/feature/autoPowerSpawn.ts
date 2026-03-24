@@ -1,5 +1,5 @@
 import { log } from "@/utils";
-import { getAutoPowerData, getStructData } from "@/modules/utils/memory";
+import { getAutoPowerData, getStructData } from "@/shared/memory";
 
 export default class AutoPower extends Room {
     autoPower() {

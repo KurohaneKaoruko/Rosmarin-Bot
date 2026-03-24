@@ -1,5 +1,5 @@
 
-import { parseShardRoomName } from '@/modules/utils/shardRoom';
+import { parseShardRoomName } from '@/shared/shardRoom';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';

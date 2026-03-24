@@ -1,8 +1,8 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
-import { decompress, decompressBodyConfig } from '@/modules/utils/compress';
+import { decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getRoomData } from '@/modules/utils/memory';
-import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/utils/creepTickIndex';
+import { getRoomData } from '@/shared/memory';
+import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/shared/creepTickIndex';
 
 // 维修相关
 const REPAIR_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN * 2;

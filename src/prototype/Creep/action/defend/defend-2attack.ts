@@ -1,5 +1,5 @@
 /** 双人小队 防御小队 */
-import { pickDefenseAnchorRampart } from '@/modules/utils/defenseUtils';
+import { pickDefenseAnchorRampart } from '@/shared/defenseUtils';
 import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
 
 type DefendCtx = { creep: Creep };

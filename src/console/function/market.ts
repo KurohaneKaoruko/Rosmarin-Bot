@@ -1,5 +1,5 @@
-import { getOrderPrice, getEnergyHistoryAvgPrice, calcTransactionCostSafe } from "@/modules/utils/marketUtils";
-import { getAutoMarketData } from "@/modules/utils/memory";
+import { getOrderPrice, getEnergyHistoryAvgPrice, calcTransactionCostSafe } from "@/shared/marketUtils";
+import { getAutoMarketData } from "@/shared/memory";
 import { BASE_CONFIG } from "@/constant/config";
 
 const normalizeResType = (resType: string): ResourceConstant => (BASE_CONFIG.RESOURCE_ABBREVIATIONS[resType] || resType) as ResourceConstant;

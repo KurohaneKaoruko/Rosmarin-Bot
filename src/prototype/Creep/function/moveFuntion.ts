@@ -1,4 +1,4 @@
-import { parseShardRoomName } from '@/modules/utils/shardRoom';
+import { parseShardRoomName } from '@/shared/shardRoom';
 
 const isRoomEdgePosition = (pos: { x: number; y: number }): boolean => (
     pos.x === 0 || pos.x === 49 || pos.y === 0 || pos.y === 49

@@ -1,6 +1,6 @@
-import { parseShardRoomName } from '@/modules/utils/shardRoom';
-import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/feature/interShard';
-import { getBotMemory } from '@/modules/utils/memory';
+import { parseShardRoomName } from '@/shared/shardRoom';
+import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/features/interShard';
+import { getBotMemory } from '@/shared/memory';
 
 /**
  * 生成扩张计划 ID。

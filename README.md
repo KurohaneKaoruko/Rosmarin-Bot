@@ -236,11 +236,6 @@ rosmarin-bot/
 │   ├── submit.js            # 提交代码到游戏
 │   └── updateVersion.js     # 更新版本号
 ├── src/
-│   ├── boot/                # 启动控制模块
-│   │   ├── CreepControl.ts
-│   │   ├── FlagControl.ts
-│   │   ├── PowerCreepControl.ts
-│   │   └── RoomControl.ts
 │   ├── console/             # 控制台命令
 │   │   ├── base.ts          # 基础命令
 │   │   ├── help.ts          # 帮助文本
@@ -250,21 +245,20 @@ rosmarin-bot/
 │   │   ├── config.ts        # 全局配置
 │   │   ├── CreepConstant.ts # Creep 常量
 │   │   └── ...
+│   ├── features/            # 玩法功能（布局/小队/外矿/跨 Shard 等）
 │   ├── framework/           # 框架核心
 │   │   ├── createApp.ts     # 应用创建
 │   │   └── errorMapper.ts   # 错误映射
+│   ├── infra/               # 基础设施（移动优化/QoS/缓存等）
 │   ├── interface/           # TypeScript 类型定义
-│   ├── modules/             # 功能模块
-│   │   ├── feature/         # 主要功能（布局/小队/外矿等）
-│   │   ├── infra/           # 基础设施（寻路/缓存/Profiler等）
-│   │   ├── runtime/         # 运行时模块（外矿/战争/统计等）
-│   │   └── utils/           # 工具模块（包含 wasm）
 │   ├── prototype/           # 原型扩展
+│   ├── modules/             # Tick 级运行时模块
+│   ├── shared/              # 跨模块复用工具
+│   ├── wasm/                # 独立的 WebAssembly 资源
 │   ├── main.ts              # 入口文件
 │   └── utils.ts             # 通用工具
 ├── package.json
 ├── rolldown.config.js       # Rolldown 配置（当前使用）
-├── rollup.config.js         # Rollup 配置（保留对照）
 ├── tsconfig.json            # TypeScript 配置
 └── vitest.config.ts         # 测试配置
 ```

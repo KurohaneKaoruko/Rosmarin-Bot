@@ -1,0 +1,1325 @@
+import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, LabMap, PRIORITY_CONFIG, PRODUCTION_MIN, PRODUCTION_MONITOR_CONFIG, RESOURCE_BALANCE, RESOURCE_DISPATCH_CONFIG, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant'
+import { log } from '@/utils';
+import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/shared/memory';
+import { getLabAB } from '@/shared/labReservations';
+import { getTransactionCostRatio } from '@/shared/marketUtils';
+
+const br = '<br/>';
+const LOG_COLORS = {
+    theme: '#D0CAE0',
+    good: '#4CC9F0',
+    warning: '#FFC300',
+    danger: '#FF003C',
+    neutral: '#B8B8B8',
+    text: '#F0F0F0',
+    textMuted: '#B0B0B0',
+} as const;
+
+const c = (text: string, color: string, bold = false) =>
+    `<span style="color:${color};${bold ? 'font-weight:700;' : ''}">${text}</span>`;
+
+const mono = (text: string, color: string = LOG_COLORS.text) =>
+    `<span style="color:${color};font-family:Consolas,monospace;">${text}</span>`;
+
+const kv = (key: string, value: string) =>
+    `${c(key, LOG_COLORS.textMuted, true)} ${mono(value)}`;
+
+const fmtPct = (ratio: number) => `${(ratio * 100).toFixed(1)}%`;
+
+const logRM = (lines: string[]) => log('资源管理', lines.join(br));
+
+interface ResourceDeficitRecord {
+    consecutiveDeficit: number;
+    originalThreshold: number;
+    currentThreshold: number;
+    lastAdjustTick: number;
+}
+
+interface RoomProductionStats {
+    roomName: string;
+    input: Record<string, number>;
+    output: Record<string, number>;
+    efficiency: number;
+    isLowEfficiency: boolean;
+    lowEfficiencyStartTick: number | null;
+    missionPaused: boolean;
+}
+
+type MarketCostCacheEntry = {
+    ratio: number;
+    tick: number;
+}
+
+const resourceDeficitHistory: Record<string, ResourceDeficitRecord> = {};
+const roomProductionStats: Record<string, RoomProductionStats> = {};
+
+let logged = 0;
+let suppressed = 0;
+const LOG_LIMIT = 10;
+const tryLog = (lines: string[]) => {
+    if (LOG_LIMIT <= 0) return;
+    if (logged >= LOG_LIMIT) {
+        suppressed++;
+        return;
+    }
+    logged++;
+    logRM(lines);
+}
+
+const initResourceDeficit = (resourceType: string, threshold: number) => {
+    if (!resourceDeficitHistory[resourceType]) {
+        resourceDeficitHistory[resourceType] = {
+            consecutiveDeficit: 0,
+            originalThreshold: threshold,
+            currentThreshold: threshold,
+            lastAdjustTick: Game.time,
+        };
+    }
+};
+
+const initRoomProduction = (roomName: string): RoomProductionStats => {
+    if (!roomProductionStats[roomName]) {
+        roomProductionStats[roomName] = {
+            roomName,
+            input: {},
+            output: {},
+            efficiency: 1.0,
+            isLowEfficiency: false,
+            lowEfficiencyStartTick: null,
+            missionPaused: false,
+        };
+    }
+    return roomProductionStats[roomName];
+};
+
+const adjustThresholdForDeficit = (resourceType: string, thresholdMap: Record<string, Record<string, [number, number]>>) => {
+    const record = resourceDeficitHistory[resourceType];
+    if (!record) return;
+
+    const { adjustPercent, adjustInterval, minThresholdRatio } = DYNAMIC_THRESHOLD_CONFIG;
+    const minThreshold = record.originalThreshold * minThresholdRatio;
+
+    if (record.consecutiveDeficit >= adjustInterval) {
+        const reduction = record.currentThreshold * adjustPercent;
+        record.currentThreshold = Math.max(minThreshold, record.currentThreshold - reduction);
+        record.consecutiveDeficit = 0;
+        record.lastAdjustTick = Game.time;
+
+        if (thresholdMap[resourceType]) {
+            for (const roomName of Object.keys(thresholdMap[resourceType])) {
+                thresholdMap[resourceType][roomName][0] = record.currentThreshold;
+            }
+        }
+    }
+};
+
+const recoverThresholdPeriodically = (resourceType: string, thresholdMap: Record<string, Record<string, [number, number]>>) => {
+    const record = resourceDeficitHistory[resourceType];
+    if (!record || record.currentThreshold >= record.originalThreshold) return;
+
+    const recoverInterval = 10;
+    if (Game.time - record.lastAdjustTick >= recoverInterval) {
+        const recoverAmount = record.originalThreshold * 0.05;
+        record.currentThreshold = Math.min(record.originalThreshold, record.currentThreshold + recoverAmount);
+        record.lastAdjustTick = Game.time;
+
+        if (thresholdMap[resourceType]) {
+            for (const roomName of Object.keys(thresholdMap[resourceType])) {
+                thresholdMap[resourceType][roomName][0] = record.currentThreshold;
+            }
+        }
+    }
+};
+
+const DEFAULT_STALL_THRESHOLD = 500;
+
+const checkAndReleaseStalledMissions = (missionPools: Record<string, any>, stallThreshold: number = DEFAULT_STALL_THRESHOLD) => {
+    for (const [roomName, roomMissions] of Object.entries(missionPools)) {
+        if (!roomMissions) continue;
+        for (const [missionType, missions] of Object.entries(roomMissions)) {
+            if (!Array.isArray(missions)) continue;
+            for (const mission of missions) {
+                if (!mission || !mission.data) continue;
+                const data = mission.data as any;
+                if (data.isResourceShortage && data.startTick) {
+                    const stalledTicks = Game.time - data.startTick;
+                    if (stalledTicks > stallThreshold) {
+                        mission._remove = true;
+                        tryLog([
+                            `${c('异常处理', LOG_COLORS.danger, true)} ${c('释放任务', LOG_COLORS.warning)} ${c(roomName, LOG_COLORS.theme)}`,
+                            `${kv('类型', missionType)} | ${kv('停滞tick', String(stalledTicks))} | ${kv('原因', '缺料超时')}`,
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+};
+
+const getGlobalMarketCostCache = (): Record<string, MarketCostCacheEntry> => {
+    const g = global as any;
+    if (!g.marketCostCache || typeof g.marketCostCache !== 'object') {
+        g.marketCostCache = {};
+    }
+    return g.marketCostCache as Record<string, MarketCostCacheEntry>;
+};
+
+const checkAndUpdateRoomEfficiency = (
+    room: Room,
+    productionRooms: Room[],
+    thresholdMap: Record<string, Record<string, [number, number]>>
+) => {
+    const stats = initRoomProduction(room.name);
+    const { efficiencyThreshold, efficiencyCheckInterval, lowEfficiencyRecoveryTicks } = PRODUCTION_MONITOR_CONFIG;
+
+    if (Game.time % efficiencyCheckInterval !== 0) return stats;
+
+    const terminal = room.terminal;
+    const storage = room.storage;
+    if (!terminal || !storage) return stats;
+
+    let totalInput = 0;
+    let totalOutput = 0;
+
+    for (const res of Object.keys(stats.input)) {
+        totalInput += stats.input[res] || 0;
+    }
+    for (const res of Object.keys(stats.output)) {
+        totalOutput += stats.output[res] || 0;
+    }
+
+    if (totalInput > 0) {
+        stats.efficiency = totalOutput / totalInput;
+    }
+
+    if (stats.efficiency < efficiencyThreshold && !stats.isLowEfficiency) {
+        stats.isLowEfficiency = true;
+        stats.lowEfficiencyStartTick = Game.time;
+        stats.missionPaused = true;
+        tryLog([
+            `${c('异常处理', LOG_COLORS.danger, true)} ${c('低效率警告', LOG_COLORS.warning)} ${c(room.name, LOG_COLORS.theme)}`,
+            `${kv('效率', fmtPct(stats.efficiency))} | ${kv('投入', String(totalInput))} | ${kv('产出', String(totalOutput))}`,
+        ]);
+    }
+
+    if (stats.isLowEfficiency && stats.lowEfficiencyStartTick) {
+        const elapsed = Game.time - stats.lowEfficiencyStartTick;
+        if (elapsed >= lowEfficiencyRecoveryTicks) {
+            stats.isLowEfficiency = false;
+            stats.missionPaused = false;
+            stats.lowEfficiencyStartTick = null;
+            tryLog([
+                `${c('异常处理', LOG_COLORS.good, true)} ${c('恢复生产', LOG_COLORS.good)} ${c(room.name, LOG_COLORS.theme)}`,
+                `${kv('效率', fmtPct(stats.efficiency))} | ${kv('恢复耗时', String(elapsed))}`,
+            ]);
+        }
+    }
+
+    return stats;
+};
+
+const getResourceIcon = (resourceType: any) => {
+    if (resourceType === 'empty') {
+        return `<span style="display:inline-block;width:12px;height:12px;border:1px dashed #555;border-radius:2px;margin-right:2px;vertical-align:middle;"></span>`;
+    }
+    const safeType = String(resourceType);
+    const baseUrl = 'https://s3.amazonaws.com/static.screeps.com/upload/mineral-icons/';
+    const iconUrl = baseUrl + encodeURIComponent(safeType) + '.png';
+    return `<img src="${iconUrl}" alt="${safeType}" style="height:12px;width:14px;object-fit:contain;vertical-align:middle;margin-right:3px;border-radius:2px;" />`;
+};
+
+const resTag = (resType: any, color: string = LOG_COLORS.text) => `${getResourceIcon(resType)}${mono(String(resType), color)}`;
+
+const calcRoomCapacityScore = (room: Room): number => {
+    const labCount = ((room as any).lab as StructureLab[] | undefined)?.length || 0;
+    const factoryLevel = room.factory?.level || 0;
+    const storageCapacity = room.storage?.store.getCapacity() || 0;
+    const storageCoeff = (storageCapacity / 1000000) * 5;
+    const terminalTotal = room.terminal?.store.getCapacity() || 1;
+    const terminalFree = room.terminal?.store.getFreeCapacity() || 0;
+    const terminalAvailRate = (terminalFree / terminalTotal) * 5;
+    return labCount * 10 + factoryLevel * 5 + storageCoeff + terminalAvailRate;
+};
+
+/** 资源管理模块 */
+export const ResourceManage = {
+    tick: function () {
+        // CPU 告急时跳过资源管理，优先保留核心逻辑与移动。
+        if (Game.cpu.bucket < 2000 || (global as any).QoS?.level === 'emergency') return;
+        // 降低全局资源平衡的 CPU 占用：固定间隔执行
+        if (Game.time % 50) return;
+        // 初始化市场交易成本缓存（global 级缓存，避免写入 Memory）
+        const marketCostCache = getGlobalMarketCostCache();
+        const ResManageMem = getResourceManage() || {};
+        // 全局默认参与平衡的资源类型（可被 Memory.RosmarinBot.ResourceManage 的房间自定义条目扩展）
+        const balanceResKeys = Object.keys(RESOURCE_BALANCE);
+
+        const missionPools = getMissionPools() || {};
+        checkAndReleaseStalledMissions(missionPools, DEFAULT_STALL_THRESHOLD);
+
+        // ResManageMap: 按资源维度收集“可供应房间/需求房间”
+        const ResManageMap = Object.create(null) as Record<string, { source: string[], target: string[] }>;
+        // ThresholdMap: 记录每个房间每种资源的 [需求阈值, 供应阈值]
+        const ThresholdMap = Object.create(null) as Record<string, Record<string, [number, number]>>;
+        // amountCache: 同 tick 内缓存 room.getResAmount，避免排序/循环重复计算
+        const amountCache = Object.create(null) as Record<string, Record<string, number>>;
+
+        const getResAmountCached = (room: Room, res: string) => {
+            if (!amountCache[room.name]) amountCache[room.name] = Object.create(null) as Record<string, number>;
+            if (amountCache[room.name][res] !== undefined) return amountCache[room.name][res];
+            const amount = room.getResAmount(res);
+            amountCache[room.name][res] = amount;
+            return amount;
+        }
+
+        const eligibleRooms: Room[] = [];
+        const productionRooms: Room[] = [];
+
+        // 遍历所有房间的设置
+        for (const roomName in getRoomData()) {
+            const roomMem = getRoomData(roomName) as any;
+            if (roomMem?.mode === 'stop') continue;
+            const room = Game.rooms[roomName];
+            // 跨房间资源平衡“是否转入资源”的风险，由房间攻防态决定。
+            // - productionRooms：用于排产/缺口统计（要求有 storage+terminal 且可用）
+            // - eligibleRooms：用于跨房间资源平衡的资源扫描与调度候选（转入是否允许在 target 分支单独判定）
+            if (!room || !room.my || !room.terminal || !room.storage || room.level < 6 ||
+                room.terminal.owner.username != room.controller.owner.username ||
+                room.storage.owner.username != room.controller.owner.username
+            ) continue;
+
+            if (roomMem?.mode !== 'low') {
+                productionRooms.push(room);
+            }
+            eligibleRooms.push(room);
+
+            const efficiencyStats = checkAndUpdateRoomEfficiency(room, productionRooms, ThresholdMap);
+
+            let Ress: string[] = [];
+
+            // 如果 terminal 与 storage 不贴近（2 格内）或手动挂旗，只平衡能量
+            if (!room.terminal.pos.inRangeTo(room.storage.pos, 2) || Game.flags[`${roomName}/BALANCE_ENERGY`]) {
+                Ress = [RESOURCE_ENERGY];
+            } else {
+                // 房间自定义阈值里出现的资源也纳入扫描
+                Ress = [...Object.keys(ResManageMem[roomName]||{}), ...balanceResKeys];
+                Ress = [...new Set(Ress)];
+            }
+            
+            for (const res of Ress) {
+                if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
+                let sourceThreshold: number, targetThreshold: number;
+                if (ResManageMem[roomName] && ResManageMem[roomName][res]) {
+                    // Memory.RosmarinBot.ResourceManage 配置优先级高于全局 RESOURCE_BALANCE
+                    sourceThreshold = ResManageMem[roomName][res][1] ?? Infinity;
+                    targetThreshold = ResManageMem[roomName][res][0] ?? 0;
+                } else {
+                    const base = (RESOURCE_BALANCE as any)[res];
+                    if (!base) continue;
+                    sourceThreshold = base[1] ?? Infinity;
+                    targetThreshold = base[0] ?? 0;
+                }
+                if (!ThresholdMap[roomName]) ThresholdMap[roomName] = {};
+                ThresholdMap[roomName][res] = [targetThreshold, sourceThreshold];
+                let resAmount = getResAmountCached(room, res);
+                if (resAmount > sourceThreshold) {
+                    // terminal 冷却时不把该房间作为供应方
+                    if (room.terminal.cooldown) continue;
+                    ResManageMap[res].source.push(roomName);
+                } else if (resAmount < targetThreshold) {
+                    if (!room.isResourceTransferInSafe()) continue;
+                    ResManageMap[res].target.push(roomName);
+                }
+            }
+        }
+
+        const prodNeeds = Object.create(null) as Record<string, Record<string, number>>;
+        const prodNeedResSet = new Set<string>();
+
+        if (RESOURCE_PRODUCTION.enabled) {
+            const globalCache = Object.create(null) as Record<string, number>;
+            const getGlobalAmount = (res: string) => {
+                if (globalCache[res] !== undefined) return globalCache[res];
+                let total = 0;
+                    for (const room of productionRooms) total += getResAmountCached(room, res);
+                globalCache[res] = total;
+                return total;
+            };
+
+            const getRoomAvailAmount = (room: Room, res: string) => {
+                let total = getResAmountCached(room, res);
+                const labs = (room as any).lab as StructureLab[] | undefined;
+                if (Array.isArray(labs)) {
+                    for (const lab of labs) {
+                        if (!lab || lab.mineralType !== (res as any)) continue;
+                        total += (lab.store as any)[res] || 0;
+                    }
+                }
+                return total;
+            };
+
+            const getBalance = (res: string) => (RESOURCE_BALANCE as any)[res] as [number, number] | undefined;
+            const getDemand = (res: string) => getBalance(res)?.[0] ?? 0;
+            const getSupply = (res: string) => getBalance(res)?.[1] ?? 0;
+
+            const pickByDeficit = (targets: Record<string, number>, remaining: Record<string, number>) => {
+                let best: string | null = null;
+                let bestDef = 0;
+                for (const [res, target] of Object.entries(targets)) {
+                    if (!target || target <= 0) continue;
+                    const def = remaining[res] ?? (target - getGlobalAmount(res));
+                    remaining[res] = def;
+                    if (def > bestDef) {
+                        bestDef = def;
+                        best = res;
+                    }
+                }
+                return best && bestDef > 0 ? best : null;
+            };
+
+            const noteNeed = (roomName: string, res: string, minAmount: number) => {
+                if (!prodNeeds[roomName]) prodNeeds[roomName] = Object.create(null) as Record<string, number>;
+                prodNeeds[roomName][res] = Math.max(prodNeeds[roomName][res] || 0, minAmount);
+                prodNeedResSet.add(res);
+            };
+
+            const planLabEnabled = RESOURCE_PRODUCTION.lab.enabled && RESOURCE_PRODUCTION.lab.chain.enabled;
+            if (planLabEnabled) {
+                const managedKeys = new Set<string>([
+                    ...LAB_T1_PRIORITY as any,
+                    ...t1 as any,
+                    ...t2 as any,
+                    ...t3 as any,
+                ]);
+
+                const remaining = Object.create(null) as Record<string, number>;
+                const getDeficit = (res: string) => {
+                    if (remaining[res] !== undefined) return remaining[res];
+                    const supply = getSupply(res);
+                    const def = supply > 0 ? Math.max(0, supply - getGlobalAmount(res)) : 0;
+                    remaining[res] = def;
+                    return def;
+                };
+
+                const canConsume = (res: string) => {
+                    const keep = getDemand(res) + 1000;
+                    return getGlobalAmount(res) > keep;
+                };
+
+                const labPlanWaitTime = Object.create(null) as Record<string, number>;
+
+                const getLabPlanResourceSufficiency = (product: string): number => {
+                    const recipe = (LabMap as any)[product];
+                    if (!recipe) return 0;
+                    const raw1 = recipe.raw1 as string;
+                    const raw2 = recipe.raw2 as string;
+                    const avail1 = getGlobalAmount(raw1);
+                    const avail2 = getGlobalAmount(raw2);
+                    const minAvail = Math.min(avail1, avail2);
+                    return Math.min(minAvail / DYNAMIC_THRESHOLD_CONFIG.resourceMax, 1.0);
+                };
+
+                const calcLabPriorityScore = (
+                    tier: string,
+                    def: number,
+                    resourceSufficiency: number,
+                    waitTime: number
+                ): number => {
+                    const tierScore = (PRIORITY_CONFIG.tierRank as any)[tier] || 0;
+                    const deficitFactor = Math.min(def / DYNAMIC_THRESHOLD_CONFIG.baseDeficit, DYNAMIC_THRESHOLD_CONFIG.deficitCap);
+                    let timeFactor = DYNAMIC_THRESHOLD_CONFIG.timeFactorMin;
+                    if (waitTime > DYNAMIC_THRESHOLD_CONFIG.waitTimeThreshold) {
+                        const timeRatio = Math.min(waitTime / 200, 1.0);
+                        timeFactor = DYNAMIC_THRESHOLD_CONFIG.timeFactorMin + 
+                            (DYNAMIC_THRESHOLD_CONFIG.timeFactorMax - DYNAMIC_THRESHOLD_CONFIG.timeFactorMin) * timeRatio;
+                    }
+                    const score = 
+                        PRIORITY_CONFIG.tierWeight * tierScore +
+                        PRIORITY_CONFIG.deficitWeight * deficitFactor +
+                        PRIORITY_CONFIG.resourceWeight * resourceSufficiency +
+                        PRIORITY_CONFIG.timeWeight * timeFactor;
+                    return score;
+                };
+
+                const buildLabPlanList = () => {
+                    const list: { product: string; tier: 'T1' | 'T2' | 'T3'; minPull: number; def: number; waitTime: number; resourceSufficiency: number }[] = [];
+
+                    const pushTier = (products: readonly string[], tier: 'T1' | 'T2' | 'T3', minPull: number, prioritize: readonly string[] | null) => {
+                        const unique = new Set<string>(products as any);
+                        const ordered: string[] = [];
+                        if (prioritize) {
+                            for (const p of prioritize) if (unique.has(p)) ordered.push(p);
+                            for (const p of products) if (!prioritize.includes(p)) ordered.push(p);
+                        } else {
+                            ordered.push(...products as any);
+                        }
+
+                        for (const p of ordered) {
+                            const def = getDeficit(p);
+                            if (def <= 0) continue;
+                            const recipe = (LabMap as any)[p];
+                            if (!recipe) continue;
+                            const raw1 = recipe.raw1 as string;
+                            const raw2 = recipe.raw2 as string;
+                            if (!canConsume(raw1) || !canConsume(raw2)) continue;
+                            const waitTime = labPlanWaitTime[p] || 0;
+                            const resourceSufficiency = getLabPlanResourceSufficiency(p);
+                            list.push({ product: p, tier, minPull, def, waitTime, resourceSufficiency });
+                        }
+                    };
+
+                    pushTier(t3 as any, 'T3', RESOURCE_PRODUCTION.lab.chain.inputMin.t3, null);
+                    pushTier(t2 as any, 'T2', RESOURCE_PRODUCTION.lab.chain.inputMin.t2, null);
+                    pushTier(t1 as any, 'T1', RESOURCE_PRODUCTION.lab.chain.inputMin.t1, LAB_T1_PRIORITY as any);
+
+                    list.sort((a, b) => {
+                        const scoreA = calcLabPriorityScore(a.tier, a.def, a.resourceSufficiency, a.waitTime);
+                        const scoreB = calcLabPriorityScore(b.tier, b.def, b.resourceSufficiency, b.waitTime);
+                        if (scoreB !== scoreA) return scoreB - scoreA;
+                        return a.product.localeCompare(b.product);
+                    });
+                    return list;
+                };
+
+                const planList = buildLabPlanList();
+                if (planList.length) {
+                    const planRooms: { room: Room; autoLabMap: Record<string, number>; botmem: any }[] = [];
+                    for (const room of productionRooms) {
+                        const labs = (room as any).lab as StructureLab[] | undefined;
+                        if (!Array.isArray(labs) || labs.length === 0) continue;
+                        const botmem = getStructData(room.name) as any;
+                        if (botmem && botmem.lab === false) continue;
+                        const { labA, labB } = getLabAB(room.name, room);
+                        if (!labA || !labB) continue;
+                        if (botmem?.labAtype && botmem?.labBtype) continue;
+
+                        const autoLabMap = getAutoLabData(room.name) as any;
+                        if (RESOURCE_PRODUCTION.lab.chain.respectManualAutoData) {
+                            const keys = Object.keys(autoLabMap);
+                            const hasManual = keys.some(k => !managedKeys.has(k));
+                            if (hasManual) continue;
+                        }
+
+                        const maxPlansPerRoom = Number((RESOURCE_PRODUCTION.lab.chain as any).maxPlansPerRoom ?? 1) || 1;
+                        const plannedKeys = Object.keys(autoLabMap).filter(k => managedKeys.has(k));
+                        if (plannedKeys.length >= maxPlansPerRoom) {
+                            const hasRunnable = plannedKeys.some(planned => {
+                                const plannedLimit = Number(autoLabMap[planned] || 0);
+                                const remain = plannedLimit - getRoomAvailAmount(room, planned);
+                                if (remain < PRODUCTION_MIN.compound) return false;
+                                const recipe = (LabMap as any)[planned];
+                                const raw1 = recipe?.raw1 as string | undefined;
+                                const raw2 = recipe?.raw2 as string | undefined;
+                                if (!raw1 || !raw2) return false;
+                                const minPull = (t3 as any).includes(planned)
+                                    ? RESOURCE_PRODUCTION.lab.chain.inputMin.t3
+                                    : (t2 as any).includes(planned)
+                                        ? RESOURCE_PRODUCTION.lab.chain.inputMin.t2
+                                        : RESOURCE_PRODUCTION.lab.chain.inputMin.t1;
+                                return getRoomAvailAmount(room, raw1) >= minPull && getRoomAvailAmount(room, raw2) >= minPull;
+                            });
+                            if (hasRunnable) continue;
+                        }
+
+                        planRooms.push({ room, autoLabMap, botmem });
+                    }
+
+                    const avgCapacityScore = planRooms.length > 0
+                        ? planRooms.reduce((sum, pr) => sum + calcRoomCapacityScore(pr.room), 0) / planRooms.length
+                        : 0;
+
+                    let cursor = 0;
+                    const pickForRoom = () => {
+                        if (!planList.length) return null;
+                        for (let i = 0; i < planList.length; i++) {
+                            const idx = (cursor + i) % planList.length;
+                            const p = planList[idx];
+                            const def = getDeficit(p.product);
+                            if (def <= 0) continue;
+                            cursor = (idx + 1) % planList.length;
+                            return { ...p, def };
+                        }
+                        return null;
+                    };
+
+                    for (const { room, autoLabMap } of planRooms) {
+                        const picked = pickForRoom();
+                        if (!picked) break;
+
+                        const maxPlansPerRoom = Number((RESOURCE_PRODUCTION.lab.chain as any).maxPlansPerRoom ?? 1) || 1;
+                        const assigned = new Set<string>();
+
+                        const roomCapacityScore = calcRoomCapacityScore(room);
+                        const capacityRatio = avgCapacityScore > 0 ? roomCapacityScore / avgCapacityScore : 1;
+
+                        for (const k of Object.keys(autoLabMap)) {
+                            if (managedKeys.has(k)) delete autoLabMap[k];
+                        }
+
+                        let firstLog: { tier: string; product: string; def: number; batch: number; extra: number } | null = null;
+                        let extra = 0;
+
+                        const tryAssign = (p: { product: string; tier: 'T1' | 'T2' | 'T3'; minPull: number; def: number }) => {
+                            const deficit = p.def;
+                            const baseBatch = Math.min(RESOURCE_PRODUCTION.lab.chain.batchPerRoom, deficit);
+                            const adjustedBatch = Math.floor(baseBatch * capacityRatio);
+                            const batch = Math.max(0, adjustedBatch);
+                            if (batch < PRODUCTION_MIN.compound) return false;
+                            remaining[p.product] = deficit - batch;
+                            autoLabMap[p.product] = getRoomAvailAmount(room, p.product) + batch;
+                            labPlanWaitTime[p.product] = 0;
+                            const recipe = (LabMap as any)[p.product];
+                            const raw1 = recipe?.raw1 as string | undefined;
+                            const raw2 = recipe?.raw2 as string | undefined;
+                            if (raw1) noteNeed(room.name, raw1, p.minPull);
+                            if (raw2) noteNeed(room.name, raw2, p.minPull);
+                            if (!firstLog) firstLog = { tier: p.tier, product: p.product, def: deficit, batch, extra: 0 };
+                            else extra++;
+                            assigned.add(p.product);
+                            return true;
+                        };
+
+                        const isRunnable = (p: { product: string; minPull: number }) => {
+                            const recipe = (LabMap as any)[p.product];
+                            const raw1 = recipe?.raw1 as string | undefined;
+                            const raw2 = recipe?.raw2 as string | undefined;
+                            if (!raw1 || !raw2) return false;
+                            return getRoomAvailAmount(room, raw1) >= p.minPull && getRoomAvailAmount(room, raw2) >= p.minPull;
+                        };
+
+                        const ordered: typeof planList = [];
+                        const seeded = new Set<string>();
+                        const seedRunnable = isRunnable(picked);
+                        if (seedRunnable) {
+                            ordered.push(picked);
+                            seeded.add(picked.product);
+                        }
+                        for (const p of planList) {
+                            if (seeded.has(p.product)) continue;
+                            if (isRunnable(p)) {
+                                ordered.push(p);
+                                seeded.add(p.product);
+                            }
+                        }
+                        if (!seeded.has(picked.product)) {
+                            ordered.push(picked);
+                            seeded.add(picked.product);
+                        }
+                        for (const p of planList) {
+                            if (seeded.has(p.product)) continue;
+                            ordered.push(p);
+                            seeded.add(p.product);
+                        }
+
+                        for (const p of ordered) {
+                            if (assigned.size >= maxPlansPerRoom) break;
+                            const def = getDeficit(p.product);
+                            if (def <= 0) continue;
+                            if (assigned.has(p.product)) continue;
+                            if (!tryAssign({ ...p, def })) continue;
+                        }
+
+                        for (const p of planList) {
+                            if (!assigned.has(p.product)) {
+                                labPlanWaitTime[p.product] = (labPlanWaitTime[p.product] || 0) + 1;
+                            }
+                        }
+
+                        if (firstLog) {
+                            firstLog.extra = extra;
+                            tryLog([
+                                `${c('生产计划', LOG_COLORS.theme, true)} ${c('LAB', LOG_COLORS.good, true)} ${c(room.name, LOG_COLORS.theme, true)}`,
+                                `${kv('tier', firstLog.tier)} | ${kv('产物', resTag(firstLog.product))} | ${kv('全局缺口', String(firstLog.def))} | ${kv('本轮批量', String(firstLog.batch))}${firstLog.extra > 0 ? ` | ${kv('候选', `+${firstLog.extra}`)}` : ''}`,
+                            ]);
+                        }
+                    }
+                }
+            }
+
+            const planFactoryRooms = RESOURCE_PRODUCTION.factory.enabled ? productionRooms : [];
+            if (planFactoryRooms.length && RESOURCE_PRODUCTION.factory.chain.enabled) {
+                const getRoomAvailWithFactory = (room: Room, res: string) => {
+                    return getResAmountCached(room, res) + ((room.factory?.store as any)?.[res] || 0);
+                };
+
+                const WHITE_ROOTS = new Set<string>([RESOURCE_COMPOSITE, RESOURCE_CRYSTAL, RESOURCE_LIQUID]);
+                const COLOR_ROOTS = new Set<string>([RESOURCE_METAL, RESOURCE_BIOMASS, RESOURCE_SILICON, RESOURCE_MIST]);
+                const ROOT_BIT: Record<string, number> = {
+                    [RESOURCE_METAL]: 1,
+                    [RESOURCE_BIOMASS]: 2,
+                    [RESOURCE_SILICON]: 4,
+                    [RESOURCE_MIST]: 8,
+                };
+                const classCache = Object.create(null) as Record<string, { colored: boolean; white: boolean; rootsMask: number }>;
+                const classify = (res: string): { colored: boolean; white: boolean; rootsMask: number } => {
+                    const hit = classCache[res];
+                    if (hit) return hit;
+                    const base = {
+                        colored: COLOR_ROOTS.has(res),
+                        white: WHITE_ROOTS.has(res),
+                        rootsMask: ROOT_BIT[res] || 0,
+                    };
+                    classCache[res] = base;
+                    const recipe = (COMMODITIES as any)?.[res];
+                    const components = recipe?.components as Record<string, number> | undefined;
+                    if (!components) return base;
+                    for (const comp of Object.keys(components)) {
+                        const child = classify(comp);
+                        base.colored ||= child.colored;
+                        base.white ||= child.white;
+                        base.rootsMask |= child.rootsMask;
+                    }
+                    return base;
+                };
+
+                const globalAvailCache = Object.create(null) as Record<string, number>;
+                const getGlobalAvail = (res: string) => {
+                    if (globalAvailCache[res] !== undefined) return globalAvailCache[res];
+                    let total = 0;
+                    for (const room of productionRooms) {
+                        total += getResAmountCached(room, res);
+                        total += ((room.factory?.store as any)?.[res] || 0);
+                    }
+                    globalAvailCache[res] = total;
+                    return total;
+                };
+
+                const availableMask =
+                    (getGlobalAvail(RESOURCE_METAL) > 0 ? 1 : 0) |
+                    (getGlobalAvail(RESOURCE_BIOMASS) > 0 ? 2 : 0) |
+                    (getGlobalAvail(RESOURCE_SILICON) > 0 ? 4 : 0) |
+                    (getGlobalAvail(RESOURCE_MIST) > 0 ? 8 : 0);
+
+                const maxLevel = RESOURCE_PRODUCTION.factory.chain.maxLevel;
+                const candidatesByLevel = Object.create(null) as Record<number, string[]>;
+                const specialCandidatesByLevel = Object.create(null) as Record<number, string[]>;
+                const specialAnyCandidates: string[] = [];
+                const managedFactoryKeys = new Set<string>();
+                for (const product of Object.keys(COMMODITIES as any)) {
+                    const info = (COMMODITIES as any)[product];
+                    const level = Number(info?.level ?? 0);
+                    if (level < 0 || level > maxLevel) continue;
+                    const tags = classify(product);
+                    if (!tags.colored) continue;
+                    if (RESOURCE_PRODUCTION.factory.chain.excludeWhite && tags.white) continue;
+                    if ((tags.rootsMask & ~availableMask) !== 0) continue;
+                    const components = info?.components as Record<string, number> | undefined;
+                    if (!components) continue;
+                    if (Object.keys(components).some(c => getGlobalAvail(c) <= 0)) continue;
+                    managedFactoryKeys.add(product);
+                    (candidatesByLevel[level] ||= []).push(product);
+                }
+
+                // 专项保有库存：白色根商品与关键中间件（不走四色链条筛选）
+                const specialKeep = (RESOURCE_PRODUCTION.factory.chain as any).specialKeep as Record<string, number> | undefined;
+                if (specialKeep) {
+                    for (const product of Object.keys(specialKeep)) {
+                        const keep = Number(specialKeep[product] || 0);
+                        if (keep <= 0) continue;
+                        const info = (COMMODITIES as any)?.[product];
+                        if (!info) continue;
+                        const level = Number(info?.level ?? 0);
+                        if (level < 0 || level > maxLevel) continue;
+                        const components = info?.components as Record<string, number> | undefined;
+                        if (!components) continue;
+                        if (Object.keys(components).some(c => getGlobalAvail(c) <= 0)) continue;
+                        managedFactoryKeys.add(product);
+                        if (level === 0) specialAnyCandidates.push(product);
+                        else (specialCandidatesByLevel[level] ||= []).push(product);
+                    }
+                }
+
+                const remaining = Object.create(null) as Record<string, number>;
+                const getKeep = (level: number) => (RESOURCE_PRODUCTION.factory.chain.keepByLevel as any)?.[level] ?? 0;
+                const getDeficit = (product: string, level: number) => {
+                    const key = `${level}:${product}`;
+                    if (remaining[key] !== undefined) return remaining[key];
+                    const keep = getKeep(level);
+                    const def = keep > 0 ? Math.max(0, keep - getGlobalAvail(product)) : 0;
+                    remaining[key] = def;
+                    return def;
+                };
+
+                const specialRemaining = Object.create(null) as Record<string, number>;
+                const getSpecialDeficit = (product: string) => {
+                    if (specialRemaining[product] !== undefined) return specialRemaining[product];
+                    const keep = Number((specialKeep as any)?.[product] ?? 0);
+                    const def = keep > 0 ? Math.max(0, keep - getGlobalAvail(product)) : 0;
+                    specialRemaining[product] = def;
+                    return def;
+                };
+
+                const factoryPlanWaitTime = Object.create(null) as Record<string, number>;
+
+                const getFactoryPlanResourceSufficiency = (product: string): number => {
+                    const info = (COMMODITIES as any)[product];
+                    const components = info?.components as Record<string, number> | undefined;
+                    if (!components) return 0;
+                    let minSufficiency = 1.0;
+                    for (const [comp, need] of Object.entries(components)) {
+                        const avail = getGlobalAvail(comp);
+                        const required = (need as number) * 10;
+                        const sufficiency = Math.min(avail / Math.max(required, DYNAMIC_THRESHOLD_CONFIG.resourceSufficient), 1.0);
+                        minSufficiency = Math.min(minSufficiency, sufficiency);
+                    }
+                    return minSufficiency;
+                };
+
+                const calcFactoryPriorityScore = (
+                    level: number,
+                    def: number,
+                    resourceSufficiency: number,
+                    waitTime: number
+                ): number => {
+                    const levelScore = Math.max(0, (maxLevel - level) / maxLevel);
+                    const deficitFactor = Math.min(def / DYNAMIC_THRESHOLD_CONFIG.baseDeficit, DYNAMIC_THRESHOLD_CONFIG.deficitCap);
+                    let timeFactor = DYNAMIC_THRESHOLD_CONFIG.timeFactorMin;
+                    if (waitTime > DYNAMIC_THRESHOLD_CONFIG.waitTimeThreshold) {
+                        const timeRatio = Math.min(waitTime / 200, 1.0);
+                        timeFactor = DYNAMIC_THRESHOLD_CONFIG.timeFactorMin + 
+                            (DYNAMIC_THRESHOLD_CONFIG.timeFactorMax - DYNAMIC_THRESHOLD_CONFIG.timeFactorMin) * timeRatio;
+                    }
+                    const score = 
+                        PRIORITY_CONFIG.tierWeight * levelScore +
+                        PRIORITY_CONFIG.deficitWeight * deficitFactor +
+                        PRIORITY_CONFIG.resourceWeight * resourceSufficiency +
+                        PRIORITY_CONFIG.timeWeight * timeFactor;
+                    return score;
+                };
+
+                const buildFactoryPlanList = (level: number) => {
+                    const list = (candidatesByLevel[level] || [])
+                        .map(p => ({ 
+                            product: p, 
+                            def: getDeficit(p, level),
+                            waitTime: factoryPlanWaitTime[p] || 0,
+                            resourceSufficiency: getFactoryPlanResourceSufficiency(p)
+                        }))
+                        .filter(x => x.def > 0)
+                        .sort((a, b) => {
+                            const scoreA = calcFactoryPriorityScore(level, a.def, a.resourceSufficiency, a.waitTime);
+                            const scoreB = calcFactoryPriorityScore(level, b.def, b.resourceSufficiency, b.waitTime);
+                            if (scoreB !== scoreA) return scoreB - scoreA;
+                            return a.product.localeCompare(b.product);
+                        });
+                    return list;
+                };
+
+                const buildSpecialPlanList = (level: number, includeAny = true) => {
+                    const anyCandidates = includeAny ? (specialAnyCandidates || []) : [];
+                    const set = new Set<string>([...anyCandidates, ...((specialCandidatesByLevel[level] || []))]);
+                    const list = Array.from(set)
+                        .map(p => ({ product: p, def: getSpecialDeficit(p) }))
+                        .filter(x => x.def > 0)
+                        .sort((a, b) => (b.def - a.def) || a.product.localeCompare(b.product));
+                    return list;
+                };
+
+                const planRoomsByLevel = Object.create(null) as Record<number, { room: Room; autoFactoryMap: Record<string, number>; mem: any }[]>;
+                for (const room of planFactoryRooms) {
+                    if (!room.factory) continue;
+                    const mem = getStructData(room.name) as any;
+                    if (mem && mem.factory === false) continue;
+                    if (mem?.factoryProduct) continue;
+
+                    const effectiveLevel = Number(room.factory.level || mem?.factoryLevel || 0);
+                    if (effectiveLevel < 0 || effectiveLevel > maxLevel) continue;
+                    if (!candidatesByLevel[effectiveLevel]?.length && !specialAnyCandidates.length && !specialCandidatesByLevel[effectiveLevel]?.length) continue;
+
+                    const autoFactoryMap = getAutoFactoryData(room.name) as any;
+                    if (RESOURCE_PRODUCTION.factory.chain.respectManualAutoData) {
+                        const keys = Object.keys(autoFactoryMap);
+                        const hasManual = keys.some(k => !managedFactoryKeys.has(k));
+                        if (hasManual) continue;
+                    }
+
+                    const plannedKeys = Object.keys(autoFactoryMap).filter(k => managedFactoryKeys.has(k));
+                    if (plannedKeys.length === 1) {
+                        const planned = plannedKeys[0];
+                        const plannedLimit = Number(autoFactoryMap[planned] || 0);
+                        const plannedLevel = Number((COMMODITIES as any)?.[planned]?.level ?? effectiveLevel);
+                        const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[plannedLevel] ?? PRODUCTION_MIN.commodityByLevel[0];
+                        const remain = plannedLimit - getRoomAvailWithFactory(room, planned);
+                        if (remain >= minBatch) continue;
+                    }
+
+                    planRoomsByLevel[effectiveLevel] ??= [];
+                    planRoomsByLevel[effectiveLevel].push({ room, autoFactoryMap, mem });
+                }
+
+                for (const [levelStr, list] of Object.entries(planRoomsByLevel)) {
+                    const level = Number(levelStr);
+                    if (!Number.isFinite(level)) continue;
+
+                    const avgCapacityScore = list.length > 0
+                        ? list.reduce((sum, pr) => sum + calcRoomCapacityScore(pr.room), 0) / list.length
+                        : 0;
+                    const planList = buildFactoryPlanList(level);
+
+                    // 同级链条有缺口时，高等级工厂优先同级任务；无缺口再承担通用专项补链
+                    const includeAnySpecial = level === 0 || planList.length === 0;
+                    const specialPlanList = buildSpecialPlanList(level, includeAnySpecial);
+                    const specialAssigned = new Set<string>();
+                    if (specialPlanList.length) {
+                        let cursor = 0;
+                        const pickForRoom = () => {
+                            for (let i = 0; i < specialPlanList.length; i++) {
+                                const idx = (cursor + i) % specialPlanList.length;
+                                const item = specialPlanList[idx];
+                                const def = getSpecialDeficit(item.product);
+                                if (def <= 0) continue;
+                                cursor = (idx + 1) % specialPlanList.length;
+                                return { product: item.product, def };
+                            }
+                            return null;
+                        };
+
+                        for (const { room, autoFactoryMap } of list) {
+                            const maxPlans = (RESOURCE_PRODUCTION.factory.chain as any).maxPlansPerRoom ?? 1;
+                            const assignedProducts = new Set<string>();
+                            for (const k of Object.keys(autoFactoryMap)) {
+                                if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                            }
+
+                            const roomCapacityScore = calcRoomCapacityScore(room);
+                            const capacityRatio = avgCapacityScore > 0 ? roomCapacityScore / avgCapacityScore : 1;
+
+                            for (let planIdx = 0; planIdx < maxPlans; planIdx++) {
+                                const picked = pickForRoom();
+                                if (!picked) break;
+
+                                const def = picked.def;
+                                const isPrimary = planIdx === 0;
+                                const baseBatch = Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom / (isPrimary ? 1 : 2), def);
+                                const adjustedBatch = Math.floor(baseBatch * capacityRatio);
+                                const batch = Math.max(0, adjustedBatch);
+                                const pickedLevel = Number((COMMODITIES as any)?.[picked.product]?.level ?? 0);
+                                const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[pickedLevel] ?? PRODUCTION_MIN.commodityByLevel[0];
+                                if (batch < minBatch) continue;
+                                specialRemaining[picked.product] = def - batch;
+                                factoryPlanWaitTime[picked.product] = 0;
+
+                                autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
+                                assignedProducts.add(picked.product);
+
+                                const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                                const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                                const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
+                                for (const [comp, need] of Object.entries(components)) {
+                                    const n = Number(need) || 0;
+                                    if (n <= 0) continue;
+                                    const minByRun = n * craftsNeed;
+                                    const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                                    noteNeed(room.name, comp, Math.max(minByRun, buffer));
+                                }
+
+                                tryLog([
+                                    `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
+                                    `${kv('产物', resTag(picked.product))} | ${kv('等级', String(pickedLevel))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))} | ${kv('类型', isPrimary ? '主' : '备用')}`,
+                                ]);
+                            }
+
+                            if (assignedProducts.size === 0) continue;
+                            for (const item of specialPlanList) {
+                                if (!assignedProducts.has(item.product)) {
+                                    factoryPlanWaitTime[item.product] = (factoryPlanWaitTime[item.product] || 0) + 1;
+                                }
+                            }
+                            specialAssigned.add(room.name);
+                        }
+                    }
+
+                    if (!planList.length) continue;
+                    let cursor = 0;
+                    const pickForRoom = () => {
+                        for (let i = 0; i < planList.length; i++) {
+                            const idx = (cursor + i) % planList.length;
+                            const item = planList[idx];
+                            const def = getDeficit(item.product, level);
+                            if (def <= 0) continue;
+                            cursor = (idx + 1) % planList.length;
+                            return { product: item.product, def };
+                        }
+                        return null;
+                    };
+
+                    for (const { room, autoFactoryMap } of list) {
+                        if (specialAssigned.has(room.name)) continue;
+
+                        const maxPlans = (RESOURCE_PRODUCTION.factory.chain as any).maxPlansPerRoom ?? 1;
+                        const assignedProducts = new Set<string>();
+                        for (const k of Object.keys(autoFactoryMap)) {
+                            if (managedFactoryKeys.has(k)) delete autoFactoryMap[k];
+                        }
+
+                        const roomCapacityScore = calcRoomCapacityScore(room);
+                        const capacityRatio = avgCapacityScore > 0 ? roomCapacityScore / avgCapacityScore : 1;
+
+                        for (let planIdx = 0; planIdx < maxPlans; planIdx++) {
+                            const picked = pickForRoom();
+                            if (!picked) break;
+
+                            const def = picked.def;
+                            const isPrimary = planIdx === 0;
+                            const baseBatch = Math.min(RESOURCE_PRODUCTION.factory.chain.batchPerRoom / (isPrimary ? 1 : 2), def);
+                            const adjustedBatch = Math.floor(baseBatch * capacityRatio);
+                            const batch = Math.max(0, adjustedBatch);
+                            const minBatch = (PRODUCTION_MIN.commodityByLevel as any)?.[level] ?? PRODUCTION_MIN.commodityByLevel[0];
+                            if (batch < minBatch) continue;
+                            remaining[`${level}:${picked.product}`] = def - batch;
+                            factoryPlanWaitTime[picked.product] = 0;
+
+                            autoFactoryMap[picked.product] = getRoomAvailWithFactory(room, picked.product) + batch;
+                            assignedProducts.add(picked.product);
+
+                            const components = (COMMODITIES as any)?.[picked.product]?.components || {};
+                            const per = Number((COMMODITIES as any)?.[picked.product]?.amount || 1);
+                            const craftsNeed = Math.max(1, Math.ceil(minBatch / Math.max(1, per)));
+                            for (const [comp, need] of Object.entries(components)) {
+                                const n = Number(need) || 0;
+                                if (n <= 0) continue;
+                                const minByRun = n * craftsNeed;
+                                const buffer = Goods.includes(comp as any) ? n * AUTO_FACTORY_CONFIG.goodsComponentMultiplier : Math.max(n * 5, 100);
+                                noteNeed(room.name, comp, Math.max(minByRun, buffer));
+                            }
+
+                            tryLog([
+                                `${c('生产计划', LOG_COLORS.theme, true)} ${c('FACTORY', LOG_COLORS.warning, true)} ${c(`${room.name} [${room.factory?.level || 0}级工厂]`, LOG_COLORS.theme, true)}`,
+                                `${kv('产物', resTag(picked.product))} | ${kv('等级', String(level))} | ${kv('全局缺口', String(def))} | ${kv('本轮批量', String(batch))} | ${kv('类型', isPrimary ? '主' : '备用')}`,
+                            ]);
+                        }
+
+                        if (assignedProducts.size === 0) continue;
+                        for (const item of planList) {
+                            if (!assignedProducts.has(item.product)) {
+                                factoryPlanWaitTime[item.product] = (factoryPlanWaitTime[item.product] || 0) + 1;
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (const [roomName, needs] of Object.entries(prodNeeds)) {
+                for (const [res, minAmount] of Object.entries(needs)) {
+                    ThresholdMap[roomName] ??= {};
+                    const cur = ThresholdMap[roomName][res];
+                    if (cur) {
+                        cur[0] = Math.max(cur[0], minAmount);
+                    } else {
+                        ThresholdMap[roomName][res] = [minAmount, Infinity];
+                    }
+                }
+            }
+
+            // 增强：确保生产原料需求被正确加入 target 列表
+            // 当房间有生产需求时，即使该资源在全局平衡中不是 target，也要确保它能被调度
+            for (const [roomName, needs] of Object.entries(prodNeeds)) {
+                if (!Game.rooms[roomName]) continue;
+                const room = Game.rooms[roomName];
+                if (!room.terminal || !room.storage) continue;
+                
+                for (const [res, minAmount] of Object.entries(needs)) {
+                    const amount = getResAmountCached(room, res);
+                    // 如果原料不足目标量，主动将其加入 target
+                    if (amount < minAmount) {
+                        if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
+                        if (!ResManageMap[res].target.includes(roomName)) {
+                            ResManageMap[res].target.push(roomName);
+                        }
+                    }
+                }
+            }
+
+            for (const k of Object.keys(ResManageMap)) delete ResManageMap[k];
+            const allResources = new Set<string>();
+            for (const roomName of Object.keys(ThresholdMap)) {
+                for (const res of Object.keys(ThresholdMap[roomName])) allResources.add(res);
+            }
+            for (const res of allResources) ResManageMap[res] = { source: [], target: [] };
+
+            for (const res of allResources) {
+                const base = (RESOURCE_BALANCE as any)[res];
+                if (!base) continue;
+                const threshold = base[0] || 0;
+                initResourceDeficit(res, threshold);
+
+                const record = resourceDeficitHistory[res];
+                const isDeficit = ResManageMap[res]?.target?.length > 0;
+                if (isDeficit) {
+                    record.consecutiveDeficit++;
+                } else {
+                    record.consecutiveDeficit = 0;
+                }
+
+                adjustThresholdForDeficit(res, ThresholdMap);
+                recoverThresholdPeriodically(res, ThresholdMap);
+            }
+
+            for (const room of eligibleRooms) {
+                const roomThresholds = ThresholdMap[room.name];
+                if (!roomThresholds) continue;
+                for (const [res, [targetThreshold, sourceThreshold]] of Object.entries(roomThresholds)) {
+                    const amount = getResAmountCached(room, res);
+                    if (amount > sourceThreshold) {
+                        if (room.terminal?.cooldown) continue;
+                        ResManageMap[res].source.push(room.name);
+                    } else if (amount < targetThreshold) {
+                        if (!room.isResourceTransferInSafe()) continue;
+                        ResManageMap[res].target.push(room.name);
+                    }
+                }
+            }
+
+            // 为什么：生产计划注入的原料需求（prodNeeds）如果仅靠“供应阈值(sourceThreshold)”筛选 source，
+            // 可能出现“全局有量但没有任何房间超过供应阈值”从而永远不调度的情况。
+            // 对这些原料，允许“超过房间保底(targetThreshold)的部分”作为可供给余量加入 source。
+            // 增强：对于有生产需求的资源，降低 source 筛选门槛，只要有原料即可作为供给源
+            if (prodNeedResSet.size > 0) {
+                for (const room of eligibleRooms) {
+                    if (!room.terminal || room.terminal.cooldown) continue;
+                    
+                    // 检查该房间是否有可用于生产需求的原料
+                    for (const res of prodNeedResSet) {
+                        const amount = getResAmountCached(room, res);
+                        // 生产需求：只要有原料就作为供给源
+                        const minSendAmount = res === RESOURCE_ENERGY
+                            ? RESOURCE_DISPATCH_CONFIG.energyMinSendAmount
+                            : (Goods.includes(res as any)
+                                ? RESOURCE_DISPATCH_CONFIG.productionSourceMarkMinGoods
+                                : RESOURCE_DISPATCH_CONFIG.productionSourceMarkMinDefault);
+                        if (amount < minSendAmount) continue;
+                        
+                        if (!ResManageMap[res]) ResManageMap[res] = { source: [], target: [] };
+                        if (!ResManageMap[res].source.includes(room.name)) {
+                            ResManageMap[res].source.push(room.name);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 处理每种资源的调度
+        // costRatioCache: 估算传输成本比例 cost/amount（用 sampleAmount 近似），用于快速过滤高成本目标
+        const costRatioCache = Object.create(null) as Record<string, Record<string, number>>;
+
+        const getCostRatio = (sourceRoomName: string, targetRoomName: string) => {
+            const key = `${sourceRoomName}->${targetRoomName}`;
+            const cached = marketCostCache[key];
+            const CACHE_EXPIRY = RESOURCE_DISPATCH_CONFIG.marketCostCacheExpiry;
+
+            if (cached && Game.time - cached.tick < CACHE_EXPIRY) {
+                return cached.ratio;
+            }
+
+            const ratio = getTransactionCostRatio(sourceRoomName, targetRoomName);
+            marketCostCache[key] = { ratio, tick: Game.time };
+            return ratio;
+        }
+
+        const queuedPair = Object.create(null) as Record<string, Record<string, Record<string, number>>>;
+        const queuedOut = Object.create(null) as Record<string, Record<string, number>>;
+        const queuedIn = Object.create(null) as Record<string, Record<string, number>>;
+
+        const addQueued = (sourceRoomName: string, targetRoomName: string, res: string, amount: number) => {
+            // queuedPair：用于限制同一 source->target 同资源的累计排队上限（避免对单目标过量调度）
+            // queuedIn/queuedOut：用于把“已排队待发送量”视作已调度，从而在下一轮计算 surplus/deficit 时去重，避免重复下发任务
+            if (!queuedPair[sourceRoomName]) queuedPair[sourceRoomName] = Object.create(null) as Record<string, Record<string, number>>;
+            if (!queuedPair[sourceRoomName][res]) queuedPair[sourceRoomName][res] = Object.create(null) as Record<string, number>;
+            queuedPair[sourceRoomName][res][targetRoomName] = (queuedPair[sourceRoomName][res][targetRoomName] || 0) + amount;
+
+            if (!queuedIn[targetRoomName]) queuedIn[targetRoomName] = Object.create(null) as Record<string, number>;
+            queuedIn[targetRoomName][res] = (queuedIn[targetRoomName][res] || 0) + amount;
+
+            if (!queuedOut[sourceRoomName]) queuedOut[sourceRoomName] = Object.create(null) as Record<string, number>;
+            if (res === RESOURCE_ENERGY) {
+                const ratio = getCostRatio(sourceRoomName, targetRoomName);
+                queuedOut[sourceRoomName][res] = (queuedOut[sourceRoomName][res] || 0) + Math.floor(amount * (1 + ratio));
+            } else {
+                queuedOut[sourceRoomName][res] = (queuedOut[sourceRoomName][res] || 0) + amount;
+            }
+        }
+
+        for (const sourceRoomName in missionPools) {
+            const roomPools = missionPools[sourceRoomName];
+            const terminalTasks = roomPools?.terminal;
+            if (!Array.isArray(terminalTasks)) continue;
+            for (const task of terminalTasks) {
+                if (!task || task.type !== 'send') continue;
+                const data = task.data as any;
+                const targetRoom = data?.targetRoom;
+                const resourceType = data?.resourceType;
+                const amount = data?.amount;
+                if (!targetRoom || !resourceType || typeof amount !== 'number' || amount <= 0) continue;
+                addQueued(sourceRoomName, targetRoom, resourceType, amount);
+            }
+        }
+
+        const setResAmountCached = (roomName: string, res: string, amount: number) => {
+            if (!amountCache[roomName]) amountCache[roomName] = Object.create(null) as Record<string, number>;
+            amountCache[roomName][res] = amount;
+        }
+
+        for (let res in ResManageMap) {
+            // Goods：终端单次发送最少 100（生产需求），最多 500；其它资源保持原先阈值约束
+            const isGoods = Goods.includes(res as any);
+            const hasProdNeed = prodNeedResSet.has(res);
+            const isEnergy = res == RESOURCE_ENERGY;
+            const minSendAmount = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsMinSendAmount
+                : (isEnergy
+                    ? RESOURCE_DISPATCH_CONFIG.energyMinSendAmount
+                    : (hasProdNeed
+                        ? RESOURCE_DISPATCH_CONFIG.productionDefaultMinSendAmount
+                        : RESOURCE_DISPATCH_CONFIG.defaultMinSendAmount));
+            const maxSendAmount = isGoods ? RESOURCE_DISPATCH_CONFIG.goodsMaxSendAmount : Infinity;
+            // 调度上限：用于实现"一次性尽量下发完，但不至于某个富余房间排队爆炸"
+            // Goods 类资源提高上限以支持生产需求
+            const perPairCap = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerPairCap
+                : (isEnergy ? RESOURCE_DISPATCH_CONFIG.energyPerPairCap : RESOURCE_DISPATCH_CONFIG.defaultPerPairCap);
+            const perSourceCap = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerSourceCap
+                : (isEnergy ? RESOURCE_DISPATCH_CONFIG.energyPerSourceCap : RESOURCE_DISPATCH_CONFIG.defaultPerSourceCap);
+            const perSourceMaxPairs = isGoods
+                ? RESOURCE_DISPATCH_CONFIG.goodsPerSourceMaxPairs
+                : RESOURCE_DISPATCH_CONFIG.defaultPerSourceMaxPairs;
+
+            const sourceRooms = ResManageMap[res].source
+                .map(roomName => Game.rooms[roomName])
+                .filter((room: Room) => !!room);
+
+            const targetRooms = ResManageMap[res].target
+                .map(roomName => Game.rooms[roomName])
+                .filter((room: Room) => !!room);
+
+            if (sourceRooms.length == 0 || targetRooms.length == 0) continue;
+
+            // sources: 以“可供给余量 surplus”排序，优先从最富余的房间开始调度
+            const sources = sourceRooms
+                .map(room => {
+                    const baseAmount = getResAmountCached(room, res);
+                    const pending = queuedOut[room.name]?.[res] || 0;
+                    const amount = Math.max(0, baseAmount - pending);
+                    const thresholds = ThresholdMap[room.name]?.[res];
+                    const targetThreshold = thresholds ? thresholds[0] : 0;
+                    const reserve = hasProdNeed
+                        ? Math.min(targetThreshold, Math.max(minSendAmount, Math.floor(targetThreshold * RESOURCE_DISPATCH_CONFIG.productionReserveRatio)))
+                        : targetThreshold;
+                    return { room, amount, surplus: amount - reserve };
+                })
+                .filter(s => s.surplus > 0 && s.room.terminal && s.room.terminal.cooldown == 0)
+                .sort((a, b) => b.surplus - a.surplus);
+
+            // targets: 以"缺口 deficit"排序，优先补最缺的房间；同时受终端剩余容量与供给阈值上限限制
+            // 增强：对于有生产需求的房间，优先满足生产原料需求
+            const targets = targetRooms
+                .map(room => {
+                    const baseAmount = getResAmountCached(room, res);
+                    const pendingIn = queuedIn[room.name]?.[res] || 0;
+                    const amount = baseAmount + pendingIn;
+                    const thresholds = ThresholdMap[room.name]?.[res];
+                    const targetThreshold = thresholds ? thresholds[0] : 0;
+                    const sourceThreshold = thresholds ? thresholds[1] : Infinity;
+                    
+                    // 考虑生产原料需求：优先满足生产缺口
+                    const prodNeedAmount = prodNeeds[room.name]?.[res] || 0;
+                    // 生产需求应该作为额外的目标，不受 sourceThreshold 限制
+                    const effectiveTargetThreshold = Math.max(targetThreshold, prodNeedAmount);
+                    
+                    const terminalFree = room.terminal.store.getFreeCapacity();
+                    const terminalFreeAfter = Math.max(0, terminalFree - pendingIn);
+                    const deficit = Math.min(effectiveTargetThreshold - amount, sourceThreshold - amount, terminalFreeAfter);
+                    const isProdDemand = prodNeedAmount > 0 && prodNeedAmount > targetThreshold;
+                    return { room, amount, deficit, isProdDemand };
+                })
+                .filter(t => t.deficit > 0)
+                // 优先调度有生产需求的房间
+                .sort((a, b) => {
+                    if (a.isProdDemand && !b.isProdDemand) return -1;
+                    if (!a.isProdDemand && b.isProdDemand) return 1;
+                    return b.deficit - a.deficit;
+                });
+
+            if (sources.length == 0 || targets.length == 0) continue;
+
+            for (const source of sources) {
+                let budgetLeft = perSourceCap - (queuedOut[source.room.name]?.[res] || 0);
+                if (budgetLeft < minSendAmount) continue;
+                let pairsScheduled = 0;
+
+                for (const target of targets) {
+                    if (target.room.name === source.room.name) continue;
+                    if (target.deficit <= 0) continue;
+                    if (source.surplus <= 0) break;
+                    if (budgetLeft <= 0) break;
+                    if (pairsScheduled >= perSourceMaxPairs) break;
+
+                    // 用固定样本估算 cost/amount，先快速过滤“成本占比过高”的组合
+                    const ratio = getCostRatio(source.room.name, target.room.name);
+                    if (ratio > 1) continue;
+
+                    const queuedToTarget = queuedPair[source.room.name]?.[res]?.[target.room.name] || 0;
+                    const pairLeft = perPairCap - queuedToTarget;
+                    if (pairLeft < minSendAmount) continue;
+
+                    let sendAmount = Math.min(source.surplus, target.deficit, budgetLeft, pairLeft);
+                    if (maxSendAmount !== Infinity) sendAmount = Math.min(sendAmount, maxSendAmount);
+                    if (res == RESOURCE_ENERGY) {
+                        // 能量发送会额外消耗 cost，需保证 send + cost 不超过可供给余量
+                        sendAmount = Math.min(sendAmount, Math.floor(source.surplus / (1 + ratio)));
+                    }
+                    sendAmount = Math.floor(sendAmount);
+                    if (sendAmount < minSendAmount) continue;
+
+                    // 精确计算该发送量的成本（使用缓存的 ratio 来减少 calcTransactionCost 调用）
+                    const cost = sendAmount * ratio;
+                    if (cost > sendAmount) continue;
+                    if (res == RESOURCE_ENERGY && sendAmount + cost > source.surplus) continue;
+
+                    // 不在这里直接 terminal.send：改为下发 send 任务，复用 TerminalWork 执行与成本修正逻辑
+                    const desiredTotal = queuedToTarget + sendAmount;
+                    const rc = source.room.SendMissionUpsertMax(target.room.name, res as any, desiredTotal, perPairCap);
+                    if (rc === OK) {
+                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
+                        tryLog([
+                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('成功', LOG_COLORS.good, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
+                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
+                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))}`,
+                        ]);
+                    } else {
+                        const costRatio = sendAmount > 0 ? cost / sendAmount : 0;
+                        tryLog([
+                            `${c('资源调度', LOG_COLORS.theme, true)} ${c('失败', LOG_COLORS.danger, true)} ${c(source.room.name, LOG_COLORS.theme, true)} ${c('→', LOG_COLORS.neutral)} ${c(target.room.name, LOG_COLORS.theme, true)}`,
+                            `${kv('资源', resTag(res))} | ${kv('发送', String(sendAmount))} | ${kv('cost', `${cost} (${fmtPct(costRatio)})`)}`,
+                            `${kv('队列', `${queuedToTarget} + ${sendAmount} = ${desiredTotal}/${perPairCap}`)} | ${kv('估算ratio', fmtPct(ratio))} | ${kv('错误码', String(rc))}`,
+                        ]);
+                        continue;
+                    }
+
+                    
+                    addQueued(source.room.name, target.room.name, res, sendAmount);
+                    pairsScheduled++;
+
+                    // 仅更新本 tick 的“估算状态”，用于后续匹配更准确；真实资源变化由实际发送发生后决定
+                    if (res == RESOURCE_ENERGY) {
+                        source.surplus -= sendAmount + cost;
+                        source.amount -= sendAmount + cost;
+                        budgetLeft -= sendAmount + cost;
+                    } else {
+                        source.surplus -= sendAmount;
+                        source.amount -= sendAmount;
+                        budgetLeft -= sendAmount;
+                    }
+                    target.deficit -= sendAmount;
+                    target.amount += sendAmount;
+                    setResAmountCached(source.room.name, res, source.amount);
+                    setResAmountCached(target.room.name, res, target.amount);
+                }
+            }
+        }
+
+        if (suppressed > 0) {
+            logRM([`${c('资源调度', LOG_COLORS.theme, true)} ${c('提示', LOG_COLORS.warning, true)} ${kv('本 tick 省略日志', String(suppressed))}`]);
+        }
+    }
+}

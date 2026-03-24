@@ -1,5 +1,5 @@
 import { BASE_CONFIG } from '@/constant/config';
-import { getAutoFactoryData, getRoomData, getStructData } from '@/modules/utils/memory';
+import { getAutoFactoryData, getRoomData, getStructData } from '@/shared/memory';
 
 export default {
     factory: {

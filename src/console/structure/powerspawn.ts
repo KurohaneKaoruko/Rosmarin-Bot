@@ -1,4 +1,4 @@
-import { getAutoPowerData, getRoomData, getStructData } from '@/modules/utils/memory';
+import { getAutoPowerData, getRoomData, getStructData } from '@/shared/memory';
 
 export default {
     power: {

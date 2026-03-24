@@ -1,5 +1,5 @@
 import { BASE_CONFIG } from '@/constant/config';
-import { getRoomData } from '@/modules/utils/memory';
+import { getRoomData } from '@/shared/memory';
 
 // 控制器工作位周边允许站人的结构。
 // 这些结构不会阻断 upgrader/worker 的“前压换位”。

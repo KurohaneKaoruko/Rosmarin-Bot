@@ -3,7 +3,7 @@
  */
 import roomConsole from '@/console/function/room';
 import layoutConsole from '@/console/function/layout';
-import { getAutoData, getMissionPools, getRoomData } from '@/modules/utils/memory';
+import { getAutoData, getMissionPools, getRoomData } from '@/shared/memory';
 
 export const roomRunner = function (room: Room) {
     if (!room) return;

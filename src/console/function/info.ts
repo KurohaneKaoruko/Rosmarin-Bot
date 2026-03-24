@@ -1,8 +1,8 @@
-import { showRoomInfo } from "@/modules/utils/showRoomInfo";
-import { showFactoryInfo, showLabInfo } from "@/modules/utils/showProductionInfo";
-import { showCraftableInfo } from "@/modules/utils/showCraftableInfo";
-import { getRoomData } from "@/modules/utils/memory";
-import { showAllRes, showRoomRes } from "@/modules/utils/roomResource";
+import { showRoomInfo } from "@/shared/showRoomInfo";
+import { showFactoryInfo, showLabInfo } from "@/shared/showProductionInfo";
+import { showCraftableInfo } from "@/shared/showCraftableInfo";
+import { getRoomData } from "@/shared/memory";
+import { showAllRes, showRoomRes } from "@/shared/roomResource";
 
 export default {
     info: {

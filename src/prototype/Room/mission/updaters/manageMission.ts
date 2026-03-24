@@ -1,6 +1,6 @@
 import { LabMap, Goods, BarList } from "@/constant/ResourceConstant";
 import { BASE_CONFIG } from "@/constant/config";
-import { getStructData } from "@/modules/utils/memory";
+import { getStructData } from "@/shared/memory";
 
 const MANAGE_BALANCE = {
     // 自动调度资源阈值

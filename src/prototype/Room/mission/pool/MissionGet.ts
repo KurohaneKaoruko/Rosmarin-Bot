@@ -1,6 +1,6 @@
-import { compress, decompress, decompressBodyConfig } from '@/modules/utils/compress';
+import { compress, decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getLayoutData, getStructData } from '@/modules/utils/memory';
+import { getLayoutData, getStructData } from '@/shared/memory';
 import { Goods } from '@/constant/ResourceConstant';
 import { RoleData } from '@/constant/CreepConstant';
 import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMission';

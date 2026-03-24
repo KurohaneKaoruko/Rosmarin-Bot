@@ -1,4 +1,4 @@
-import { getNukerData } from "@/modules/utils/memory";
+import { getNukerData } from "@/shared/memory";
 
 export default {
     nuker: {

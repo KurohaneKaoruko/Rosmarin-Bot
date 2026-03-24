@@ -1,5 +1,5 @@
-import LayoutPlanner from "@/modules/feature/Planner/layoutPlanner"
-import { getLayoutData, getRoomData } from "@/modules/utils/memory";
+import LayoutPlanner from "@/features/Planner/layoutPlanner"
+import { getLayoutData, getRoomData } from "@/shared/memory";
 
 
 

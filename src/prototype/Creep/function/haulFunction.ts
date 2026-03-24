@@ -1,4 +1,4 @@
-import { getCoreDepotContainer, isCoreDepotContainer } from '@/modules/utils/coreDepot';
+import { getCoreDepotContainer, isCoreDepotContainer } from '@/shared/coreDepot';
 
 /**
  * 搬运通用功能
@@ -43,10 +43,11 @@ export default class HaulFunction extends Creep {
         if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
         const controller = this.room.controller;
         if (!controller) return false;
-        if (this.isCoreDepotContainer(target)) return false;
+        const container = target as StructureContainer;
+        if (isCoreDepotContainer(this.room, container)) return false;
         // 若极端布局下与 source/mineral 共用同一个箱子，存放侧仍按 controller buffer 处理：
         // 能量可以补进去，非能量一律不允许再塞回去。
-        return target.pos.inRangeTo(controller.pos, 3);
+        return container.pos.inRangeTo(controller.pos, 3);
     }
 
     /**

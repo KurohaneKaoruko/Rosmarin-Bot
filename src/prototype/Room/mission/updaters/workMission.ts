@@ -1,4 +1,4 @@
-import { getStructData } from '@/modules/utils/memory';
+import { getStructData } from '@/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type WorkPoolName = 'build' | 'repair';

@@ -1,5 +1,5 @@
-import { inWhitelist } from '@/modules/utils/whitelist';
-import { getStructData } from '@/modules/utils/memory';
+import { inWhitelist } from '@/shared/whitelist';
+import { getStructData } from '@/shared/memory';
 
 export default class BaseFunction extends PowerCreep {
     getOpsTransferTarget(): StructureStorage | StructureTerminal | null {

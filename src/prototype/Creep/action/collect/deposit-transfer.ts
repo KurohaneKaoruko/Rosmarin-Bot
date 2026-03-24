@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 

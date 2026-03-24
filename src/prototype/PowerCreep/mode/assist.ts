@@ -1,5 +1,5 @@
 import { RoleData } from '@/constant/CreepConstant';
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 export function runAssist(pc: PowerCreep, assistFlag: Flag): boolean {
     const PC_RETREAT_TTL = 800;

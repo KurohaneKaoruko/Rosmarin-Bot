@@ -1,4 +1,4 @@
-import { getRoomData, getStructData } from '@/modules/utils/memory';
+import { getRoomData, getStructData } from '@/shared/memory';
 
 export default class RoomExecute extends Room {
     exec() {

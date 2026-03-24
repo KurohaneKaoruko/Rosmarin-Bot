@@ -1,7 +1,7 @@
 import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
-import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/modules/utils/memory";
-import { parseShardRoomName } from "@/modules/utils/shardRoom";
+import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/shared/memory";
+import { parseShardRoomName } from "@/shared/shardRoom";
 
 // 房间控制
 export default {

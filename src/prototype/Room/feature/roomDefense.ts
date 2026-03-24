@@ -1,5 +1,5 @@
 import { getStructureSignature } from '@/utils';
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 type DefenderCounts = {
     attack: number;

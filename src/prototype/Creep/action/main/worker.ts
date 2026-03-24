@@ -1,6 +1,6 @@
-import { compress, decompress } from '@/modules/utils/compress';
+import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getRoomData } from '@/modules/utils/memory';
+import { getRoomData } from '@/shared/memory';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 

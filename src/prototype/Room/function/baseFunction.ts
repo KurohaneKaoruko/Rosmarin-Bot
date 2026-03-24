@@ -1,7 +1,7 @@
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
-import { inWhitelist } from '@/modules/utils/whitelist';
-import { getRoomData, getStructData } from '@/modules/utils/memory';
-import { getCreepNumByAssignedRoom } from '@/modules/utils/creepTickIndex';
+import { inWhitelist } from '@/shared/whitelist';
+import { getRoomData, getStructData } from '@/shared/memory';
+import { getCreepNumByAssignedRoom } from '@/shared/creepTickIndex';
 
 const getMyCreepsByRoleByRoom = (() => {
     let cachedTick = -1;

@@ -2,7 +2,7 @@
  * 任务更新主模块
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
-import { getRoomData } from '@/modules/utils/memory';
+import { getRoomData } from '@/shared/memory';
 
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;

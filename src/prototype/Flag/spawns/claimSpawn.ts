@@ -1,4 +1,4 @@
-import { compressBodyConfig } from "@/modules/utils/compress";
+import { compressBodyConfig } from "@/shared/compress";
 import { log } from "@/utils";
 import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
 import { getSpawnRoomOrRemove } from "../utils";

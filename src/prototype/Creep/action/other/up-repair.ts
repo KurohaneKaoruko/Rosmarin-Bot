@@ -1,6 +1,6 @@
-import { compress } from '@/modules/utils/compress';
-import { getLayoutData } from '@/modules/utils/memory';
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { compress } from '@/shared/compress';
+import { getLayoutData } from '@/shared/memory';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 

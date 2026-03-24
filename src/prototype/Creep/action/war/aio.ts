@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/modules/utils/roomTickCache';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { BehaviorTree, BehaviorTreeRegistry, BtStatus, leaf, selector, sequence, hotSwap, fail } from '@/framework/ai/behaviorTree';
 
 const getRoomNonWhitelistHostiles = (creep: Creep) =>

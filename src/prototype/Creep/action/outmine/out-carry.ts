@@ -1,6 +1,6 @@
 import { StrategyContainer, runStrategy } from '@/framework/ai/strategy';
-import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/feature/externalMine';
-import { RoadMemory } from '@/modules/feature/externalRoad';
+import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/features/externalMine';
+import { RoadMemory } from '@/features/externalRoad';
 import {
     clearOutCarryRelayIntent,
     rememberOutCarryRelayIntentTowards,

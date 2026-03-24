@@ -1,21 +1,21 @@
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
-import { EventModule } from '@/modules/runtime/EventModule';
-import { ClearModule } from '@/modules/runtime/ClearModule';
-import { GeneratePixel } from '@/modules/runtime/Pixel';
-import { Statistics } from '@/modules/runtime/Statistics';
-import { ResourceManage } from '@/modules/runtime/ResourceManage';
-import { TeamModule } from '@/modules/runtime/TeamModule';
-import { DDModule } from '@/modules/runtime/DD_Module';
-import { NukeModule } from '@/modules/runtime/NukeModule';
-import { ExpandModule } from '@/modules/runtime/ExpandModule';
-import { InterShardModule } from '@/modules/runtime/InterShardModule';
-import { MoveModule } from '@/modules/runtime/MoveModule';
+import { EventModule } from '@/modules/EventModule';
+import { ClearModule } from '@/modules/ClearModule';
+import { GeneratePixel } from '@/modules/Pixel';
+import { Statistics } from '@/modules/Statistics';
+import { ResourceManage } from '@/modules/ResourceManage';
+import { TeamModule } from '@/modules/TeamModule';
+import { DDModule } from '@/modules/DD_Module';
+import { NukeModule } from '@/modules/NukeModule';
+import { ExpandModule } from '@/modules/ExpandModule';
+import { InterShardModule } from '@/modules/InterShardModule';
+import { MoveModule } from '@/modules/MoveModule';
 
-import '@/modules/infra/qos';    // QoS 全局挂载
-import '@/modules/infra/BetterMove';    // creep移动优化
-import '@/modules/infra/structureCache';  // 极致建筑缓存
+import '@/infra/qos';    // QoS 全局挂载
+import '@/infra/BetterMove';    // creep移动优化
+import '@/infra/structureCache';  // 极致建筑缓存
 
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展

@@ -1,7 +1,7 @@
 /**
  * 一些基础的功能
  */
-import { inWhitelist } from '@/modules/utils/whitelist';
+import { inWhitelist } from '@/shared/whitelist';
 
 type TakeTargetType = 'dropped' | 'structure' | 'ruin';
 type TakeTarget = { id: Id<any>; type: TakeTargetType };

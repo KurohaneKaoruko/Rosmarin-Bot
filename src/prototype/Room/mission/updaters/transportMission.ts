@@ -1,6 +1,6 @@
-import { compress } from '@/modules/utils/compress';
-import { getLabAB } from '@/modules/utils/labReservations';
-import { getRoomData, getStructData } from '@/modules/utils/memory';
+import { compress } from '@/shared/compress';
+import { getLabAB } from '@/shared/labReservations';
+import { getRoomData, getStructData } from '@/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 

@@ -1,5 +1,5 @@
-import { compress } from '@/modules/utils/compress';
-import { pickTowerFocusTarget } from '@/modules/utils/defenseUtils';
+import { compress } from '@/shared/compress';
+import { pickTowerFocusTarget } from '@/shared/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type TowerTargetId = Id<Creep> | Id<PowerCreep>

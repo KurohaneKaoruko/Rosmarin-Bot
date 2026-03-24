@@ -5,7 +5,7 @@ import { defineConfig } from 'rolldown';
 import { minify as terserMinify } from 'terser';
 
 const filePath = {
-	wasmDir: 'src/modules/wasm'
+	wasmDir: 'src/wasm'
 };
 
 const formatDisplayPath = (targetPath) => {

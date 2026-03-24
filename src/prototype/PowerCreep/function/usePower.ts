@@ -1,5 +1,5 @@
-import { getLabAB } from '@/modules/utils/labReservations';
-import { getStructData } from '@/modules/utils/memory';
+import { getLabAB } from '@/shared/labReservations';
+import { getStructData } from '@/shared/memory';
 
 export default class PowerCreepUsePower extends PowerCreep {
     private usePowerOrMove(
