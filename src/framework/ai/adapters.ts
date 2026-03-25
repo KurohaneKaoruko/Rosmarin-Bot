@@ -1,5 +1,5 @@
 import { LayeredStateMachine, StateMachine, StateId, EventId, GuardId, StepOptions, TransitionResult } from './stateMachine';
-import { WORK_EVENTS, WorkLayerContext, WorkStateHandlers } from './workMachine';
+import { WORK_EVENTS, WorkStateHandlers } from './workMachine';
 
 // 记忆适配器：读写到 creep.memory
 type MemoryStateStorage<S extends StateId> = {
@@ -76,12 +76,12 @@ const setWorkLayerState = (creep: Creep, state: WorkLayerState) => {
 
 const runWorkLayerState = (
     handlers: WorkStateHandlers,
-    ctx: WorkLayerContext,
+    creep: Creep,
     state: WorkLayerState
 ) => {
     return state === WORK_LAYER_STATE.TARGET
-        ? handlers.onTarget(ctx)
-        : handlers.onSource(ctx);
+        ? handlers.onTarget(creep)
+        : handlers.onSource(creep);
 };
 
 const resolveNextWorkLayerState = (state: WorkLayerState, event: ReturnType<typeof runWorkLayerState>): WorkLayerState => {
@@ -96,16 +96,15 @@ export const runWorkLayer = (
     handlers: WorkStateHandlers,
     options: { reenter?: boolean } = {}
 ) => {
-    const ctx = { creep };
     const from = getWorkLayerState(creep);
-    const event = runWorkLayerState(handlers, ctx, from);
+    const event = runWorkLayerState(handlers, creep, from);
     const to = resolveNextWorkLayerState(from, event);
     const transitioned = to !== from;
 
     if (transitioned) {
         setWorkLayerState(creep, to);
         if (options.reenter ?? true) {
-            runWorkLayerState(handlers, ctx, to);
+            runWorkLayerState(handlers, creep, to);
         }
     }
 

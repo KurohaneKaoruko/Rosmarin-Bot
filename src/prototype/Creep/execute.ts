@@ -39,19 +39,19 @@ export default class CreepExecute extends Creep {
             return;
         }
 
-        // 新框架下，角色执行入口统一由 executor 绑定声明。
+        // 新框架下，角色执行入口统一由 executor 字符串声明。
         // 这里不再区分旧的 work/action 模式，只根据统一 id 获取处理器。
-        // 因此 role 名与 executor.id 可以不同，例如 reserver -> reserve。
+        // 因此 role 名与 executor 可以不同，例如 reserver -> reserve。
         const executor = roledata.executor;
         if (!executor) {
             // 没有执行器绑定的角色直接跳过：
             return;
         }
 
-        const handler = getRoleHandler(executor.id, (missingId) => {
+        const handler = getRoleHandler(executor, (missingId) => {
             reportExecuteIssue(
                 `missing-handler:${role}:${missingId}`,
-                `[CreepExecute] 角色 ${role} 绑定的统一处理器 ${missingId} 不存在，请检查 RoleData.executor.id 与 roleRegistry 是否一致。`
+                `[CreepExecute] 角色 ${role} 绑定的统一处理器 ${missingId} 不存在，请检查 RoleData.executor 与 roleRegistry 是否一致。`
             );
         });
         if (!handler) return;

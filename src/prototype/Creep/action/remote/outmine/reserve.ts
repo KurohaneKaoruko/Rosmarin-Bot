@@ -75,8 +75,8 @@ const Reserve = {
      */
     run: function (creep: Creep) {
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(),
-            onTarget: ({ creep }) => onTarget(creep),
+            onSource: () => onSource(),
+            onTarget,
         });
     }
 };

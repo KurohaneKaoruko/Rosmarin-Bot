@@ -1,5 +1,5 @@
 import { runWorkLayer } from './adapters';
-import type { WorkEvent, WorkStateHandlers } from './workMachine';
+import type { WorkEvent } from './workMachine';
 
 // 统一的 creep 角色运行接口：
 // exec 只需要调用 run，准备阶段由框架包装器自行处理。
@@ -9,7 +9,7 @@ export type CreepRoleHandler = {
 
 // 角色定义输入：
 // 允许保留一个轻量 prepare，但它不会再暴露给 exec。
-export type CreepRoleDefinition = {
+type CreepRoleDefinition = {
     prepare?: (creep: Creep) => boolean;
     run: (creep: Creep) => void;
 };
@@ -27,10 +27,8 @@ type BoostedRoleDefinition = {
 
 type WorkLayerRoleDefinition = {
     prepare?: (creep: Creep) => boolean;
-    onSource?: (creep: Creep) => WorkEvent;
-    onTarget?: (creep: Creep) => WorkEvent;
-    createHandlers?: (creep: Creep) => WorkStateHandlers;
-    beforeRun?: (creep: Creep) => void;
+    onSource: (creep: Creep) => WorkEvent;
+    onTarget: (creep: Creep) => WorkEvent;
     reenter?: boolean;
 };
 
@@ -88,15 +86,9 @@ export const createWorkLayerRole = (definition: WorkLayerRoleDefinition): CreepR
     createCreepRole({
         prepare: definition.prepare,
         run(creep: Creep) {
-            definition.beforeRun?.(creep);
-
-            const handlers: WorkStateHandlers = definition.createHandlers
-                ? definition.createHandlers(creep)
-                : {
-                    onSource: ({ creep: current }) => definition.onSource!(current),
-                    onTarget: ({ creep: current }) => definition.onTarget!(current),
-                };
-
-            runWorkLayer(creep, handlers, { reenter: definition.reenter });
+            runWorkLayer(creep, {
+                onSource: definition.onSource,
+                onTarget: definition.onTarget,
+            }, { reenter: definition.reenter });
         }
     });

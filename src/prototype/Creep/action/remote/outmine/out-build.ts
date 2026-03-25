@@ -481,8 +481,8 @@ export const syncOutBuildMoveWork = (creep: Creep) => {
 const outBuild = {
     run: function (creep: Creep) {
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep)
+            onSource,
+            onTarget
         });
     }
 };

@@ -1010,8 +1010,8 @@ const onTarget = (creep: Creep): WorkEvent => {
 const CarrierFunction = {
     run: (creep: Creep) => {
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
+            onSource,
+            onTarget,
         });
     }
 };

@@ -1,7 +1,8 @@
 import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
+import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
+import { runWorkLayer } from '@/framework/ai/adapters';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
@@ -449,17 +450,18 @@ export const syncWorkerMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const workerWork = createWorkLayerRole({
-    beforeRun: (creep) => writeMoveWorkTileCandidates(creep, []),
-    createHandlers: (creep) => {
+const workerWork = createCreepRole({
+    run(creep) {
+        writeMoveWorkTileCandidates(creep, []);
+
         const publishMoveWork = (candidates: MoveWorkTileCandidate[]) => {
             writeMoveWorkTileCandidates(creep, candidates);
         };
 
-        return {
-            onSource: ({ creep: current }) => onSource(current, publishMoveWork),
-            onTarget: ({ creep: current }) => onTarget(current, publishMoveWork),
-        };
+        runWorkLayer(creep, {
+            onSource: (current) => onSource(current, publishMoveWork),
+            onTarget: (current) => onTarget(current, publishMoveWork),
+        });
     }
 });
 

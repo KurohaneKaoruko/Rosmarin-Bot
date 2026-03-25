@@ -1,5 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import type { CreepRoleHandler } from '../../types';
+import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 
 const ensureInTargetRoom = (creep: Creep, resetDontPullMe = false): boolean => {
     if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {

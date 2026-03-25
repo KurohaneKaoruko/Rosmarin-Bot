@@ -1,4 +1,4 @@
-import type { CreepRoleHandler } from './types';
+import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 import harvester from './economy/harvester';
 import carrier from './economy/carrier';
 import transport from './economy/transport';

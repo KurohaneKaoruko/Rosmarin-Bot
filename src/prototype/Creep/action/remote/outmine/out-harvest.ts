@@ -243,8 +243,8 @@ export const syncOutHarvestMoveWork = (creep: Creep) => {
 const outHarvest = {
     run: function (creep: Creep) {
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep)
+            onSource,
+            onTarget
         });
     }
 };

@@ -1,5 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import type { CreepRoleHandler } from '../../types';
+import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;

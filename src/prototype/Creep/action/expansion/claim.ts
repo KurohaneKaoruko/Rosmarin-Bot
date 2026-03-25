@@ -1,4 +1,4 @@
-import type { CreepRoleHandler } from '../types';
+import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 
 const runClaimer = (creep: Creep) => {
     if (!creep.memory.targetRoom) {

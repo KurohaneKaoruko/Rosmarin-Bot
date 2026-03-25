@@ -164,8 +164,8 @@ const onTarget = (creep: Creep): WorkEvent => {
 const deposit_harvest = {
     run: function (creep: Creep) {
         runWorkLayer(creep, {
-            onSource: ({ creep }) => onSource(creep),
-            onTarget: ({ creep }) => onTarget(creep),
+            onSource,
+            onTarget,
         });
     }
 }
