@@ -272,11 +272,11 @@ export default class BoostMission extends TransportMission {
         const reactionActive = !!botmem?.lab && !!labAId && !!labBId && !!botmem?.labAtype && !!botmem?.labBtype;
         const boostLabs = botmem?.boostLabs;
         if (boostLabs) {
-            for (const labId in boostLabs) {
+            for (const labId of Object.keys(boostLabs) as Id<StructureLab>[]) {
                 const entry = boostLabs[labId];
                 if (!entry || entry.mode !== 'task') continue;
                 if (!reactionActive && ((labAId && labId === labAId) || (labBId && labId === labBId))) continue;
-                const lab = Game.getObjectById(labId) as StructureLab | null;
+                const lab = Game.getObjectById(labId);
                 if (lab && lab.mineralType && this.storage) {
                     const exist = this.checkSameMissionInPool('transport', 'transport', {
                         source: lab.id,

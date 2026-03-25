@@ -10,16 +10,19 @@ import {
     isCoreDepotContainer
 } from '@/shared/coreDepot';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+
+type CarrierWithdrawTarget = Resource | Tombstone | Ruin | AnyStoreStructure;
+
 type CarrierCache = {
-    sourceId?: Id<any>;
+    sourceId?: Id<CarrierWithdrawTarget>;
     sourceKind?: 'dropped' | 'tombstone' | 'ruin' | 'container' | 'link' | 'storage' | 'terminal';
-    targetId?: Id<any>;
+    targetId?: Id<AnyStoreStructure>;
     resourceType?: ResourceConstant;
     /**
      * 记录当前载荷是从哪个“仓储型目标”借出来的，
      * 用于避免 carrier 在中心仓/中央 container 上出现“取一下又放回去”的空转。
      */
-    avoidReturnTargetId?: Id<any>;
+    avoidReturnTargetId?: Id<AnyStoreStructure>;
     avoidReturnResourceType?: ResourceConstant;
 };
 
@@ -420,7 +423,7 @@ const checkAndFillNearbyExtensions = (
 
     const extensions = memory.nearbyExtensions as Id<AnyStoreStructure>[];
     for (let i = 0; i < extensions.length; i++) {
-        const ext = Game.getObjectById(extensions[i]) as AnyStoreStructure | null;
+        const ext = Game.getObjectById(extensions[i]);
         if (!ext) continue;
         if (ext.structureType === STRUCTURE_TOWER && ext.store.getFreeCapacity(RESOURCE_ENERGY) <= THRESHOLDS.TOWER.HEAL_THRESHOLD) continue;
         if (ext.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
@@ -435,7 +438,7 @@ const checkAndFillNearbyExtensions = (
 };
 
 type WithdrawPlan = {
-    id: Id<any>;
+    id: Id<CarrierWithdrawTarget>;
     kind: CarrierCache['sourceKind'];
     resourceType?: ResourceConstant;
     lockTtl?: number;
@@ -512,29 +515,41 @@ const getCarrierEffectiveAvailableAmount = (
     return amount - reserved;
 };
 
+const isDroppedResourceTarget = (target: _HasId): target is Resource =>
+    'amount' in target && 'resourceType' in target;
+
+const isTombstoneTarget = (target: _HasId): target is Tombstone =>
+    'deathTime' in target && 'store' in target;
+
+const isRuinTarget = (target: _HasId): target is Ruin =>
+    'destroyTime' in target && 'store' in target;
+
+const isStoreStructureTarget = (target: _HasId | null | undefined): target is AnyStoreStructure =>
+    !!target && 'store' in target && 'structureType' in target;
+
 const getFallbackWithdrawPlan = (
     creep: Creep,
-    target: Resource | Ruin | AnyStoreStructure,
+    target: CarrierWithdrawTarget,
     urgentEnergy: boolean
 ): WithdrawPlan => {
-    if ((target as Resource).amount !== undefined) {
-        const resource = target as Resource;
+    if (isDroppedResourceTarget(target)) {
+        const resource = target;
         return { id: resource.id, kind: 'dropped', resourceType: resource.resourceType, lockTtl: 3 };
     }
 
-    if ((target as Tombstone).deathTime !== undefined) {
-        const tombstone = target as Tombstone;
+    if (isTombstoneTarget(target)) {
+        const tombstone = target;
         const type = pickBestWithdrawTypeFromStore(creep, tombstone.store, urgentEnergy ? 'energy' : 'nonEnergy');
         return { id: tombstone.id, kind: 'tombstone', resourceType: type || RESOURCE_ENERGY, lockTtl: 5 };
     }
 
-    if ((target as Ruin).destroyTime !== undefined) {
-        const ruin = target as Ruin;
+    if (isRuinTarget(target)) {
+        const ruin = target;
         const type = pickBestWithdrawTypeFromStore(creep, ruin.store, urgentEnergy ? 'energy' : 'nonEnergy');
         return { id: ruin.id, kind: 'ruin', resourceType: type || RESOURCE_ENERGY, lockTtl: 5 };
     }
 
-    const structure = target as AnyStoreStructure;
+    const structure = target;
     const kind: CarrierCache['sourceKind'] =
         structure.structureType === STRUCTURE_STORAGE ? 'storage' :
         structure.structureType === STRUCTURE_TERMINAL ? 'terminal' :
@@ -820,15 +835,15 @@ const resolveCarryTarget = (
 
     const currentType = !forceRetarget && cache.resourceType && store[cache.resourceType] > 0 ? cache.resourceType : undefined;
     const currentTarget = !forceRetarget && cache.targetId ? Game.getObjectById(cache.targetId) : null;
+    const currentStoreTarget = isStoreStructureTarget(currentTarget) ? currentTarget : null;
 
     const needNewTarget =
         forceRetarget ||
         !currentType ||
-        !currentTarget ||
-        !currentTarget.store?.getFreeCapacity ||
-        currentTarget.store.getFreeCapacity(currentType) <= 0;
+        !currentStoreTarget ||
+        currentStoreTarget.store.getFreeCapacity(currentType) <= 0;
 
-    let target: AnyStoreStructure | null = (currentTarget?.store?.getFreeCapacity ? currentTarget : null);
+    let target: AnyStoreStructure | null = currentStoreTarget;
     let resourceType: ResourceConstant = currentType || carryTypes[0];
 
     if (needNewTarget) {
@@ -945,8 +960,8 @@ const withdraw = (
         return false;
     }
 
-    if ((target as Resource).amount !== undefined) {
-        const res = target as Resource;
+    if (isDroppedResourceTarget(target)) {
+        const res = target;
         if (res.amount <= 0) {
             clearCarrierSourceCache(cache);
             return false;
@@ -972,7 +987,12 @@ const withdraw = (
         return false;
     }
 
-    const storeTarget = target as any;
+    if (!isTombstoneTarget(target) && !isRuinTarget(target) && !isStoreStructureTarget(target)) {
+        clearCarrierSourceCache(cache);
+        return false;
+    }
+
+    const storeTarget = target;
     const resourceType = cache.resourceType || RESOURCE_ENERGY;
     const used = storeTarget.store?.getUsedCapacity?.(resourceType) ?? 0;
     if (used <= 0) {

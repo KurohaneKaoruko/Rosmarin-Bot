@@ -1,6 +1,13 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { createBoostedRole } from '@/framework/ai/creepRole';
 
+const getCachedDoubleDismantleTarget = (creep: Creep): Structure | null => {
+    const targetId = creep.memory['targetId'] as Id<Structure> | null | undefined;
+    if (!targetId) return null;
+    const target = Game.getObjectById(targetId);
+    return target && 'structureType' in target && 'hits' in target ? target : null;
+};
+
 function FlagActionMove(creep: Creep) {
     const name = creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
     const moveflag = Game.flags[`2D-${name}-MOVE`];
@@ -86,7 +93,7 @@ function AutoFindTarget(creep: Creep) {
 
 function AutoActionDismantle(creep: Creep) {
     // 获取缓存的目标
-    let target = Game.getObjectById(creep.memory['targetId']) as Structure;
+    let target = getCachedDoubleDismantleTarget(creep);
     const roomHostiles = getRoomTickCacheValue(creep.room, 'double_dismantle_room_hostiles', () =>
         creep.room.find(FIND_HOSTILE_CREEPS) as Creep[]
     );
@@ -101,7 +108,7 @@ function AutoActionDismantle(creep: Creep) {
     if (target && targetDangerHostiles) {
         creep.memory['targetId'] = null;
         AutoFindTarget(creep);
-        target = Game.getObjectById(creep.memory['targetId']) as Structure;
+        target = getCachedDoubleDismantleTarget(creep);
     }
 
     // 规避
@@ -131,7 +138,9 @@ const runLegacy = (creep: Creep) => {
     if (!creep.memory.bind) return;
 
     // 获取绑定的另一个creep
-    const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
+    const bindId = creep.memory.bind;
+    if (!bindId) return;
+    const bindcreep = Game.getObjectById(bindId);
     if (!bindcreep) {
         delete creep.memory.bind;
         return;

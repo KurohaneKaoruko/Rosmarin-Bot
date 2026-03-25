@@ -211,7 +211,7 @@ const updateRouteTarget = (creep: Creep, mem: DismantleMemory) => {
 
 // 统一执行拆除目标
 const resolveTargetAndDismantle = (creep: Creep, mem: DismantleMemory) => {
-    let target = mem.targetId ? (Game.getObjectById(mem.targetId) as Structure | null) : null;
+    let target = mem.targetId ? Game.getObjectById(mem.targetId) : null;
     if (!target) {
         mem.targetId = null;
         target = pickCleanTarget(creep, mem) || null;

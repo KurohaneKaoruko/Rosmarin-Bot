@@ -1,5 +1,17 @@
 import { createBoostedRole } from '@/framework/ai/creepRole';
 
+type DoubleAttackTarget = Creep | Structure;
+
+const isDoubleAttackTarget = (target: _HasId | null): target is DoubleAttackTarget =>
+    !!target && 'pos' in target && (('owner' in target && 'body' in target) || ('structureType' in target && 'hits' in target));
+
+const getCachedDoubleAttackTarget = (creep: Creep): DoubleAttackTarget | null => {
+    const targetId = creep.memory['targetId'] as Id<Creep | Structure> | null | undefined;
+    if (!targetId) return null;
+    const target = Game.getObjectById(targetId);
+    return isDoubleAttackTarget(target) ? target : null;
+};
+
 function isDoubleAttackDangerHostile(hostile: Creep, creep: Creep): boolean {
     return (!hostile.my &&
         !hostile.isWhiteList() &&
@@ -124,9 +136,9 @@ function AutoFindTarget(creep: Creep) {
 
 function AutoActionAttack(creep: Creep) {
     // 获取缓存的目标
-    let target = Game.getObjectById(creep.memory['targetId']);
+    let target = getCachedDoubleAttackTarget(creep);
 
-    if (target && Memory['whitelist']?.includes(target.owner.username)) {
+    if (target && 'owner' in target && Memory['whitelist']?.includes(target.owner.username)) {
         creep.memory['targetId'] = null;
         target = null;
     }
@@ -170,7 +182,9 @@ const runLegacy = (creep: Creep) => {
     if (!creep.memory.bind) return;
 
     // 获取绑定的另一个creep
-    const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
+    const bindId = creep.memory.bind;
+    if (!bindId) return;
+    const bindcreep = Game.getObjectById(bindId);
     if (!bindcreep) {
         delete creep.memory.bind;
         return;

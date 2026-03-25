@@ -2,7 +2,9 @@ import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 export default class DoubleAction extends Creep {
     // 双人小队移动
     doubleMove(Direction: DirectionConstant): number {
-        const bindCreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindCreep = Game.getObjectById(bindId);
         if(!bindCreep) return;
 
         if (this.pos.isNear(bindCreep.pos)) {
@@ -26,7 +28,9 @@ export default class DoubleAction extends Creep {
 
     // 双人小队移动到目标
     doubleMoveTo(target: RoomPosition, color='#ffffff', ops={}): number | boolean {
-        const bindCreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindCreep = Game.getObjectById(bindId);
         if(!bindCreep) return;
 
         ops['visualizePathStyle'] = { stroke: color };
@@ -55,7 +59,9 @@ export default class DoubleAction extends Creep {
     
     // 双人小队移动到目标房间
     doubleMoveToRoom(roomName: string, color: string): boolean {
-        const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindcreep = Game.getObjectById(bindId);
         if(!bindcreep) return;
         // 移动到目标房间
         if(this.room.name !== roomName) {
@@ -69,7 +75,9 @@ export default class DoubleAction extends Creep {
 
     // 躲边界
     doubleFleeEdge() {
-        const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindcreep = Game.getObjectById(bindId);
         if(!bindcreep) return;
 
         if (this.pos.isRoomEdge()) {
@@ -101,7 +109,8 @@ export default class DoubleAction extends Creep {
 
     // 规避敌人
     doubleFlee() {
-        const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        const bindcreep = bindId ? Game.getObjectById(bindId) : null;
         const dangerousHostiles = getRoomTickCacheValue(this.room, 'double_action_dangerous_hostiles', () =>
             this.room.find(FIND_HOSTILE_CREEPS, {
                 filter: (c) =>
@@ -131,7 +140,10 @@ export default class DoubleAction extends Creep {
         return creep.doubleMove(creep.pos.getDirection(path[0]));
     }
     doubleToAttack(target: Creep | Structure): number | boolean {
-        const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindcreep = Game.getObjectById(bindId);
+        if (!bindcreep) return;
         if (!this.pos.isNearTo(bindcreep)) {
             bindcreep.moveTo(this);
         }
@@ -143,7 +155,10 @@ export default class DoubleAction extends Creep {
     }
 
     doubleToDismantle(target: Structure): number | boolean {
-        const bindcreep = Game.getObjectById(this.memory.bind) as Creep;
+        const bindId = this.memory.bind;
+        if (!bindId) return;
+        const bindcreep = Game.getObjectById(bindId);
+        if (!bindcreep) return;
         if (!this.pos.isNearTo(bindcreep)) {
             bindcreep.moveTo(this);
             return true;

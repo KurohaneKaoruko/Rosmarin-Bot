@@ -17,6 +17,10 @@ const moveToTransportTarget = (creep: Creep, target: RoomObject, options: MoveTo
     creep.moveTo(target, options);
 };
 
+const isStoreStructure = (target: Structure | null): target is AnyStoreStructure => {
+    return !!target && 'store' in target;
+};
+
 const clearTransportMission = (creep: Creep, mission: Task | null | undefined) => {
     if (mission) {
         creep.room.deleteMissionFromPool('transport', mission.id);
@@ -62,13 +66,13 @@ const getTransportMissionContext = (creep: Creep) => {
     if (!mission) return null;
 
     const data = mission.data as TransportTask;
-    const source = Game.getObjectById(data.source) as AnyStoreStructure | null;
-    const target = Game.getObjectById(data.target) as AnyStoreStructure | null;
+    const source = Game.getObjectById(data.source);
+    const target = Game.getObjectById(data.target);
 
     return {
         mission,
-        source,
-        target,
+        source: isStoreStructure(source) ? source : null,
+        target: isStoreStructure(target) ? target : null,
         resourceType: data.resourceType,
         amount: data.amount,
     };

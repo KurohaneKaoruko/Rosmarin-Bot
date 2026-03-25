@@ -541,7 +541,7 @@ const outCarry: OutCarryAction = {
         }
 
         if (cache.targetId) {
-            const target = Game.getObjectById(cache.targetId as Id<AnyStoreStructure | Tombstone | Ruin | Resource>);
+            const target = Game.getObjectById(cache.targetId) as any;
             if (!target) {
                 delete cache.targetId;
                 delete cache.targetType;
@@ -593,7 +593,7 @@ const outCarry: OutCarryAction = {
             cache.targetId = bestTarget.id;
             cache.targetType = bestTarget.type;
 
-            const target = Game.getObjectById(bestTarget.id as Id<AnyStoreStructure | Tombstone | Ruin | Resource>);
+            const target = Game.getObjectById(bestTarget.id) as any;
             if (target) {
                 if (bestTarget.type === 'dropped' && creep.pos.isNearTo(target)) {
                     creep.pickup(target);

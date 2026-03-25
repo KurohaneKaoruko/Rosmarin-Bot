@@ -14,7 +14,7 @@ type CreepRoleDefinition = {
     run: (creep: Creep) => void;
 };
 
-type BoostConfig = Record<string, string[]>;
+type BoostConfig = Record<string, MineralBoostConstant | MineralBoostConstant[]>;
 
 type BoostConfigResolver = BoostConfig | ((creep: Creep) => BoostConfig | null | undefined);
 type BoostMustResolver = boolean | ((creep: Creep) => boolean);
@@ -71,8 +71,8 @@ export const createBoostedRole = (definition: BoostedRoleDefinition): CreepRoleH
 
             const must = resolveBoostMust(creep, definition.must);
             const result = must === undefined
-                ? creep.goBoost(boostmap as any)
-                : creep.goBoost(boostmap as any, { must });
+                ? creep.goBoost(boostmap)
+                : creep.goBoost(boostmap, { must });
             const ok = result === OK;
             if (ok) creep.memory.boosted = true;
             return ok;

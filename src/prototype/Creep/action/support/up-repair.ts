@@ -11,20 +11,25 @@ const getUpRepairTargetCache = (creep: Creep): Record<string, any> => {
     return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as Record<string, any>;
 };
 
+const getUpRepairTargetId = (creep: Creep): Id<StructureRampart | StructureWall> | undefined => {
+    return (ensureMemoryCache(creep.memory).target as Record<string, any> | undefined)?.targetId;
+};
+
 export const syncUpRepairMoveWork = (creep: Creep) => {
-    const targetId = (ensureMemoryCache(creep.memory).target as Record<string, any> | undefined)?.targetId as Id<StructureRampart | StructureWall> | undefined;
+    const targetId = getUpRepairTargetId(creep);
     if (!targetId) {
         writeMoveWorkTileCandidates(creep, []);
         return;
     }
 
-    const target = Game.getObjectById(targetId) as StructureRampart | StructureWall | null;
+    const target = Game.getObjectById(targetId);
     writeMoveWorkTileCandidates(creep, target ? [{ pos: target.pos, range: 3 }] : []);
 };
 
 const RepairWork = function (creep: Creep) {
     const cache = getUpRepairTargetCache(creep);
-    let target = Game.getObjectById(cache.targetId) as StructureRampart | StructureWall | null;
+    const targetId = getUpRepairTargetId(creep);
+    let target = targetId ? Game.getObjectById(targetId) : null;
 
     if (!target || target.hits == target.hitsMax) {
         const memory = getLayoutData(creep.room.name);
@@ -51,7 +56,8 @@ const RepairWork = function (creep: Creep) {
         
         // 附近
         let inRangeRamWalls = []
-        const link = Game.getObjectById(creep.memory['linkId']) as StructureLink;
+        const linkId = creep.memory.linkId;
+        const link = linkId ? Game.getObjectById(linkId) : null;
         if (link) {
             inRangeRamWalls = allRamWalls.filter(structure => structure.pos.inRangeTo(link.pos, 4));
         } else {
@@ -88,7 +94,8 @@ const RepairWork = function (creep: Creep) {
 }
 
 const WithdrawLink = function (creep: Creep) {
-    let linktarget = Game.getObjectById(creep.memory['linkId']) || undefined;
+    const linkId = creep.memory.linkId;
+    let linktarget = linkId ? Game.getObjectById(linkId) : undefined;
     if (!linktarget) {
         const centerPos = creep.room.getCenter();
         const sources = creep.room.source;
@@ -109,11 +116,12 @@ const WithdrawLink = function (creep: Creep) {
             const bindNumByLinkId = getRoomTickCacheValue(creep.room, 'up_repair_link_bind_num', () => {
                 const countMap: Record<string, number> = {};
                 const boundCreeps = creep.room.find(FIND_MY_CREEPS, {
-                    filter: (myCreep) => !!myCreep.memory['linkId']
+                    filter: (myCreep) => !!myCreep.memory.linkId
                 }) as Creep[];
                 for (const myCreep of boundCreeps) {
-                    const linkId = myCreep.memory['linkId'] as string;
-                    countMap[linkId] = (countMap[linkId] || 0) + 1;
+                    const boundLinkId = myCreep.memory.linkId;
+                    if (!boundLinkId) continue;
+                    countMap[boundLinkId] = (countMap[boundLinkId] || 0) + 1;
                 }
                 return countMap;
             });
@@ -130,7 +138,7 @@ const WithdrawLink = function (creep: Creep) {
             }
         }
         if (linktarget) {
-            creep.memory['linkId'] = linktarget.id;
+            creep.memory.linkId = linktarget.id;
             const bindNumByLinkId = getRoomTickCacheValue(creep.room, 'up_repair_link_bind_num', () => ({} as Record<string, number>));
             bindNumByLinkId[linktarget.id] = (bindNumByLinkId[linktarget.id] || 0) + 1;
         }

@@ -6,9 +6,27 @@ import { runWorkLayer } from '@/framework/ai/adapters';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import type { CreepCacheTarget } from '@/interface/creep-cache.interface';
+
+type WorkerTaskData = BuildTask | RepairTask;
+
+type WorkerCache = CreepCacheTarget & {
+    _roomName?: string;
+    wallPos?: number;
+    repairId?: Id<Structure>;
+};
+
+type WorkerRoomTargetCache = {
+    tick: number;
+    buildId?: Id<ConstructionSite>;
+    buildPos?: number;
+    repairId?: Id<Structure>;
+    repairPos?: number;
+    repairHits?: number;
+};
 
 const getWorkTargetCache = (() => {
-    const root: Record<string, { tick: number; [key: string]: any }> = {};
+    const root: Record<string, WorkerRoomTargetCache> = {};
     return (roomName: string) => {
         if (!root[roomName]) root[roomName] = { tick: -1 };
         return root[roomName];
@@ -17,10 +35,10 @@ const getWorkTargetCache = (() => {
 
 const getCache = (creep: Creep) => {
     const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
-    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as Record<string, any>;
+    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as WorkerCache;
 }
 
-const resetCacheIfRoomChanged = (creep: Creep, cache: any) => {
+const resetCacheIfRoomChanged = (creep: Creep, cache: WorkerCache) => {
     const roomName = creep.room.name;
     if (cache._roomName && cache._roomName !== roomName) {
         delete cache.task;
@@ -77,11 +95,17 @@ const pushWorkerCandidate = (candidates: MoveWorkTileCandidate[], pos: RoomPosit
     candidates.push({ pos, range });
 };
 
+const isRampart = (structure: Structure | null | undefined): structure is StructureRampart =>
+    !!structure && structure.structureType === STRUCTURE_RAMPART;
+
+const getRepairTaskHits = (task: WorkerTaskData): number | undefined =>
+    'hits' in task ? task.hits : undefined;
+
 const RepairRampart = function (creep: Creep, candidates: MoveWorkTileCandidate[]) {
     const cache = getCache(creep)
     if (cache.buildRampartId) {
-        const rampart = Game.getObjectById(cache.buildRampartId) as StructureRampart;
-        if (!rampart || rampart.hits >= THRESHOLDS.REPAIR.RAMPART_BUILD_BUFFER) {
+        const rampart = Game.getObjectById(cache.buildRampartId);
+        if (!isRampart(rampart) || rampart.hits >= THRESHOLDS.REPAIR.RAMPART_BUILD_BUFFER) {
             delete cache.buildRampartId;
             return false;
         } else {
@@ -94,7 +118,7 @@ const RepairRampart = function (creep: Creep, candidates: MoveWorkTileCandidate[
     if (cache.buildRampart && !cache.task) {
         const [x, y] = decompress(cache.posInfo);
         const Pos = new RoomPosition(x, y, creep.room.name);
-        const rampart = Pos.lookFor(LOOK_STRUCTURES).find((s) => s.structureType == STRUCTURE_RAMPART);
+        const rampart = Pos.lookFor(LOOK_STRUCTURES).find(isRampart);
         if (rampart) {
             cache.buildRampartId = rampart.id;
             pushWorkerCandidate(candidates, rampart.pos);
@@ -113,7 +137,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
     resetCacheIfRoomChanged(creep, cache);
     let target = null;
     let taskType: 'build' | 'repair' | null = null;
-    let taskid = null;
+    let taskid: string | null = null;
     const sites = (creep.room as any).constructionSite || creep.room.find(FIND_CONSTRUCTION_SITES);
     const hasBuildTarget = sites.some((s: ConstructionSite) => s && (s as any).my);
 
@@ -130,8 +154,10 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
 
     if (!cache.task) {
         let task = creep.room.getBuildMission(creep);
+        let resolvedTaskType: 'build' | 'repair' | null = task ? 'build' : null;
         if (!task && hasBuildTarget) {
             task = { type: 'build', id: LOCAL_BUILD_TASK_ID, data: {} as any } as any;
+            resolvedTaskType = 'build';
         }
         if (!task) {
             let allowRepair = true;
@@ -148,19 +174,21 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
             }
             if (allowRepair) {
                 task = creep.room.getRepairMission(creep);
+                if (task) resolvedTaskType = 'repair';
             }
         }
-        if (!task) return false;
+        if (!task || !resolvedTaskType) return false;
 
-        const taskdata = task.data as any;
+        const taskdata = task.data as WorkerTaskData;
         if (taskdata && taskdata.target) {
             const target = Game.getObjectById(taskdata.target);
-            const taskPoolName = task.type === 'build' ? 'build' : 'repair';
-            if (task.type == 'build' && target?.structureType == 'rampart') {
+            const taskPoolName = resolvedTaskType;
+            if (resolvedTaskType === 'build' && target?.structureType == 'rampart') {
                 cache.buildRampart = true;
                 cache.posInfo = taskdata.pos;
             }
-            if (!target || (task.type !== 'build' && target.hits >= taskdata.hits)){
+            const repairTaskHits = getRepairTaskHits(taskdata);
+            if (!target || (resolvedTaskType === 'repair' && 'hits' in target && repairTaskHits != null && target.hits >= repairTaskHits)){
                 creep.room.deleteMissionFromPool(taskPoolName, task.id);
                 delete cache.task;
                 delete cache.taskid;
@@ -169,8 +197,8 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
             }
             cache.task = taskdata;
             cache.taskid = task.id;
-            cache.tasktype = task.type;
-        } else if (task.type === 'build') {
+            cache.tasktype = resolvedTaskType;
+        } else if (resolvedTaskType === 'build') {
             const roomCache = getWorkTargetCache(creep.room.name);
             if (roomCache.tick !== Game.time) {
                 roomCache.tick = Game.time;
@@ -220,8 +248,8 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
             }
             cache.task = { target: best.id, pos: roomCache.buildPos } as any;
             cache.taskid = task.id;
-            cache.tasktype = task.type;
-        } else if (task.type === 'repair') {
+            cache.tasktype = 'build';
+        } else if (resolvedTaskType === 'repair') {
             const NORMAL_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.NORMAL_STRUCTURE;
             const URGENT_STRUCTURE_THRESHOLD = THRESHOLDS.REPAIR.URGENT_STRUCTURE;
             const roomCache = getWorkTargetCache(creep.room.name);
@@ -289,16 +317,17 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
 
             cache.task = { target: best.id, pos: roomCache.repairPos, hits: roomCache.repairHits } as any;
             cache.taskid = task.id;
-            cache.tasktype = task.type;
+            cache.tasktype = 'repair';
         }
     }
     
     if (cache.task){
-        const taskdata = cache.task;
+        const taskdata = cache.task as WorkerTaskData;
         target = Game.getObjectById(taskdata.target);
         taskType = cache.tasktype;
         taskid = cache.taskid;
-        if(!target || (taskType !== 'build' && target.hits >= taskdata.hits)){
+        const repairTaskHits = getRepairTaskHits(taskdata);
+        if(!target || (taskType !== 'build' && 'hits' in target && repairTaskHits != null && target.hits >= repairTaskHits)){
             creep.room.deleteMissionFromPool(taskType, taskid);
             delete cache.task;
             delete cache.taskid;
@@ -350,7 +379,7 @@ const RepairWallWork = function (creep: Creep, candidates: MoveWorkTileCandidate
     return true;
 }
 
-const hasWorkerBuildOrRepairTarget = (cache: any): boolean => {
+const hasWorkerBuildOrRepairTarget = (cache: WorkerCache): boolean => {
     return !!(
         cache?.task?.target ||
         cache?.buildRampartId ||

@@ -4,7 +4,7 @@ import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
 
-    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
+    const partner = Game.getObjectById(creep.memory.bind);
     if (partner) return partner;
 
     delete creep.memory.bind;
@@ -127,7 +127,8 @@ const runPowerAttack = (creep: Creep) => {
     }
 
     if (creep.memory['hostile']) {
-        const hostile = Game.getObjectById(creep.memory['hostile']) as Creep | null;
+        const hostileId = creep.memory['hostile'] as Id<Creep> | undefined;
+        const hostile = hostileId ? Game.getObjectById(hostileId) : null;
         if (hostile && hostile.pos.inRangeTo(powerBank.pos, 10)) {
             if (creep.pos.isNearTo(hostile)) {
                 creep.attack(hostile);

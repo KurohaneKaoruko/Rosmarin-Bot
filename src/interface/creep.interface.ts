@@ -54,6 +54,11 @@ interface CreepFindEnergySourceOptions {
  * 实际目标筛选仍由 `findEnergySource` 负责。
  */
 interface CreepAcquireEnergyOptions extends CreepFindEnergySourceOptions {
+    /**
+     * 是否优先拾取地面掉落能量。
+     * @defaultValue `true`
+     */
+    pickup?: boolean;
 }
 
 /**
@@ -909,10 +914,16 @@ interface CreepMemory {
     boostTargetPart?: BodyPartConstant;
     
     /** 
-     * 绑定的creep名称
-     * @description 用于双人小队，绑定另一个creep
+     * 绑定的 creep ID
+     * @description 用于双人小队，绑定另一个 creep
      */
-    bind?: string;
+    bind?: Id<Creep>;
+
+    /**
+     * 绑定的 link ID
+     * @description 用于 up-repair 等角色复用固定取能 link
+     */
+    linkId?: Id<StructureLink>;
     
     /** 
      * 当前任务

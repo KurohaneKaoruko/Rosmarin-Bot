@@ -49,7 +49,9 @@ const runLegacy = (creep: Creep) => {
         return;
     }
 
-    const bindcreep = Game.getObjectById(creep.memory.bind) as Creep;
+    const bindId = creep.memory.bind;
+    if (!bindId) return;
+    const bindcreep = Game.getObjectById(bindId);
     if (!bindcreep) {
         delete creep.memory.bind;
         return;

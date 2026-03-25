@@ -97,7 +97,7 @@ export default class BoostFunction extends Creep {
         
         // 尝试从缓存获取
         if (this.memory.boostTargetId) {
-            const cachedLab = Game.getObjectById(this.memory.boostTargetId) as StructureLab;
+            const cachedLab = Game.getObjectById(this.memory.boostTargetId);
             const cachedMineral = this.memory.boostTargetMineral as MineralBoostConstant | undefined;
             const cachedPart = this.memory.boostTargetPart as BodyPartConstant | undefined;
 

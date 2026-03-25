@@ -435,8 +435,8 @@ const parseAidBuildPosKey = (key?: string): RoomPosition | null => {
 const resolveAidBuildRepairTargetPos = (creep: Creep): RoomPosition | null => {
     const repairTargetId = (creep.memory.cache as any)?.repairTarget as Id<Structure> | undefined;
     if (!repairTargetId) return null;
-    const repairTarget = Game.getObjectById(repairTargetId) as Structure | null;
-    return repairTarget?.pos || null;
+    const repairTarget = Game.getObjectById(repairTargetId);
+    return repairTarget && 'pos' in repairTarget ? repairTarget.pos : null;
 };
 
 export const syncAidBuildMoveWork = (creep: Creep) => {

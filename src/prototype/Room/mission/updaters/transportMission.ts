@@ -406,8 +406,8 @@ export default class TransportMission extends Room {
                 }
             };
             const data = task.data as TransportTask
-            const source = Game.getObjectById(data.source);
-            const target = Game.getObjectById(data.target);
+            const source = Game.getObjectById(data.source) as StructureContainer | StructureStorage;
+            const target = Game.getObjectById(data.target) as StructureContainer | StructureStorage;
             if(!source || !target) return false;
             return target.store.getFreeCapacity(data.resourceType) > 0 && data.amount > 0;
         }
