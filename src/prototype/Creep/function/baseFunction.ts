@@ -162,7 +162,7 @@ export default class BaseFunction extends Creep {
                 }
             }
 
-            const currentSource = Game.getObjectById(this.memory.targetSourceId as Id<Source>) as Source | null;
+            const currentSource = Game.getObjectById(this.memory.targetSourceId as Id<Source>);
             const targetSource = this.resolveSourceByPriority(currentSource);
             if (!targetSource || targetSource.energy <= 0) {
                 clearBoundSource();
@@ -184,7 +184,7 @@ export default class BaseFunction extends Creep {
 
             const takeTarget = cache.takeTarget as TakeTarget;
             clearBoundSource();
-            const target = Game.getObjectById(takeTarget.id) as any;
+            const target = Game.getObjectById(takeTarget.id);
             if (!target) {
                 cache.takeTarget = null;
                 return null;
@@ -214,7 +214,7 @@ export default class BaseFunction extends Creep {
                 cache.takeTarget = null;
                 if (target.amount >= freeCapacity) return true;
                 if (updateTakeTarget(takeTarget.id)) {
-                    const nextTarget = Game.getObjectById(cache.takeTarget.id) as any;
+                    const nextTarget = Game.getObjectById(cache.takeTarget.id);
                     if (nextTarget) moveToTakeTarget(nextTarget);
                     else cache.takeTarget = null;
                 } else moveToHarvestSource();
@@ -244,7 +244,7 @@ export default class BaseFunction extends Creep {
                 cache.takeTarget = null;
                 if (availableEnergy >= freeCapacity) return true;
                 if (updateTakeTarget(takeTarget.id)) {
-                    const nextTarget = Game.getObjectById(cache.takeTarget.id) as any;
+                    const nextTarget = Game.getObjectById(cache.takeTarget.id);
                     if (nextTarget) moveToTakeTarget(nextTarget);
                     else cache.takeTarget = null;
                 } else moveToHarvestSource();

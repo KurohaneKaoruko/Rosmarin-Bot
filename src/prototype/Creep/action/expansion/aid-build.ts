@@ -2,8 +2,10 @@
 import { parseShardRoomName } from '@/shared/shardRoom';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { createWorkLayerRole } from '@/framework/ai/creepRole';
 import { StateMachine } from '@/framework/ai/stateMachine';
-import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
+import { createFsmStorage, ensureFsmBucket } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 // ==============================
@@ -1176,34 +1178,59 @@ const createAidBuildJobMachine = (creep: Creep) => {
 //  外部入口（run）
 // ==============================
 
+const stepAidBuildJobMachine = (creep: Creep, readyToWork: boolean) => {
+    const ctx: AidBuildContext = {
+        creep,
+        readyToWork,
+        jobDecision: decideAidBuildJob(creep)
+    };
+    const jobMachine = createAidBuildJobMachine(creep);
+    jobMachine.step(ctx, { reenter: true });
+};
+
+const onAidBuildSource = (creep: Creep): WorkEvent => {
+    if (!ensureAidBuildMemory(creep)) return WORK_EVENTS.STAY;
+
+    ensureFsmBucket(creep)[AID_BUILD_LAYERS.FLOW] = AID_BUILD_FLOW_STATES.COLLECT;
+    const readyToWork = runAidBuildHarvest(creep) || shouldAidBuildSwitchToWork(creep);
+
+    if (!readyToWork) {
+        stepAidBuildJobMachine(creep, false);
+        return WORK_EVENTS.STAY;
+    }
+
+    return WORK_EVENTS.TO_TARGET;
+};
+
+const onAidBuildTarget = (creep: Creep): WorkEvent => {
+    if (!ensureAidBuildMemory(creep)) return WORK_EVENTS.STAY;
+
+    if (shouldAidBuildSwitchToCollect(creep)) {
+        ensureFsmBucket(creep)[AID_BUILD_LAYERS.FLOW] = AID_BUILD_FLOW_STATES.COLLECT;
+        return WORK_EVENTS.TO_SOURCE;
+    }
+
+    ensureFsmBucket(creep)[AID_BUILD_LAYERS.FLOW] = AID_BUILD_FLOW_STATES.WORK;
+    stepAidBuildJobMachine(creep, true);
+    return WORK_EVENTS.STAY;
+};
+
+const aidBuildWork = createWorkLayerRole({
+    prepare: prepareAidBuild,
+    onSource: onAidBuildSource,
+    onTarget: onAidBuildTarget,
+    reenter: true
+});
+
 const aid_build = {
     run: function (creep: Creep) {
         if (!ensureAidBuildMemory(creep)) return;
 
-        // 准备阶段：先完成 boost
-        if (!creep.memory.ready) {
-            creep.memory.ready = prepareAidBuild(creep);
-            return;
-        }
+        const flowState = creep.memory.fsm?.[AID_BUILD_LAYERS.FLOW];
+        if (flowState === AID_BUILD_FLOW_STATES.WORK) creep.memory.working = true;
+        else if (flowState === AID_BUILD_FLOW_STATES.COLLECT) creep.memory.working = false;
 
-        const ctx: AidBuildContext = {
-            creep,
-            readyToWork: shouldAidBuildSwitchToWork(creep),
-            jobDecision: decideAidBuildJob(creep)
-        };
-
-        const flowMachine = createAidBuildFlowMachine(creep);
-        const jobMachine = createAidBuildJobMachine(creep);
-        const runner = createLayeredRunner<AidBuildContext>({
-            [AID_BUILD_LAYERS.FLOW]: flowMachine,
-            [AID_BUILD_LAYERS.JOB]: jobMachine
-        });
-
-        // reenter: 状态切换后允许本 tick 继续执行新状态逻辑
-        runner.step(ctx, {
-            [AID_BUILD_LAYERS.FLOW]: { reenter: true },
-            [AID_BUILD_LAYERS.JOB]: { reenter: true }
-        });
+        aidBuildWork.run(creep);
     }
 };
 

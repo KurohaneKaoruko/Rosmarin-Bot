@@ -1404,7 +1404,7 @@ export default class TeamAction {
         const lockedId = team.cache?.focusTargetId as Id<any> | undefined
         let lockedPos: RoomPosition | undefined
         if (hasAttackTargets && lockedId && Game.time < lockedUntil) {
-            const lockedObj = Game.getObjectById(lockedId) as any
+            const lockedObj = Game.getObjectById(lockedId)
             if (lockedObj?.pos) lockedPos = lockedObj.pos
             else {
                 delete team.cache.focusTargetId

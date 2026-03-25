@@ -154,7 +154,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
 
         const taskdata = task.data as any;
         if (taskdata && taskdata.target) {
-            const target = Game.getObjectById(taskdata.target) as any;
+            const target = Game.getObjectById(taskdata.target);
             const taskPoolName = task.type === 'build' ? 'build' : 'repair';
             if (task.type == 'build' && target?.structureType == 'rampart') {
                 cache.buildRampart = true;
@@ -207,7 +207,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
                 roomCache.buildPos = compress(best.pos.x, best.pos.y);
             }
 
-            const best = Game.getObjectById(roomCache.buildId) as any;
+            const best = Game.getObjectById(roomCache.buildId);
             if (!best) {
                 delete roomCache.buildId;
                 delete roomCache.buildPos;
@@ -279,7 +279,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
                 roomCache.repairHits = bestTargetHits;
             }
 
-            const best = Game.getObjectById(roomCache.repairId) as any;
+            const best = Game.getObjectById(roomCache.repairId);
             if (!best) {
                 delete roomCache.repairId;
                 delete roomCache.repairPos;
@@ -400,7 +400,7 @@ const onSource = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandid
         publishMoveWork(WorkerAction(creep));
         return WORK_EVENTS.TO_TARGET;
     }
-    const fullAfterTake = creep.TakeEnergy();
+    const fullAfterTake = creep.acquireEnergy({ pickup: true });
     if (fullAfterTake) {
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         publishMoveWork(WorkerAction(creep));
@@ -414,17 +414,17 @@ export const syncWorkerMoveWork = (creep: Creep) => {
     const candidates = [];
 
     if (cache?.task?.target) {
-        const target = Game.getObjectById(cache.task.target as Id<any>) as { pos?: RoomPosition } | null;
+        const target = Game.getObjectById(cache.task.target as Id<any>);
         if (target?.pos) candidates.push({ pos: target.pos, range: 3 });
     }
 
     if (cache?.buildRampartId) {
-        const rampart = Game.getObjectById(cache.buildRampartId as Id<StructureRampart>) as StructureRampart | null;
+        const rampart = Game.getObjectById(cache.buildRampartId as Id<StructureRampart>);
         if (rampart?.pos) candidates.push({ pos: rampart.pos, range: 3 });
     }
 
     if (cache?.repairId) {
-        const repairTarget = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
+        const repairTarget = Game.getObjectById(cache.repairId as Id<Structure>);
         if (repairTarget?.pos) candidates.push({ pos: repairTarget.pos, range: 3 });
     }
 

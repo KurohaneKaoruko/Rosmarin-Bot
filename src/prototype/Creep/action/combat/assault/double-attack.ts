@@ -124,7 +124,7 @@ function AutoFindTarget(creep: Creep) {
 
 function AutoActionAttack(creep: Creep) {
     // 获取缓存的目标
-    let target = Game.getObjectById(creep.memory['targetId']) as any;
+    let target = Game.getObjectById(creep.memory['targetId']);
 
     if (target && Memory['whitelist']?.includes(target.owner.username)) {
         creep.memory['targetId'] = null;

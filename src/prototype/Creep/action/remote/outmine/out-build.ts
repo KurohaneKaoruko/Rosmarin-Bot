@@ -276,7 +276,7 @@ const getOutBuildTargetCache = (creep: Creep): Record<string, any> => {
 const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite | null => {
     const cache = getOutBuildTargetCache(creep);
     if (cache.targetId) {
-        const cached = Game.getObjectById(cache.targetId as Id<ConstructionSite>) as ConstructionSite | null;
+        const cached = Game.getObjectById(cache.targetId as Id<ConstructionSite>);
         if (cached && cached.my && (cached.structureType === STRUCTURE_ROAD || cached.structureType === STRUCTURE_CONTAINER)) {
             return cached;
         }
@@ -295,7 +295,7 @@ const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite 
 const findRepairTarget = (creep: Creep, source: Source | null): Structure | null => {
     const cache = getOutBuildTargetCache(creep);
     if (cache.repairId) {
-        const cached = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
+        const cached = Game.getObjectById(cache.repairId as Id<Structure>);
         if (
             cached &&
             (cached.structureType === STRUCTURE_ROAD || cached.structureType === STRUCTURE_CONTAINER) &&
@@ -466,12 +466,12 @@ export const syncOutBuildMoveWork = (creep: Creep) => {
     const candidates = [];
 
     if (cache.targetId) {
-        const target = Game.getObjectById(cache.targetId as Id<ConstructionSite>) as ConstructionSite | null;
+        const target = Game.getObjectById(cache.targetId as Id<ConstructionSite>);
         if (target) candidates.push({ pos: target.pos, range: 3 });
     }
 
     if (cache.repairId) {
-        const target = Game.getObjectById(cache.repairId as Id<Structure>) as Structure | null;
+        const target = Game.getObjectById(cache.repairId as Id<Structure>);
         if (target) candidates.push({ pos: target.pos, range: 3 });
     }
 

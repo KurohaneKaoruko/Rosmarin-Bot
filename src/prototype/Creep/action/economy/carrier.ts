@@ -1,4 +1,7 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
+import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
+import { createCreepRole } from '@/framework/ai/creepRole';
+import { StateMachine } from '@/framework/ai/stateMachine';
 import {
     getCoreDepotContainer,
     getCoreDepotKindAtPos,
@@ -6,10 +9,7 @@ import {
     hasCoreDepotTarget,
     isCoreDepotContainer
 } from '@/shared/coreDepot';
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-
 type CarrierCache = {
     sourceId?: Id<any>;
     sourceKind?: 'dropped' | 'tombstone' | 'ruin' | 'container' | 'link' | 'storage' | 'terminal';
@@ -23,15 +23,75 @@ type CarrierCache = {
     avoidReturnResourceType?: ResourceConstant;
 };
 
+type CarrierCacheFieldMap = Partial<Record<keyof CarrierCache, string>>;
+
+const SOURCE_CACHE_FIELDS: CarrierCacheFieldMap = {
+    sourceId: 'carrierSourceId',
+    sourceKind: 'carrierSourceKind',
+    resourceType: 'carrierSourceResourceType',
+    avoidReturnTargetId: 'carrierAvoidReturnTargetId',
+    avoidReturnResourceType: 'carrierAvoidReturnResourceType',
+};
+
+const TARGET_CACHE_FIELDS: CarrierCacheFieldMap = {
+    targetId: 'carrierTargetId',
+    resourceType: 'carrierTargetResourceType',
+};
+
+const isCarrierCacheObject = (value: unknown): value is Record<string, any> =>
+    !!value && typeof value === 'object' && !Array.isArray(value);
+
+const migrateCarrierCacheSection = (
+    root: Record<string, any>,
+    legacyKey: 'source' | 'target',
+    fields: CarrierCacheFieldMap
+) => {
+    const legacy = isCarrierCacheObject(root[legacyKey]) ? root[legacyKey] as Record<string, any> : null;
+    if (!legacy) return;
+
+    for (const [field, flatKey] of Object.entries(fields)) {
+        if (!flatKey) continue;
+        if (root[flatKey] === undefined && legacy[field] !== undefined) {
+            root[flatKey] = legacy[field];
+        }
+    }
+
+    delete root[legacyKey];
+};
+
+const createCarrierCacheView = (
+    root: Record<string, any>,
+    fields: CarrierCacheFieldMap
+): CarrierCache => {
+    const view = {} as CarrierCache;
+
+    for (const [field, flatKey] of Object.entries(fields)) {
+        if (!flatKey) continue;
+        Object.defineProperty(view, field, {
+            configurable: true,
+            enumerable: true,
+            get: () => root[flatKey],
+            set: (value) => {
+                if (value === undefined) delete root[flatKey];
+                else root[flatKey] = value;
+            }
+        });
+    }
+
+    return view;
+};
+
 const getCarrierSourceCache = (creep: Creep): CarrierCache => {
     const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
-    return (cache.source && typeof cache.source === 'object' ? cache.source : (cache.source = {})) as CarrierCache;
-}
+    migrateCarrierCacheSection(cache, 'source', SOURCE_CACHE_FIELDS);
+    return createCarrierCacheView(cache, SOURCE_CACHE_FIELDS);
+};
 
 const getCarrierTargetCache = (creep: Creep): CarrierCache => {
     const cache = ensureMemoryCache(creep.memory) as Record<string, any>;
-    return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as CarrierCache;
-}
+    migrateCarrierCacheSection(cache, 'target', TARGET_CACHE_FIELDS);
+    return createCarrierCacheView(cache, TARGET_CACHE_FIELDS);
+};
 
 /**
  * 清理“避免原样放回来源仓”的借货标记。
@@ -81,7 +141,7 @@ const getReservedWithdrawCapacityByCarrier = (() => {
                 const creep = Game.creeps[creepName];
                 if (!creep) continue;
                 if (creep.memory?.role !== 'carrier') continue;
-                const sourceCache = ensureMemoryCache(creep.memory).source as CarrierCache | undefined;
+                const sourceCache = getCarrierSourceCache(creep);
                 const sourceId = sourceCache?.sourceId;
                 if (!sourceId) continue;
                 const freeCapacity = creep.store.getFreeCapacity();
@@ -196,7 +256,7 @@ const pickBestStoreTargetAvoiding = (
     secondaryExcludeId?: Id<AnyStoreStructure>
 ): AnyStoreStructure | null => {
     const firstExclude = primaryExcludeId || secondaryExcludeId;
-    let target = creep.findBestStoreTarget(resourceType, firstExclude);
+    let target = creep.findStoreTarget(resourceType, firstExclude);
     if (!target) return null;
 
     if (
@@ -204,7 +264,7 @@ const pickBestStoreTargetAvoiding = (
         secondaryExcludeId !== primaryExcludeId &&
         target.id === secondaryExcludeId
     ) {
-        target = creep.findBestStoreTarget(resourceType, secondaryExcludeId);
+        target = creep.findStoreTarget(resourceType, secondaryExcludeId);
         if (!target) return null;
     }
 
@@ -220,14 +280,15 @@ const canCarryResourceSafely = (
 ): boolean => {
     if (resourceType === RESOURCE_ENERGY) return true;
     if (!hasCoreDepotTarget(creep.room)) return false;
-    return !!creep.findBestStoreTarget(resourceType, excludeTargetId);
+    return !!creep.findStoreTarget(resourceType, excludeTargetId);
 };
 
-const getCreepCarryTypesSorted = (creep: Creep): ResourceConstant[] => {
+const getCreepCarryTypesSorted = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+): ResourceConstant[] => {
     const types = getPositiveStoreTypes(creep.store);
     if (types.length <= 1) return types;
-
-    const urgentEnergy = creep.room.CheckSpawnAndTower();
 
     types.sort((a, b) => {
         if (urgentEnergy) {
@@ -279,7 +340,10 @@ const pickBestContaminantTypeFromContainer = (
 };
 
 // 获取 storage 或 terminal 作为能量来源
-const getStorageOrTerminal = (creep: Creep) => {
+const getStorageOrTerminal = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const { storage, terminal, link, controller } = creep.room as any;
     const storageFallback = storage || getCoreDepotContainer(creep.room, 'storage');
     const terminalFallback = terminal || getCoreDepotContainer(creep.room, 'terminal');
@@ -288,7 +352,7 @@ const getStorageOrTerminal = (creep: Creep) => {
     const controllerContainer = controller ? getControllerContainer(creep.room) : null;
     const controllerLink = link?.find((l: StructureLink) => l.pos.inRangeTo(controller, 2));
     
-    const needEnergy = creep.room.CheckSpawnAndTower() ||
+    const needEnergy = urgentEnergy ||
                        (!controllerLink && controllerContainer?.store.getFreeCapacity(RESOURCE_ENERGY) > THRESHOLDS.ENERGY.CONTAINER_MIN);
     
     const storageEnergy = storageFallback?.store[RESOURCE_ENERGY] || 0;
@@ -315,7 +379,10 @@ const getStorageOrTerminal = (creep: Creep) => {
 };
 
 // 路过时顺便填充附近的 extension
-const checkAndFillNearbyExtensions = (creep: Creep) => {
+const checkAndFillNearbyExtensions = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const { pos, room, store, memory } = creep;
     const energyAvailable = store[RESOURCE_ENERGY];
     
@@ -323,7 +390,6 @@ const checkAndFillNearbyExtensions = (creep: Creep) => {
         return false;
     }
 
-    const urgentEnergy = room.CheckSpawnAndTower();
     const nearStorage = !!room.storage && pos.getRangeTo(room.storage) <= 10;
     if (!urgentEnergy && !nearStorage) {
         return false;
@@ -446,7 +512,43 @@ const getCarrierEffectiveAvailableAmount = (
     return amount - reserved;
 };
 
-const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | null => {
+const getFallbackWithdrawPlan = (
+    creep: Creep,
+    target: Resource | Ruin | AnyStoreStructure,
+    urgentEnergy: boolean
+): WithdrawPlan => {
+    if ((target as Resource).amount !== undefined) {
+        const resource = target as Resource;
+        return { id: resource.id, kind: 'dropped', resourceType: resource.resourceType, lockTtl: 3 };
+    }
+
+    if ((target as Tombstone).deathTime !== undefined) {
+        const tombstone = target as Tombstone;
+        const type = pickBestWithdrawTypeFromStore(creep, tombstone.store, urgentEnergy ? 'energy' : 'nonEnergy');
+        return { id: tombstone.id, kind: 'tombstone', resourceType: type || RESOURCE_ENERGY, lockTtl: 5 };
+    }
+
+    if ((target as Ruin).destroyTime !== undefined) {
+        const ruin = target as Ruin;
+        const type = pickBestWithdrawTypeFromStore(creep, ruin.store, urgentEnergy ? 'energy' : 'nonEnergy');
+        return { id: ruin.id, kind: 'ruin', resourceType: type || RESOURCE_ENERGY, lockTtl: 5 };
+    }
+
+    const structure = target as AnyStoreStructure;
+    const kind: CarrierCache['sourceKind'] =
+        structure.structureType === STRUCTURE_STORAGE ? 'storage' :
+        structure.structureType === STRUCTURE_TERMINAL ? 'terminal' :
+        structure.structureType === STRUCTURE_LINK ? 'link' :
+        'container';
+    const type = pickBestWithdrawTypeFromStore(creep, structure.store, urgentEnergy ? 'energy' : 'nonEnergy');
+    return { id: structure.id, kind, resourceType: type || RESOURCE_ENERGY, lockTtl: 3 };
+};
+
+const selectWithdrawPlan = (
+    creep: Creep,
+    excludeId?: Id<any>,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+): WithdrawPlan | null => {
     const { room, pos, store } = creep;
     const roomAny = room as any;
 
@@ -454,7 +556,6 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
 
     const reservedCapacityById = getReservedWithdrawCapacityByCarrier(room.name);
 
-    const urgentEnergy = room.CheckSpawnAndTower();
     const hasStorage = hasCoreDepotTarget(room);
     const freeCap = store.getFreeCapacity();
 
@@ -629,7 +730,7 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
 
     // 优先级4：从 storage/terminal 取能量（仅用于补能模式的兜底）
     if (urgentEnergy && freeCap > 0) {
-        const source = getStorageOrTerminal(creep) as AnyStoreStructure | null;
+        const source = getStorageOrTerminal(creep, urgentEnergy) as AnyStoreStructure | null;
         const minAmount = source?.structureType === STRUCTURE_CONTAINER ? THRESHOLDS.ENERGY.CONTAINER_MIN : THRESHOLDS.ENERGY.STORAGE_MIN;
         if (source && source.store.getUsedCapacity(RESOURCE_ENERGY) > minAmount) {
             if ((!excludeId || source.id !== excludeId) && !isNoPath(room.name, source.id)) {
@@ -651,7 +752,13 @@ const selectWithdrawPlan = (creep: Creep, excludeId?: Id<any>): WithdrawPlan | n
         }
     }
 
-    if (candidates.length === 0) return null;
+    if (candidates.length === 0) {
+        const fallback = creep.findWithdrawTarget();
+        if (!fallback || (excludeId && fallback.id === excludeId) || isNoPath(room.name, fallback.id)) {
+            return null;
+        }
+        return getFallbackWithdrawPlan(creep, fallback, urgentEnergy);
+    }
     candidates.sort(compareWithdrawCandidate);
     return candidates[0].plan;
 };
@@ -665,14 +772,18 @@ const cacheWithdrawPlan = (creep: Creep, plan: WithdrawPlan) => {
     cache.resourceType = plan.resourceType;
 };
 
-const moveToNextWithdrawTarget = (creep: Creep, excludeId?: Id<any>) => {
+const moveToNextWithdrawTarget = (
+    creep: Creep,
+    excludeId?: Id<any>,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const cache = getCarrierSourceCache(creep);
     clearCarrierSourceCache(cache);
-    const plan = selectWithdrawPlan(creep, excludeId);
+    const plan = selectWithdrawPlan(creep, excludeId, urgentEnergy);
     if (!plan) return false;
 
     cacheWithdrawPlan(creep, plan);
-    const nextTarget = Game.getObjectById(plan.id) as any;
+    const nextTarget = Game.getObjectById(plan.id);
     if (!nextTarget) {
         clearCarrierSourceCache(cache);
         return false;
@@ -688,13 +799,17 @@ const moveToNextWithdrawTarget = (creep: Creep, excludeId?: Id<any>) => {
     return true;
 };
 
-const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
+const resolveCarryTarget = (
+    creep: Creep,
+    forceRetarget: boolean = false,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const { store, room, pos } = creep;
     const roomAny = room as any;
     const cache = getCarrierTargetCache(creep)
     const sourceCache = getCarrierSourceCache(creep);
 
-    const carryTypes = getCreepCarryTypesSorted(creep);
+    const carryTypes = getCreepCarryTypesSorted(creep, urgentEnergy);
     if (carryTypes.length === 0) return { carryTypes, target: null as AnyStoreStructure | null, resourceType: undefined as ResourceConstant | undefined };
     if (
         sourceCache.avoidReturnResourceType &&
@@ -704,7 +819,7 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     }
 
     const currentType = !forceRetarget && cache.resourceType && store[cache.resourceType] > 0 ? cache.resourceType : undefined;
-    const currentTarget = !forceRetarget && cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
+    const currentTarget = !forceRetarget && cache.targetId ? Game.getObjectById(cache.targetId) : null;
 
     const needNewTarget =
         forceRetarget ||
@@ -719,7 +834,6 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     if (needNewTarget) {
         clearCarrierTargetCache(cache);
 
-        const urgentEnergy = room.CheckSpawnAndTower();
         const sourceIdToAvoid = sourceCache.sourceId as Id<AnyStoreStructure> | undefined;
         const controllerContainer = getControllerContainer(room);
         const controllerLink = roomAny.link?.find((l: StructureLink) =>
@@ -766,11 +880,14 @@ const resolveCarryTarget = (creep: Creep, forceRetarget: boolean = false) => {
     return { carryTypes, target, resourceType };
 };
 
-const moveToNextCarryTarget = (creep: Creep) => {
+const moveToNextCarryTarget = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const { room, pos } = creep;
     const roomAny = room as any;
     const cache = getCarrierTargetCache(creep);
-    const { carryTypes, target } = resolveCarryTarget(creep, true);
+    const { carryTypes, target } = resolveCarryTarget(creep, true, urgentEnergy);
     if (carryTypes.length === 0) return false;
 
     if (!target) {
@@ -803,7 +920,10 @@ const moveToNextCarryTarget = (creep: Creep) => {
 };
 
 // 收集资源阶段
-const withdraw = (creep: Creep) => {
+const withdraw = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const cache = getCarrierSourceCache(creep)
     const { pos, store, room } = creep;
 
@@ -813,7 +933,7 @@ const withdraw = (creep: Creep) => {
     }
 
     if (!cache.sourceId) {
-        const plan = selectWithdrawPlan(creep);
+        const plan = selectWithdrawPlan(creep, undefined, urgentEnergy);
         if (!plan) return false;
 
         cacheWithdrawPlan(creep, plan);
@@ -837,7 +957,7 @@ const withdraw = (creep: Creep) => {
             if (result === OK) {
                 const fullAfterTake = available >= store.getFreeCapacity();
                 if (fullAfterTake) return true;
-                moveToNextWithdrawTarget(creep, res.id);
+                moveToNextWithdrawTarget(creep, res.id, urgentEnergy);
                 return false;
             }
             if (result === ERR_FULL) return true;
@@ -871,7 +991,7 @@ const withdraw = (creep: Creep) => {
             }
             const fullAfterTake = available >= store.getFreeCapacity();
             if (fullAfterTake) return true;
-            moveToNextWithdrawTarget(creep, storeTarget.id);
+            moveToNextWithdrawTarget(creep, storeTarget.id, urgentEnergy);
             return false;
         }
         if (result === ERR_FULL) return true;
@@ -888,12 +1008,15 @@ const withdraw = (creep: Creep) => {
 };
 
 // 运送资源阶段
-const carry = (creep: Creep) => {
+const carry = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
     const { store, room, pos } = creep;
     const roomAny = room as any;
     const cache = getCarrierTargetCache(creep)
 
-    const { carryTypes, target, resourceType } = resolveCarryTarget(creep);
+    const { carryTypes, target, resourceType } = resolveCarryTarget(creep, false, urgentEnergy);
     if (carryTypes.length === 0) return true;
 
     if (!target) {
@@ -929,7 +1052,7 @@ const carry = (creep: Creep) => {
             }
             clearCarrierTargetCache(cache);
             if (creep.store.getUsedCapacity() === 0) return true;
-            moveToNextCarryTarget(creep);
+            moveToNextCarryTarget(creep, urgentEnergy);
             return;
         }
         if (transferResult === ERR_FULL) {
@@ -977,45 +1100,187 @@ const goGenerateSafeMode = (creep: Creep): boolean => {
 
 
 
-const onSource = (creep: Creep): WorkEvent => {
-    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+const shouldSwitchToCarry = (creep: Creep) => (
+    creep.store.getFreeCapacity() === 0 ||
+    (creep.store.getUsedCapacity() > 0 && !getCarrierSourceCache(creep).sourceId)
+);
+
+const shouldSwitchToWithdraw = (creep: Creep) => creep.store.getUsedCapacity() === 0;
+
+const runCarrierSourceState = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
+    if (!creep.moveHomeRoom()) return false;
     if (creep.store.getFreeCapacity() === 0) {
-        carry(creep);
-        return WORK_EVENTS.TO_TARGET;
+        carry(creep, urgentEnergy);
+        return true;
     }
-    if (goGenerateSafeMode(creep)) return WORK_EVENTS.STAY;
-    const result = withdraw(creep);
-    if (result) return WORK_EVENTS.TO_TARGET;
+    if (goGenerateSafeMode(creep)) return false;
 
-    // 源侧暂时断流时，允许带着半仓资源先回去交付，避免卡在 source 态空转。
+    const filled = withdraw(creep, urgentEnergy);
+    if (filled) return true;
+
     if (creep.store.getUsedCapacity() > 0 && !getCarrierSourceCache(creep).sourceId) {
-        carry(creep);
-        return WORK_EVENTS.TO_TARGET;
+        carry(creep, urgentEnergy);
+        return true;
     }
 
-    return WORK_EVENTS.STAY;
+    return false;
 };
 
-const onTarget = (creep: Creep): WorkEvent => {
-    if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
+const runCarrierTargetState = (
+    creep: Creep,
+    urgentEnergy: boolean = creep.room.CheckSpawnAndTower()
+) => {
+    if (!creep.moveHomeRoom()) return false;
     if (creep.store.getUsedCapacity() === 0) {
-        withdraw(creep);
-        return WORK_EVENTS.TO_SOURCE;
+        withdraw(creep, urgentEnergy);
+        return true;
     }
-    if (checkAndFillNearbyExtensions(creep)) return WORK_EVENTS.STAY;
-    return carry(creep) ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
+    if (checkAndFillNearbyExtensions(creep, urgentEnergy)) return false;
+    return !!carry(creep, urgentEnergy);
 };
 
-// Carrier 主逻辑
-const CarrierFunction = {
+const shouldUseUrgentEnergyMode = (creep: Creep) => creep.room.CheckSpawnAndTower();
+
+export const CARRIER_LAYERS = {
+    PRIORITY: 'carrier:priority',
+    FLOW: 'carrier:flow',
+} as const;
+
+export const CARRIER_STATES = {
+    PRIORITY: {
+        URGENT: 'urgent',
+        NORMAL: 'normal',
+    },
+    FLOW: {
+        WITHDRAW: 'withdraw',
+        CARRY: 'carry',
+    }
+} as const;
+
+export const CARRIER_EVENTS = {
+    PRIORITY: {
+        URGENT: 'urgent',
+        NORMAL: 'normal',
+    },
+    FLOW: {
+        FULL: 'full',
+        EMPTY: 'empty',
+    }
+} as const;
+
+type CarrierPriorityState = typeof CARRIER_STATES.PRIORITY[keyof typeof CARRIER_STATES.PRIORITY];
+type CarrierPriorityEvent = typeof CARRIER_EVENTS.PRIORITY[keyof typeof CARRIER_EVENTS.PRIORITY];
+type CarrierFlowState = typeof CARRIER_STATES.FLOW[keyof typeof CARRIER_STATES.FLOW];
+type CarrierFlowEvent = typeof CARRIER_EVENTS.FLOW[keyof typeof CARRIER_EVENTS.FLOW];
+
+type CarrierContext = {
+    creep: Creep;
+    urgentMode: boolean;
+};
+
+const getCarrierPriorityState = (creep: Creep): CarrierPriorityState =>
+    (creep.memory.fsm?.[CARRIER_LAYERS.PRIORITY] as CarrierPriorityState | undefined) || CARRIER_STATES.PRIORITY.NORMAL;
+
+const getCarrierFlowState = (creep: Creep): CarrierFlowState =>
+    (creep.memory.fsm?.[CARRIER_LAYERS.FLOW] as CarrierFlowState | undefined) ||
+    (creep.memory.working ? CARRIER_STATES.FLOW.CARRY : CARRIER_STATES.FLOW.WITHDRAW);
+
+const seedCarrierStates = (creep: Creep) => {
+    const fsm = ensureFsmBucket(creep);
+    if (!fsm[CARRIER_LAYERS.PRIORITY]) {
+        fsm[CARRIER_LAYERS.PRIORITY] = shouldUseUrgentEnergyMode(creep)
+            ? CARRIER_STATES.PRIORITY.URGENT
+            : CARRIER_STATES.PRIORITY.NORMAL;
+    }
+    if (!fsm[CARRIER_LAYERS.FLOW]) {
+        fsm[CARRIER_LAYERS.FLOW] = creep.memory.working
+            ? CARRIER_STATES.FLOW.CARRY
+            : CARRIER_STATES.FLOW.WITHDRAW;
+    }
+};
+
+const syncCarrierWorkingState = (creep: Creep) => {
+    creep.memory.working = getCarrierFlowState(creep) === CARRIER_STATES.FLOW.CARRY;
+};
+
+const createCarrierPriorityMachine = (creep: Creep) =>
+    new StateMachine<CarrierContext, CarrierPriorityState, CarrierPriorityEvent, never>({
+        initial: CARRIER_STATES.PRIORITY.NORMAL,
+        states: {
+            [CARRIER_STATES.PRIORITY.URGENT]: {
+                onTick: (ctx) => {
+                    ctx.urgentMode = true;
+                    if (!shouldUseUrgentEnergyMode(ctx.creep)) {
+                        return [CARRIER_EVENTS.PRIORITY.NORMAL];
+                    }
+                }
+            },
+            [CARRIER_STATES.PRIORITY.NORMAL]: {
+                onTick: (ctx) => {
+                    ctx.urgentMode = false;
+                    if (shouldUseUrgentEnergyMode(ctx.creep)) {
+                        return [CARRIER_EVENTS.PRIORITY.URGENT];
+                    }
+                }
+            }
+        },
+        transitions: [
+            { from: CARRIER_STATES.PRIORITY.NORMAL, event: CARRIER_EVENTS.PRIORITY.URGENT, to: CARRIER_STATES.PRIORITY.URGENT },
+            { from: CARRIER_STATES.PRIORITY.URGENT, event: CARRIER_EVENTS.PRIORITY.NORMAL, to: CARRIER_STATES.PRIORITY.NORMAL },
+        ]
+    }, createFsmStorage<CarrierPriorityState>(creep, CARRIER_LAYERS.PRIORITY));
+
+const createCarrierFlowMachine = (creep: Creep) =>
+    new StateMachine<CarrierContext, CarrierFlowState, CarrierFlowEvent, never>({
+        initial: CARRIER_STATES.FLOW.WITHDRAW,
+        states: {
+            [CARRIER_STATES.FLOW.WITHDRAW]: {
+                onTick: (ctx) => {
+                    if (runCarrierSourceState(ctx.creep, ctx.urgentMode)) {
+                        return [CARRIER_EVENTS.FLOW.FULL];
+                    }
+                }
+            },
+            [CARRIER_STATES.FLOW.CARRY]: {
+                onTick: (ctx) => {
+                    if (runCarrierTargetState(ctx.creep, ctx.urgentMode)) {
+                        return [CARRIER_EVENTS.FLOW.EMPTY];
+                    }
+                }
+            }
+        },
+        transitions: [
+            { from: CARRIER_STATES.FLOW.WITHDRAW, event: CARRIER_EVENTS.FLOW.FULL, to: CARRIER_STATES.FLOW.CARRY },
+            { from: CARRIER_STATES.FLOW.CARRY, event: CARRIER_EVENTS.FLOW.EMPTY, to: CARRIER_STATES.FLOW.WITHDRAW },
+        ]
+    }, createFsmStorage<CarrierFlowState>(creep, CARRIER_LAYERS.FLOW));
+
+const CarrierRole = createCreepRole({
     run: (creep: Creep) => {
-        runWorkLayer(creep, {
-            onSource,
-            onTarget,
+        seedCarrierStates(creep);
+
+        const ctx: CarrierContext = {
+            creep,
+            urgentMode: getCarrierPriorityState(creep) === CARRIER_STATES.PRIORITY.URGENT,
+        };
+
+        const runner = createLayeredRunner<CarrierContext>({
+            [CARRIER_LAYERS.PRIORITY]: createCarrierPriorityMachine(creep),
+            [CARRIER_LAYERS.FLOW]: createCarrierFlowMachine(creep),
         });
+
+        runner.step(ctx, {
+            [CARRIER_LAYERS.PRIORITY]: { reenter: true },
+            [CARRIER_LAYERS.FLOW]: { reenter: true },
+        });
+
+        syncCarrierWorkingState(creep);
     }
-};
+});
 
-export default CarrierFunction;
+export default CarrierRole;
 
-export { getStorageOrTerminal, selectWithdrawPlan };
+export { selectWithdrawPlan };

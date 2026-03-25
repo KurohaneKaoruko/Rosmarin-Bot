@@ -2,10 +2,10 @@ import { compress, decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/shared/memory';
 import { Goods } from '@/constant/ResourceConstant';
-import { RoleData } from '@/constant/CreepConstant';
+import { normalizeRoleId, RoleData } from '@/constant/CreepConstant';
 import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMission';
 
-const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transport', 'carrier', 'manager']);
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
 
 /**
  * 任务获取模块
@@ -17,8 +17,9 @@ export default class MissionGet extends Room {
 
     private getSpawnTaskRequiredEnergy(task: Task, energyAvailable: number): number | null {
         const data = task.data as SpawnTask;
-        const role = data?.memory?.role;
+        const role = normalizeRoleId(data?.memory?.role);
         if (!role || !RoleData[role]) return null;
+        if (data?.memory && data.memory.role !== role) data.memory.role = role;
 
         let body = data.body as ((BodyPartConstant | number)[])[] | string;
         const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
@@ -387,8 +388,10 @@ export default class MissionGet extends Room {
         const tasks = this.getAllMissionFromPool('spawn');
         const spawnMissionNum: Record<string, number> = {};
         for (const task of tasks) {
-            const role = (task.data as SpawnTask)?.memory?.role;
+            const data = task.data as SpawnTask;
+            const role = normalizeRoleId(data?.memory?.role);
             if (!role) continue;
+            if (data?.memory && data.memory.role !== role) data.memory.role = role;
             spawnMissionNum[role] = (spawnMissionNum[role] || 0) + 1;
         }
 
@@ -403,7 +406,9 @@ export default class MissionGet extends Room {
         let num = 0;
         for(const task of tasks) {
             const data = task.data as SpawnTask;
-            const role = data.memory.role;
+            const role = normalizeRoleId(data.memory.role);
+            if (!role) continue;
+            if (data?.memory && role && data.memory.role !== role) data.memory.role = role;
             if(roles.includes(role)) num++;
         }
         return num;

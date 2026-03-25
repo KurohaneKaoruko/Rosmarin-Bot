@@ -1,6 +1,6 @@
 import { getRoleHandler } from './action';
 import { ensureMemoryCache } from './function/cacheFunction';
-import { RoleData } from '@/constant/CreepConstant';
+import { normalizeRoleId, RoleData } from '@/constant/CreepConstant';
 
 const creepExecuteErrorTickCache: Record<string, number> = {};
 
@@ -11,17 +11,8 @@ const reportExecuteIssue = (key: string, message: string) => {
     if (creepExecuteErrorTickCache[key] === tick) return;
     creepExecuteErrorTickCache[key] = tick;
 
-    const runtime = (typeof globalThis !== 'undefined'
-        ? globalThis
-        : typeof global !== 'undefined'
-            ? global
-            : Function('return this')()) as any;
-    if (typeof runtime.log === 'function') {
-        runtime.log(message);
-        return;
-    }
-    if (typeof runtime.global?.log === 'function') {
-        runtime.global.log(message);
+    if (typeof global.log === 'function') {
+        global.log(message);
         return;
     }
     console.log(message);
@@ -29,7 +20,9 @@ const reportExecuteIssue = (key: string, message: string) => {
 
 export default class CreepExecute extends Creep {
     exec() {
-        const role = this.memory.role;
+        const role = normalizeRoleId(this.memory.role);
+        if (!role) return;
+        if (this.memory.role !== role) this.memory.role = role;
         const roledata = RoleData[role];
         if (!roledata) {
             reportExecuteIssue(

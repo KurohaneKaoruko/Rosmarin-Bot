@@ -88,7 +88,7 @@ function withdraw(creep: Creep) {
 
     const room = creep.room;
     const cache = getLogisticSourceCache(mem);
-    let target = cache.targetId ? (Game.getObjectById(cache.targetId) as any) : null;
+    let target = cache.targetId ? Game.getObjectById(cache.targetId) : null;
     let resType = cache.resType;
     let actionType = cache.actionType;
 
@@ -259,7 +259,8 @@ const onTarget = (creep: Creep): WorkEvent => {
  */
 const logisticWork = createWorkLayerRole({
     onSource,
-    onTarget
+    onTarget,
+    reenter: true
 });
 
 const logisticFunction = createBoostedRole({

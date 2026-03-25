@@ -227,7 +227,7 @@ export default class TowerControl extends Room {
         if (Hostiles.length > 0) {
             const pick = pickTowerFocusTarget(this, Hostiles as any);
             if (!pick) return false;
-            const hostile = Game.getObjectById(pick.id as Id<Creep>) as Creep | null;
+            const hostile = Game.getObjectById(pick.id as Id<Creep>);
             if (!hostile) return false;
             this.CallTowerAttack(hostile);
             return true;
@@ -259,7 +259,7 @@ export default class TowerControl extends Room {
 
         const pick = pickTowerFocusTarget(this, Hostiles as any);
         if (!pick) return false;
-        const hostile = Game.getObjectById(pick.id) as any;
+        const hostile = Game.getObjectById(pick.id);
         if (!hostile) return false;
 
         // 集火攻击：优先选择“可击杀且 TTk 更短”的目标，并保持短期粘性，避免频繁换目标打不死。

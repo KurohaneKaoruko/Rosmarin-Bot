@@ -46,11 +46,7 @@ const onSource = (creep: Creep): WorkEvent => {
         return WORK_EVENTS.TO_TARGET;
     }
 
-    const fullAfterTake = creep.withdrawControllerEnergy({
-        linkRange: 2,
-        containerRange: 3,
-        fallbackToTakeEnergy: true,
-    });
+    const fullAfterTake = creep.acquireEnergy({ pickup: false });
     if (fullAfterTake) {
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
         creep.say('⚡');

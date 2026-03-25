@@ -122,7 +122,7 @@ const runDefendAttack = (creep: Creep) => {
     }
 
     const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
-    const focus = focusId ? (Game.getObjectById(focusId) as any) : null;
+    const focus = focusId ? Game.getObjectById(focusId) : null;
     const target = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostileCreeps);
     if (!target) return;
 
@@ -165,7 +165,7 @@ const runDefendRanged = (creep: Creep) => {
     }
 
     const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
-    const focus = focusId ? (Game.getObjectById(focusId) as any) : null;
+    const focus = focusId ? Game.getObjectById(focusId) : null;
     const target = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostileCreeps);
     if (!target) return;
 

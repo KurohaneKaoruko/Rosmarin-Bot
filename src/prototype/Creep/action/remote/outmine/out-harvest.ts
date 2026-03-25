@@ -111,7 +111,7 @@ const handleFullContainer = (creep: Creep, container: StructureContainer) => {
 
 // 有容器的情况下执行交付逻辑
 const handleWithContainer = (creep: Creep, container: StructureContainer) => {
-    const source = Game.getObjectById(creep.memory.targetSourceId as Id<Source>) as Source | null;
+    const source = Game.getObjectById(creep.memory.targetSourceId as Id<Source>);
     if (source && !creep.moveToSourceWorkTile(source)) return;
 
     if (container.hits < container.hitsMax * 0.8) {

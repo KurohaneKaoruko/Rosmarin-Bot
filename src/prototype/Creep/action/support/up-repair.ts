@@ -88,7 +88,7 @@ const RepairWork = function (creep: Creep) {
 }
 
 const WithdrawLink = function (creep: Creep) {
-    let linktarget = Game.getObjectById(creep.memory['linkId']) as any || undefined;
+    let linktarget = Game.getObjectById(creep.memory['linkId']) || undefined;
     if (!linktarget) {
         const centerPos = creep.room.getCenter();
         const sources = creep.room.source;

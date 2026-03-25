@@ -15,9 +15,9 @@ const WORKER_MIN_SPAWN_ENERGY = BODYPART_COST[WORK] + BODYPART_COST[CARRY] + BOD
 const HARVESTER_MAX_WORK_PER_SOURCE = 8;
 // builder 目标数的参考 work 基线
 const WORKER_BUILD_REFERENCE_WORK = 3;
-// 只有 transport 允许在恢复期按“缩水物流”扣减 current；
+// 只有 transporter 允许在恢复期按“缩水物流”扣减 current；
 // manager 是中心单点位，若扣减会把“已有缩水 manager”误判成缺口，导致反复补人堵路。
-const RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET = new Set(['transport']);
+const RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET = new Set(['transporter']);
 
 // 优先使用缓存的能量状态，避免重复计算
 const getEnergyState = (room: Room) => {
@@ -341,9 +341,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
             const creepNum = room.getCreepNum() || {};
             const spawnMissionNum = room.getSpawnMissionNum() || {};
             const logisticsNum =
-                (creepNum['transport'] || 0) +
+                (creepNum['transporter'] || 0) +
                 (creepNum['manager'] || 0) +
-                (spawnMissionNum['transport'] || 0) +
+                (spawnMissionNum['transporter'] || 0) +
                 (spawnMissionNum['manager'] || 0);
             if (logisticsNum === 0 && lv >= 5) {
                 num = Math.min(num, baseNum + 1);
@@ -355,14 +355,14 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         if (lv >= 5 && ttd > 10000 && room[RESOURCE_ENERGY] < 50e3) return false;
         return current < num;
     },
-    'transport': (room: Room, current: number) => {
+    'transporter': (room: Room, current: number) => {
         const state = getEnergyState(room);
         const highMode = isHighLikeMode(getRoomMode(room));
         const storedEnergy = getStoredEnergy(room);
         const hasStorageLike = !!room.storage || !!room.terminal;
-        let num = RoleLevelData['transport'][room.level]['num'];
+        let num = RoleLevelData['transporter'][room.level]['num'];
 
-        // transport 当前仍依赖 storage / terminal 体系与 transport mission 调度，
+        // transporter 当前仍依赖 storage / terminal 体系与 transport mission 调度，
         // 因此在只有 container 的恢复期不能提前孵化，否则只会空转占位。
         if (!hasStorageLike) return false;
 
@@ -487,7 +487,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
 
         return false;
     },
-    'mineral': (room: Room, current: number) => {
+    'miner': (room: Room, current: number) => {
         const lv = room.level;
         if (lv < 6) return false;
         if (room.memory.defend) return false;
@@ -517,9 +517,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         const state = getEnergyState(room);
         const isLowEnergy = state === 'LOW' || state === 'CRITICAL';
         const creepNum = room.getCreepNum() || {};
-        const transportNum =
+        const transporterNum =
             (creepNum['carrier'] || 0) +
-            (creepNum['transport'] || 0) +
+            (creepNum['transporter'] || 0) +
             (creepNum['manager'] || 0) +
             (creepNum['logistic'] || 0);
         const harvestNum =
@@ -534,7 +534,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         };
         const minHarvesterEnergy = getRoleMinEnergy('harvester');
         const minCarrierEnergy = getRoleMinEnergy('carrier');
-        const minTransportEnergy = getRoleMinEnergy('transport');
+        const minTransportEnergy = getRoleMinEnergy('transporter');
         const minManagerEnergy = getRoleMinEnergy('manager');
         const hasStorageLike = !!room.storage || !!room.terminal;
         const minLogisticEnergy = hasStorageLike
@@ -542,7 +542,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
             : minCarrierEnergy;
         const energyAvailable = room.energyAvailable || 0;
         const needHarvestRescue = harvestNum === 0 && energyAvailable < minHarvesterEnergy;
-        const needTransportRescue = transportNum === 0 && energyAvailable < minLogisticEnergy;
+        const needTransportRescue = transporterNum === 0 && energyAvailable < minLogisticEnergy;
 
         // 1) 控制器降级兜底：仅在低等级且低能量时用 UNIV，常态靠 upgrader
         let target = 0;
@@ -554,7 +554,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         if (isLowEnergy && room.CheckSpawnAndTower() && (needHarvestRescue || needTransportRescue)) {
             let emergencyTarget = lv <= 2 ? 3 : lv <= 4 ? 2 : 1;
             if (state === 'CRITICAL') emergencyTarget += 1;
-            if (transportNum === 0) emergencyTarget += 1;
+            if (transporterNum === 0) emergencyTarget += 1;
             target = Math.max(target, emergencyTarget);
         }
 

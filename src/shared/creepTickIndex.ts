@@ -1,3 +1,5 @@
+import { normalizeRoleId } from '@/constant/CreepConstant'
+
 type TargetRoomCreepInfo = {
     ticksToLive: number | undefined
     spawning: boolean
@@ -22,10 +24,10 @@ type CreepTickIndexCache = {
 
 const EMPTY_TARGET_ROOM_ROLE_MAP: TargetRoomRoleMap = Object.freeze({}) as TargetRoomRoleMap
 const EMPTY_ROLE_COUNT_MAP: RoleCountMap = Object.freeze({}) as RoleCountMap
-// 只有 transport 继续走“缩水体型补正”：
-// - transport 是纯吞吐位，恢复期补一只满体型通常是收益；
+// 只有 transporter 继续走“缩水体型补正”：
+// - transporter 是纯吞吐位，恢复期补一只满体型通常是收益；
 // - manager 是中心单点位，若把缩水 manager 当作“缺口”继续补，会在中心区叠出多只堵路。
-const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transport'])
+const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transporter'])
 
 let tickCache: CreepTickIndexCache | undefined
 
@@ -41,8 +43,9 @@ function buildCache(): CreepTickIndexCache {
 
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName]
-        const role = creep.memory.role
+        const role = normalizeRoleId(creep.memory.role)
         if (!role) continue
+        if (creep.memory.role !== role) creep.memory.role = role
 
         allRoleCounts[role] = (allRoleCounts[role] || 0) + 1
 

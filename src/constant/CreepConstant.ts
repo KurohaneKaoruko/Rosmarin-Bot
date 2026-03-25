@@ -13,10 +13,21 @@ export const ROLE_EXECUTOR_ID_OVERRIDES = {
     reserver: 'reserve',
 } as const;
 
+// 旧角色名在过渡期统一归一化到新 id，避免存量 creep 因改名直接失联。
+export const LEGACY_ROLE_ID_ALIASES = {
+    transport: 'transporter',
+    mineral: 'miner',
+} as const;
+
 // 解析角色绑定到的统一执行器 id：
 // 默认直接返回 role 本身；只有登记在 override 表中的角色才会映射到历史 handler 名称。
 export const resolveRoleExecutorId = (role: string): string =>
     ROLE_EXECUTOR_ID_OVERRIDES[role as keyof typeof ROLE_EXECUTOR_ID_OVERRIDES] || role;
+
+export const normalizeRoleId = (role?: string): string | undefined =>
+    role
+        ? LEGACY_ROLE_ID_ALIASES[role as keyof typeof LEGACY_ROLE_ID_ALIASES] || role
+        : role;
 
 export const RoleData = {
     /* 基本房间运营 */
@@ -32,11 +43,11 @@ export const RoleData = {
         code: 'C',
         executor: 'carrier',
     }, // 通用搬运
-    transport: {
+    transporter: {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 2,
         code: 'T',
-        executor: 'transport',
+        executor: 'transporter',
     }, // 资源搬运
     manager: {
         bodypart: [[CARRY, 4], [MOVE, 2]],
@@ -56,11 +67,11 @@ export const RoleData = {
         code: 'W',
         executor: 'worker',
     }, // 建造、维修、刷墙
-    mineral: {
+    miner: {
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 6,
         code: 'MR',
-        executor: 'mineral',
+        executor: 'miner',
     }, // 矿工
     universal: {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
@@ -386,7 +397,7 @@ export const RoleLevelData = {
         7: { bodypart: [[CARRY, 20], [MOVE, 20]], num: 0 },
         8: { bodypart: [[CARRY, 25], [MOVE, 25]], num: 0 },
     },
-    'transport': {
+    'transporter': {
         1: { bodypart: [[CARRY, 1], [MOVE, 1]], num: 0 },
         2: { bodypart: [[CARRY, 1], [MOVE, 1]], num: 0 },
         3: { bodypart: [[CARRY, 2], [MOVE, 2]], num: 0 },
@@ -437,7 +448,7 @@ export const RoleLevelData = {
         8: { bodypart: [[WORK, 15], [CARRY, 15], [MOVE, 15]], num: 0,
              upbodypart: [[WORK, 20], [CARRY, 10], [MOVE, 15]]},
     },
-    'mineral': {
+    'miner': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
         2: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
         3: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },

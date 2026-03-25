@@ -1,5 +1,133 @@
 
 /**
+ * 供取能流程直接消费的能量来源。
+ *
+ * @remarks
+ * 这里只覆盖“当前实现会直接处理”的目标类型：
+ * 有库存的建筑，以及掉落在地上的能量资源。
+ */
+type CreepEnergySourceTarget = AnyStoreStructure | Resource<RESOURCE_ENERGY>;
+
+/**
+ * 通用提取流程允许返回的 withdraw 目标集合。
+ *
+ * @remarks
+ * carrier 等角色会复用这个返回值做兜底提取，
+ * 因此除了建筑外还允许资源堆与废墟。
+ */
+type CreepWithdrawTarget = AnyStoreStructure | Resource | Ruin;
+
+/**
+ * 统一目标缓存里使用的目标类型标签。
+ */
+type CreepCacheTargetType = 'source' | 'store' | 'site' | 'structure' | 'dropped' | 'ruin';
+
+/**
+ * 查找取能目标时的过滤条件。
+ */
+interface CreepFindEnergySourceOptions {
+    /**
+     * 是否把地上的能量也纳入候选。
+     * @defaultValue true
+     */
+    includeDropped?: boolean;
+
+    /**
+     * 是否把 storage / terminal 纳入候选。
+     * @defaultValue true
+     */
+    includeStorage?: boolean;
+
+    /**
+     * 候选目标至少要具备的能量数量。
+     * @defaultValue 100
+     */
+    minAmount?: number;
+}
+
+/**
+ * 主房通用取能动作的配置。
+ *
+ * @remarks
+ * 与 {@link CreepFindEnergySourceOptions} 的区别在于：
+ * 这是“动作入口”的配置，调用方只关心是否允许拾取或读取仓储，
+ * 实际目标筛选仍由 `findEnergySource` 负责。
+ */
+interface CreepAcquireEnergyOptions extends CreepFindEnergySourceOptions {
+}
+
+/**
+ * 建造目标选择配置。
+ */
+interface CreepFindBuildTargetOptions {
+    /**
+     * 建筑类型优先级；按数组顺序依次尝试。
+     */
+    priority?: StructureConstant[];
+
+    /**
+     * 仅在 creep 附近指定范围内查找。
+     * 不传则扫描全房间。
+     */
+    range?: number;
+}
+
+/**
+ * 维修目标选择配置。
+ */
+interface CreepFindRepairTargetOptions {
+    /**
+     * 命中值上限；高于该值的建筑不会被选中。
+     */
+    maxHits?: number;
+
+    /**
+     * 命中值比例上限；高于 `hitsMax * maxHitsRatio` 的建筑不会被选中。
+     */
+    maxHitsRatio?: number;
+
+    /**
+     * 需要跳过的建筑类型。
+     */
+    excludeTypes?: StructureConstant[];
+
+    /**
+     * 仅在 creep 附近指定范围内查找。
+     * 不传则扫描全房间。
+     */
+    range?: number;
+}
+
+/**
+ * 收回到原型扩展后的统一轻量缓存结构。
+ *
+ * @remarks
+ * 这里约定的是“这组辅助方法会读写的字段”，
+ * 并不限制 `memory.cache` 根对象上存在其他角色专用字段。
+ */
+interface CreepFlatCache {
+    /**
+     * 当前缓存目标的 id。
+     */
+    targetId?: Id<any>;
+
+    /**
+     * 当前缓存目标的语义类型。
+     */
+    targetType?: CreepCacheTargetType;
+
+    /**
+     * 与当前缓存目标相关联的资源类型。
+     */
+    resourceType?: ResourceConstant;
+
+    /**
+     * 允许角色在同一层级追加自己的扁平字段。
+     */
+    [key: string]: any;
+}
+
+/**
  * Creep接口扩展
  * @description 扩展Screeps原生Creep类，添加自定义方法
  */
@@ -197,6 +325,60 @@ interface Creep {
      */
     switchTaskState(resourceType?: ResourceConstant): 'source' | 'target' | null;
 
+    // ==================== 缓存功能 (CacheFunction) ====================
+    /**
+     * 获取当前 creep 的统一缓存根对象。
+     *
+     * @remarks
+     * 该方法会在首次访问时自动初始化 `memory.cache`，
+     * 并兼容迁移旧的 `cacheSource/cacheTarget` 别名字段。
+     */
+    getCache(): CreepFlatCache;
+
+    /**
+     * 清除由统一目标缓存辅助方法维护的目标字段。
+     *
+     * @remarks
+     * 只会移除 `targetId`、`targetType` 与 `resourceType`，
+     * 不会触碰同层的其他角色自定义缓存键。
+     */
+    clearTarget(): void;
+
+    /**
+     * 写入当前工作目标到统一缓存。
+     *
+     * @param target 要缓存的游戏对象；只会持久化其 `id`。
+     * @param type 目标的语义类型，供上层状态机识别。
+     * @param resourceType 与目标绑定的资源类型；未传时会清除旧值。
+     */
+    setTarget(
+        target: { id?: Id<any> } | null | undefined,
+        type: CreepCacheTargetType,
+        resourceType?: ResourceConstant
+    ): void;
+
+    /**
+     * 读取当前缓存的目标对象。
+     *
+     * @remarks
+     * 如果缓存 id 对应的对象已经失效，会自动清掉陈旧缓存并返回 `null`。
+     */
+    getTarget<T extends RoomObject = RoomObject>(): T | null;
+
+    /**
+     * 判断统一缓存里当前是否记录了目标。
+     */
+    hasTarget(): boolean;
+
+    /**
+     * 校验某个缓存对象是否保持“深度不超过 1”的扁平结构。
+     *
+     * @remarks
+     * 主要用于单元测试和迁移校验；
+     * 若不传参数，则默认检查当前 creep 的缓存根对象。
+     */
+    validateCacheDepth(cache?: CreepFlatCache): boolean;
+
 
     // ==================== 控制器功能 (ControllerFunction) ====================
     /**
@@ -250,7 +432,60 @@ interface Creep {
     }): boolean;
 
     // ==================== 工作功能 (WorkFunction) ====================
-    /** 
+    /**
+     * 统一执行“找来源 -> 取能 -> 无来源时采集 source”这一套主房取能流程。
+     *
+     * @param options 取能筛选条件。
+     * @returns `true` 表示本 tick 取能后已经装满或等价完成；`false` 表示仍需继续取能或仅执行了移动。
+     *
+     * @remarks
+     * 该方法会优先尝试建筑 / 掉落资源，
+     * 只有房间内没有可用候选时才退回到 source harvest。
+     */
+    acquireEnergy(options?: CreepAcquireEnergyOptions): boolean;
+
+    /**
+     * 选择最近且满足阈值要求的能量来源。
+     *
+     * @param options 来源过滤条件。
+     * @returns 最佳候选来源；找不到时返回 `null`。
+     */
+    findEnergySource(options?: CreepFindEnergySourceOptions): CreepEnergySourceTarget | null;
+
+    /**
+     * 选择当前最合适的资源存放目标。
+     *
+     * @param resourceType 计划投递的资源类型。
+     * @param excludeId 需要排除的目标 id，常用于避免“取了又放回去”。
+     * @returns 可投递的建筑；找不到时返回 `null`。
+     */
+    findStoreTarget(resourceType: ResourceConstant, excludeId?: Id<AnyStoreStructure>): AnyStoreStructure | null;
+
+    /**
+     * 选择当前应优先维修的建筑。
+     *
+     * @param options 维修筛选条件。
+     * @returns 命中值最低、且满足约束的结构；找不到时返回 `null`。
+     */
+    findRepairTarget(options?: CreepFindRepairTargetOptions): Structure | null;
+
+    /**
+     * 选择当前应优先建造的建筑工地。
+     *
+     * @param options 建造目标筛选条件。
+     * @returns 最佳工地；找不到时返回 `null`。
+     */
+    findBuildTarget(options?: CreepFindBuildTargetOptions): ConstructionSite | null;
+
+    /**
+     * 为搬运 / 清仓类逻辑选择通用提取目标。
+     *
+     * @param resourceType 计划提取的资源类型，默认 `RESOURCE_ENERGY`。
+     * @returns 可提取目标；找不到时返回 `null`。
+     */
+    findWithdrawTarget(resourceType?: ResourceConstant): CreepWithdrawTarget | null;
+
+    /**
      * 采集资源
      * @param target - 采集目标（Source或Mineral）
      * @returns true表示正在采集，false表示正在移动，null表示目标无效
@@ -381,12 +616,14 @@ interface Creep {
     /** 
      * 查找并维修建筑
      * @param options - 可选配置
+     * @param options.maxHits - 命中值上限，高于该值则跳过
      * @param options.maxHitsRatio - 最大血量比例，低于此比例才维修
      * @param options.excludeTypes - 排除的建筑类型
      * @param options.range - 搜索范围
      * @returns true表示找到并正在维修，false表示未找到
      */
     findAndRepair(options?: {
+        maxHits?: number;
         maxHitsRatio?: number;
         excludeTypes?: StructureConstant[];
         range?: number;

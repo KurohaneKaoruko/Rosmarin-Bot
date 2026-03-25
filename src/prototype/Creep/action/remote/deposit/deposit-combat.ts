@@ -4,7 +4,7 @@ import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
 
-    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>) as Creep | null;
+    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
     if (partner) return partner;
 
     delete creep.memory.bind;

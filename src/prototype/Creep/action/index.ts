@@ -1,11 +1,11 @@
 import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 import harvester from './economy/harvester';
 import carrier from './economy/carrier';
-import transport from './economy/transport';
+import transporterRole from './economy/transporter';
 import manager from './economy/manager';
 import upgrader from './economy/upgrader';
 import worker from './economy/worker';
-import mineral from './economy/mineral';
+import minerRole from './economy/miner';
 import universal from './economy/universal';
 import aidBuild from './expansion/aid-build';
 import aidCarry from './expansion/aid-carry';
@@ -43,8 +43,8 @@ export const roleRegistry: Record<string, CreepRoleHandler> = {
     'carrier': carrier,
     'harvester': harvester,
     'manager': manager,
-    'mineral': mineral,
-    'transport': transport,
+    'miner': minerRole,
+    'transporter': transporterRole,
     'universal': universal,
     'upgrader': upgrader,
     'worker': worker,

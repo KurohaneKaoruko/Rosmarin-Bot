@@ -1,77 +1,42 @@
 export default class BuildFunction extends Creep {
     /**
-     * 查找并建造建筑工地
-     * @param options 配置选项
-     * @returns boolean - true 表示找到并正在建造，false 表示未找到
+     * 查找并立即对最佳工地执行建造动作。
+     *
+     * @param options 建造目标筛选条件。
+     * @returns `true` 表示已找到目标并执行 `goBuild`；`false` 表示当前没有可建造工地。
+     *
+     * @remarks
+     * 具体目标选择逻辑统一委托给 `findBuildTarget`，
+     * 这样角色层、测试层与原型层只需要维护一套优先级语义。
      */
     findAndBuild(options?: {
         priority?: StructureConstant[];
         range?: number;
     }): boolean {
-        const sites = this.room.find(FIND_CONSTRUCTION_SITES);
-        if (sites.length === 0) return false;
-
-        // 默认优先级: spawn 优先，其次为主要功能建筑，最后为道路/墙体等
-        const defaultPriority: StructureConstant[] = [
-            STRUCTURE_SPAWN,
-            STRUCTURE_EXTENSION,
-            STRUCTURE_TOWER,
-            STRUCTURE_STORAGE,
-            STRUCTURE_TERMINAL,
-            STRUCTURE_CONTAINER,
-            STRUCTURE_ROAD,
-            STRUCTURE_RAMPART
-        ];
-        const priority = options?.priority || defaultPriority;
-
-        let targetSite: ConstructionSite | null = null;
-
-        // 按优先级查找建筑工地
-        for (const structureType of priority) {
-            const filtered = sites.filter(s => s.structureType === structureType);
-            if (filtered.length > 0) {
-                targetSite = this.pos.findClosestByRange(filtered);
-                break;
-            }
-        }
-
-        // 如果没有找到优先级内的建筑，选择最近的任意建筑
-        if (!targetSite) {
-            targetSite = this.pos.findClosestByRange(sites);
-        }
-
+        const targetSite = this.findBuildTarget(options);
         if (!targetSite) return false;
-
         this.goBuild(targetSite);
         return true;
     }
 
     /**
-     * 查找并维修建筑
-     * @param options 配置选项
-     * @returns boolean - true 表示找到并正在维修，false 表示未找到
+     * 查找并立即对最佳目标执行维修动作。
+     *
+     * @param options 维修目标筛选条件。
+     * @returns `true` 表示已找到目标并执行 `goRepair`；`false` 表示当前没有合格维修目标。
+     *
+     * @remarks
+     * 这里同样只保留“动作调度”职责，
+     * 具体筛选逻辑统一走 `findRepairTarget`，避免历史上 WorkFunction / BuildFunction 双实现漂移。
      */
     findAndRepair(options?: {
+        maxHits?: number;
         maxHitsRatio?: number;
         excludeTypes?: StructureConstant[];
         range?: number;
     }): boolean {
-        const maxHitsRatio = options?.maxHitsRatio ?? 0.8;
-        const excludeTypes = options?.excludeTypes || [];
-
-        const structures = this.room.find(FIND_STRUCTURES, {
-            filter: (s) => {
-                if (s.hits >= s.hitsMax * maxHitsRatio) return false;
-                if (excludeTypes.includes(s.structureType)) return false;
-                return true;
-            }
-        });
-
-        if (structures.length === 0) return false;
-
-        // 选择血量最低的建筑
-        const target = structures.reduce((a, b) => a.hits < b.hits ? a : b);
-
+        const target = this.findRepairTarget(options);
+        if (!target) return false;
         this.goRepair(target);
         return true;
     }

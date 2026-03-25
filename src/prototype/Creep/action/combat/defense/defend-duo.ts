@@ -5,7 +5,7 @@ import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
 
-    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>) as Creep | null;
+    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
     if (partner) return partner;
 
     delete creep.memory.bind;
@@ -94,7 +94,7 @@ const runDefend2Attack = (creep: Creep) => {
     }
 
     const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
-    const focus = focusId ? (Game.getObjectById(focusId) as any) : null;
+    const focus = focusId ? Game.getObjectById(focusId) : null;
     const hostiles = creep.findHostileCreeps() as Creep[];
     const hostile = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostiles);
     if (!hostile) return;

@@ -102,7 +102,8 @@ const onTarget = (creep: Creep): WorkEvent => {
 
 const aidCarryWork = createWorkLayerRole({
     onSource,
-    onTarget
+    onTarget,
+    reenter: true
 });
 
 const AidCarryFunction = createBoostedRole({

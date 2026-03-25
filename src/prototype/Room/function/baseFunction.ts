@@ -286,7 +286,7 @@ export default class BaseFunction extends Room {
         const creepNum = this.getCreepNum();
         const logisticNum =
             (creepNum['carrier'] || 0) +
-            (creepNum['transport'] || 0) +
+            (creepNum['transporter'] || 0) +
             (creepNum['manager'] || 0) +
             (creepNum['universal'] || 0);
         const spawnNeedsEnergy = this.CheckSpawnAndTower();

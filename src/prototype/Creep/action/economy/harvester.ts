@@ -83,36 +83,35 @@ const shouldRunDeliverLayer = (ctx: HarvesterContext): boolean => {
 };
 
 /**
- * 查找适合投递的 Link
- * @description 要求房间 RCL>=5，Link 在 source 附近且未满
+ * 获取当前绑定 source 周边可用的交付结构。
+ *
+ * @param creep 当前 harvester。
+ * @returns source 周边的 link 与 container；找不到时对应字段为 `null`。
+ *
+ * @remarks
+ * `harvester` 的交付判定应围绕“绑定 source 的工作面”做判断，
+ * 而不是围绕 creep 当前所在位置做短视扫描。
+ * 否则 creep 在返回源点的过程中，会把“远离 source 的临时位置”误判成
+ * “source 周边没有 link / container”，导致交付层错误切到 `BUILD`。
  */
-function findTransferLink(creep: Creep, source: Source): StructureLink | null {
-    if (creep.room.level < 5) return null;
-    const links = creep.room.link;
-    if (!links) return null;
-    return links.find(l => l.store.getFreeCapacity(RESOURCE_ENERGY) > 0 && source.pos.inRangeTo(l, NEAR_RANGE)) ?? null;
-}
+const getSourceDeliveryTargets = (creep: Creep): {
+    link: StructureLink | null;
+    container: StructureContainer | null;
+} => ({
+    link: creep.getNearbySourceLink(NEAR_RANGE),
+    container: creep.getNearbySourceContainer(NEAR_RANGE),
+});
 
 /**
- * 查找 Creep 附近的任意 Link
- * @description 用于交付层判断，主要关心“有没有可投递结构”
+ * 查找适合投递的 Link。
+ *
+ * @param creep 当前 harvester。
+ * @returns source 周边仍有容量的 link；找不到时返回 `null`。
  */
-function findAnyNearbyLink(creep: Creep): StructureLink | null {
-    const links = creep.room.link;
-    if (!links) return null;
-    return links.find(l => l.pos.inRangeTo(creep.pos, NEAR_RANGE)) ?? null;
-}
-
-/**
- * 查找 Creep 附近的任意 Container
- * @description 用于交付层判断，主要关心“有没有可投递结构”
- */
-function findAnyNearbyContainer(creep: Creep): StructureContainer | null {
-    const containers = creep.room.container;
-    if (!containers) return null;
-    const candidates = containers.filter(c => c.pos.inRangeTo(creep.pos, NEAR_RANGE));
-    if (candidates.length === 0) return null;
-    return creep.pos.findClosestByRange(candidates) ?? null;
+function findTransferLink(creep: Creep): StructureLink | null {
+    const link = getSourceDeliveryTargets(creep).link;
+    if (!link) return null;
+    return link.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? link : null;
 }
 
 /**
@@ -134,8 +133,7 @@ function stayAndBuildNearby(creep: Creep): boolean {
  * @description 附近没有 Link/Container 时，说明需要维护容器
  */
 const shouldDeliverByBuild = (creep: Creep) => {
-    const link = findAnyNearbyLink(creep);
-    const container = findAnyNearbyContainer(creep);
+    const { link, container } = getSourceDeliveryTargets(creep);
     return !link && !container;
 };
 
@@ -184,7 +182,7 @@ const runHarvest = (creep: Creep): boolean => {
                 c => c.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && creep.pos.inRangeTo(c, SOURCE_RANGE)
             );
             const container = candidates.length > 0 ? creep.pos.findClosestByRange(candidates) : null;
-            const link = findTransferLink(creep, targetSource);
+            const link = findTransferLink(creep);
             if (!container || !link) return false;
             creep.goWithdraw(container, RESOURCE_ENERGY);
         }
@@ -344,20 +342,29 @@ const createHarvesterDeliverMachine = (creep: Creep) => {
 };
 
 const HarvesterAction = createCreepRole({
+    /**
+     * Harvester 准备阶段。
+     *
+     * @remarks
+     * 这里保留原有“每只 harvester 绑定一个 source”设计，
+     * 只把 source 选择统一收敛到已有原型 helper，避免角色层再维护一套分配逻辑。
+     */
     prepare: function (creep: Creep) {
         if (!creep.room.source || creep.room.source.length === 0) return false;
         const boundSource = creep.getBoundSource();
-        if (boundSource) {
-            creep.setBoundSourceId(boundSource.id);
-            return true;
-        }
-        const targetSource = creep.room.closestSource(creep);
+        const targetSource = creep.resolveSourceByPriority(boundSource || creep.room.closestSource(creep));
         if (!targetSource) return false;
         creep.setBoundSourceId(targetSource.id);
         return true;
     },
     /**
-     * Harvester 主运行逻辑（已迁移到多层 FSM）
+     * Harvester 主运行逻辑。
+     *
+     * @remarks
+     * 这是当前项目里“多层状态机保留型角色”的参考实现：
+     * - `FLOW` 层只决定 collect / deliver 节奏；
+     * - `DELIVER` 层只决定 transfer / build 交付方式；
+     * - 两层通过 `allowDeliver` 做最小同步，不把职责重新揉回一个大循环。
      */
     run: function (creep: Creep) {
         if (!creep.moveHomeRoom()) return;

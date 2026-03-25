@@ -145,7 +145,7 @@ const resolveTransferTarget = (creep: Creep, cache: UniversalTargetCache) => {
     const urgent = isUrgentRefill(creep.room);
 
     if (cache.targetId) {
-        const target = Game.getObjectById(cache.targetId as Id<AnyStoreStructure>) as AnyStoreStructure | null;
+        const target = Game.getObjectById(cache.targetId as Id<AnyStoreStructure>);
         if (isTargetValid(target, cache.targetKind, urgent)) {
             return { target, kind: cache.targetKind as UniversalTargetKind };
         }

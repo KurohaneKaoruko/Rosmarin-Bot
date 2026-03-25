@@ -70,7 +70,8 @@ export const syncAidUpgradeMoveWork = (creep: Creep) => {
  */
 const aidUpgradeWork = createWorkLayerRole({
     onSource,
-    onTarget
+    onTarget,
+    reenter: true
 });
 
 const aid_upgrade = createBoostedRole({

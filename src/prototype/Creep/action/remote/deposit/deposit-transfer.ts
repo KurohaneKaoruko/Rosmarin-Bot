@@ -38,7 +38,7 @@ const onSource = (creep: Creep): WorkEvent => {
         }
     }
 
-    const target = Game.getObjectById(cache.targetId) as any;
+    const target = Game.getObjectById(cache.targetId);
     const targetType = cache.targetType;
     if (target) {
         if (targetType === 'dropped' && target.amount > 0) {

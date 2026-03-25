@@ -56,7 +56,7 @@ export function resolveLabFromMem(room: Room, value: unknown): { lab: StructureL
         return { lab: target, pos: target ? value : null };
     }
     if (typeof value === 'string' && value) {
-        const lab = Game.getObjectById(value as Id<StructureLab>) as StructureLab | null;
+        const lab = Game.getObjectById(value as Id<StructureLab>);
         if (lab && lab.pos && lab.structureType === STRUCTURE_LAB) {
             const pos = compress(lab.pos.x, lab.pos.y);
             const target = room.lab.find(l => l && compress(l.pos.x, l.pos.y) === pos) || lab;
