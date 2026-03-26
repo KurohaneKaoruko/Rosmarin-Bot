@@ -6,6 +6,10 @@ import { isRoleId, type RoleId } from '@/constant/CreepConstant';
 import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMission';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
+const getSpawnTaskRole = (taskData?: SpawnTask): RoleId | null => {
+    const role = taskData?.memory?.role;
+    return isRoleId(role) ? role : null;
+};
 
 /**
  * 任务获取模块
@@ -15,14 +19,9 @@ export default class MissionGet extends Room {
         return compress(creep.pos.x, creep.pos.y);
     }
 
-    private getSpawnTaskRole(taskData?: SpawnTask): RoleId | null {
-        const role = taskData?.memory?.role;
-        return isRoleId(role) ? role : null;
-    }
-
     private getSpawnTaskRequiredEnergy(task: Task, energyAvailable: number): number | null {
         const data = task.data as SpawnTask;
-        const role = this.getSpawnTaskRole(data);
+        const role = getSpawnTaskRole(data);
         if (!role) return null;
 
         let body = data.body as ((BodyPartConstant | number)[])[] | string;
@@ -393,7 +392,7 @@ export default class MissionGet extends Room {
         const spawnMissionNum: Record<string, number> = {};
         for (const task of tasks) {
             const data = task.data as SpawnTask;
-            const role = this.getSpawnTaskRole(data);
+            const role = getSpawnTaskRole(data);
             if (!role) continue;
             spawnMissionNum[role] = (spawnMissionNum[role] || 0) + 1;
         }
@@ -409,7 +408,7 @@ export default class MissionGet extends Room {
         let num = 0;
         for(const task of tasks) {
             const data = task.data as SpawnTask;
-            const role = this.getSpawnTaskRole(data);
+            const role = getSpawnTaskRole(data);
             if (!role) continue;
             if(roles.includes(role)) num++;
         }

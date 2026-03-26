@@ -9,56 +9,78 @@ const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 };
 
+const getEnergyState = (room: Room) =>
+    room.memory.energyState || room.updateEnergyState?.(false);
+
 // 仅这些角色允许在低能量时按当前可用能量降级体型。
 // worker 的预算体型单独由“存在建造需求”控制。
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
 const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
 const DOWNGRADED_LOGISTICS_ROLE_SET = new Set<RoleId>(['transporter', 'carrier', 'manager']);
 
+const getFullRoleBodyCost = (room: Room, role: RoleId, upbody?: boolean) => {
+    const fullConfig = room.GetRoleBodys(role, upbody, undefined);
+    const fullBody = room.GenerateBodys(fullConfig, role);
+    return fullBody?.length ? room.CalculateEnergy(fullBody) : null;
+};
+
+const updateDowngradedFlag = (
+    room: Room,
+    role: RoleId,
+    taskData: SpawnTask,
+    cost: number,
+    usedBudget: boolean,
+    state = getEnergyState(room)
+) => {
+    if (!DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) return;
+
+    const fullCost = getFullRoleBodyCost(room, role, taskData.upbody) ?? cost;
+    const isLowEnergy = state === 'LOW' || state === 'CRITICAL';
+
+    if (usedBudget && isLowEnergy) {
+        if (cost < fullCost) taskData.memory.downgraded = true;
+        return;
+    }
+
+    if (state === 'NORMAL' || state === 'SURPLUS') {
+        if (cost >= fullCost) delete (taskData.memory as any).downgraded;
+    }
+};
+
+const getAvailableSpawn = (room: Room) => {
+    const requireActive =
+        room.level !== 8 &&
+        room.spawn.length !== 1 &&
+        room.spawn.length !== CONTROLLER_STRUCTURES['spawn'][room.level];
+
+    return room.spawn.find((spawn) => !spawn.spawning && (!requireActive || spawn.isActive()));
+};
+
+const finishSpawnTask = (room: Room, role: RoleId, taskId: string) => {
+    const creepNum = room.getCreepNum();
+    creepNum[role] = (creepNum[role] || 0) + 1;
+    room.submitSpawnMission(taskId);
+};
 
 export default class SpawnControl extends Room {
-    private getFullRoleBodyCost(role: RoleId, upbody?: boolean) {
-        const fullConfig = this.GetRoleBodys(role, upbody, undefined);
-        const fullBody = this.GenerateBodys(fullConfig, role);
-        return fullBody?.length ? this.CalculateEnergy(fullBody) : null;
-    }
-
-    private updateDowngradedFlag(role: RoleId, taskData: SpawnTask, cost: number, usedBudget: boolean) {
-        if (!DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) return;
-
-        const state = this.memory.energyState || this.updateEnergyState?.(false);
-        const fullCost = this.getFullRoleBodyCost(role, taskData.upbody) ?? cost;
-
-        if (usedBudget && (state === 'LOW' || state === 'CRITICAL')) {
-            if (cost < fullCost) taskData.memory.downgraded = true;
-            return;
-        }
-
-        if (state === 'NORMAL' || state === 'SURPLUS') {
-            if (cost >= fullCost) delete (taskData.memory as any).downgraded;
-        }
-    }
 
     private getEmergencyUniversalCap() {
         const mode = getRoomMode(this);
         const highMode = mode === 'high' || mode === 'rush';
-        return this.level <= 2
-            ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2)
-            : this.level === 3
-                ? (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3)
-                : (highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P);
+        if (this.level <= 2) {
+            return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2;
+        }
+        if (this.level === 3) {
+            return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3;
+        }
+        return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P;
     }
 
     private getEmergencyRecoveryUniversalBody() {
         const normalBody = this.GenerateBodys(this.GetRoleBodys('universal'), 'universal');
-        if (normalBody && normalBody.length > 0) {
-            const normalCost = this.CalculateEnergy(normalBody);
-            if (normalCost <= this.energyAvailable) return normalBody;
-        }
-        if (this.energyAvailable >= THRESHOLDS.SPAWN.MIN_ENERGY) {
-            return [...EMERGENCY_RECOVERY_UNIVERSAL_BODY];
-        }
-        return null;
+        if (normalBody?.length && this.CalculateEnergy(normalBody) <= this.energyAvailable) return normalBody;
+        if (this.energyAvailable < THRESHOLDS.SPAWN.MIN_ENERGY) return null;
+        return [...EMERGENCY_RECOVERY_UNIVERSAL_BODY];
     }
 
     private trySpawnEmergencyUniversal(spawn: StructureSpawn, blockedRole = 'recovery', referenceCost = 300) {
@@ -110,14 +132,14 @@ export default class SpawnControl extends Room {
     }
 
     VisualSpawnInfo() {
-        this.spawn.forEach(spawn => {
-            if (!spawn.spawning) return;
-            
+        for (const spawn of this.spawn) {
+            if (!spawn.spawning) continue;
+
             const creepMemory = Memory.creeps[spawn.spawning.name];
             const role = creepMemory?.role;
             if (!isRoleId(role)) {
                 spawn.spawning.cancel();
-                return;
+                continue;
             }
             const code = RoleData[role].code;
             this.visual.text(
@@ -129,8 +151,8 @@ export default class SpawnControl extends Room {
                   stroke: '#ffffff',
                   strokeWidth: 0.05,
                   font: 'bold 0.32 inter' }
-            )
-        })
+            );
+        }
     }
 
     GetSpawnTaskData() {
@@ -145,12 +167,12 @@ export default class SpawnControl extends Room {
             return null;
         }
 
+        const state = getEnergyState(this);
         let usedBudget = false;
         let body: ((BodyPartConstant | number)[])[] | string = data.body;
-        if (typeof body == 'string' && body) {
+        if (typeof body === 'string' && body) {
             body = decompressBodyConfig(body);
-        } else if (!body || !Array.isArray(body) || body.length == 0) {
-            const state = this.memory.energyState || this.updateEnergyState?.(false);
+        } else if (!body || !Array.isArray(body) || body.length === 0) {
             const allowBudgetSpawn =
                 ((state === 'LOW' || state === 'CRITICAL') &&
                 EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
@@ -161,7 +183,7 @@ export default class SpawnControl extends Room {
         }
 
         const bodypart = this.GenerateBodys(body, role);
-        if (!bodypart || bodypart.length == 0) {
+        if (!bodypart?.length) {
             this.deleteMissionFromPool('spawn', task.id);
             return null;
         }
@@ -174,7 +196,7 @@ export default class SpawnControl extends Room {
 
         if (!data.memory.cache) data.memory.cache = {};
 
-        this.updateDowngradedFlag(role, data, cost, usedBudget);
+        updateDowngradedFlag(this, role, data, cost, usedBudget, state);
 
         const name = GenCreepName(data.name || RoleData[role].code);
 
@@ -183,22 +205,15 @@ export default class SpawnControl extends Room {
             name,
             memory: data.memory,
             taskId: task.id,
-            cost
-        }
+            cost,
+        };
     }
 
     SpawnCreep() {
         if (Game.time % 5) return;
         if (this.energyAvailable < 200) return;
 
-        let spawn: StructureSpawn;
-        if (this.level == 8 || this.spawn.length == 1) {
-            spawn = this.spawn.find(s => !s.spawning);
-        } else if (this.spawn.length == CONTROLLER_STRUCTURES['spawn'][this.level]) {
-            spawn = this.spawn.find(s => !s.spawning);
-        } else {
-            spawn = this.spawn.find(s => !s.spawning && s.isActive());
-        }
+        const spawn = getAvailableSpawn(this);
         if (!spawn) return;
 
         const data = this.GetSpawnTaskData();
@@ -216,10 +231,7 @@ export default class SpawnControl extends Room {
         const role = data.memory.role;
         if (!isRoleId(role)) return;
         if (result === OK) {
-            // 成功孵化后更新房间内角色计数
-            const creepNum = this.getCreepNum();
-            creepNum[role] = (creepNum[role] || 0) + 1;
-            this.submitSpawnMission(data.taskId);
+            finishSpawnTask(this, role, data.taskId);
             return;
         }
 
@@ -232,7 +244,7 @@ export default class SpawnControl extends Room {
                 return;
             }
 
-            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            const state = getEnergyState(this);
             if (state === 'LOW' || state === 'CRITICAL') {
                 const config = this.GetRoleBodys(role, false, this.energyAvailable);
                 const bodypart = this.GenerateBodys(config, role);
@@ -243,9 +255,7 @@ export default class SpawnControl extends Room {
                     }
                     const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
                     if (emergencyResult === OK) {
-                        const creepNum = this.getCreepNum();
-                        creepNum[role] = (creepNum[role] || 0) + 1;
-                        this.submitSpawnMission(data.taskId);
+                        finishSpawnTask(this, role, data.taskId);
                         global.log(`房间 ${this.name} 不足以孵化目标体型 ${role}，已按当前能量孵化缩小体型。`);
                         return;
                     }
