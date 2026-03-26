@@ -1,6 +1,6 @@
 import { getRoleHandler } from './action';
 import { ensureMemoryCache } from './function/cacheFunction';
-import { normalizeRoleId, RoleData } from '@/constant/CreepConstant';
+import { RoleData } from '@/constant/CreepConstant';
 
 const creepExecuteErrorTickCache: Record<string, number> = {};
 
@@ -20,9 +20,8 @@ const reportExecuteIssue = (key: string, message: string) => {
 
 export default class CreepExecute extends Creep {
     exec() {
-        const role = normalizeRoleId(this.memory.role);
+        const role = this.memory.role;
         if (!role) return;
-        if (this.memory.role !== role) this.memory.role = role;
         const roledata = RoleData[role];
         if (!roledata) {
             reportExecuteIssue(
@@ -34,7 +33,6 @@ export default class CreepExecute extends Creep {
 
         // 新框架下，角色执行入口统一由 executor 字符串声明。
         // 这里不再区分旧的 work/action 模式，只根据统一 id 获取处理器。
-        // 因此 role 名与 executor 可以不同，例如 reserver -> reserve。
         const executor = roledata.executor;
         if (!executor) {
             // 没有执行器绑定的角色直接跳过：

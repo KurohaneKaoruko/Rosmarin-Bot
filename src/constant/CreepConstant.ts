@@ -7,28 +7,6 @@ type RoleDefinition = {
     boostmap?: Record<string, string>; // boost 配置
 };
 
-// 默认命名约定：role 名与 executor 保持一致。
-// 只有这里登记的角色允许偏离默认约定，用于兼容历史 handler 名称并集中记录例外。
-export const ROLE_EXECUTOR_ID_OVERRIDES = {
-    reserver: 'reserve',
-} as const;
-
-// 旧角色名在过渡期统一归一化到新 id，避免存量 creep 因改名直接失联。
-export const LEGACY_ROLE_ID_ALIASES = {
-    transport: 'transporter',
-    mineral: 'miner',
-} as const;
-
-// 解析角色绑定到的统一执行器 id：
-// 默认直接返回 role 本身；只有登记在 override 表中的角色才会映射到历史 handler 名称。
-export const resolveRoleExecutorId = (role: string): string =>
-    ROLE_EXECUTOR_ID_OVERRIDES[role as keyof typeof ROLE_EXECUTOR_ID_OVERRIDES] || role;
-
-export const normalizeRoleId = (role?: string): string | undefined =>
-    role
-        ? LEGACY_ROLE_ID_ALIASES[role as keyof typeof LEGACY_ROLE_ID_ALIASES] || role
-        : role;
-
 export const RoleData = {
     /* 基本房间运营 */
     harvester: {
@@ -239,8 +217,7 @@ export const RoleData = {
         bodypart: [],
         level: 11,
         code: 'RSV',
-        // reserver 角色使用 reserve 处理器，映射关系由 ROLE_EXECUTOR_ID_OVERRIDES 统一维护。
-        executor: resolveRoleExecutorId('reserver'),
+        executor: 'reserver',
     },
     'out-harvest': {
         bodypart: [],
@@ -648,5 +625,4 @@ export const RoleBodys = {
         }
     }
 }
-
 

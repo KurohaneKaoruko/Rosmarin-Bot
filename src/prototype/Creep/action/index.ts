@@ -19,7 +19,7 @@ import scout from './support/scout';
 import outHarvest from './remote/outmine/out-harvest';
 import outCarry from './remote/outmine/out-carry';
 import outBuild from './remote/outmine/out-build';
-import reserve from './remote/outmine/reserve';
+import reserver from './remote/outmine/reserver';
 import { outAttack, outDefend, outInvader, outRanged } from './remote/outmine/out-combat';
 import outMineral from './remote/outmine/out-mineral';
 import { out2Attack, out2Heal } from './remote/outmine/out-duo';
@@ -78,7 +78,7 @@ export const roleRegistry: Record<string, CreepRoleHandler> = {
     'power-carry': powerCarry,
     'power-heal': powerHeal,
     'power-ranged': powerRanged,
-    'reserve': reserve,
+    'reserver': reserver,
     'aio': aio,
     'double-attack': doubleAttack,
     'double-dismantle': doubleDismantle,

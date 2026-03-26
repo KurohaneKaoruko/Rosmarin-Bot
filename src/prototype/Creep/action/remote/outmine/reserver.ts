@@ -67,7 +67,7 @@ const onSource = (): WorkEvent => {
 /**
  * 外矿 reserver 角色入口。
  */
-const Reserve = {
+const reserverRole = {
     /**
      * 执行 reserver 的 WorkLayer 状态机。
      *
@@ -81,4 +81,4 @@ const Reserve = {
     }
 };
 
-export default Reserve;
+export default reserverRole;

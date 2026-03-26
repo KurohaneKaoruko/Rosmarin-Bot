@@ -1,4 +1,4 @@
-import { normalizeRoleId, RoleData } from '@/constant/CreepConstant';
+import { RoleData } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/shared/compress';
@@ -91,13 +91,12 @@ export default class SpawnControl extends Room {
             if (!spawn.spawning) return;
             
             const creepMemory = Memory.creeps[spawn.spawning.name];
-            const role = normalizeRoleId(creepMemory?.role);
-            if (!role) {
+            const role = creepMemory?.role;
+            if (!role || !RoleData[role]) {
                 spawn.spawning.cancel();
                 return;
             }
-            if (creepMemory && creepMemory.role !== role) creepMemory.role = role;
-            const code = RoleData[role]?.code;
+            const code = RoleData[role].code;
             this.visual.text(
                 `${code} 🕒${spawn.spawning.remainingTime}`,
                 spawn.pos.x,
@@ -116,13 +115,12 @@ export default class SpawnControl extends Room {
         if (!task) return;
 
         const data = task.data as SpawnTask;
-        let role = normalizeRoleId(data.memory.role);
+        let role = data.memory.role;
 
-        if (!role) {
+        if (!role || !RoleData[role]) {
             this.deleteMissionFromPool('spawn', task.id);
             return null;
         }
-        if (data.memory.role !== role) data.memory.role = role;
 
         let usedBudget = false;
         let body: ((BodyPartConstant | number)[])[] | string = data.body;
@@ -205,9 +203,8 @@ export default class SpawnControl extends Room {
         }
 
         const result = spawn.spawnCreep(data.bodypart, data.name, {memory: data.memory})
-        let role = normalizeRoleId(data.memory.role) || data.memory.role;
-        if (!role) return;
-        if (data.memory.role !== role) data.memory.role = role;
+        let role = data.memory.role;
+        if (!role || !RoleData[role]) return;
         if (result == OK) {
             // 成功孵化后更新房间内角色计数
             const creepNum = this.getCreepNum();
