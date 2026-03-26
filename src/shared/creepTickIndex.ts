@@ -1,4 +1,4 @@
-import { RoleData } from '@/constant/CreepConstant'
+import { isRoleId } from '@/constant/CreepConstant'
 
 type TargetRoomCreepInfo = {
     ticksToLive: number | undefined
@@ -44,7 +44,7 @@ function buildCache(): CreepTickIndexCache {
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName]
         const role = creep.memory.role
-        if (!role || !RoleData[role]) continue
+        if (!isRoleId(role)) continue
 
         allRoleCounts[role] = (allRoleCounts[role] || 0) + 1
 

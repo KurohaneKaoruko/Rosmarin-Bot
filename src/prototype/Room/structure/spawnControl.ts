@@ -1,4 +1,4 @@
-import { RoleData } from '@/constant/CreepConstant';
+import { isRoleId, RoleData, type RoleId } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/shared/compress';
@@ -13,9 +13,32 @@ const getRoomMode = (room: Room) => {
 // worker 的预算体型单独由“存在建造需求”控制。
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
 const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
+const DOWNGRADED_LOGISTICS_ROLE_SET = new Set<RoleId>(['transporter', 'carrier', 'manager']);
 
 
 export default class SpawnControl extends Room {
+    private getFullRoleBodyCost(role: RoleId, upbody?: boolean) {
+        const fullConfig = this.GetRoleBodys(role, upbody, undefined);
+        const fullBody = this.GenerateBodys(fullConfig, role);
+        return fullBody?.length ? this.CalculateEnergy(fullBody) : null;
+    }
+
+    private updateDowngradedFlag(role: RoleId, taskData: SpawnTask, cost: number, usedBudget: boolean) {
+        if (!DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) return;
+
+        const state = this.memory.energyState || this.updateEnergyState?.(false);
+        const fullCost = this.getFullRoleBodyCost(role, taskData.upbody) ?? cost;
+
+        if (usedBudget && (state === 'LOW' || state === 'CRITICAL')) {
+            if (cost < fullCost) taskData.memory.downgraded = true;
+            return;
+        }
+
+        if (state === 'NORMAL' || state === 'SURPLUS') {
+            if (cost >= fullCost) delete (taskData.memory as any).downgraded;
+        }
+    }
+
     private getEmergencyUniversalCap() {
         const mode = getRoomMode(this);
         const highMode = mode === 'high' || mode === 'rush';
@@ -92,7 +115,7 @@ export default class SpawnControl extends Room {
             
             const creepMemory = Memory.creeps[spawn.spawning.name];
             const role = creepMemory?.role;
-            if (!role || !RoleData[role]) {
+            if (!isRoleId(role)) {
                 spawn.spawning.cancel();
                 return;
             }
@@ -115,9 +138,9 @@ export default class SpawnControl extends Room {
         if (!task) return;
 
         const data = task.data as SpawnTask;
-        let role = data.memory.role;
+        const role = data.memory.role;
 
-        if (!role || !RoleData[role]) {
+        if (!isRoleId(role)) {
             this.deleteMissionFromPool('spawn', task.id);
             return null;
         }
@@ -151,22 +174,9 @@ export default class SpawnControl extends Room {
 
         if (!data.memory.cache) data.memory.cache = {};
 
-        if (role === 'transporter' || role === 'carrier' || role === 'manager') {
-            const state = this.memory.energyState || this.updateEnergyState?.(false);
-            if (usedBudget && (state === 'LOW' || state === 'CRITICAL')) {
-                const fullConfig = this.GetRoleBodys(role, data.upbody, undefined);
-                const fullBody = this.GenerateBodys(fullConfig, role);
-                const fullCost = fullBody?.length ? this.CalculateEnergy(fullBody) : cost;
-                if (cost < fullCost) data.memory.downgraded = true;
-            } else if (state === 'NORMAL' || state === 'SURPLUS') {
-                const fullConfig = this.GetRoleBodys(role, data.upbody, undefined);
-                const fullBody = this.GenerateBodys(fullConfig, role);
-                const fullCost = fullBody?.length ? this.CalculateEnergy(fullBody) : cost;
-                if (cost >= fullCost) delete (data.memory as any).downgraded;
-            }
-        }
+        this.updateDowngradedFlag(role, data, cost, usedBudget);
 
-        let name = GenCreepName(data.name||RoleData[role].code);
+        const name = GenCreepName(data.name || RoleData[role].code);
 
         return {
             bodypart,
@@ -202,10 +212,10 @@ export default class SpawnControl extends Room {
             return;
         }
 
-        const result = spawn.spawnCreep(data.bodypart, data.name, {memory: data.memory})
-        let role = data.memory.role;
-        if (!role || !RoleData[role]) return;
-        if (result == OK) {
+        const result = spawn.spawnCreep(data.bodypart, data.name, { memory: data.memory });
+        const role = data.memory.role;
+        if (!isRoleId(role)) return;
+        if (result === OK) {
             // 成功孵化后更新房间内角色计数
             const creepNum = this.getCreepNum();
             creepNum[role] = (creepNum[role] || 0) + 1;
@@ -228,7 +238,7 @@ export default class SpawnControl extends Room {
                 const bodypart = this.GenerateBodys(config, role);
                 const cost = this.CalculateEnergy(bodypart);
                 if (bodypart.length > 0 && cost > 0 && cost <= this.energyAvailable) {
-                    if (role === 'transporter' || role === 'carrier' || role === 'manager') {
+                    if (DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) {
                         data.memory.downgraded = true;
                     }
                     const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });

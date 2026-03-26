@@ -2,7 +2,7 @@ import { compress, decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getLayoutData, getStructData } from '@/shared/memory';
 import { Goods } from '@/constant/ResourceConstant';
-import { RoleData } from '@/constant/CreepConstant';
+import { isRoleId, type RoleId } from '@/constant/CreepConstant';
 import { getMyConstructionSites, pruneDelayedUpgraderSpawnMissions } from '../updaters/spawnMission';
 
 const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
@@ -15,10 +15,15 @@ export default class MissionGet extends Room {
         return compress(creep.pos.x, creep.pos.y);
     }
 
+    private getSpawnTaskRole(taskData?: SpawnTask): RoleId | null {
+        const role = taskData?.memory?.role;
+        return isRoleId(role) ? role : null;
+    }
+
     private getSpawnTaskRequiredEnergy(task: Task, energyAvailable: number): number | null {
         const data = task.data as SpawnTask;
-        const role = data?.memory?.role;
-        if (!role || !RoleData[role]) return null;
+        const role = this.getSpawnTaskRole(data);
+        if (!role) return null;
 
         let body = data.body as ((BodyPartConstant | number)[])[] | string;
         const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
@@ -388,8 +393,8 @@ export default class MissionGet extends Room {
         const spawnMissionNum: Record<string, number> = {};
         for (const task of tasks) {
             const data = task.data as SpawnTask;
-            const role = data?.memory?.role;
-            if (!role || !RoleData[role]) continue;
+            const role = this.getSpawnTaskRole(data);
+            if (!role) continue;
             spawnMissionNum[role] = (spawnMissionNum[role] || 0) + 1;
         }
 
@@ -404,8 +409,8 @@ export default class MissionGet extends Room {
         let num = 0;
         for(const task of tasks) {
             const data = task.data as SpawnTask;
-            const role = data.memory.role;
-            if (!role || !RoleData[role]) continue;
+            const role = this.getSpawnTaskRole(data);
+            if (!role) continue;
             if(roles.includes(role)) num++;
         }
         return num;

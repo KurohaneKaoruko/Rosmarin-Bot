@@ -351,6 +351,11 @@ export const RoleData = {
     },
 } satisfies Record<string, RoleDefinition>;
 
+export type RoleId = keyof typeof RoleData;
+
+export const isRoleId = (role?: string): role is RoleId =>
+    !!role && role in RoleData;
+
 // 根据等级的动态部件
 export const RoleLevelData = {
     'harvester': {
@@ -625,4 +630,3 @@ export const RoleBodys = {
         }
     }
 }
-
