@@ -612,3 +612,36 @@ export default class TransportMission extends Room {
         });
     }
 }
+
+const getTransportTaskPosInfo = (creep: Creep) =>
+    compress(creep.pos.x, creep.pos.y);
+
+export class TransportTaskGetter extends Room {
+    /**
+     * transport 任务在取出前再做一次校验。
+     * 这样能及时清理 source/target 已失效的陈旧任务，避免 creep 卡在递归重试里。
+     */
+    private isTransportTaskValid(task: Task) {
+        const data = task.data as TransportTask;
+        const source = Game.getObjectById(data.source);
+        const target = Game.getObjectById(data.target);
+        if (!source || !target || !data.resourceType || !data.amount) return false;
+        if ((source as any).store[data.resourceType] <= 0) return false;
+        return (target as any).store.getFreeCapacity(data.resourceType) > 0;
+    }
+
+    getTransportMission(creep: Creep) {
+        const posInfo = getTransportTaskPosInfo(creep);
+        while (true) {
+            const task = this.getMissionFromPool('transport', posInfo, (transportTask) => transportTask.type === 'transport');
+            if (!task) return null;
+            if (!this.isTransportTaskValid(task)) {
+                this.deleteMissionFromPool('transport', task.id);
+                continue;
+            }
+
+            this.lockMissionInPool('transport', task.id, creep.id);
+            return task;
+        }
+    }
+}

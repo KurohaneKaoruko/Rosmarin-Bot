@@ -1,6 +1,7 @@
 import { LabMap, Goods, BarList } from "@/constant/ResourceConstant";
 import { BASE_CONFIG } from "@/constant/config";
 import { getStructData } from "@/shared/memory";
+import { THRESHOLDS } from "@/constant/Thresholds";
 
 const MANAGE_BALANCE = {
     // 自动调度资源阈值
@@ -357,5 +358,48 @@ export default class ManageMission extends Room {
             resourceType: normalizedResourceType,
             amount: nextAmount,
         } as SendTask);
+    }
+}
+
+const getSendMinBatch = (resourceType: ResourceConstant) => {
+    if (resourceType === RESOURCE_ENERGY) return THRESHOLDS.ENERGY.SEND_BATCH_ENERGY;
+    return Goods.includes(resourceType as any) ? 10 : THRESHOLDS.ENERGY.SEND_BATCH_MINERAL;
+};
+
+const getRoomSendAmount = (room: Room, resourceType: ResourceConstant) =>
+    (room.terminal?.store[resourceType] || 0) + (room.storage?.store[resourceType] || 0);
+
+const canDispatchSendTask = (terminal: StructureTerminal | undefined, task: Task) => {
+    if (!terminal || task.type !== 'send') return false;
+    const data = task.data as SendTask;
+    const minBatch = Math.min(data.amount, getSendMinBatch(data.resourceType));
+    return (terminal.store[data.resourceType] || 0) >= minBatch;
+};
+
+const hasEnoughResourceForSendTask = (room: Room, task: Task) => {
+    if (task.type !== 'send') return false;
+    const data = task.data as SendTask;
+    const requiredAmount = Math.min(data.amount, THRESHOLDS.ENERGY.SEND_REQUEST_MIN);
+    return getRoomSendAmount(room, data.resourceType) >= requiredAmount;
+};
+
+export class ManageTaskGetter extends Room {
+    // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个最小批量。
+    getSendMission() {
+        return this.getMissionFromPoolFirst('terminal', (task) => canDispatchSendTask(this.terminal, task));
+    }
+
+    getSendMissionTotalAmount() {
+        const sends: Record<string, number> = {};
+        const tasks = this.getAllMissionFromPool('terminal').filter((task) => task.type === 'send');
+        for (const task of tasks) {
+            const data = task.data as SendTask;
+            if (!hasEnoughResourceForSendTask(this, task)) {
+                this.deleteMissionFromPool('terminal', task.id);
+                continue;
+            }
+            sends[data.resourceType] = data.amount + (sends[data.resourceType] || 0);
+        }
+        return sends;
     }
 }

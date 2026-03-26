@@ -1,8 +1,7 @@
-import TransportMission from "./transportMission";
 import { getLabAB, ensureBoostLabs } from '@/shared/labReservations';
 import { getStructData, getTeamData } from '@/shared/memory';
 
-export default class BoostMission extends TransportMission {
+export default class BoostMission extends Room {
     /**
      * 更新 Boost 任务池
      * @description

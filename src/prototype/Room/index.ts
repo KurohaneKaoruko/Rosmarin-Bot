@@ -21,15 +21,13 @@ import AutoPowerSpawn from "./feature/autoPowerSpawn"
 
 import Mission from "./mission"
 import MissionPools from "./mission/pool/MissionPools"
-import MissionGet from "./mission/pool/MissionGet"
 import MissionSubmit from "./mission/pool/MissionSubmit"
-
-import SpawnMission from "./mission/updaters/spawnMission"
-import ManageMission from "./mission/updaters/manageMission"
-import WorkMission from "./mission/updaters/workMission"
+import SpawnMission, { SpawnTaskGetter } from "./mission/updaters/spawnMission"
+import ManageMission, { ManageTaskGetter } from "./mission/updaters/manageMission"
+import WorkMission, { WorkTaskGetter } from "./mission/updaters/workMission"
 import MineMission from "./mission/updaters/mineMission"
 import BoostMission from "./mission/updaters/boostMission"
-import TransportMission from "./mission/updaters/transportMission"
+import TransportMission, { TransportTaskGetter } from "./mission/updaters/transportMission"
 
 import RoomExecute from "./execute"
 
@@ -57,7 +55,10 @@ const plugins = [
     
     Mission,        // 任务模块
     MissionPools,   // 任务池
-    MissionGet,     // 获取任务
+    TransportTaskGetter, // 获取 transport 任务
+    WorkTaskGetter, // 获取 build/repair/wall 任务
+    ManageTaskGetter, // 获取 terminal 任务
+    SpawnTaskGetter, // 获取孵化任务
     MissionSubmit,  // 提交任务
     SpawnMission,   // 孵化任务
     ManageMission,  // 管理任务

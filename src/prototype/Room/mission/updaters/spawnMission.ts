@@ -1,4 +1,4 @@
-import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
+import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/CreepConstant';
 import { decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
@@ -710,5 +710,175 @@ export default class SpawnMission extends Room {
             this.addMissionToPool('spawn', 'spawn', level, { name, body, memory, energy, upbody: !!upbody });
         }
         return OK;
+    }
+}
+
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
+
+const getSpawnTaskRole = (taskData?: SpawnTask): RoleId | null => {
+    const role = taskData?.memory?.role;
+    return isRoleId(role) ? role : null;
+};
+
+type SpawnMissionSelection = {
+    highestPriority: number;
+    firstAffordableAtHighestPriority: Task | null;
+    cheapestBlockedAtHighestPriority: Task | null;
+    cheapestBlockedEnergy: number;
+    bestAffordableOverall: Task | null;
+    bestAffordableOverallLevel: number;
+};
+
+const createSpawnMissionSelection = (): SpawnMissionSelection => ({
+    highestPriority: Infinity,
+    firstAffordableAtHighestPriority: null,
+    cheapestBlockedAtHighestPriority: null,
+    cheapestBlockedEnergy: Infinity,
+    bestAffordableOverall: null,
+    bestAffordableOverallLevel: Infinity,
+});
+
+const updateSpawnMissionSelection = (
+    selection: SpawnMissionSelection,
+    task: Task,
+    requiredEnergy: number,
+    availableEnergy: number
+) => {
+    const affordable = requiredEnergy <= availableEnergy;
+
+    if (affordable && task.level < selection.bestAffordableOverallLevel) {
+        selection.bestAffordableOverall = task;
+        selection.bestAffordableOverallLevel = task.level;
+    }
+
+    if (task.level < selection.highestPriority) {
+        selection.highestPriority = task.level;
+        selection.firstAffordableAtHighestPriority = affordable ? task : null;
+        selection.cheapestBlockedAtHighestPriority = affordable ? null : task;
+        selection.cheapestBlockedEnergy = affordable ? Infinity : requiredEnergy;
+        return;
+    }
+
+    if (task.level > selection.highestPriority) return;
+
+    if (affordable) {
+        selection.firstAffordableAtHighestPriority ??= task;
+        return;
+    }
+
+    if (requiredEnergy < selection.cheapestBlockedEnergy) {
+        selection.cheapestBlockedAtHighestPriority = task;
+        selection.cheapestBlockedEnergy = requiredEnergy;
+    }
+};
+
+const pickSpawnMission = (
+    selection: SpawnMissionSelection,
+    allowWaitForPriorityEnergy: boolean,
+    queueJumpAllowBelowLevel: number
+) => {
+    if (selection.highestPriority === Infinity) return null;
+
+    if (!allowWaitForPriorityEnergy) {
+        return selection.bestAffordableOverall || selection.cheapestBlockedAtHighestPriority;
+    }
+
+    if (selection.firstAffordableAtHighestPriority) {
+        return selection.firstAffordableAtHighestPriority;
+    }
+
+    if (
+        selection.bestAffordableOverall &&
+        selection.bestAffordableOverallLevel < queueJumpAllowBelowLevel
+    ) {
+        return selection.bestAffordableOverall;
+    }
+
+    return selection.cheapestBlockedAtHighestPriority;
+};
+
+export class SpawnTaskGetter extends Room {
+    private getSpawnTaskRequiredEnergy(task: Task, energyAvailable: number): number | null {
+        const data = task.data as SpawnTask;
+        const role = getSpawnTaskRole(data);
+        if (!role) return null;
+
+        let body = data.body as ((BodyPartConstant | number)[])[] | string;
+        const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
+        let requiredEnergy = Number(data.energy || 0);
+
+        // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
+        if (!hasFixedBody) {
+            const state = this.memory.energyState || this.updateEnergyState?.(false);
+            const allowBudgetSpawn =
+                ((state === 'LOW' || state === 'CRITICAL') &&
+                EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
+                (role === 'worker' && getMyConstructionSites(this).length > 0);
+            const budget = allowBudgetSpawn ? energyAvailable : undefined;
+            body = this.GetRoleBodys(role, data.upbody, budget);
+            const bodypart = this.GenerateBodys(body as any[], role);
+            requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
+        } else if (requiredEnergy <= 0) {
+            const normalized = typeof body === 'string' ? decompressBodyConfig(body) : body;
+            const bodypart = this.GenerateBodys(normalized as any[], role);
+            requiredEnergy = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : Infinity;
+            data.energy = requiredEnergy;
+        }
+
+        return Number.isFinite(requiredEnergy) && requiredEnergy > 0 ? requiredEnergy : null;
+    }
+
+    getSpawnMission() {
+        pruneDelayedUpgraderSpawnMissions(this);
+        const availableEnergy = this.energyAvailable || 0;
+        const allowWaitForPriorityEnergy = THRESHOLDS.SPAWN.ALLOW_WAIT_FOR_PRIORITY_ENERGY;
+        const queueJumpAllowBelowLevel = THRESHOLDS.SPAWN.WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL;
+        const tasks = this.getAllMissionFromPool('spawn');
+        const selection = createSpawnMissionSelection();
+
+        for (const task of tasks) {
+            if (!task || task.lock) continue;
+
+            const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
+            if (requiredEnergy == null) continue;
+
+            updateSpawnMissionSelection(selection, task, requiredEnergy, availableEnergy);
+        }
+
+        // 严格尊重优先级：只有最高优先级层没有能孵化的任务时，才等待该层；
+        // 少数例外（例如停摆恢复 universal）仍由 SpawnControl 层处理。
+        return pickSpawnMission(selection, allowWaitForPriorityEnergy, queueJumpAllowBelowLevel);
+    }
+
+    getSpawnMissionNum() {
+        const roomAny = this as any;
+        if (roomAny._spawnMissionNumCacheTick === Game.time) {
+            return roomAny._spawnMissionNumCache || {};
+        }
+
+        const tasks = this.getAllMissionFromPool('spawn');
+        const spawnMissionNum: Record<string, number> = {};
+        for (const task of tasks) {
+            const data = task.data as SpawnTask;
+            const role = getSpawnTaskRole(data);
+            if (!role) continue;
+            spawnMissionNum[role] = (spawnMissionNum[role] || 0) + 1;
+        }
+
+        roomAny._spawnMissionNumCache = spawnMissionNum;
+        roomAny._spawnMissionNumCacheTick = Game.time;
+        return spawnMissionNum;
+    }
+
+    getSpawnMissionTotalByRoles(roles: string[]) {
+        const tasks = this.getAllMissionFromPool('spawn');
+        let num = 0;
+        for (const task of tasks) {
+            const data = task.data as SpawnTask;
+            const role = getSpawnTaskRole(data);
+            if (!role) continue;
+            if (roles.includes(role)) num++;
+        }
+        return num;
     }
 }
