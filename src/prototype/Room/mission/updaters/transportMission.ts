@@ -518,6 +518,35 @@ export default class TransportMission extends Room {
         return false;
     }
 
+    private moveLabMineralToStorage(lab: StructureLab, storage: StructureStorage, resourceType = lab.mineralType) {
+        if (!resourceType) return;
+        const amount = lab.store[resourceType] || 0;
+        if (amount <= 0) return;
+        this.queueTransportTransfer(this.TransportLevel('lab'), lab, storage, resourceType, amount);
+    }
+
+    private fillReactionInputLab(
+        lab: StructureLab,
+        resourceType: ResourceConstant,
+        storage: StructureStorage,
+        terminal?: StructureTerminal,
+    ) {
+        const freeCapacity = lab.store.getFreeCapacity(resourceType) || 0;
+        if (freeCapacity < TransportMission.LAB_TRIGGER_AMOUNT) return;
+        if (this.getResAmount(resourceType) < TransportMission.LAB_TRIGGER_AMOUNT) return;
+
+        const source = [storage, terminal].find((store) => store && store.store[resourceType] > 0);
+        if (!source) return;
+
+        this.queueTransportTransfer(
+            this.TransportLevel('lab'),
+            source,
+            lab,
+            resourceType,
+            Math.min(freeCapacity, source.store[resourceType]),
+        );
+    }
+
     /**
      * Lab 合成相关搬运
      * @description
@@ -525,91 +554,55 @@ export default class TransportMission extends Room {
      * - 合成开启时：保持 A/B 原料正确，普通 lab 只保留产物并在容量不足时搬出
      */
     UpdateLabMission(offset = 0) {
-        const room = this;
-        const storage = room.storage;
-        const terminal = room.terminal;
+        void offset;
+        const storage = this.storage;
+        const terminal = this.terminal;
         if (!storage) return;
-        if (!room.lab || room.lab.length === 0) return;
+        if (!this.lab || this.lab.length === 0) return;
 
-        const BotMemStructures = getStructData(room.name);
+        const structMem = getStructData(this.name);
 
-        const { labA, labB, labAId, labBId } = getLabAB(room.name, room);
-        const labAtype = BotMemStructures.labAtype;
-        const labBtype = BotMemStructures.labBtype;
+        const { labA, labB, labAId, labBId } = getLabAB(this.name, this);
+        const labAtype = structMem.labAtype;
+        const labBtype = structMem.labBtype;
 
-        const isShutDown = !BotMemStructures.lab || !labA || !labB || !labAtype || !labBtype;
-        const hasBoostTasks = (this.getAllMissionFromPool('boost') as any[])?.length > 0;
+        const isShutDown = !structMem.lab || !labA || !labB || !labAtype || !labBtype;
+        const hasBoostTasks = ((this.getAllMissionFromPool('boost') as Task[]) || []).length > 0;
+        const reactionProduct = isShutDown ? null : REACTIONS[labAtype][labBtype];
 
-        room.lab.forEach(lab => {
+        for (const lab of this.lab) {
             if (isShutDown) {
-                //合成结束后需要回收 A/B 底物；且房间无 boost 任务时，所有 lab 都应搬空避免残留底物。
-                if (hasBoostTasks && this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
-                if (!lab.store[lab.mineralType] || lab.store[lab.mineralType] === 0) return;
-                
-                this.addTransportMission(this.TransportLevel('lab'), {
-                    pos: lab,
-                    source: lab.id,
-                    target: storage.id,
-                    resourceType: lab.mineralType,
-                    amount: lab.store[lab.mineralType],
-                });
-                return;
+                // 合成结束后需要回收 A/B 底物；且房间无 boost 任务时，所有 lab 都应搬空避免残留底物。
+                if (hasBoostTasks && this.isSpecialLab(lab.id, labAId, labBId, structMem)) continue;
+                this.moveLabMineralToStorage(lab, storage);
+                continue;
             }
 
-            if ((labAId && lab.id === labAId) || (labBId && lab.id === labBId)) {
-                const type = (labAId && lab.id === labAId) ? labAtype : labBtype;
-                
+            const isLabA = !!labAId && lab.id === labAId;
+            const isLabB = !!labBId && lab.id === labBId;
+            if (isLabA || isLabB) {
+                const type = isLabA ? labAtype : labBtype;
                 if (lab.mineralType && lab.mineralType !== type && lab.store[lab.mineralType] > 0) {
-                    this.addTransportMission(this.TransportLevel('lab'), {
-                        pos: lab,
-                        source: lab.id,
-                        target: storage.id,
-                        resourceType: lab.mineralType,
-                        amount: lab.store[lab.mineralType],
-                    });
-                    return;
+                    this.moveLabMineralToStorage(lab, storage);
+                    continue;
                 }
 
-                if (lab.store.getFreeCapacity(type) >= TransportMission.LAB_TRIGGER_AMOUNT && room.getResAmount(type) >= TransportMission.LAB_TRIGGER_AMOUNT) {
-                    const target = [storage, terminal].find(t => t && t.store[type] > 0);
-                    if (target) {
-                        this.addTransportMission(this.TransportLevel('lab'), {
-                            pos: lab,
-                            source: target.id,
-                            target: lab.id,
-                            resourceType: type,
-                            amount: Math.min(lab.store.getFreeCapacity(type), target.store[type]),
-                        } as any);
-                    }
-                }
-                return;
+                this.fillReactionInputLab(lab, type, storage, terminal);
+                continue;
             }
 
-            if (this.isSpecialLab(lab.id, labAId, labBId, BotMemStructures)) return;
+            if (this.isSpecialLab(lab.id, labAId, labBId, structMem)) continue;
+            if (!reactionProduct) continue;
 
-            const reactionProduct = REACTIONS[labAtype][labBtype];
-            
             if (lab.mineralType && lab.mineralType !== reactionProduct && lab.store[lab.mineralType] > 0) {
-                this.addTransportMission(this.TransportLevel('lab'), {
-                    pos: lab,
-                    source: lab.id,
-                    target: storage.id,
-                    resourceType: lab.mineralType,
-                    amount: lab.store[lab.mineralType],
-                });
-                return;
+                this.moveLabMineralToStorage(lab, storage);
+                continue;
             }
 
             if (lab.mineralType === reactionProduct && lab.store.getFreeCapacity(reactionProduct) < TransportMission.LAB_MIN_CAPACITY) {
-                this.addTransportMission(this.TransportLevel('lab'), {
-                    pos: lab,
-                    source: lab.id,
-                    target: storage.id,
-                    resourceType: reactionProduct,
-                    amount: lab.store[reactionProduct],
-                });
+                this.moveLabMineralToStorage(lab, storage, reactionProduct);
             }
-        });
+        }
     }
 }
 

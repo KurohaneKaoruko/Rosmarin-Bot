@@ -1,5 +1,12 @@
-import { getLabAB, ensureBoostLabs } from '@/shared/labReservations';
+import { getLabAB, ensureBoostLabs, type BoostLabsMemory } from '@/shared/labReservations';
 import { getStructData, getTeamData } from '@/shared/memory';
+
+const BOOST_LAB_CAPACITY = 3000;
+const BOOST_LAB_ENERGY_TARGET = 2000;
+const BOOST_OWNER_TIMEOUT = 3000;
+
+type BoostDemandMap = Partial<Record<ResourceConstant, number>>;
+type BoostOwnerInfo = BoostTask['owners'][string];
 
 export default class BoostMission extends Room {
     /**
@@ -10,94 +17,123 @@ export default class BoostMission extends Room {
      * 3. 生成 Transport 任务 (清理/填充)
      * 4. 回收不再需要的 Boost 资源
      */
-    UpdateBoostMission(offset = 0) {
+    UpdateBoostMission(_offset = 0) {
         // 1. 清理无效预定
         this.cleanInvalidBoostTasks();
 
-        const botmem = getStructData(this.name);
-        const { labAId, labBId } = getLabAB(this.name, this);
         if (!this.lab || this.lab.length === 0) return;
+
         // boostLabs：单表预留（task=任务临时征用，fixed=长期固定配置），并在这里完成旧字段迁移
         const boostLabs = ensureBoostLabs(this.name);
+        const forbiddenLabIds = this.getForbiddenBoostLabIds();
+
+        // 2. 获取当前活跃的 Boost 任务
+        const activeTasks = (this.getAllMissionFromPool('boost') as Task[]) || [];
+
+        if (activeTasks.length === 0) {
+            // 没有 boost 任务时：只清理 task 征用；fixed 仍要持续补能量/补矿以保证随时可用
+            this.clearAllBoostData();
+            for (const labId in boostLabs) {
+                const entry = boostLabs[labId];
+                if (!entry || entry.mode !== 'fixed' || forbiddenLabIds.has(labId)) continue;
+                this.manageBoostLab(Game.getObjectById(labId as Id<StructureLab>), entry.mineral, BOOST_LAB_CAPACITY);
+            }
+            return;
+        }
+
+        // 3. 收集需求与当前分配状态
+        const neededMineralsMap: BoostDemandMap = {};
+        for (const task of activeTasks) {
+            const data = task.data as BoostTask;
+            if (data.totalAmount <= 0) continue;
+            neededMineralsMap[data.mineral] = (neededMineralsMap[data.mineral] || 0) + data.totalAmount;
+        }
+
+        const neededMinerals = new Set(Object.keys(neededMineralsMap) as ResourceConstant[]);
+        // 本轮确认被占用的 Lab
+        const assignedLabs = new Set<string>();
+
+        for (const labId in boostLabs) {
+            const entry = boostLabs[labId];
+            if (!entry) continue;
+
+            if (forbiddenLabIds.has(labId)) {
+                if (entry.mode === 'task') delete boostLabs[labId];
+                continue;
+            }
+
+            const mineral = entry.mineral;
+            if (!mineral) {
+                delete boostLabs[labId];
+                continue;
+            }
+
+            if (entry.mode === 'fixed') {
+                assignedLabs.add(labId);
+                this.manageBoostLab(Game.getObjectById(labId as Id<StructureLab>), mineral, BOOST_LAB_CAPACITY);
+                continue;
+            }
+
+            if (neededMinerals.has(mineral)) {
+                assignedLabs.add(labId);
+                this.manageBoostLab(Game.getObjectById(labId as Id<StructureLab>), mineral, neededMineralsMap[mineral] || 0);
+                neededMinerals.delete(mineral);
+                continue;
+            }
+
+            delete boostLabs[labId];
+        }
+
+        // 5. 为剩余的新需求分配 Lab
+        const availableLabs = this.lab.filter((lab) => !forbiddenLabIds.has(lab.id));
+        for (const mineral of neededMinerals) {
+            // 寻找最佳 Lab（排除已分配的）
+            const targetLab = this.findBestLabForBoost(availableLabs, assignedLabs, mineral);
+            if (!targetLab) continue;
+
+            // 标记征用，并立即驱动搬运
+            boostLabs[targetLab.id] = { mineral, mode: 'task' };
+            assignedLabs.add(targetLab.id);
+            this.manageBoostLab(targetLab, mineral, neededMineralsMap[mineral] || 0);
+        }
+    }
+
+    // ==================== Update Helpers ====================
+
+    private getForbiddenBoostLabIds(): Set<string> {
+        const botmem = getStructData(this.name);
+        const { labAId, labBId } = getLabAB(this.name, this);
         const reactionActive = !!botmem?.lab && !!labAId && !!labBId && !!botmem?.labAtype && !!botmem?.labBtype;
         const forbiddenLabIds = new Set<string>();
         if (reactionActive) {
             forbiddenLabIds.add(labAId as string);
             forbiddenLabIds.add(labBId as string);
         }
+        return forbiddenLabIds;
+    }
 
-        // 2. 获取当前活跃的 Boost 任务
-        const activeTasks = this.getAllMissionFromPool('boost') as Task[];
-        if (!activeTasks || activeTasks.length === 0) {
-            // 没有 boost 任务时：只清理 task 征用；fixed 仍要持续补能量/补矿以保证随时可用
-            this.clearAllBoostData();
-            for (const labId in boostLabs) {
-                const entry = boostLabs[labId];
-                if (!entry || entry.mode !== 'fixed') continue;
-                if (forbiddenLabIds.has(labId)) continue;
-                this.manageBoostLab(Game.getObjectById(labId), entry.mineral, 3000);
-            }
-            return;
-        }
+    // ==================== Transport Helpers ====================
 
-        // 3. 收集需求与当前分配状态
-        const neededMineralsMap: Record<string, number> = {};
-        for (const task of activeTasks) {
-            const data = task.data as BoostTask;
-            if (data.totalAmount > 0) {
-                neededMineralsMap[data.mineral] = (neededMineralsMap[data.mineral] || 0) + data.totalAmount;
-            }
-        }
-        const neededMinerals = Object.keys(neededMineralsMap) as ResourceConstant[];
-        const assignedLabs = new Set<string>(); // 本轮确认被占用的 Lab
+    private addBoostTransportMissionIfAbsent(task: TransportTask, match: Partial<TransportTask>) {
+        // 检查是否已有相同的搬运任务
+        if (this.checkSameMissionInPool('transport', 'transport', match as any)) return;
+        this.addTransportMission(this.TransportLevel('boost'), task);
+    }
 
-        for (const labId in boostLabs) {
-            const entry = boostLabs[labId];
-            if (!entry) continue;
-            if (forbiddenLabIds.has(labId)) {
-                if (entry.mode === 'task') delete boostLabs[labId];
-                continue;
-            }
-            const mineral = entry.mineral;
-            if (!mineral) {
-                delete boostLabs[labId];
-                continue;
-            }
-            if (entry.mode === 'fixed') {
-                assignedLabs.add(labId);
-                this.manageBoostLab(Game.getObjectById(labId), mineral, 3000);
-                continue;
-            }
-            if (neededMinerals.includes(mineral)) {
-                assignedLabs.add(labId);
-                this.manageBoostLab(Game.getObjectById(labId), mineral, neededMineralsMap[mineral]);
+    private cleanupBoostLab(lab: StructureLab) {
+        const mineral = lab.mineralType;
+        if (!mineral || lab.store[mineral] <= 0 || !this.storage) return;
 
-                const index = neededMinerals.indexOf(mineral);
-                if (index > -1) neededMinerals.splice(index, 1);
-            } else {
-                delete boostLabs[labId];
-            }
-        }
-
-        // 5. 为剩余的新需求分配 Lab
-        if (neededMinerals.length > 0) {
-            const availableLabs = reactionActive
-                ? this.lab.filter(lab => lab.id !== labAId && lab.id !== labBId)
-                : this.lab;
-
-            for (const mineral of neededMinerals) {
-                // 寻找最佳 Lab (排除已分配的)
-                const targetLab = this.findBestLabForBoost(availableLabs, assignedLabs, mineral);
-                
-                if (targetLab) {
-                    // 标记征用
-                    boostLabs[targetLab.id] = { mineral, mode: 'task' };
-                    assignedLabs.add(targetLab.id);
-                    // 执行搬运逻辑
-                    this.manageBoostLab(targetLab, mineral, neededMineralsMap[mineral]);
-                }
-            }
-        }
+        this.addBoostTransportMissionIfAbsent({
+            source: lab.id,
+            target: this.storage.id,
+            resourceType: mineral,
+            amount: lab.store[mineral],
+            pos: this.toPosNumber(lab.pos)
+        }, {
+            source: lab.id,
+            resourceType: mineral
+        });
     }
 
     /**
@@ -134,78 +170,61 @@ export default class BoostMission extends Room {
     private manageBoostLab(lab: StructureLab | null, mineral: ResourceConstant, amount: number) {
         if (!lab) return;
 
-        // 1. 检查资源是否匹配
         if (lab.mineralType && lab.mineralType !== mineral) {
-            // 资源不匹配，且有存量，需要清理
-            if (lab.store[lab.mineralType] > 0) {
-                const exist = this.checkSameMissionInPool('transport', 'transport', {
-                    source: lab.id,
-                    resourceType: lab.mineralType
-                } as any);
-                if (!exist && this.storage) {
-                    this.addTransportMission(this.TransportLevel('boost'), {
-                        source: lab.id,
-                        target: this.storage.id,
-                        resourceType: lab.mineralType,
-                        amount: lab.store[lab.mineralType],
-                        pos: this.toPosNumber(lab.pos)
-                    });
-                }
-            }
-            // 正在清理中，无法填充
+            // 资源不匹配，先清理现有矿物，再等待下一轮填充
+            this.cleanupBoostLab(lab);
             return;
         }
 
-        // 2. 资源匹配或为空，执行填充逻辑
+        // 目标是让 Lab 里有足够的资源满足 totalAmount，且不超过 Lab 容量
         const currentAmount = lab.store[mineral] || 0;
         const freeSpace = lab.store.getFreeCapacity(mineral);
-        
-        // 目标是让 Lab 里有足够的资源满足 totalAmount，且不超过 Lab 容量 (3000)
-        // 这里的 amount 是 boost 任务的总需求量，可能大于 3000
-        const fillTarget = Math.min(3000, amount);
+        const fillTarget = Math.min(BOOST_LAB_CAPACITY, amount);
 
+        // 资源匹配或为空时，执行填充逻辑
         if (currentAmount < fillTarget && freeSpace > 0) {
-            const needed = Math.min(fillTarget - currentAmount, freeSpace);
-            
             // 检查是否有足够的资源储备
-            const stores = [this.storage, this.terminal];
-            const source = stores.find(s => s && s.store[mineral] > 0);
-            
+            const source = [this.storage, this.terminal].find((store) => store && store.store[mineral] > 0);
             if (source) {
-                // 检查是否已有相同的搬运任务
-                const exist = this.checkSameMissionInPool('transport', 'transport', {
-                    target: lab.id,
-                    resourceType: mineral
-                } as any);
-
-                if (!exist) {
-                    this.addTransportMission(this.TransportLevel('boost'), {
+                const needed = Math.min(fillTarget - currentAmount, freeSpace, source.store[mineral]);
+                if (needed > 0) {
+                    this.addBoostTransportMissionIfAbsent({
                         source: source.id,
                         target: lab.id,
                         resourceType: mineral,
-                        amount: Math.min(needed, source.store[mineral]),
+                        amount: needed,
                         pos: this.toPosNumber(lab.pos)
+                    }, {
+                        target: lab.id,
+                        resourceType: mineral
                     });
                 }
             }
         }
 
-        // 3. 补充能量 (Boost Lab 必须有能量)
-        if (lab.store[RESOURCE_ENERGY] < 2000) {
-            const existEnergy = this.checkSameMissionInPool('transport', 'transport', {
-                target: lab.id,
-                resourceType: RESOURCE_ENERGY
-            } as any);
-            if (!existEnergy && this.storage && this.storage.store[RESOURCE_ENERGY] > 0) {
-                this.addTransportMission(this.TransportLevel('boost'), {
-                    source: this.storage.id,
-                    target: lab.id,
-                    resourceType: RESOURCE_ENERGY,
-                    amount: 2000 - lab.store[RESOURCE_ENERGY],
-                    pos: this.toPosNumber(lab.pos)
-                });
-            }
-        }
+        // 补充能量（Boost Lab 必须有能量）
+        if (!this.storage || this.storage.store[RESOURCE_ENERGY] <= 0) return;
+        if (lab.store[RESOURCE_ENERGY] >= BOOST_LAB_ENERGY_TARGET) return;
+
+        this.addBoostTransportMissionIfAbsent({
+            source: this.storage.id,
+            target: lab.id,
+            resourceType: RESOURCE_ENERGY,
+            amount: BOOST_LAB_ENERGY_TARGET - lab.store[RESOURCE_ENERGY],
+            pos: this.toPosNumber(lab.pos)
+        }, {
+            target: lab.id,
+            resourceType: RESOURCE_ENERGY
+        });
+    }
+
+    // ==================== Cleanup Helpers ====================
+
+    private isBoostOwnerValid(ownerId: string, info: BoostOwnerInfo) {
+        // 超时预定直接失效；Team 预定则还要检查队伍是否仍然存在
+        if (Game.time - info.time > BOOST_OWNER_TIMEOUT) return false;
+        if (!ownerId.startsWith('Team-')) return true;
+        return !!getTeamData(ownerId.slice(5));
     }
 
     /**
@@ -223,27 +242,15 @@ export default class BoostMission extends Room {
             }
 
             if (!data.owners || Object.keys(data.owners).length === 0) {
-                data.owners = { ['__public__']: { amount: data.totalAmount, time: Game.time } } as any
+                data.owners = { ['__public__']: { amount: data.totalAmount, time: Game.time } };
             }
 
             let modified = false;
             for (const ownerId in data.owners) {
                 const info = data.owners[ownerId];
-                let isValid = true;
 
-                // 超时检查 (3000 tick)
-                if (Game.time - info.time > 3000) {
-                    isValid = false;
-                } 
-                // Team 有效性检查
-                else if (ownerId.startsWith('Team-')) {
-                    const teamID = ownerId.slice(5);
-                    if (!getTeamData(teamID)) {
-                        isValid = false;
-                    }
-                }
-
-                if (!isValid) {
+                // 超时检查 + Team 有效性检查
+                if (!this.isBoostOwnerValid(ownerId, info)) {
                     console.log(`[Boost] 清理无效预定: ${ownerId} (Resource: ${data.mineral}, Amount: ${info.amount})`);
                     data.totalAmount -= info.amount;
                     delete data.owners[ownerId];
@@ -276,21 +283,7 @@ export default class BoostMission extends Room {
                 if (!entry || entry.mode !== 'task') continue;
                 if (!reactionActive && ((labAId && labId === labAId) || (labBId && labId === labBId))) continue;
                 const lab = Game.getObjectById(labId);
-                if (lab && lab.mineralType && this.storage) {
-                    const exist = this.checkSameMissionInPool('transport', 'transport', {
-                        source: lab.id,
-                        resourceType: lab.mineralType
-                    } as any);
-                    if (!exist) {
-                        this.addTransportMission(this.TransportLevel('boost'), {
-                            source: lab.id,
-                            target: this.storage.id,
-                            resourceType: lab.mineralType,
-                            amount: lab.store[lab.mineralType],
-                            pos: this.toPosNumber(lab.pos)
-                        });
-                    }
-                }
+                if (lab) this.cleanupBoostLab(lab);
             }
             for (const labId in boostLabs) {
                 if (boostLabs[labId]?.mode === 'task') delete boostLabs[labId];
