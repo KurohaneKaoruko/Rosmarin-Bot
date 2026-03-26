@@ -208,7 +208,7 @@ function resolveDepositTarget(creep: Creep): { target: AnyStoreStructure | null;
 // 构建计划：集中判断要执行的策略
 function buildManagerPlan(creep: Creep): ManagerPlan {
     const linkPlan = planLinkTransfer(creep);
-    const missionTask = creep.room.getMissionFromPoolFirst('transport', (task) => task.type === 'manage') as Task || null;
+    const missionTask = creep.room.getManageMission();
     const depositTarget = resolveDepositTarget(creep);
     return { linkPlan, missionTask, depositTarget };
 }

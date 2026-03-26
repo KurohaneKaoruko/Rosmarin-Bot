@@ -613,7 +613,8 @@ export default class TransportMission extends Room {
     }
 }
 
-const getTransportTaskPosInfo = (creep: Creep) =>
+// ==================== Getter ====================
+const getTransportMissionPosInfo = (creep: Creep) =>
     compress(creep.pos.x, creep.pos.y);
 
 export class TransportTaskGetter extends Room {
@@ -631,7 +632,7 @@ export class TransportTaskGetter extends Room {
     }
 
     getTransportMission(creep: Creep) {
-        const posInfo = getTransportTaskPosInfo(creep);
+        const posInfo = getTransportMissionPosInfo(creep);
         while (true) {
             const task = this.getMissionFromPool('transport', posInfo, (transportTask) => transportTask.type === 'transport');
             if (!task) return null;

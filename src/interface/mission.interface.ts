@@ -269,6 +269,14 @@ interface Room {
     getWallMission(creep: Creep): RepairTask | null;
 
     /**
+     * 获取中央搬运任务
+     * @returns manage 任务对象，无任务返回null
+     * @description 从 transport 池获取 type === 'manage' 的任务
+     * @example const task = room.getManageMission();
+     */
+    getManageMission(): Task | null;
+
+    /**
      * 获取资源发送任务
      * @returns 发送任务对象
      * @description 从terminal任务池获取send类型任务

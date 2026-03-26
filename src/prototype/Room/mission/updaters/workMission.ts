@@ -3,6 +3,16 @@ import { getLayoutData, getStructData } from '@/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type WorkPoolName = 'build' | 'repair';
+type WallRepairMemoryState = {
+    pos?: number;
+    hits?: number;
+    until?: number;
+    cursor?: number;
+};
+type WallRepairContext = {
+    botMem: Record<string, any>;
+    wallRepair: WallRepairMemoryState;
+};
 
 /**
  * 房间 Work 任务更新模块
@@ -118,6 +128,7 @@ export default class WorkMission extends Room {
     }
 }
 
+// ==================== Wall Getter Helpers ====================
 const WALL_REPAIR_STRUCTURE_KEYS = ['spawn', 'tower', 'storage', 'terminal', 'factory', 'lab', 'nuker', 'powerSpawn'] as const;
 
 const getWorkTaskPosInfo = (creep: Creep) =>
@@ -129,17 +140,12 @@ const setWallMissionTickCache = (room: Room, task: RepairTask | null) => {
     roomAny._wallMissionTickCacheTask = task;
 };
 
-const getWallRepairMemory = (roomName: string) => {
+const getWallRepairMemory = (roomName: string): WallRepairContext => {
     const botMem = getStructData(roomName) as any;
     botMem.wallRepair ??= {};
     return {
         botMem,
-        wallRepair: botMem.wallRepair as {
-            pos?: number;
-            hits?: number;
-            until?: number;
-            cursor?: number;
-        },
+        wallRepair: botMem.wallRepair as WallRepairMemoryState,
     };
 };
 
@@ -157,7 +163,7 @@ const getWallRepairStructuresAt = (room: Room, x: number, y: number) =>
 
 const restoreCachedWallTask = (
     room: Room,
-    wallRepair: { pos?: number; hits?: number; until?: number }
+    wallRepair: WallRepairMemoryState
 ): RepairTask | null => {
     const { pos, hits, until } = wallRepair;
     if (pos == null || hits == null || !until || Game.time >= until) return null;
@@ -310,7 +316,7 @@ const scanWallRepairCandidates = (
 
 const persistWallRepairTask = (
     room: Room,
-    wallRepair: { pos?: number; hits?: number; until?: number; cursor?: number },
+    wallRepair: WallRepairMemoryState,
     task: RepairTask,
     ttl: number,
     cursor?: number
@@ -325,7 +331,7 @@ const persistWallRepairTask = (
 
 const clearWallRepairTask = (
     room: Room,
-    wallRepair: { pos?: number; hits?: number; until?: number; cursor?: number },
+    wallRepair: WallRepairMemoryState,
     ttl: number,
     cursor?: number
 ) => {
@@ -337,6 +343,7 @@ const clearWallRepairTask = (
     return null;
 };
 
+// ==================== Getter ====================
 export class WorkTaskGetter extends Room {
     getBuildMission(creep: Creep) {
         if (!this.checkMissionInPool('build')) return null;

@@ -42,6 +42,12 @@ const MANAGE_STRUCTURE_ALIASES = {
     p: 'powerSpawn',
 } as const;
 
+type ManageStructureRef = {
+    key: string;
+    structure: AnyStoreStructure;
+};
+
+// 构造 terminal 资源平衡阈值表。
 const createTerminalThresholds = () => {
     const thresholds = {
         source: {
@@ -83,7 +89,7 @@ const getThresholdAmount = (thresholdMap: Record<string, number>, resourceType: 
     return thresholdMap[resourceType] ?? thresholdMap.default ?? 0;
 };
 
-const resolveManageStructure = (room: Room, structure: string) => {
+const resolveManageStructure = (room: Room, structure: string): ManageStructureRef | null => {
     const resolvedKey = normalizeManageStructureKey(structure);
     const value = (room as any)[resolvedKey] as AnyStoreStructure | AnyStoreStructure[] | null;
     if (!value || Array.isArray(value)) return null;
@@ -93,17 +99,19 @@ const resolveManageStructure = (room: Room, structure: string) => {
     };
 };
 
+const getRequestedSendTotalAmount = (sendTotal: Record<string, number>) =>
+    Object.values(sendTotal).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
 
-
+// ==================== 更新辅助 ====================
 // 检查终端资源, 自动调度资源
-function CheckTerminalResAmount(room: Room) {
+function checkTerminalResourceBalance(room: Room) {
     if (!room.storage || !room.terminal) return false;
     if (!room.storage.pos.inRange(room.terminal.pos, 2)) return false;
 
     // 发送任务资源数
     const sendTotal = room.getSendMissionTotalAmount();
     const thresholds = createTerminalThresholds();
-    const totalRequestedAmount = Object.values(sendTotal).reduce((sum, amount) => sum + (Number(amount) || 0), 0);
+    const totalRequestedAmount = getRequestedSendTotalAmount(sendTotal);
 
     // 存在该旗帜时, 清空终端
     const terminalClearFlag = Game.flags[`${room.name}_terminal_clear`];
@@ -154,7 +162,7 @@ function CheckTerminalResAmount(room: Room) {
     }
 }
 
-function CheckFactoryResAmount(room: Room) {
+function checkFactoryResourceBalance(room: Room) {
     const factory = room.factory;
     if (!factory) return;
     const storage = room.storage;
@@ -208,7 +216,7 @@ function CheckFactoryResAmount(room: Room) {
     }
 }
 
-function CheckPowerSpawnResAmount(room: Room) {
+function checkPowerSpawnResourceBalance(room: Room) {
     const powerSpawn = room.powerSpawn;
     if (!powerSpawn) return;
     const centerPos = room.getCenter();
@@ -244,11 +252,11 @@ export default class ManageMission extends Room {
     UpdateManageMission(offset = 0) {
         void offset;
         // 检查终端资源预留数量，不足则补充，超过则搬出
-        CheckTerminalResAmount(this);
+        checkTerminalResourceBalance(this);
         // 检查工厂资源数量，补充或搬出
-        CheckFactoryResAmount(this);
+        checkFactoryResourceBalance(this);
         // 补充powerSpawn资源，只在特定布局生效
-        CheckPowerSpawnResAmount(this);
+        checkPowerSpawnResourceBalance(this);
     }
 
     /**
@@ -383,7 +391,12 @@ const hasEnoughResourceForSendTask = (room: Room, task: Task) => {
     return getRoomSendAmount(room, data.resourceType) >= requiredAmount;
 };
 
+// ==================== Getter ====================
 export class ManageTaskGetter extends Room {
+    getManageMission() {
+        return this.getMissionFromPoolFirst('transport', (task) => task.type === 'manage') || null;
+    }
+
     // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个最小批量。
     getSendMission() {
         return this.getMissionFromPoolFirst('terminal', (task) => canDispatchSendTask(this.terminal, task));

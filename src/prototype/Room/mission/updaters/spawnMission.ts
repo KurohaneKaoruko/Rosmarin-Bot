@@ -713,7 +713,8 @@ export default class SpawnMission extends Room {
     }
 }
 
-const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
+// ==================== Getter Helpers ====================
+const SPAWN_GETTER_BUDGET_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
 
 const getSpawnTaskRole = (taskData?: SpawnTask): RoleId | null => {
     const role = taskData?.memory?.role;
@@ -812,7 +813,7 @@ export class SpawnTaskGetter extends Room {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
             const allowBudgetSpawn =
                 ((state === 'LOW' || state === 'CRITICAL') &&
-                EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
+                SPAWN_GETTER_BUDGET_ROLES.has(role)) ||
                 (role === 'worker' && getMyConstructionSites(this).length > 0);
             const budget = allowBudgetSpawn ? energyAvailable : undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
