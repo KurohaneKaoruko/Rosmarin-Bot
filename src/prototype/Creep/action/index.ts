@@ -28,14 +28,14 @@ import { powerAttack, powerHeal, powerRanged } from './remote/power/power-combat
 import depositHarvest from './remote/deposit/deposit-harvest';
 import depositTransfer from './remote/deposit/deposit-transfer';
 import { depositAttack, depositHeal, depositRanged } from './remote/deposit/deposit-combat';
-import oneRanged from './combat/assault/one-ranged';
-import aio from './combat/assault/aio';
-import doubleAttack from './combat/assault/double-attack';
-import doubleDismantle from './combat/assault/double-dismantle';
-import doubleHeal from './combat/assault/double-heal';
-import pcHeal from './combat/assault/pc-heal';
-import { defend2Attack, defend2Heal } from './combat/defense/defend-duo';
-import { defendAttack, defendRanged } from './combat/defense/defend-single';
+import oneRanged from './combat/one-ranged';
+import aio from './combat/aio';
+import doubleAttack from './combat/double-attack';
+import doubleDismantle from './combat/double-dismantle';
+import doubleHeal from './combat/double-heal';
+import pcHeal from './combat/pc-heal';
+import { defend2Attack, defend2Heal } from './combat/defend-duo';
+import { defendAttack, defendRanged } from './combat/defend-single';
 
 type MissingRoleHandlerReporter = (id: string) => void;
 
