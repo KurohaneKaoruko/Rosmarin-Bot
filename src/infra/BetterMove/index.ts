@@ -1,5 +1,4 @@
 // @ts-nocheck
-
 /*
 creep 堵车解算+跨房间寻路+寻路缓存+小队移动
 跑的比香港记者还快从你做起
@@ -79,6 +78,10 @@ creep 堵车解算+跨房间寻路+寻路缓存+小队移动
     * 调用样例见压缩包中 main.js;
     * 不传 isWorkTile 也能跑，结果是工作 creep 容易被推出工位然后再走回去，不在工作状态的 creep 需 isWorkTile 返回 true。
 
+9. getSquadCostMatrix(roomName, ignoreDestructibleStructures)
+* 如果无此 roomName 的缓存，返回 undefined。否则返回 CostMatrix，其中每格代表以此格为四人小队右下角时的移动开销，
+  255 表示摆不下四人小队。用于方便用户将小队摆成正方形、作其他战术判断。
+
 === 典型用例 ===
 1. 设置 harvester、upgrader、builder 的工作范围：参考文件夹中样例 main.js；
 2. 民用 creep 不能进去部分房间，战斗 creep 允许进去：通过 addAvoidRooms、addAvoidExits 设置默认不可入房间，
@@ -108,7 +111,7 @@ author: Scorpior
 debug helpers: fangxm, czc
 
 date: 2026/3/21
-version: 1.0.1
+version: 1.0.2
 
 Usage:
 module: main.js
@@ -143,6 +146,8 @@ changelog:
         替换 Creep.prototype.move(), Creep.prototype.pull(), Creep.prototype.cancelOrder();
         avoidRoom、avoidExit 可以作为 creep.moveTo 参数传入了;
 1.0.1:  Tons of bugfix;
+1.0.2:  新增 export 接口: getSquadCostMatrix(string, boolean): undefined | CostMatrix，返回的 CostMatrix 代表以此格为四人小队右下角时的移动开销，255 表示摆不下四人小队。
+        bugfix：pull bug；moveTo 撞到障碍物未触发重新寻路 bug；
 
 1.1.0: TODO（看心情更新）: 
         1. betterFindClosestByPath
@@ -213,6 +218,7 @@ let squadIdx = 1; // 用于给新队伍分配id
 let creepIdx = 1; // 用于给新 creep 分配id
 const checkedTiles = new Map(); // 记录当前 tick 已经检查过的格子
 const nameToIntentIdx = new Map();
+const pullPair = new Map();
 let curTick = 0;
 
 const obstacles = new Set(OBSTACLE_OBJECT_TYPES);
@@ -339,7 +345,7 @@ function parseRoomName(roomName) {
 /**
  *  官方映射：https://github.com/screeps/driver/blob/d551e857615ef79b0dff1e7bcdc82a1797fab9e0/lib/path-finder.js
  *  统一到大地图坐标，平均单次开销0.00005
- * @param {RoomPosition | RoomObject} pos 
+ * @param {RoomPosition} pos 
  */
 function formalize(pos) {
     let parsed = parseRoomName(pos.roomName);
@@ -441,9 +447,14 @@ function inRange(pos1, pos2, range) {
     if (pos1.roomName == pos2.roomName) {
         return -range <= pos1.x - pos2.x && pos1.x - pos2.x <= range && -range <= pos1.y - pos2.y && pos1.y - pos2.y <= range;
     } else {
-        pos1 = formalize(pos1);
-        pos2 = formalize(pos2);
-        return pos1.x && pos2.x && inRange(pos1, pos2, range);
+        try {
+            pos1 = formalize(pos1);
+            pos2 = formalize(pos2);
+            return pos1.x && pos2.x && inRange(pos1, pos2, range);
+        } catch (error) {
+            console.log(`inRange: pos1: [${typeof pos1}, ${JSON.stringify(pos1)}] pos2: [${typeof pos2}, ${JSON.stringify(pos2)}}]\nposArray: ${JSON.stringify(posArray)}\n${error}`);
+            return false;
+        }
     }
 }
 
@@ -504,7 +515,7 @@ function getDirection(fromPos, toPos) {
             if (fromPos.y === 48) return BOTTOM;
             return 0;
         }
-        return 0;
+        return 0;       
     }
 }
 
@@ -579,10 +590,10 @@ function isClosedRampart(structure) {
  */
 function isObstacleStructure(room, pos, ignoreStructures) {
     let consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos);
-    if (0 in consSite && consSite[0].my && obstacles.has(consSite[0].structureType)) {  // 工地会挡路
+    if (_.any(consSite, c => c.my && obstacles.has(c.structureType))) {  // 工地会挡路
         return true;
     }
-    for (let s of room.lookForAt(LOOK_STRUCTURES, pos)) {
+    for (const s of room.lookForAt(LOOK_STRUCTURES, pos)) {
         if (!s.hits || s.ticksToDeploy) {     // 是新手墙或者无敌中的invaderCore
             return true;
         } else if (obstacles.has(s.structureType)) {  // 挡路的建筑
@@ -1776,7 +1787,7 @@ function startSquadRoute(squad, leader, creepPosArray, leaderPos, pathCache, vis
     }
     creepMoveCache[leader.name] = Game.time;
     //console.log(`startSquadRoute: ${JSON.stringify(posArray)}`);
-
+    
     const leaderNextPos = posArray[idx];
     if (findPathIgnoreCondition && leaderNextPos.roomName === leader.room.name) {
         if (!(leaderNextPos.roomName in costMatrixCache)) {
@@ -2100,7 +2111,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
     ops.bypassHostileCreeps = ops.bypassHostileCreeps === undefined || ops.bypassHostileCreeps;    // 设置默认值为true
     findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
 
-    if (typeof toPos.x != "number" || typeof toPos.y != "number") {   // 房名无效或目的坐标不是数字，不合法
+    if (typeof toPos.x !== "number" || typeof toPos.y !== "number") {   // 房名无效或目的坐标不是数字，不合法
         return ERR_INVALID_TARGET;
     } else if (inRange(this.pos, toPos, ops.range || 1)) {   // 已到达，用于走进 portal
         if (isEqual(toPos, this.pos) || ops.range) {  // 已到达
@@ -2129,7 +2140,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
         idx = creepCache.idx;
         if (path && idx < path.posArray.length - 1 && path.ignoreStructures === findPathIgnoreCondition) {  // 缓存路条件相同
             posArray = path.posArray;
-            if (isEqual(toPos, creepCache.dst) || inRange(posArray[posArray.length - 1], toPos, ops.range)) {   // 正向走，目的地没变
+            if (posArray[0] && (isEqual(toPos, creepCache.dst) || inRange(posArray[posArray.length - 1], toPos, ops.range))) {   // 正向走，目的地没变
                 if (isEqual(this.pos, posArray[idx])) {    // 正常
                     if (idx < posArray.length - 1) {
                         // this.say('正常');
@@ -2189,6 +2200,7 @@ function betterMoveTo(firstArg, secondArg, opts) {
                             if (isObstacleStructure(this.room, posArray[idx], ops.ignoreDestructibleStructures)) {// 发现出现新建筑物挡路，删除costMatrix和path缓存，重新寻路
                                 // console.log(`${Game.time}: ${this.name} find obstacles at ${this.pos}`);
                                 delete costMatrixCache[this.pos.roomName];
+                                generateCostMatrix(this.room);
                                 deletePath(path);
                                 // 不 return，掉下去重新寻路
                             }
@@ -2322,6 +2334,7 @@ function betterPull(target) {
     const ret = originPull.call(this, target);
     if (ret === OK) {
         // 只需登记小队，无需登记 move intent
+        pullPair.set(target.name, this.name);
         registerSquad(this, target);
     }
     return ret;
@@ -2375,7 +2388,7 @@ function squadMove(squad, target) {
  * @param {Creep[]} squad 只允许 4 creep 小队
  */
 function squadMoveTo(squad, firstArg, secondArg, opts) {
-    let qx = 0, qy = 0, px, py, leader, creepPosArray = [];
+    let leaderFormalX = 0, leaderFormalY = 0, xLeader, yLeader, leader, creepPosArray = [];
     if (squad.length !== 4) {
         return ERR_INVALID_ARGS;
     }
@@ -2404,11 +2417,11 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
                 someOneTired = true;
             }
             const pos = formalize(creep.pos);   // 用 formalize 后的兼容跨房情况
-            if (pos.x > qx || pos.y > qy) {
-                qx = pos.x;
-                qy = pos.y;
-                px = creep.pos.x;
-                py = creep.pos.y;
+            if (pos.x > leaderFormalX || pos.y > leaderFormalY) {
+                leaderFormalX = pos.x;
+                leaderFormalY = pos.y;
+                xLeader = creep.pos.x;
+                yLeader = creep.pos.y;
                 leader = creep;
             }
             creepPosArray.push(pos);
@@ -2417,25 +2430,30 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
         }
     }
     // 检查是否相邻
-    let crossRoom = leader.pos.x === 0 || leader.pos.x === 49 || leader.pos.y === 0 || leader.pos.y === 49;
+    let crossRoom = xLeader === 0 || xLeader === 49 || yLeader === 0 || yLeader === 49;
+    let xDiff1 = 0, xDiff2 = 0, yDiff1 = 0, yDiff2 = 0;
     for (const pos of creepPosArray) {
-        if (pos.x > qx || pos.y > qy) {
-            // 如果有 creep 超出了范围，直接返回
-            return ERR_NOT_IN_RANGE;
-        } else if (qx - pos.x > 1 || qy - pos.y > 1) { // 距离超过1，可能掉队
-            // 如果是跨房的情况，不视为掉队
-            if ((qx - pos.x === 2 && (px === 0 || px === 1) && qy - pos.y <= 1) || (qy - pos.y === 2 && (py === 0 || py === 1) && qx - pos.x <= 1)) {
-                //leader.say("跨房");
-                crossRoom = true;
-                continue;
-            }
-            // else 确实掉队，由用户处理
-            // console.log(`${Game.time} 掉队: {${qx}, ${qy}}, (${px}, ${py}),  ${leader.name}`);
-            //leader.say("掉队");
+        const xDiff = leaderFormalX - pos.x;
+        const yDiff = leaderFormalY - pos.y;
+        if (xDiff < 0 || xDiff > 2 || yDiff < 0 || yDiff > 2) {
             return ERR_NOT_IN_RANGE;
         }
+        xDiff1 += xDiff === 1;
+        xDiff2 += xDiff === 2;
+        yDiff1 += yDiff === 1;
+        yDiff2 += yDiff === 2;
     }
-    // console.log(`没掉队: ${qx}, ${qy}, ${JSON.stringify(creepPosArray)}`);
+    if (xDiff2) {
+        if (xDiff1 || yDiff2 || xLeader > 1) return ERR_NOT_IN_RANGE;
+        //leader.say("跨房");
+        crossRoom = true;
+    }
+    if (yDiff2) {
+        if (yDiff1 || yLeader > 1) return ERR_NOT_IN_RANGE;
+        //leader.say("跨房");
+        crossRoom = true;
+    }
+    // console.log(`没掉队: ${leaderFormalX}, ${leaderFormalY}, ${xDiff1}, ${xDiff2}, ${yDiff1}, ${yDiff2}, ${JSON.stringify(creepPosArray)}`);
 
     findPathIgnoreCondition = !!ops.ignoreDestructibleStructures;
 
@@ -2455,11 +2473,11 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
                 return findPathIgnoreCondition ? ERR_FULL : OK;
             }
         }
-        return squadStepToPos(toPos, squad, leader, creepPosArray, { x: qx, y: qy }, someOneTired);
+        return squadStepToPos(toPos, squad, leader, creepPosArray, { x: leaderFormalX, y: leaderFormalY }, someOneTired);
     }
 
     /** x、y 是 formal pos */
-    const leaderPos = { x: qx, y: qy };
+    const leaderPos = { x: leaderFormalX, y: leaderFormalY};
     const key = leader.name + '_quad';
     creepCache = creepPathCache[key];
     if (creepCache) {   // 有缓存
@@ -2471,7 +2489,7 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
                 if (crossRoom) {
                     if (idx + 2 < posArray.length && isNear(leader.pos, posArray[idx + 2])) {
                         creepCache.idx++;
-                    } else if (!isNear(leader.pos, posArray[idx + 1])) {
+                    } else if (!isNear(leader.pos, posArray[idx+1])) {
                         creepCache.idx--;
                     }
                     if (leader.room.name in costMatrixCache || checkSquadRoom(leader.room, path, creepCache.idx)) {   // 房间已见过 或 检查路径正常，TODO：若寻路是在无视野时，然后被其他 creep 先进入建立了 costMatrix，仍然需要检查路径
@@ -2482,7 +2500,7 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
                     if (findPathIgnoreCondition) {
                         const leaderNextPos = posArray[idx + 1];
                         const roomName = leaderNextPos.roomName;
-
+                        
                         if (roomName === leader.room.name) {
                             if (!(roomName in costMatrixCache)) {
                                 generateCostMatrix(leader.room);
@@ -2518,6 +2536,7 @@ function squadMoveTo(squad, firstArg, secondArg, opts) {
                         // leader.say("绕建筑");
                         // 删除路和 costMatrix 后重新寻路
                         delete costMatrixCache[leader.pos.roomName];
+                        generateCostMatrix(leader.room);
                     } else if (leader.name in creepMoveCache && creepMoveCache[leader.name] <= Game.time - 4) {     // 赌得严重
                         if (findSquadTemporalPath(leader, toPos, ops, key, true, new Set(squad.map(c => c.name)))) {
                             // leader.say("严重绕路");
@@ -2735,7 +2754,7 @@ function endTickResolve(userIsWorkTile) {
             }
         }
     }
-
+    
     // 再遍历所有 creep 移动 intent，保留不属于 squad 的
     for (const [creepName, idx] of cachedMoveIntents) {
         if (idx) {
@@ -2872,8 +2891,13 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    creep.room.visual.line(creep.pos, pos, lineStyle[0]);
-                    originMove.call(creep, getDirection(creepPos, pos));
+                    // creep.room.visual.line(creep.pos, pos, lineStyle[0]);
+                    const puller = pullPair.get(start);
+                    if (puller) {
+                        originMove.call(creep, Game.creeps[puller]);
+                    } else {
+                        originMove.call(creep, getDirection(creepPos, pos));
+                    }
                     moveCount++;
                 }
             } else if (target !== IntentTiles[startIdx + 1]) { // 如果 target !== start 当前所在位置才需要移动
@@ -2884,8 +2908,13 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    creep.room.visual.line(creep.pos, pos, lineStyle[0]);
-                    originMove.call(creep, getDirection(creepPos, pos));
+                    // creep.room.visual.line(creep.pos, pos, lineStyle[0]);
+                    const puller = pullPair.get(start);
+                    if (puller) {
+                        originMove.call(creep, Game.creeps[puller]);
+                    } else {
+                        originMove.call(creep, getDirection(creepPos, pos));
+                    }
                     moveCount++;
                 }
             }
@@ -2899,9 +2928,14 @@ function endTickResolve(userIsWorkTile) {
                 const creepPos = creep.pos;
                 const pos = tile2Pos(target[i]);
                 if (pos.x !== creepPos.x || pos.y !== creepPos.y) {  // 如果 target !== start 当前所在位置才需要移动
-                    if (pos.roomName === creepPos.roomName) creep.room.visual.line(creep.pos, pos, lineStyle[start % lineStyle.length]);
+                    // if (pos.roomName === creepPos.roomName) creep.room.visual.line(creep.pos, pos, lineStyle[start % lineStyle.length]);
                     // console.log(`squad ${creep.name} from ${JSON.stringify(creepPos)} move to ${JSON.stringify(pos)}: ${getDirection(creepPos, pos)}`);
-                    originMove.call(creep, getDirection(creepPos, pos));
+                    const puller = pullPair.get(creep.name);
+                    if (puller) {
+                        originMove.call(creep, Game.creeps[puller]);
+                    } else {
+                        originMove.call(creep, getDirection(creepPos, pos));
+                    }
                     moveCount++;
                 }
             }
@@ -2921,6 +2955,7 @@ function preTickBetterMove() {
     rerouteSquad.clear();
     checkedTiles.clear();
     nameToIntentIdx.clear();
+    pullPair.clear();
     creepIdx = 1;
     squadIdx = 1;
 }
@@ -2952,9 +2987,13 @@ global.BetterMove = {
     squadMoveTo,
     preTickBetterMove,
     endTickResolve,
-    setCheckTile: function (userCheckTile) {
-        checkTile = wrapCheckTile(userCheckTile);
-        return OK;
+    getSquadCostMatrix: function (roomName, ignoreDestructibleStructures) {
+        const cache = costMatrixCache[roomName];
+        if (cache) {
+            return cache['squad'][!!ignoreDestructibleStructures].clone();
+        }
+        return undefined;
+
     },
     setPathClearDelay: function (number) {
         if (typeof number == "number" && number > 0) {
