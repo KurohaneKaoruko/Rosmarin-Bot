@@ -6,6 +6,7 @@ import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 // 目标房间列表的类型：普通外矿（能量）与中心房（SK/中心区）外矿。
 type OutMineTargetListKey = 'energy' | 'centerRoom';
@@ -1377,7 +1378,25 @@ class ExternalMineSpawner {
         return count;
     }
 
-    // 判断 creep 记录的 sourceRoom 是否与期望源房一致。
+    // spawnInAdvance：TTL 不足以再跑一趟（路程 + 缓冲）的
+    // 采集者不计入覆盖数——接替者在其死亡前就提前孵化，新爬到场时老爬刚好耗尽，外矿不断档。
+    private static getEffectiveOutHarvesterNum(sourceRoom: Room, targetRoomName: string): number {
+        const travelTicks = getRoomTickCacheValue(sourceRoom, `out_harvest_travel_${targetRoomName}`, () =>
+            ExternalMineState.estimateTargetSelectionStat(sourceRoom, targetRoomName).distance
+        );
+        const minUsefulTtl = travelTicks + 15; // 路程 + 缓冲：跑不完一趟的爬不再计入覆盖
+        let count = 0;
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep || creep.memory?.role !== 'out-harvest') continue;
+            if (creep.memory?.targetRoom !== targetRoomName) continue;
+            if (!this.isSameSourceRoom(creep.memory?.sourceRoom, sourceRoom.name)) continue;
+            if ((creep.ticksToLive ?? 0) <= minUsefulTtl) continue;
+            count++;
+        }
+        return count;
+    }
+
     private static isSameSourceRoom(creepSourceRoom: string | undefined, sourceRoomName: string): boolean {
         if (!creepSourceRoom) return false;
         return creepSourceRoom === sourceRoomName;
@@ -1554,12 +1573,13 @@ class ExternalMineSpawner {
 
         // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
         // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
-        const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
+        // spawnInAdvance：快死的采集者不计入覆盖——接替者提前孵化，外矿不断档
+        const globalEffective = this.getEffectiveOutHarvesterNum(sourceRoom, targetRoom.name);
         const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
         const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-        if (globalActive + globalQueued + globalSpawning >= targetNum) return false;
+        if (globalEffective + globalQueued + globalSpawning >= targetNum) return false;
         if (slotCap > 0) {
-            if (globalActive + globalQueued + globalSpawning >= slotCap) return false;
+            if (globalEffective + globalQueued + globalSpawning >= slotCap) return false;
         }
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
