@@ -1,16 +1,7 @@
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 
-/**
- * 主房升级工在「升级态」下的行为：
- * - 回到 home 房间；
- * - 清理与采集目标相关的缓存；
- * - 持续升级控制器，空仓时切回取能态。
- *
- * @param creep 当前执行的 creep。
- * @returns 工作层状态机事件。
- */
 const onTarget = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
@@ -28,15 +19,6 @@ const onTarget = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-/**
- * 主房升级工在「取能态」下的行为：
- * - 回到 home 房间；
- * - 从控制器周边能源体系补能；
- * - 满仓后立即切回升级态并可当 tick 开始升级。
- *
- * @param creep 当前执行的 creep。
- * @returns 工作层状态机事件。
- */
 const onSource = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
@@ -68,21 +50,26 @@ export const syncUpgraderMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-/**
- * 主房升级角色入口。
- *
- * @remarks
- * 使用 WorkLayer 统一驱动「取能 -> 升级」循环，
- * 并在 prepare 阶段执行升级加速 boost。
- */
-const upgraderWork = createWorkLayerRole({
-    onSource,
-    onTarget
-});
-
-const Upgrader = createBoostedRole({
-    boost: (creep) => creep.room.level == 8 ? null : { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
-    run: upgraderWork.run
-});
+const Upgrader = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        if (creep.room.level == 8) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const boostmap = creep.memory['boostmap'] || { [WORK]: ['XGH2O', 'GH2O', 'GH'] };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget });
+    }
+};
 
 export default Upgrader;

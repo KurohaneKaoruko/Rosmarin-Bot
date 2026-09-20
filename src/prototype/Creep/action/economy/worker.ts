@@ -1,7 +1,6 @@
 import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
-import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
@@ -143,7 +142,6 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
 
     if (RepairRampart(creep, candidates)) return true;
 
-    // 工地出现时，立即抢占非 build 缓存任务，避免 worker 被 repair 长时间占用。
     if (hasBuildTarget && cache.task && cache.tasktype !== 'build') {
         delete cache.task;
         delete cache.taskid;
@@ -399,11 +397,9 @@ const resolveWorkerPackedPos = (roomName: string, packed: number | null | undefi
 
 const WorkerAction = function (creep: Creep): MoveWorkTileCandidate[] {
     const candidates: MoveWorkTileCandidate[] = [];
-    // 如果有任务执行，则执行后退出
     if (BuildRepairWork(creep, candidates)) return candidates;
     if (RepairWallWork(creep, candidates)) return candidates;
     
-    // 如果没有任务，则升级控制器
     if (!creep.room.controller?.my) return candidates;
     pushWorkerCandidate(candidates, creep.room.controller.pos);
     creep.runControllerUpgrade({ sign: false, pickupDropped: false });
@@ -479,7 +475,19 @@ export const syncWorkerMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const workerWork = createCreepRole({
+const WorkerFunction = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || { [WORK]: ['XLH2O', 'LH2O', 'LH'] };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run(creep) {
         writeMoveWorkTileCandidates(creep, []);
 
@@ -492,11 +500,6 @@ const workerWork = createCreepRole({
             onTarget: (current) => onTarget(current, publishMoveWork),
         });
     }
-});
+};
 
-const WorkerFunction = createBoostedRole({
-    boost: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    run: workerWork.run
-})
-
-export default WorkerFunction
+export default WorkerFunction;

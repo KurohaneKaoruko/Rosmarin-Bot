@@ -1,5 +1,3 @@
-import { createBoostedRole } from '@/framework/ai/creepRole';
-
 type DoubleAttackTarget = Creep | Structure;
 
 const isDoubleAttackTarget = (target: _HasId | null): target is DoubleAttackTarget =>
@@ -42,7 +40,6 @@ function FlagActionAttack(creep: Creep) {
         return true;
     }
 
-    // 使用 findHostileCreeps 查找敌人，然后过滤在旗帜范围内的
     const allEnemies = creep.findHostileCreeps();
     const enemies = allEnemies.filter(c => aFlag.pos.inRangeTo(c.pos, 5));
 
@@ -66,7 +63,6 @@ function FlagActionAttack(creep: Creep) {
 function AutoFindTarget(creep: Creep) {
     let room = creep.room;
 
-    // 使用 findHostileCreeps 找敌方creep
     const allEnemies = creep.findHostileCreeps();
     const dangerousEnemies = allEnemies.filter((hostile) => isDoubleAttackDangerHostile(hostile, creep));
     const enemies = allEnemies.filter((c) => !dangerousEnemies.some((hostile) => hostile.pos.inRangeTo(c.pos, 8)));
@@ -84,14 +80,12 @@ function AutoFindTarget(creep: Creep) {
         }
     }
 
-    // 建筑
     const enemiesStructures = [
         ...room.rampart, ...room.constructedWall, ...room.extension, ...room.tower, ...room.spawn, ...room.lab,
         room.observer, room.factory, room.storage, room.terminal, room.nuker, room.powerSpawn,
     ];
     if(enemiesStructures.length == 0) return;
 
-    // 找一般建筑
     let Structures = enemiesStructures.filter((s: any) => s &&
         s.structureType != STRUCTURE_RAMPART && s.structureType != STRUCTURE_WALL &&
         (!s.store || s.store.getUsedCapacity() <= 3000) &&
@@ -103,7 +97,6 @@ function AutoFindTarget(creep: Creep) {
         plainCost: 1, swampCost: 1
     });
 
-    // 找不到就找墙
     if (!targetStructure) {
         Structures = enemiesStructures.filter((s: any) => s &&
             (s.structureType == STRUCTURE_RAMPART || s.structureType == STRUCTURE_WALL) &&
@@ -135,7 +128,6 @@ function AutoFindTarget(creep: Creep) {
 }
 
 function AutoActionAttack(creep: Creep) {
-    // 获取缓存的目标
     let target = getCachedDoubleAttackTarget(creep);
 
     if (target && 'owner' in target && Memory['whitelist']?.includes(target.owner.username)) {
@@ -143,18 +135,6 @@ function AutoActionAttack(creep: Creep) {
         target = null;
     }
 
-    // // 如果目标位于危险区域, 更换目标
-    // if (target && target.pos.findInRange(FIND_HOSTILE_CREEPS, 6, {
-    //     filter: (c) => !c.isWhiteList() &&
-    //     (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 4)) ||
-    //     (c.getActiveBodyparts(RANGED_ATTACK) >= 30 && c.pos.inRangeTo(creep, 6))
-    // })) {
-    //     creep.memory['targetId'] = null;
-    //     AutoFindTarget(creep);
-    //     target = Game.getObjectById(creep.memory['targetId']) as Structure;
-    // }
-
-    // 使用 findHostileCreeps 检测危险敌人并规避
     const nearbyHostiles = creep.findHostileCreeps(6);
     const dangerousHostiles = nearbyHostiles.filter((c) =>
         (c.getActiveBodyparts(ATTACK) >= 30 && c.pos.inRangeTo(creep, 4)) ||
@@ -166,22 +146,17 @@ function AutoActionAttack(creep: Creep) {
         if (result === OK) return true;
     }
 
-    // 目标存在则行动
     if (target) {
         creep.doubleToAttack(target);
         return true;
     }
 }
 
-
-// 旧逻辑封装为叶子节点，保持原有行为
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
 
-    // 等待绑定
     if (!creep.memory.bind) return;
 
-    // 获取绑定的另一个creep
     const bindId = creep.memory.bind;
     if (!bindId) return;
     const bindcreep = Game.getObjectById(bindId);
@@ -192,21 +167,16 @@ const runLegacy = (creep: Creep) => {
 
     creep.memory.dontPullMe = !creep.room.my;
 
-    // 旗帜控制移动
     if (FlagActionMove(creep)) return;
 
-    // 移动到目标房间.未到达房间不继续行动
     if (!creep.memory['targetId'] &&
         creep.doubleMoveToRoom(creep.memory.targetRoom, '#ff0000')) return;
     if (creep.room.my || Game.time < (creep.memory.idle || 0)) return;
 
-    // 攻击标记的目标
     if (FlagActionAttack(creep)) return;
 
-    // 自动行动
     if (AutoActionAttack(creep)) return;
 
-    // 自动寻找目标
     AutoFindTarget(creep);
 
     if (!creep.pos.isNearTo(bindcreep)) {
@@ -214,13 +184,23 @@ const runLegacy = (creep: Creep) => {
     }
 };
 
-/** 双人小队 进攻小队 */
-const double_attack = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || {
-        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-        [ATTACK]: ['XUH2O', 'UH2O', 'UH']
+const double_attack = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || {
+            [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+            [ATTACK]: ['XUH2O', 'UH2O', 'UH']
+        };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
     },
     run: runLegacy
-})
+};
 
 export default double_attack;

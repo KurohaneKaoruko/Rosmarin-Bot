@@ -1,16 +1,7 @@
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 
-/**
- * AID 升级角色在「目标态」下的行为：
- * 1. 先确保 creep 已完成初始化并进入目标房间；
- * 2. 对控制器执行升级；
- * 3. 能量耗尽后切换回取能态。
- *
- * @param creep 当前执行的 creep。
- * @returns 工作层状态机事件。
- */
 const onTarget = (creep: Creep): WorkEvent => {
     if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
@@ -23,15 +14,6 @@ const onTarget = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-/**
- * AID 升级角色在「取能态」下的行为：
- * 1. 保证 creep 已就绪并在目标房间；
- * 2. 按优先级从 link/container/其他兜底来源取能；
- * 3. 满仓后切换回升级态。
- *
- * @param creep 当前执行的 creep。
- * @returns 工作层状态机事件。
- */
 const onSource = (creep: Creep): WorkEvent => {
     if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
@@ -60,23 +42,22 @@ export const syncAidUpgradeMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-/**
- * AID 升级角色入口。
- *
- * @remarks
- * 该角色使用统一 WorkLayer 双态模型：
- * - `onSource` 负责补能；
- * - `onTarget` 负责升级。
- */
-const aidUpgradeWork = createWorkLayerRole({
-    onSource,
-    onTarget,
-    reenter: true
-});
-
-const aid_upgrade = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
-    run: aidUpgradeWork.run
-});
+const aid_upgrade = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || { [WORK]: ['XGH2O', 'GH2O', 'GH'] };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget }, { reenter: true });
+    }
+};
 
 export default aid_upgrade;

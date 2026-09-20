@@ -1,13 +1,10 @@
 import { pickDefenseAnchorRampart } from '@/shared/defenseUtils';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
-
     const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
     if (partner) return partner;
-
     delete creep.memory.bind;
     onMissing?.();
     return null;
@@ -38,10 +35,10 @@ const tryBindNearestPartner = (
 };
 
 const getDefend2AttackBoost = () => ({
-        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-        [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
-        [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
-    });
+    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+    [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
+    [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
+});
 
 const defend2HealPrepare = (creep: Creep) => {
     if (creep.memory.boosted) return true;
@@ -57,147 +54,139 @@ const defend2HealPrepare = (creep: Creep) => {
     const result = creep.goBoost({
         [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
         [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-        [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
-    }) === OK;
-    if (result) creep.memory.boosted = true;
-    return result;
-};
-
-const runDefend2Attack = (creep: Creep) => {
-    creep.disableAttackNotificationsOnce();
-
-    const bindcreep = resolveBoundPartner(creep);
-    if (!bindcreep || !bindcreep.memory.boosted) return;
-
-    const costCallback = creep.room.getDefenseCreepCostCallback(creep.name);
-    const mem = creep.room.memory['defenseRamparts'];
-    const minHits = (mem && mem.minHits) ? mem.minHits : (creep.room.memory['breached'] ? 1e5 : 1e6);
-    const anchor = pickDefenseAnchorRampart(creep.room, 'melee', creep.name, minHits);
-
-    if (!creep.pos.isNear(bindcreep.pos)) {
-        creep.moveTo(bindcreep.pos, { range: 1, costCallback } as any);
-        return;
+        [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+    });
+    if (result === OK) {
+        creep.memory.boosted = true;
+        return true;
     }
-
-    const state = creep.room.memory['defenseState'];
-    const hasRamparts = Array.isArray(creep.room[STRUCTURE_RAMPART]) && creep.room[STRUCTURE_RAMPART].length > 0;
-    const needRetreat =
-        creep.hits < creep.hitsMax * 0.55 ||
-        bindcreep.hits < bindcreep.hitsMax * 0.55;
-    if (needRetreat) {
-        if (anchor) {
-            creep.doubleMoveTo(anchor.pos, '#ffaa00', { range: 0, costCallback } as any);
-        } else {
-            creep.doubleFlee();
-        }
-        return;
-    }
-
-    const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
-    const focus = focusId ? Game.getObjectById(focusId) : null;
-    const hostiles = creep.findHostileCreeps() as Creep[];
-    const hostile = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostiles);
-    if (!hostile) return;
-
-    if (state !== 'breached' && hasRamparts && anchor) {
-        if (!creep.pos.isEqualTo(anchor.pos)) {
-            creep.doubleMoveTo(anchor.pos, '#ff0000', { range: 0, costCallback } as any);
-            creep.room.CallTowerAttack(hostile);
-            return;
-        }
-        creep.room.CallTowerAttack(hostile);
-        if (creep.pos.inRangeTo(hostile, 1)) {
-            creep.attack(hostile);
-        }
-        return;
-    }
-
-    const corePos = creep.room.storage?.pos || new RoomPosition(25, 25, creep.room.name);
-    if (hostile.pos.getRangeTo(corePos) > 16 && anchor) {
-        creep.doubleMoveTo(anchor.pos, '#ffaa00', { range: 0, costCallback } as any);
-        creep.room.CallTowerAttack(hostile);
-        return;
-    }
-
-    creep.room.CallTowerAttack(hostile);
-    if (creep.pos.inRangeTo(hostile, 1)) {
-        creep.attack(hostile);
-    } else {
-        creep.doubleMoveTo(hostile.pos, '#ff0000', { range: 1, costCallback } as any);
-    }
+    return false;
 };
 
 const runDefend2Heal = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
+
     if (creep.ticksToLive < 100 && creep.room.my) {
         creep.unBoost();
         return;
     }
 
-    if (!creep.memory.bind) {
-        tryBindNearestPartner(
-            creep,
-            'defend_2heal_attack_creeps',
-            (candidate) => candidate.memory.role === 'defend-2attack'
-        );
+    const bindcreep = tryBindNearestPartner(creep, 'defend2_heal_candidates', (candidate) =>
+        candidate.memory.role === 'defend2-attack'
+    );
+
+    if (!bindcreep) {
+        if (creep.hits < creep.hitsMax) creep.heal(creep);
         return;
     }
-
-    const bindcreep = resolveBoundPartner(creep);
-    if (!bindcreep || !bindcreep.memory.boosted) return;
 
     creep.memory.dontPullMe = !creep.room.my;
 
-    const costCallback = creep.room.getDefenseCreepCostCallback(creep.name);
-    const needSelfCritical = creep.hits < creep.hitsMax * 0.35;
-    const needRetreat =
-        creep.hits < creep.hitsMax * 0.55 ||
-        bindcreep.hits < bindcreep.hitsMax * 0.55;
-
-    if (needSelfCritical && creep.hits < creep.hitsMax) {
+    let healed = false;
+    if ((creep.hits < creep.hitsMax) && (creep.hits < bindcreep.hits)) {
         creep.heal(creep);
-        if (creep.pos.isNearTo(bindcreep)) {
-            creep.doubleFlee();
-        } else {
-            creep.moveTo(bindcreep, { range: 1, costCallback } as any);
-        }
+        healed = true;
+    }
+
+    if (!healed && creep.pos.isNearTo(bindcreep)) {
+        creep.heal(bindcreep);
+    } else if (!healed && creep.pos.inRangeTo(bindcreep, 3)) {
+        creep.rangedHeal(bindcreep);
+        creep.moveTo(bindcreep);
+    } else {
+        creep.moveTo(bindcreep);
+    }
+};
+
+const runDefend2Attack = (creep: Creep) => {
+    creep.disableAttackNotificationsOnce();
+
+    if (creep.ticksToLive < 100 && creep.room.my) {
+        creep.unBoost();
         return;
     }
 
-    const shouldSaveBind =
-        bindcreep.hits < bindcreep.hitsMax &&
-        (bindcreep.hits < bindcreep.hitsMax * 0.75 || bindcreep.hits < creep.hits);
+    const bindcreep = tryBindNearestPartner(creep, 'defend2_attack_candidates', (candidate) =>
+        candidate.memory.role === 'defend2-heal'
+    );
 
-    if (needRetreat && creep.pos.isNearTo(bindcreep)) {
-        if (shouldSaveBind) creep.heal(bindcreep);
-        else if (creep.hits < creep.hitsMax) creep.heal(creep);
-        creep.doubleFlee();
+    if (!bindcreep) return;
+
+    creep.memory.dontPullMe = !creep.room.my;
+
+    const hostileCreeps = creep.findHostileCreeps() as Creep[];
+    if (hostileCreeps.length === 0) return;
+
+    const targetRampart = pickDefenseAnchorRampart(creep.room, 'melee', creep.name);
+    if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
+        const costCallback = creep.room.getDefenseCreepCostCallback(creep.name);
+        creep.moveTo(targetRampart.pos, {
+            visualizePathStyle: { stroke: '#ff0000' },
+            range: 0,
+            costCallback
+        });
+        const movingTarget = creep.pos.findClosestByRange(hostileCreeps);
+        if (movingTarget) creep.room.CallTowerAttack(movingTarget);
         return;
     }
 
-    if (shouldSaveBind) {
-        if (creep.pos.isNearTo(bindcreep)) {
-            creep.heal(bindcreep);
-        } else if (creep.pos.inRangeTo(bindcreep, 3)) {
-            creep.rangedHeal(bindcreep);
-        }
-    } else if (creep.hits < creep.hitsMax) {
-        creep.heal(creep);
+    const focusId = creep.room.memory['_towerFocus']?.id as Id<Creep | PowerCreep> | undefined;
+    const focus = focusId ? Game.getObjectById(focusId) : null;
+    const target = (focus && focus.pos?.roomName === creep.room.name ? focus : null) || creep.pos.findClosestByRange(hostileCreeps);
+    if (!target) return;
+
+    if (creep.pos.isNearTo(target)) {
+        const result = creep.attack(target);
+        if (result === OK) creep.room.CallTowerAttack(target);
+        return;
     }
+
+    const state = creep.room.memory['defenseState'];
+    const hasRamparts = Array.isArray(creep.room[STRUCTURE_RAMPART]) && creep.room[STRUCTURE_RAMPART].length > 0;
+    if (state === 'breached' || !hasRamparts) {
+        creep.moveTo(target, {
+            visualizePathStyle: { stroke: '#ff0000' },
+            range: 1,
+            costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
+        });
+        creep.room.CallTowerAttack(target);
+        return;
+    }
+
+    creep.room.CallTowerAttack(target);
 
     if (!creep.pos.isNearTo(bindcreep)) {
         creep.moveTo(bindcreep, { range: 1, costCallback } as any);
     }
 };
 
-const defend2Attack = createBoostedRole({
-    boost: getDefend2AttackBoost(),
-    run: runDefend2Attack
-});
+const defend2AttackPrepare = (creep: Creep) => {
+    if (creep.memory.boosted) return true;
+    if (creep.memory['boostmap']) {
+        const result = creep.goBoost(creep.memory['boostmap']);
+        if (result === OK) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        return false;
+    }
 
-const defend2Heal = createCreepRole({
+    const result = creep.goBoost(getDefend2AttackBoost());
+    if (result === OK) {
+        creep.memory.boosted = true;
+        return true;
+    }
+    return false;
+};
+
+const defend2Attack = {
+    prepare: defend2AttackPrepare,
+    run: runDefend2Attack
+};
+
+const defend2Heal = {
     prepare: defend2HealPrepare,
     run: runDefend2Heal
-});
+};
 
 export { defend2Attack, defend2Heal };

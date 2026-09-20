@@ -1,13 +1,10 @@
 import { compress, decompress} from '@/shared/compress';
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 
-// 测试环境有时不会预置 Screeps 全局常量，这里保留一个最小兜底，
-// 避免模块在 import 阶段因为 `MOVE` 缺失直接抛错。
 const WORK_PART: BodyPartConstant = typeof WORK === 'undefined' ? 'work' : WORK;
 const MOVE_PART: BodyPartConstant = typeof MOVE === 'undefined' ? 'move' : MOVE;
-
 
 const upgrade = function (creep: Creep) {
     if (creep.room.level == 8) {
@@ -101,7 +98,6 @@ const getDistance = function(pos1: RoomPosition, pos2: RoomPosition) {
 
 
 function withdrawEnergy(creep) {
-    // 寻找获取能量的目标
     const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2)) || null;
     const container = creep.room.container.find(c => c.pos.inRangeTo(creep.room.controller, 2)) ?? null;
     const terminal = [creep.room.terminal].find(t => t && t.pos.inRangeTo(creep.room.controller, 3)) ?? null;
@@ -110,7 +106,6 @@ function withdrawEnergy(creep) {
 
     if ((storage && creep.pos.inRangeTo(storage, 2)) ||
         (terminal && creep.pos.inRangeTo(terminal, 2))) {
-        // 周围的非冲级爬均允许对穿, 避免堵路
         creep.room.lookForAtArea(LOOK_CREEPS,
             Math.max(0, creep.pos.y - 1), Math.max(0, creep.pos.x - 1),
             Math.min(49,creep.pos.y + 1), Math.min(49,creep.pos.x + 1), true)
@@ -158,8 +153,6 @@ function withdrawEnergy(creep) {
     ) { creep.goWithdraw(storage, RESOURCE_ENERGY) }
     else creep.TakeEnergy();
 }
-
-
 
 const onTarget = (creep: Creep): WorkEvent => {
     if(creep.ticksToLive < 10) {
@@ -209,14 +202,27 @@ export const syncUpUpgradeMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const upUpgradeWork = createWorkLayerRole({
-    onSource,
-    onTarget
-});
+const upUpgradeBoost = {
+    [WORK_PART]: ['XGH2O'],
+    [MOVE_PART]: ['XZHO2']
+};
 
-const UpUpgradeFunction = createBoostedRole({
-    boost: { [WORK_PART]: ['XGH2O'], [MOVE_PART]: ['XZHO2'] },
-    run: upUpgradeWork.run
-})
+const UpUpgradeFunction = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || upUpgradeBoost;
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget });
+    }
+};
 
 export default UpUpgradeFunction;

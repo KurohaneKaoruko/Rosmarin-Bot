@@ -1,11 +1,12 @@
 import { BehaviorTree, BtStatus, condition, fail, leaf, selector, sequence } from '@/framework/ai/behaviorTree';
-import { createBoostedRole } from '@/framework/ai/creepRole';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 type AioContext = {
     creep: Creep;
     baseName: string;
 };
+
+type AttackTarget = Creep | PowerCreep | Structure | ConstructionSite;
 
 const getRoomNonWhitelistHostiles = (creep: Creep) =>
     getRoomTickCacheValue(creep.room, 'aio_room_non_whitelist_hostiles', () =>
@@ -19,7 +20,7 @@ const getRoomHostileStructures = (creep: Creep) =>
 
 const getRoomNonRoadStructures = (creep: Creep) =>
     getRoomTickCacheValue(creep.room, 'aio_room_non_road_structures', () =>
-        creep.room.find(FIND_STRUCTURES, { filter: (e) => e.hits && e.structureType != STRUCTURE_ROAD }) as AnyStructure[]
+        creep.room.find(FIND_STRUCTURES, { filter: (e) => e.hits && e.structureType !== STRUCTURE_ROAD }) as AnyStructure[]
     );
 
 const findNonWhitelistHostilesInRange = (creep: Creep, range: number, filter?: (e: Creep) => boolean) => {
@@ -27,7 +28,7 @@ const findNonWhitelistHostilesInRange = (creep: Creep, range: number, filter?: (
     return filter ? hostiles.filter(filter) : hostiles;
 };
 
-const getAioBaseName = (creep: Creep) => creep.name.match(/_(\w+)/)?.[1] ?? creep.name;
+const getAioBaseName = (creep: Creep) => creep.name.match(/#(\w+)/)?.[1] ?? creep.name;
 
 const getFlag = (name: string) => Game.flags?.[name];
 
@@ -40,109 +41,160 @@ const hasEnemyTower = (creep: Creep) => (creep.room.tower || []).some((tower) =>
 const isInnerRoomPosition = (pos: RoomPosition) => pos.x > 2 && pos.x < 47 && pos.y > 2 && pos.y < 47;
 
 const findBoostedThreat = (creep: Creep) =>
-    findNonWhitelistHostilesInRange(creep, 3, (e) =>
-        e.body.some((part) => part.boost === 'XUH2O')
-    )[0] || null;
+    findNonWhitelistHostilesInRange(creep, 3, (e) => e.body.some((part) => part.boost === 'XUH2O'))[0] || null;
 
 const rangedAttackNearby = (creep: Creep) => {
-    let creeps = findNonWhitelistHostilesInRange(creep, 1);
-    if (creeps.length) {
+    const nearHostiles = findNonWhitelistHostilesInRange(creep, 1);
+    if (nearHostiles.length) {
+        creep.rangedMassAttack();
+        return;
+    }
+    const farHostiles = findNonWhitelistHostilesInRange(creep, 3);
+    if (farHostiles.length) {
+        creep.rangedAttack(farHostiles.reduce((a, b) => a.hits < b.hits ? a : b));
+    }
+};
+
+const findAttackTarget = (creep: Creep, baseName: string): AttackTarget | null => {
+    const flag = getAioFlag(baseName);
+
+    const cachedTarget = Game.getObjectById(creep.memory.targetId) as AttackTarget | null;
+    if (cachedTarget) return cachedTarget;
+
+    if (flag?.room) {
+        const structure = flag.pos.lookFor(LOOK_STRUCTURES).find((s: any) => !s.my);
+        if (structure) return structure;
+    }
+
+    const targets = [
+        creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+            filter: (e) => !!e.hits && !e.pos.coverRampart()
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, {
+            filter: (e) => e.body.length > 2 && !e.body.some((p) => p.type === RANGED_ATTACK) && !e.pos.coverRampart() && !e.isWhiteList()
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, {
+            filter: (e) => e.body.length > 2 && !e.body.some((p) => p.type === TOUGH && p.boost) && !e.pos.coverRampart() && !e.isWhiteList()
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_POWER_CREEPS, {
+            filter: (e) => !e.pos.coverRampart() && !e.isWhiteList()
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_CONSTRUCTION_SITES, {
+            filter: (e) => !!e.progress && !e.pos.coverRampart()
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+            filter: (e) => e.structureType === STRUCTURE_SPAWN
+        }),
+        creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+            filter: (e) => !!e.hits && e.structureType !== STRUCTURE_RAMPART
+        }),
+    ];
+
+    for (const target of targets) {
+        if (target) return target;
+    }
+
+    if (creep.room.controller?.owner && !creep.room.my) {
+        const target = creep.pos.findClosestByPath(FIND_STRUCTURES, {
+            filter: (e) => !!e.hits && e.structureType !== STRUCTURE_ROAD
+        });
+        if (target) return target;
+    }
+
+    const hostileStructure = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, {
+        filter: (e) => e.structureType !== STRUCTURE_INVADER_CORE && e.structureType !== STRUCTURE_CONTROLLER
+    });
+    if (hostileStructure) return hostileStructure;
+
+    const armedHostile = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, {
+        filter: (e) => !e.pos.coverRampart() && !e.isWhiteList() && e.body.some((p) => p.type === ATTACK || p.type === RANGED_ATTACK)
+    });
+    if (armedHostile) return armedHostile;
+
+    const nearbyHostile = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart())[0];
+    if (nearbyHostile) return nearbyHostile;
+
+    return getRoomHostileStructures(creep).find((e) =>
+        creep.pos.inRangeTo(e, 3) && !!e.hits && !e.pos.coverRampart() && e.structureType !== STRUCTURE_ROAD
+    ) || null;
+};
+
+const executeAttack = (creep: Creep, target: AttackTarget) => {
+    const isStructure = 'structureType' in target;
+    const isCreep = 'body' in target;
+
+    creep.room.visual?.text?.('_', target.pos.x, target.pos.y + 0.35, { color: 'red', opacity: 0.75, font: 1 });
+
+    if (isStructure) {
+        executeStructureAttack(creep, target as Structure);
+    } else if (isCreep) {
+        executeCreepAttack(creep, target as Creep | PowerCreep);
+    } else {
+        executeDefaultAttack(creep, target);
+    }
+};
+
+const executeStructureAttack = (creep: Creep, target: Structure) => {
+    creep.moveTo(target);
+
+    if (creep.pos.isNearTo(target) && (target.pos.coverRampart() || 'owner' in target)) {
+        const altTarget = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];
+        if (altTarget) creep.rangedAttack(altTarget);
+        else creep.rangedMassAttack();
+        return;
+    }
+
+    if (creep.rangedAttack(target) === ERR_NOT_IN_RANGE) {
+        tryAttackNearbyStructure(creep);
+    }
+
+    const altTarget = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];
+    if (altTarget) creep.rangedAttack(altTarget);
+};
+
+const executeCreepAttack = (creep: Creep, target: Creep | PowerCreep) => {
+    creep.moveTo(target);
+
+    if (creep.pos.isNearTo(target)) {
         creep.rangedMassAttack();
         return;
     }
 
-    creeps = findNonWhitelistHostilesInRange(creep, 3);
-    if (creeps.length) {
-        creep.rangedAttack(creeps.reduce((a, b) => a.hits < b.hits ? a : b));
+    const result = creep.rangedAttack(target);
+    if (result === ERR_NOT_IN_RANGE && creep.room.controller?.owner && !creep.room.my) {
+        tryAttackNearbyStructure(creep);
     }
 };
 
-const autoAttack = (creep: Creep) => {
-    const baseName = getAioBaseName(creep);
-    const flag = getAioFlag(baseName);
+const executeDefaultAttack = (creep: Creep, target: AttackTarget) => {
+    if (creep.pos.isNearTo(target)) {
+        creep.rangedMassAttack();
+    } else if (creep.pos.inRangeTo(target, 3)) {
+        creep.rangedAttack(target as any);
+    }
+    if (!creep.pos.inRangeTo(target, 1)) {
+        creep.moveTo(target);
+    }
+};
 
-    let em = Game.getObjectById(creep.memory.targetId) as Creep | Structure;
-    let isHostileCreep = false;
-    let isHostileConstruction = false;
+const tryAttackNearbyStructure = (creep: Creep) => {
+    if (!creep.room.controller?.owner || creep.room.my) return;
+    const structure = creep.pos.findClosestByRange(getRoomNonRoadStructures(creep));
+    if (structure) creep.rangedAttack(structure);
+};
 
-    if (!em) em = flag && flag.room && flag.pos.lookFor(LOOK_STRUCTURES).find((e: any) => !e.my);
-    if (!em) em = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { range: 3, filter: e => e.hits && e.structureType != STRUCTURE_WALL && e.structureType != STRUCTURE_ROAD && !e.pos.coverRampart() });
-    if (!em) {
-        em = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, { filter: e => e.body.length > 2 && !e.body.some(e => e.type == RANGED_ATTACK) && !e.pos.coverRampart() && !e.isWhiteList() });
-        if (em) isHostileCreep = true;
-    }
-    if (!em) {
-        em = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, { filter: e => e.body.length > 2 && !e.body.some(e => e.type == TOUGH && e.boost) && !e.pos.coverRampart() && !e.isWhiteList() });
-        if (em) isHostileCreep = true;
-    }
-    if (!em) em = creep.pos.findClosestByPath(FIND_HOSTILE_POWER_CREEPS, { filter: e => !e.pos.coverRampart() && !e.isWhiteList() });
-    if (!em) {
-        em = creep.pos.findClosestByPath(FIND_HOSTILE_CONSTRUCTION_SITES, { filter: e => e.progress && !e.pos.coverRampart() });
-    }
-    if (!em) em = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => e.structureType == STRUCTURE_SPAWN });
-    if (!em) em = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => e.hits && e.structureType != STRUCTURE_RAMPART });
-    if (!em && creep.room.controller && creep.room.controller.owner && !creep.room.my) {
-        em = creep.pos.findClosestByPath(FIND_STRUCTURES, { filter: e => e.hits && e.structureType != STRUCTURE_ROAD });
-    }
-    if (!em) em = creep.pos.findClosestByPath(FIND_HOSTILE_STRUCTURES, { filter: e => e.structureType != STRUCTURE_INVADER_CORE && e.structureType != STRUCTURE_CONTROLLER && e.structureType != STRUCTURE_ROAD });
-    if (!em) {
-        em = creep.pos.findClosestByPath(FIND_HOSTILE_CREEPS, { filter: e => !e.pos.coverRampart() && !e.isWhiteList() && e.body.some(e => e.type == ATTACK || e.type == RANGED_ATTACK) });
-        if (em) isHostileCreep = true;
-    }
-    if (!em) em = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart())[0];
-    if (!em) {
-        em = getRoomHostileStructures(creep).find((e) =>
-            creep.pos.inRangeTo(e, 3) &&
-            !!e.hits &&
-            !e.pos.coverRampart() &&
-            e.structureType != STRUCTURE_ROAD
-        ) || null;
-    }
+const tryRetreat = (creep: Creep) => {
+    if (creep.hits + 1300 >= creep.hitsMax) return;
+    const exit = creep.pos.findClosestByPath(FIND_EXIT);
+    if (exit) creep.moveTo(exit);
+};
 
-    if (em) creep.room.visual?.text?.('_', em.pos.x, em.pos.y + 0.35, { color: 'red', opacity: 0.75, font: 1 });
-    if (em && (em as any).structureType) isHostileConstruction = true;
-
-    if (isHostileConstruction) {
-        creep.moveTo(em);
-        if (creep.pos.isNearTo(em) && (em.pos.coverRampart() || (em as any).owner)) {
-            let em1 = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];
-            if (em1) creep.rangedAttack(em1);
-            else creep.rangedMassAttack();
-        } else if (creep.rangedAttack(em) == ERR_NOT_IN_RANGE) {
-            if (creep.room.controller && creep.room.controller.owner && !creep.room.my) {
-                em = creep.pos.findClosestByRange(getRoomNonRoadStructures(creep));
-                if (em) creep.rangedAttack(em as any);
-            }
-        }
-        const em1 = findNonWhitelistHostilesInRange(creep, 3, (e) => !e.pos.coverRampart() && !creep.pos.isNearTo(e))[0];
-        if (em1) creep.rangedAttack(em1);
-    } else if (isHostileCreep && em) {
-        creep.moveTo(em);
-        if (creep.pos.isNearTo(em) && 'body' in em) {
-            creep.rangedMassAttack();
-        } else if (creep.rangedAttack(em as Creep) == ERR_NOT_IN_RANGE) {
-            if (creep.room.controller && creep.room.controller.owner && !creep.room.my) {
-                em = creep.pos.findClosestByRange(getRoomNonRoadStructures(creep));
-                if (em) creep.rangedAttack(em as any);
-            } else if (creep.pos.isNearTo(em) && (em as any).structureType != STRUCTURE_WALL && (em as any).structureType != STRUCTURE_ROAD && (em as any).structureType != STRUCTURE_CONTAINER) {
-                creep.rangedMassAttack();
-            }
-        }
-    } else if (em) {
-        if (creep.pos.isNearTo(em)) {
-            creep.rangedMassAttack();
-        } else if (creep.pos.inRangeTo(em, 3)) {
-            creep.rangedAttack(em as any);
-        }
-        if (!creep.pos.inRangeTo(em, 1)) {
-            creep.moveTo(em);
-        }
+const autoAttack = (creep: Creep, baseName: string) => {
+    const target = findAttackTarget(creep, baseName);
+    if (target) {
+        executeAttack(creep, target);
     }
-
-    if (creep.hits + 1300 < creep.hitsMax) {
-        const exit = creep.pos.findClosestByPath(FIND_EXIT);
-        if (exit) creep.moveTo(exit);
-    }
+    tryRetreat(creep);
 };
 
 const runBoostedThreatRetreat = (creep: Creep, threat: Creep) => {
@@ -177,8 +229,7 @@ const shouldAdvanceToTargetRoom = (creep: Creep) => {
 
     const heavilyDamaged = (creep.hitsMax - creep.hits) > 1300;
     if (heavilyDamaged && !isInnerRoomPosition(creep.pos) && !hasEnemyTower(creep)) return true;
-    if (!heavilyDamaged) return true;
-    return false;
+    return !heavilyDamaged;
 };
 
 const runAdvanceToTargetRoom = (ctx: AioContext) => {
@@ -253,7 +304,7 @@ const createAioBehaviorTree = () =>
                     fail()
                 ),
                 leaf((ctx) => {
-                    autoAttack(ctx.creep);
+                    autoAttack(ctx.creep, ctx.baseName);
                     return BtStatus.Success;
                 })
             )
@@ -267,8 +318,19 @@ const aioBoost = {
     [MOVE]: ['XZHO2']
 };
 
-const aio = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || aioBoost,
+const aio = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || aioBoost;
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run: (creep) => {
         creep.disableAttackNotificationsOnce();
         createAioBehaviorTree().tick({
@@ -276,6 +338,6 @@ const aio = createBoostedRole({
             baseName: getAioBaseName(creep),
         });
     }
-});
+};
 
 export default aio;

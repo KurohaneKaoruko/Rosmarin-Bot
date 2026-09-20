@@ -1,6 +1,5 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
-import { createCreepRole } from '@/framework/ai/creepRole';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import {
     getCoreDepotContainer,
@@ -1278,7 +1277,7 @@ const createCarrierFlowMachine = (creep: Creep) =>
         ]
     }, createFsmStorage<CarrierFlowState>(creep, CARRIER_LAYERS.FLOW));
 
-const CarrierRole = createCreepRole({
+const CarrierRole = {
     run: (creep: Creep) => {
         seedCarrierStates(creep);
 
@@ -1299,7 +1298,7 @@ const CarrierRole = createCreepRole({
 
         syncCarrierWorkingState(creep);
     }
-});
+};
 
 export default CarrierRole;
 

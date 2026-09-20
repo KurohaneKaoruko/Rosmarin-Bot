@@ -1,5 +1,4 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 
 const ensureInTargetRoom = (creep: Creep, resetDontPullMe = false): boolean => {
     if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {
@@ -289,19 +288,19 @@ const runOutInvader = (creep: Creep) => {
     if (creep.memory['suicideCount'] >= 10) creep.suicide();
 };
 
-const outAttack: CreepRoleHandler = {
+const outAttack = {
     run: runOutAttack
 };
 
-const outRanged: CreepRoleHandler = {
+const outRanged = {
     run: runOutRanged
 };
 
-const outDefend: CreepRoleHandler = {
+const outDefend = {
     run: runOutDefend
 };
 
-const outInvader: CreepRoleHandler = {
+const outInvader = {
     run: runOutInvader
 };
 

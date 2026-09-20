@@ -1,4 +1,4 @@
-import { createBoostedRole } from '@/framework/ai/creepRole';
+
 
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -72,10 +72,21 @@ const runLegacy = (creep: Creep) => {
     creep.moveTo(pc as any, { range: 1, maxRooms: 1, ignoreCreeps: true, reusePath: 5, plainCost: 1, swampCost: 5 });
 };
 
-const pc_heal = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || null,
-    must: (creep) => !!creep.memory['mustBoost'],
+const pc_heal = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'];
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const must = !!creep.memory['mustBoost'];
+        const result = creep.goBoost(boostmap, { must });
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run: runLegacy
-});
+};
 
 export default pc_heal;

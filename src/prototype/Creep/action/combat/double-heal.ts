@@ -1,6 +1,4 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { createBoostedRole } from '@/framework/ai/creepRole';
-/** 双人小队 heal */
 
 const runLegacy = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -75,13 +73,24 @@ const runLegacy = (creep: Creep) => {
     }
 };
 
-const double_heal = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || {
-        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-        [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-        [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
+const double_heal = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || {
+            [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+            [HEAL]: ['XLHO2', 'LHO2', 'LO'],
+            [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
+        };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
     },
     run: runLegacy
-})
+};
 
-export default double_heal
+export default double_heal;

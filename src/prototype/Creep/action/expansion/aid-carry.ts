@@ -1,20 +1,17 @@
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 
 function withdraw(creep: Creep) {
     if(!creep.memory['resource']) creep.memory['resource'] = RESOURCE_ENERGY;
 
-    // 使用新的原型方法收集掉落资源（范围5格，无最小数量限制）
     if (creep.collectDroppedResource(creep.memory['resource'], 0, 5)) {
         return;
     }
 
-    // 使用新的原型方法从墓碑收集资源
     if (creep.collectFromTombstone(creep.memory['resource'])) {
         return;
     }
 
-    // 使用新的原型方法移动到资源房间
     if (!creep.moveToSourceRoom()) {
         return;
     }
@@ -47,7 +44,6 @@ function withdraw(creep: Creep) {
 }
 
 function transfer(creep: Creep) {
-    // 使用新的原型方法移动到目标房间
     if (!creep.moveToTargetRoom()) {
         return;
     }
@@ -80,8 +76,6 @@ function transfer(creep: Creep) {
     
 }
 
-
-
 const onSource = (creep: Creep): WorkEvent => {
     if (creep.store.getFreeCapacity() === 0) {
         transfer(creep);
@@ -100,15 +94,22 @@ const onTarget = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-const aidCarryWork = createWorkLayerRole({
-    onSource,
-    onTarget,
-    reenter: true
-});
-
-const AidCarryFunction = createBoostedRole({
-    boost: (creep) => creep.memory['boostmap'] || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] },
-    run: aidCarryWork.run
-});
+const AidCarryFunction = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] };
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget }, { reenter: true });
+    }
+};
 
 export default AidCarryFunction;

@@ -1,15 +1,12 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { createBoostedRole } from '@/framework/ai/creepRole';
 
 const oneRangedBoost = {
-        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-        [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-        [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
-        [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
+    [HEAL]: ['XLHO2', 'LHO2', 'LO'],
+    [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
+    [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
 };
 
-// 这一类单体战斗 creep 没有实际热插拔入口，
-// 直接走“boost 完成后执行战斗逻辑”即可。
 const runCombat = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
     creep.heal(creep);
@@ -75,9 +72,20 @@ const runCombat = (creep: Creep) => {
     }
 };
 
-const one_ranged = createBoostedRole({
-    boost: oneRangedBoost,
+const one_ranged = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const boostmap = creep.memory['boostmap'] || oneRangedBoost;
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap);
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run: runCombat
-});
+};
 
 export default one_ranged;

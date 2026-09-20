@@ -1,4 +1,4 @@
-import { createWorkLayerRole } from '@/framework/ai/creepRole';
+import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 const TRANSPORT_SOURCE_MOVE_OPTS: MoveToOpts = {
@@ -200,10 +200,10 @@ const onTarget = (creep: Creep): WorkEvent => {
     return creep.store.getUsedCapacity() === 0 ? WORK_EVENTS.TO_SOURCE : WORK_EVENTS.STAY;
 };
 
-const transporterRole = createWorkLayerRole({
-    onSource,
-    onTarget,
-    reenter: true,
-});
+const transporterRole = {
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget }, { reenter: true });
+    }
+};
 
 export default transporterRole;

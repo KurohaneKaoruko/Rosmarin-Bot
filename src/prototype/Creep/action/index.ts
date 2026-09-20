@@ -1,4 +1,3 @@
-import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 import harvester from './economy/harvester';
 import carrier from './economy/carrier';
 import transporterRole from './economy/transporter';
@@ -37,9 +36,14 @@ import pcHeal from './combat/pc-heal';
 import { defend2Attack, defend2Heal } from './combat/defend-duo';
 import { defendAttack, defendRanged } from './combat/defend-single';
 
+type RoleHandler = {
+    prepare?: (creep: Creep) => boolean;
+    run: (creep: Creep) => void;
+};
+
 type MissingRoleHandlerReporter = (id: string) => void;
 
-export const roleRegistry: Record<string, CreepRoleHandler> = {
+export const roleRegistry: Record<string, RoleHandler> = {
     'carrier': carrier,
     'harvester': harvester,
     'manager': manager,
@@ -91,7 +95,7 @@ export const roleRegistry: Record<string, CreepRoleHandler> = {
     'defend-ranged': defendRanged,
 };
 
-export const getRoleHandler = (id: string, onMissing?: MissingRoleHandlerReporter): CreepRoleHandler | null => {
+export const getRoleHandler = (id: string, onMissing?: MissingRoleHandlerReporter): RoleHandler | null => {
     const handler = roleRegistry[id];
     if (handler) return handler;
     onMissing?.(id);

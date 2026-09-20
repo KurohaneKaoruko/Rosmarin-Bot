@@ -1,5 +1,4 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import type { CreepRoleHandler } from '@/framework/ai/creepRole';
 
 const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
     if (!creep.memory.bind) return null;
@@ -203,15 +202,15 @@ const runDepositRanged = (creep: Creep) => {
     }
 };
 
-const depositAttack: CreepRoleHandler = {
+const depositAttack = {
     run: runDepositAttack
 };
 
-const depositHeal: CreepRoleHandler = {
+const depositHeal = {
     run: runDepositHeal
 };
 
-const depositRanged: CreepRoleHandler = {
+const depositRanged = {
     run: runDepositRanged
 };
 
