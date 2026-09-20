@@ -1,6 +1,7 @@
 /**
  * 房间控制
  */
+import { isRoomTickAligned } from '@/shared/roomPhase';
 import roomConsole from '@/console/function/room';
 import layoutConsole from '@/console/function/layout';
 import { getAutoData, getMissionPools, getRoomData } from '@/shared/memory';
@@ -8,8 +9,8 @@ import { getAutoData, getMissionPools, getRoomData } from '@/shared/memory';
 export const roomRunner = function (room: Room) {
     if (!room) return;
 
-    // 更新建筑缓存(对所有有视野的房间)
-    if (Game.time % 10 === 0) room.update();
+    // 更新建筑缓存(对所有有视野的房间)——叠加房间相位错峰，多房不同 tick 重建
+    if (isRoomTickAligned(room.name, 10)) room.update();
 
     // 只运行自己的房间
     if (!room.my) return;

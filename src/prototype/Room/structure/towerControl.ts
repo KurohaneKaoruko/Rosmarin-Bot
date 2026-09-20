@@ -1,4 +1,5 @@
 import { compress } from '@/shared/compress';
+import { isRoomTickAligned } from '@/shared/roomPhase';
 import { pickTowerFocusTarget } from '@/shared/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
@@ -289,7 +290,7 @@ export default class TowerControl extends Room {
         }
 
         const targetCache = towerRepairTargetByRoom;
-        if (Game.time % 20 == 0) {
+        if (isRoomTickAligned(this.name, 20)) {
             targetCache[this.name] = null;
             if (this.checkMissionInPool('repair')) {
                 const centerPos = this.getCenter();
