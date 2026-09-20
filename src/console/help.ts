@@ -164,7 +164,6 @@ const helpTexts: Record<string, string> = {
         `- 这里的 sourceRoom 指外矿任务的源头房（旧文档中的 homeRoom）`,
         `${cmd('mine.addarea(sourceRoom, range?)')}：批量添加周围外矿`,
         `- 默认添加 sourceRoom 周围 1 圈（8 个房间）`,
-        `- 例如：${cmd('mine.addarea("W12N61", 2)')} 添加周围 2 圈房间`,
         `- 不判断视野、不判断 source 数，直接按房型分到 energy / highway / centerRoom`,
         `${cmd('mine.remove(sourceRoom, targetRoom)')}：删除外矿房间`,
         `${cmd('mine.list(sourceRoom)')}：查看外矿列表`,

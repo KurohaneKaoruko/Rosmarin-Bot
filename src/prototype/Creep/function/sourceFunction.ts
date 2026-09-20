@@ -158,24 +158,8 @@ export default class SourceFunction extends Creep {
     moveToSourceWorkTile(source: Source | null = this.getBoundSource()): boolean {
         if (!source) return false;
 
-        const getNearbySourceContainer = typeof this.getNearbySourceContainer === 'function'
-            ? this.getNearbySourceContainer
-            : SourceFunction.prototype.getNearbySourceContainer;
-        const getNearbySourceLink = typeof this.getNearbySourceLink === 'function'
-            ? this.getNearbySourceLink
-            : SourceFunction.prototype.getNearbySourceLink;
-        const isSourceWorkTilePassable = typeof this.isSourceWorkTilePassable === 'function'
-            ? this.isSourceWorkTilePassable
-            : SourceFunction.prototype.isSourceWorkTilePassable;
-        const getSourceWorkTileTrafficPenalty = typeof this.getSourceWorkTileTrafficPenalty === 'function'
-            ? this.getSourceWorkTileTrafficPenalty
-            : SourceFunction.prototype.getSourceWorkTileTrafficPenalty;
-        const scoreSourceWorkTile = typeof this.scoreSourceWorkTile === 'function'
-            ? this.scoreSourceWorkTile
-            : SourceFunction.prototype.scoreSourceWorkTile;
-
-        const sourceContainer = getNearbySourceContainer.call(this, 1);
-        const sourceLink = getNearbySourceLink.call(this, 2);
+        const sourceContainer = this.getNearbySourceContainer(1);
+        const sourceLink = this.getNearbySourceLink(2);
 
         // Once already standing on a valid harvest tile, avoid lateral churn.
         if (this.pos.inRangeTo(source, 1)) {
@@ -187,24 +171,7 @@ export default class SourceFunction extends Creep {
             }
         }
 
-        let bestPos: RoomPosition | null = null;
-        let bestScore = -Infinity;
-
-        for (let dx = -1; dx <= 1; dx++) {
-            for (let dy = -1; dy <= 1; dy++) {
-                if (dx === 0 && dy === 0) continue;
-                const pos = new RoomPosition(source.pos.x + dx, source.pos.y + dy, source.pos.roomName);
-                if (!isSourceWorkTilePassable.call(this, pos)) continue;
-                const trafficPenalty = getSourceWorkTileTrafficPenalty.call(this, pos);
-                if (trafficPenalty === null) continue;
-
-                const score = scoreSourceWorkTile.call(this, pos, source, sourceContainer, sourceLink, trafficPenalty);
-                if (score > bestScore) {
-                    bestScore = score;
-                    bestPos = pos;
-                }
-            }
-        }
+        const { bestPos } = evaluateSourceWorkTiles(this, source);
 
         if (bestPos) {
             if (this.pos.isEqualTo(bestPos)) return true;
@@ -301,3 +268,44 @@ export default class SourceFunction extends Creep {
         return false;
     }
 }
+
+export type SourceWorkTileReport = {
+    pos: RoomPosition;
+    passable: boolean;
+    penalty: number | null;
+    score: number | null;
+};
+
+/**
+ * 只读评估 source 周边八个工作位（通行性 / 交通惩罚 / 得分）。
+ * 供 moveToSourceWorkTile 与控制台诊断命令共用，保证诊断与实际行为同一份逻辑。
+ */
+export const evaluateSourceWorkTiles = (
+    creep: Creep,
+    source: Source
+): { tiles: SourceWorkTileReport[]; bestPos: RoomPosition | null } => {
+    const proto = SourceFunction.prototype;
+    const sourceContainer = proto.getNearbySourceContainer.call(creep, 1);
+    const sourceLink = proto.getNearbySourceLink.call(creep, 2);
+    const tiles: SourceWorkTileReport[] = [];
+    let bestPos: RoomPosition | null = null;
+    let bestScore = -Infinity;
+
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            if (dx === 0 && dy === 0) continue;
+            const pos = new RoomPosition(source.pos.x + dx, source.pos.y + dy, source.pos.roomName);
+            const passable = proto.isSourceWorkTilePassable.call(creep, pos);
+            const penalty = passable ? proto.getSourceWorkTileTrafficPenalty.call(creep, pos) : null;
+            const score = passable && penalty !== null
+                ? proto.scoreSourceWorkTile.call(creep, pos, source, sourceContainer, sourceLink, penalty)
+                : null;
+            tiles.push({ pos, passable, penalty, score });
+            if (passable && penalty !== null && score !== null && score > bestScore) {
+                bestScore = score;
+                bestPos = pos;
+            }
+        }
+    }
+    return { tiles, bestPos };
+};
