@@ -1,4 +1,5 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
@@ -328,7 +329,7 @@ class ExternalMineState {
         };
     }
 
-    private static estimateTargetSelectionStat(sourceRoom: Room, targetRoomName: string): ExternalMineTargetSelectionStat {
+    static estimateTargetSelectionStat(sourceRoom: Room, targetRoomName: string): ExternalMineTargetSelectionStat {
         const targetRoom = Game.rooms[targetRoomName];
         const kind = this.getTargetKind(targetRoomName);
         const fallbackSourceCount = kind === 'centerRoom' ? 3 : 2;
@@ -1793,6 +1794,13 @@ export class ExternalMine {
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum === 0) continue;
 
+            // CPU 桶闭环（Tier 1-3）：桶紧张时按性价比挂起低分外矿
+            const activeThreshold = getActiveRemoteThreshold();
+            if (activeThreshold > 0 && room.level >= 4) {
+                const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
+                if (stat.score < activeThreshold) continue;
+            }
+
             const hostiles = targetRoom.find(FIND_HOSTILE_CREEPS, {
                 filter: (c) => (
                     (c.owner.username === 'Invader' ||
@@ -1879,6 +1887,13 @@ export class ExternalMine {
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum <= 0) continue;
+
+            // CPU 桶闭环（Tier 1-3）：桶紧张时按性价比挂起低分中心房外矿
+            const activeThresholdCenter = getActiveRemoteThreshold();
+            if (activeThresholdCenter > 0 && room.level >= 4) {
+                const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
+                if (stat.score < activeThresholdCenter) continue;
+            }
             ExternalMineSpawner.harvester(room, targetRoom, sourceNum, true);
 
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];

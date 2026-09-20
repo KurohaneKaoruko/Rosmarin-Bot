@@ -34,4 +34,10 @@ App.on(Statistics);       // 统计数据
 App.on(GeneratePixel);    // 搓像素
 App.on(MoveModule);       // 移动模块
 
-export const loop = App.run;
+import { updateBucketGovernor } from '@/infra/bucketGovernor';
+
+export const loop = () => {
+    // CPU 桶闭环：先更新外矿活跃阈值，再跑主循环（Tier 1-3）
+    updateBucketGovernor();
+    App.run();
+};
