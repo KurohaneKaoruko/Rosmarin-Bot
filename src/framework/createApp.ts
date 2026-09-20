@@ -36,6 +36,10 @@ export const createApp = () => {
     const ERROR_PRINT_LIMIT = 5;        // 每 tick 最多打印的堆栈数
     const ERROR_STREAK_SILENCE = 10;    // 连续报错 tick 数达到后静默
     const ERROR_STREAK_RECYCLE = 30;    // creep 连续报错 tick 数达到后自动回收
+    const RECYCLE_COOLDOWN_TICKS = 1500;// 同角色两次回收的最小间隔（≈一个 creep 寿命）
+    // 回收冷却（运行时态，代码重新推送后自动清零）：防止确定性错误触发
+    // 「孵化→报错→自杀→再孵化」的能量空转循环——同角色至多 1 次回收 / 1500 tick。
+    const recycleCooldownByRole = new Map<string, number>();
 
     const collectRunnerError = (context: string, error: unknown): void => {
         collectedErrors.push({ context, error });
@@ -60,17 +64,19 @@ export const createApp = () => {
             log(`[错误隔离] 本 tick 另有 ${errors.length - ERROR_PRINT_LIMIT} 条错误被抑制`);
         }
 
-        // 毒 creep 自动回收：连续多个 tick 每次执行都报错 → 已是僵尸，清掉让孵化重置
+        // 毒 creep 自动回收：连续多个 tick 每次执行都报错 → 已是僵尸，清掉让孵化重置。
+        // 但同角色受 1500 tick 冷却限制：确定性代码错误不会触发「孵化→自杀」能量空转循环。
         for (const [key, streak] of errorStreak) {
-            if (streak.count >= ERROR_STREAK_RECYCLE && streak.lastTick === Game.time) {
-                const name = key.slice(0, key.indexOf(':'));
-                const creep = Game.creeps[name];
-                if (creep) {
-                    creep.suicide();
-                    errorStreak.delete(key);
-                    log(`[错误隔离] creep ${name} 连续 ${ERROR_STREAK_RECYCLE} tick 报错，已自动回收`);
-                }
-            }
+            if (streak.count < ERROR_STREAK_RECYCLE || streak.lastTick !== Game.time) continue;
+            const name = key.slice(0, key.indexOf(':'));
+            const creep = Game.creeps[name];
+            if (!creep) continue;
+            const role = String(creep.memory?.role ?? 'unknown');
+            const lastRecycle = recycleCooldownByRole.get(role) ?? -Infinity;
+            if (Game.time - lastRecycle < RECYCLE_COOLDOWN_TICKS) continue; // 冷却期内：静默保留，交由隔离兜底
+            recycleCooldownByRole.set(role, Game.time);
+            creep.suicide();
+            log(`[错误隔离] creep ${name} 连续 ${ERROR_STREAK_RECYCLE} tick 报错，已自动回收（${role} 角色进入 ${RECYCLE_COOLDOWN_TICKS} tick 回收冷却）`);
         }
         // 清理过期 streak，防止 Map 无限增长
         if (errorStreak.size > 200) {
