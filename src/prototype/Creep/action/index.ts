@@ -2,7 +2,6 @@ import harvester from './economy/harvester';
 import carrier from './economy/carrier';
 import transporterRole from './economy/transporter';
 import manager from './economy/manager';
-import upgrader from './economy/upgrader';
 import worker from './economy/worker';
 import minerRole from './economy/miner';
 import universal from './economy/universal';
@@ -50,7 +49,6 @@ export const roleRegistry: Record<string, RoleHandler> = {
     'miner': minerRole,
     'transporter': transporterRole,
     'universal': universal,
-    'upgrader': upgrader,
     'worker': worker,
     'aid-build': aidBuild,
     'aid-carry': aidCarry,
