@@ -19,7 +19,7 @@
 | T0-3 | **房间哈希错峰调度** |  prototype_room.js:50 + manager_rooms.js:41 /  init.ts:138 | 周期闸门从 `Game.time % N`（固定 offset）改为 `(Game.time + roomHash) % N`——所有房间不再同一 tick 集中跑 spawnMission/transportMission，削平周期性 CPU 尖峰 | mission/index.ts MissionUpdate 的 offset 加房间相位 | 小 |
 | T0-4 | **CPU 观测三件套** |  cpuLogger/callStack/stat +  调用栈分析器.js | collectCost 包装 + cpu_list 采样（Memory 开关，生产零开销）+ 按完整调用路径的剖析器（pure 自耗时排名/hard API 计次/HTML 报告） | src/infra/cpuProfiler.ts + Memory.stats.profiler 开关 | 小-中 |
 
-## Tier 1 —— 经济健壮性（停机与断档的治本）
+## Tier 1 —— 经济健壮性（✅ T1-1/T1-2/T1-3 已落地；T1-4/T1-5 待做；T1-6 被现有 score+T1-3 门控覆盖）
 
 | # | 设计 | 来源 | 核心机制 | 落地点 | 工作量 |
 |---|---|---|---|---|---|
