@@ -1,5 +1,5 @@
 import { parseShardRoomName } from '@/shared/shardRoom';
-import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/features/interShard';
+import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/features/interShard';
 import { getBotMemory } from '@/shared/memory';
 
 /**

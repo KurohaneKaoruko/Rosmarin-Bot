@@ -1,6 +1,6 @@
-import { PriorityQueue, NewNode, ReclaimNode } from '@/features/Planner/utils/priorityQueue'
-import { UnionFind } from '@/features/Planner/utils/unionFind'
-import { RoomArray } from '@/features/Planner/utils/roomArray'
+import { PriorityQueue, NewNode, ReclaimNode } from '@/modules/features/Planner/utils/priorityQueue'
+import { UnionFind } from '@/modules/features/Planner/utils/unionFind'
+import { RoomArray } from '@/modules/features/Planner/utils/roomArray'
 
 type PlannerPoint = { x: number; y: number; roomName: string }
 type XY = { x: number; y: number }

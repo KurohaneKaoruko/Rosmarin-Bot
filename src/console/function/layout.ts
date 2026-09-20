@@ -1,6 +1,6 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/shared/compress';
-import LayoutVisual from '@/features/Planner/utils/layoutVisual';
-import LayoutPlanner from '@/features/Planner/layoutPlanner';
+import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
+import LayoutPlanner from '@/modules/features/Planner/layoutPlanner';
 import { ensureRoomData, getLayoutData, getRoomData } from '@/shared/memory';
 
 export default {

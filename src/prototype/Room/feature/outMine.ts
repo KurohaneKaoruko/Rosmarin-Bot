@@ -1,4 +1,4 @@
-import { ExternalMine, ExternalMineTiming } from '@/features/externalMine';
+import { ExternalMine, ExternalMineTiming } from '@/modules/features/external/externalMine';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {

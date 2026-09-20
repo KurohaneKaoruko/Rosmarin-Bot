@@ -1,5 +1,5 @@
-import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/features/externalMine';
-import { RoadMemory } from '@/features/externalRoad';
+import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features/external/externalMine';
+import { RoadMemory } from '@/modules/features/external/externalRoad';
 import {
     clearOutCarryRelayIntent,
     rememberOutCarryRelayIntentTowards,

@@ -1,6 +1,6 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoleData } from '@/constant/CreepConstant';
-import { RoadBuilder, RoadMemory, RoadVisual } from '@/features/externalRoad';
+import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/shared/memory';

@@ -1,9 +1,9 @@
 import { log } from '@/utils';
 import { compress, compressBatch, decompress } from '@/shared/compress';
-import LayoutVisual from '@/features/Planner/utils/layoutVisual';
-import { autoPlanner } from '@/features/Planner/dynamic/autoPlanner';
-import { autoPlanner63 } from '@/features/Planner/dynamic/63Planner';
-import * as StaticPlanner from '@/features/Planner/static';
+import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
+import { autoPlanner } from '@/modules/features/Planner/dynamic/autoPlanner';
+import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
+import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/shared/memory';
 
