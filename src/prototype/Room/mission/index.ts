@@ -3,20 +3,7 @@
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
 import { getRoomData } from '@/shared/memory';
-
-// 房间相位：按房名哈希错峰。
-// 多个房间不再同一 tick 集中执行 spawnMission/transportMission 等重任务，削平 CPU 尖峰。
-const roomPhaseCache = new Map<string, number>();
-const getRoomPhase = (roomName: string): number => {
-    let phase = roomPhaseCache.get(roomName);
-    if (phase === undefined) {
-        let hash = 0;
-        for (let i = 0; i < roomName.length; i++) hash = (hash * 31 + roomName.charCodeAt(i)) >>> 0;
-        phase = hash % 997;
-        roomPhaseCache.set(roomName, phase);
-    }
-    return phase;
-};
+import { getRoomPhase } from '@/shared/roomPhase';
 
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
