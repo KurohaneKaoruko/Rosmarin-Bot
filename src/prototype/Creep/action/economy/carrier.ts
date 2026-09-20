@@ -991,7 +991,8 @@ const withdraw = (
         return false;
     }
 
-    const storeTarget = target;
+    // 此处 target 已收窄为 AnyStoreStructure | Ruin | Tombstone，统一按带 store 的目标处理（Ruin/Tombstone 运行时兼容）
+    const storeTarget = target as AnyStoreStructure;
     const resourceType = cache.resourceType || RESOURCE_ENERGY;
     const used = storeTarget.store?.getUsedCapacity?.(resourceType) ?? 0;
     if (used <= 0) {

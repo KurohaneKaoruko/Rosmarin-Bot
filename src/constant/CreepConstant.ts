@@ -1,4 +1,4 @@
-type RoleDefinition = {
+export type RoleDefinition = {
     bodypart: any[];                    // body 配置
     must?: boolean;                    // 是否无论战争还是和平都得孵化
     level?: number;                    // 孵化优先级，越小越优先

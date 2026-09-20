@@ -1,4 +1,4 @@
-import { RoleData } from "@/constant/CreepConstant";
+import { RoleData, RoleDefinition } from "@/constant/CreepConstant";
 import { log } from "@/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
@@ -72,7 +72,7 @@ export default class WarSpawnFunction extends Flag {
         if (spawnLoad.total > 0) return true
 
         let bodys: [BodyPartConstant, number][] = []
-        let boostmap: BoostMap = (RoleData['aio'].boostmap || {}) as BoostMap
+        let boostmap: BoostMap = ((RoleData['aio'] as RoleDefinition).boostmap || {}) as BoostMap
 
         const B = flagName.match(/AIO\/(\w+)/)?.[1] as any
         if (AIO_CONFIG[B]) {

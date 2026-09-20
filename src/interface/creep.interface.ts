@@ -163,7 +163,7 @@ interface Creep {
      * @param options - 可选的移动选项
      * @returns 移动结果状态码
      */
-    moveToRoom(roomName: string, options?: MoveToOpts): ScreepsReturnCode;
+    moveToRoom(roomName: string, options?: MoveToOpts & { bypassRange?: number }): ScreepsReturnCode;
     
     /** 
      * 移动到所属房间 (home)
