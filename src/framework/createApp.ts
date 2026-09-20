@@ -165,6 +165,11 @@ export const createApp = () => {
     const run = () => {
         cacheMemory();
         errorMapper(exec);
+        // 序列化节流：显式调用 RawMemory.set 后，
+        // 引擎会跳过 tick 末的默认 Memory 序列化。Memory 上 MB 时这是每 tick 1~3 CPU 的固定开销。
+        // 30 tick 窗口平衡 CPU 收益与全局重置时的丢失风险；
+        // cacheMemory 已持有 _MemoryCache 引用，与此机制兼容。
+        if (Game.time % 30 === 0) RawMemory.set(JSON.stringify(Memory));
     };
 
     return { name, on, run };
