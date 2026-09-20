@@ -1,5 +1,6 @@
 import { log } from '@/utils.js';
 import { errorMapper, sourceMappedStackTrace } from './errorMapper.js'
+import { isProfilingEnabled, profileStage, recordObjectCost } from '@/infra/cpuProfiler';
 import { BASE_CONFIG } from '@/constant/config.js'
 import { roomRunner } from './runner/RoomRunner';
 import { creepRunner } from './runner/CreepRunner';
@@ -80,12 +81,25 @@ export const createApp = () => {
     };
 
     const runRunner = <T>(objs: Record<string, T>, runner: (obj: T) => void, contextPrefix: string) => {
+        const profiling = isProfilingEnabled();
         for (const id in objs) {
             if (!hasOwnProperty.call(objs, id)) continue;
+            if (!profiling) {
+                try {
+                    runner(objs[id]);
+                } catch (e) {
+                    collectRunnerError(`${contextPrefix}:${id}`, e);
+                }
+                continue;
+            }
+            // 采样模式：额外记录单对象 CPU 开销
+            const start = Game.cpu.getUsed();
             try {
                 runner(objs[id]);
             } catch (e) {
                 collectRunnerError(`${contextPrefix}:${id}`, e);
+            } finally {
+                recordObjectCost(`${contextPrefix}:${id}`, Game.cpu.getUsed() - start);
             }
         }
     };
@@ -150,13 +164,13 @@ export const createApp = () => {
         // 先更新 QoS（用于后续模块统一降级/节流的判定依据）
         global.qos.updateQoS();
         runInit();
-        runCall('start');
-        runners.room();
-        runners.creep();
-        runners.powerCreep();
-        runners.flag();
-        runCall('tick');
-        runCall('end');
+        profileStage('start', () => runCall('start'));
+        profileStage('rooms', () => runners.room());
+        profileStage('creeps', () => runners.creep());
+        profileStage('powerCreeps', () => runners.powerCreep());
+        profileStage('flags', () => runners.flag());
+        profileStage('tick', () => runCall('tick'));
+        profileStage('end', () => runCall('end'));
         // tick 末统一输出隔离收集的错误
         flushCollectedErrors();
     };

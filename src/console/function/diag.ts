@@ -1,4 +1,5 @@
 import { evaluateSourceWorkTiles } from '@/prototype/Creep/function/sourceFunction';
+import { getProfilerReport } from '@/infra/cpuProfiler';
 
 /**
  * 采集/搬运决策诊断命令
@@ -8,6 +9,10 @@ import { evaluateSourceWorkTiles } from '@/prototype/Creep/function/sourceFuncti
  */
 export default {
     diag: {
+        /** CPU 观测报告：开启采样 Memory.stats.profiler = true 后等待 50 tick 再查看 */
+        cpu() {
+            return getProfilerReport();
+        },
         worktile(creepName: string) {
             const creep = Game.creeps[creepName] as any;
             if (!creep) return `未找到 creep: ${creepName}`;
