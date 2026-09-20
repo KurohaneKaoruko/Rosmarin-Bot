@@ -34,33 +34,8 @@ const tryBindNearestPartner = (
     return partner;
 };
 
-const getDefend2AttackBoost = (): { [part: string]: MineralBoostConstant[] } => ({
-    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-    [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
-    [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
-});
-
 const defend2HealPrepare = (creep: Creep) => {
-    if (creep.memory.boosted) return true;
-    if (creep.memory['boostmap']) {
-        const result = creep.goBoost(creep.memory['boostmap']);
-        if (result === OK) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        return false;
-    }
-
-    const result = creep.goBoost({
-        [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-        [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-        [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
-    });
-    if (result === OK) {
-        creep.memory.boosted = true;
-        return true;
-    }
-    return false;
+    return creep.ensureBoosted(creep.memory['boostmap']);
 };
 
 const runDefend2Heal = (creep: Creep) => {
@@ -167,22 +142,7 @@ const runDefend2Attack = (creep: Creep) => {
 };
 
 const defend2AttackPrepare = (creep: Creep) => {
-    if (creep.memory.boosted) return true;
-    if (creep.memory['boostmap']) {
-        const result = creep.goBoost(creep.memory['boostmap']);
-        if (result === OK) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        return false;
-    }
-
-    const result = creep.goBoost(getDefend2AttackBoost());
-    if (result === OK) {
-        creep.memory.boosted = true;
-        return true;
-    }
-    return false;
+    return creep.ensureBoosted(creep.memory['boostmap']);
 };
 
 const defend2Attack = {

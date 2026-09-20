@@ -311,25 +311,9 @@ const createAioBehaviorTree = () =>
         )
     );
 
-const aioBoost = {
-    [TOUGH]: ['XGHO2'],
-    [HEAL]: ['XLHO2'],
-    [RANGED_ATTACK]: ['XKHO2'],
-    [MOVE]: ['XZHO2']
-};
-
 const aio = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || aioBoost;
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: (creep) => {
         creep.disableAttackNotificationsOnce();

@@ -44,16 +44,7 @@ export const syncAidUpgradeMoveWork = (creep: Creep) => {
 
 const aid_upgrade = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || { [WORK]: ['XGH2O', 'GH2O', 'GH'] };
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: (creep) => {
         runWorkLayer(creep, { onSource, onTarget }, { reenter: true });

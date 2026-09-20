@@ -186,19 +186,7 @@ const runLegacy = (creep: Creep) => {
 
 const double_attack = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || {
-            [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-            [ATTACK]: ['XUH2O', 'UH2O', 'UH']
-        };
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: runLegacy
 };

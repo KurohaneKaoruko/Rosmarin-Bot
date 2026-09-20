@@ -192,16 +192,7 @@ const onSource = (creep: Creep): WorkEvent => {
 
 const UpRepairFunction = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || { [WORK]: ['XLH2O', 'LH2O', 'LH'] };
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: (creep) => {
         runWorkLayer(creep, { onSource, onTarget });

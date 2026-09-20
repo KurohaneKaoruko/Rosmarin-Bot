@@ -290,6 +290,16 @@ interface Creep {
      * if (result === 0) { // boost完成，执行后续逻辑 }
      */
     goBoost(boostmap: { [part: string]: MineralBoostConstant | MineralBoostConstant[] }, options?: { must?: boolean }): number;
+
+    /**
+     * 确保 creep 完成 boost 的唯一入口（Tier 1 boost 管理统一）。
+     * 解析优先级：显式传入 > memory.boostmap > ROLE_BOOST_CONFIGS[role]。
+     * @returns true 表示 boost 已完成或已按策略退化，creep 可以开始正常工作
+     */
+    ensureBoosted(
+        boostMap?: { [part: string]: MineralBoostConstant | MineralBoostConstant[] | string[] } | null,
+        opts?: { must?: boolean }
+    ): boolean;
     
     /**
      * 旧版 goBoost（资源列表模式）已废弃

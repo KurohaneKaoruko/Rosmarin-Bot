@@ -750,10 +750,7 @@ export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
 
 // boost 准备阶段：保持与旧逻辑一致
 const prepareAidBuild = (creep: Creep) => {
-    if (creep.memory['boostmap']) {
-        return creep.goBoost(creep.memory['boostmap']) === OK;
-    }
-    return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
+    return creep.ensureBoosted({ [WORK]: ['XLH2O', 'LH2O', 'LH'] });
 };
 
 // 采集阶段：收集能量并判断是否进入工作阶段

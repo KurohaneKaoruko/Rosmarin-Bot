@@ -50,15 +50,10 @@ const ensureBoostIfNeeded = (creep: Creep, mem: DismantleMemory, mode: Dismantle
     if (Game.time < retryAt) return false;
 
     // route 模式需要尽快拆通路，所以优先抢 boost
-    const boostmap = mem.boostmap || {
-        [WORK]: ['XZH2O', 'ZH2O', 'ZH'],
-        [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
-    };
-    const ret = creep.goBoost(boostmap);
-    if (ret === OK) {
-        mem.boosted = true;
-        return true;
-    }
+    const boosted = creep.ensureBoosted(
+        mem.boostmap ?? { [WORK]: ['XZH2O', 'ZH2O', 'ZH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] }
+    );
+    if (boosted) return true;
 
     mem.boostRetryAt = Game.time + 50;
     return false;
