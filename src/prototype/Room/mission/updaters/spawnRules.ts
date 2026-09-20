@@ -300,12 +300,42 @@ const getHarvesterTargetBySource = (room: Room): number => {
     return target;
 };
 
+// 无缝换班：按每个 source 的实测路程判定接班需求。
+// 返回需要额外孵化的接班者数量；路程尚未校准的 source 不参与（首次换班按原逻辑走）。
+const getHarvesterSuccessionNeeds = (room: Room): number => {
+    const timing = (room.memory as any).sourceTiming;
+    if (!timing) return 0;
+    const harvesters = getRoomTickCacheValue(room, 'succession_harvesters', () =>
+        room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => c.memory.role === 'harvester' && !!c.memory.targetSourceId
+        }) as Creep[]
+    );
+
+    let needs = 0;
+    for (const source of room.source || []) {
+        const info = timing[source.id];
+        const pathTime = info?.pathTime;
+        if (typeof pathTime !== 'number') continue;
+        const bound = harvesters.filter(h => h.memory.targetSourceId === source.id);
+        if (bound.length === 0) continue;
+        const incubation = Math.max(...bound.map(h => h.body.length * 3), 12);
+        const covered = bound.some(h => (h.ticksToLive || 0) > pathTime + incubation + 10);
+        if (!covered) needs += 1;
+    }
+    return needs;
+};
+
 // 每个角色一个检查函数，保持结构清晰
 export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
         const baseTarget = getHarvesterTargetBySource(room);
         if (baseTarget <= 0) return false;
+
+        // 无缝换班：绑定爬 TTL 低于「实测路程 + 孵化期 + 缓冲」时，
+        // 立即孵接班者——新爬在路上走的时候老爬还在挖，到场即无缝接班，矿位不空转。
+        const successorNeeds = getHarvesterSuccessionNeeds(room);
+        if (successorNeeds > 0 && current < baseTarget + successorNeeds) return true;
 
         let num = baseTarget;
         if (isHighLikeMode(getRoomMode(room)) && getBuiltRoomLevel(room) <= 3) {
