@@ -114,3 +114,41 @@ export const estimateDismantlePower = (worker: { body?: BodyPartLike[] }): numbe
     }
     return total;
 };
+
+// ── Tower 数值模型（距离衰减统一口径，供塔控/防御预测共用）──
+
+/** 塔攻击/治疗的距离衰减：≤5 满额 600，5~20 线性衰减到 150，>20 恒 150 */
+export const getTowerEffectByDistance = (distance: number): number => {
+    if (distance <= 5) return 600;
+    if (distance <= 20) return 600 - (distance - 5) * 30;
+    return 150;
+};
+
+/** 塔攻击距离衰减伤害 */
+export const getTowerDamageByDistance = getTowerEffectByDistance;
+
+/** 塔治疗距离衰减治疗量（与攻击同一条衰减曲线） */
+export const getTowerHealByDistance = getTowerEffectByDistance;
+
+/**
+ * 远程 mass attack（rangedMassAttack）单部件伤害：
+ * 距离 1 = 10 / 距离 2~3 = 4 / 更远 = 1（无 boost 时）
+ */
+export const getRangedMassDamageByDistance = (rangeToTarget: number): number => {
+    if (rangeToTarget <= 1) return 10;
+    if (rangeToTarget <= 3) return 4;
+    return 1;
+};
+
+/** rangedMassAttack 总伤害（含 boost 倍率） */
+export const estimateRangedMassDamage = (attacker: { body?: BodyPartLike[] }, rangeToTarget: number): number => {
+    const base = getRangedMassDamageByDistance(rangeToTarget);
+    if (base <= 0) return 0;
+    let total = 0;
+    for (const p of attacker.body || []) {
+        if (!p || p.type !== RANGED_ATTACK) continue;
+        if (typeof p.hits === 'number' && p.hits <= 0) continue;
+        total += base * getBoostMultiplier(RANGED_ATTACK, p.boost ? String(p.boost) : undefined);
+    }
+    return total;
+};

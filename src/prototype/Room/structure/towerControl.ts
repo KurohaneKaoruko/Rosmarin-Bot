@@ -1,4 +1,5 @@
 import { compress } from '@/shared/compress';
+import { estimateHealPower, getTowerEffectByDistance } from '@/shared/combatCalc';
 import { isRoomTickAligned } from '@/shared/roomPhase';
 import { pickTowerFocusTarget } from '@/shared/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
@@ -71,9 +72,7 @@ export default class TowerControl extends Room {
      * @returns 伤害值
      */
     TowerDamage(dist: number) {
-        if (dist <= 5) return 600;
-        else if (dist <= 20) return 600 - (dist - 5) * 30;
-        else return 150;
+        return getTowerEffectByDistance(dist);
     }
 
     private TowerPowerScale(tower: StructureTower): number {
@@ -143,22 +142,8 @@ export default class TowerControl extends Room {
             filter: c => creep.owner.username == c.owner.username && c.getActiveBodyparts(HEAL) > 0
         }) || [];
         let totalHeal = 0;
-        const BOOST_POWER = {
-            'LO': 2,
-            'LHO2': 3,
-            'XLHO2': 4,
-        }
         healers.forEach(c => {
-            const range = c.pos.getRangeTo(creep.pos);
-            const base = range <= 1 ? 12 : (range <= 3 ? 4 : 0);
-            if (base <= 0) return;
-            let h = 0;
-            c.body.forEach(part => {
-                if (part.type !== HEAL || part.hits <= 0) return;
-                if (!part.boost) h += base;
-                else h += base * (BOOST_POWER as any)[part.boost];
-            });
-            totalHeal += h;
+            totalHeal += estimateHealPower(c as any, c.pos.getRangeTo(creep.pos));
         });
         creep['_towerDamage'] = realDamage - totalHeal;
         // 可视化仅用于调试：默认不画，避免每 tick 多目标评估时产生额外 CPU/视图开销。
