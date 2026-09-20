@@ -51,6 +51,14 @@ export default {
                 syncMoveWork(creep, source);
                 return;
             }
+            // 首次到场：实测「出生 → 工作位」路程，供孵化系统无缝换班
+            if (!creep.memory.calibrated) {
+                const roomMem = creep.room.memory as any;
+                roomMem.sourceTiming ??= {};
+                const timing = roomMem.sourceTiming[source.id] ?? (roomMem.sourceTiming[source.id] = {});
+                timing.pathTime = Math.max(10, Math.min(500, Game.time - (creep.memory.spawnTick ?? Game.time)));
+                creep.memory.calibrated = true;
+            }
             creep.goHaverst(source);
             // 快满时同 tick 顺带进入交付，避免“采一跳卡满”原地空转
             if (carryCapacity === 0 || creep.store.getFreeCapacity() > income) {

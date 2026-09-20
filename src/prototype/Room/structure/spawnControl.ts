@@ -227,6 +227,8 @@ export default class SpawnControl extends Room {
             return;
         }
 
+        // 记录出生 tick：供 harvester 无缝换班的路程实测（spawnRules）使用
+        data.memory.spawnTick = Game.time;
         const result = spawn.spawnCreep(data.bodypart, data.name, { memory: data.memory });
         const role = data.memory.role;
         if (!isRoleId(role)) return;
