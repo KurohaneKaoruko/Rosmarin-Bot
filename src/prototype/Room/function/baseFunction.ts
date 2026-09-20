@@ -919,6 +919,44 @@ export default class BaseFunction extends Room {
         return this.structures;
     }
 
+    /**
+     * 确保控制器旁有能量缓冲工地（冲级/常驻升级的「围在周边秒取能」配套）。
+     * RCL4+ 且控制器 3 格内无 storage/terminal 建筑与同类工地时，
+     * 在控制器 2 格内找一个可建位放置 terminal（RCL6+）或 storage 工地。
+     * 建造由 worker 自然完成，本方法只负责放工地（低频调用）。
+     */
+    ensureControllerBufferSite() {
+        if (this.level < 4) return;
+        const controller = this.controller;
+        if (!controller?.my) return;
+
+        const hasBuffer =
+            (this.storage && this.storage.pos.inRangeTo(controller.pos, 3)) ||
+            (this.terminal && this.terminal.pos.inRangeTo(controller.pos, 3));
+        if (hasBuffer) return;
+
+        const wanted = this.level >= 6 ? STRUCTURE_TERMINAL : STRUCTURE_STORAGE;
+        const existingSite = controller.pos.findInRange(FIND_CONSTRUCTION_SITES, 2)
+            .find(s => s.structureType === wanted);
+        if (existingSite) return;
+
+        for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -2; dy <= 2; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = controller.pos.x + dx;
+                const y = controller.pos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                if (this.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+                const pos = new RoomPosition(x, y, this.name);
+                const blocked = pos.lookFor(LOOK_STRUCTURES).some(s =>
+                    s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART);
+                if (blocked) continue;
+                if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
+                if (pos.createConstructionSite(wanted) === OK) return;
+            }
+        }
+    }
+
 }
 
 function AddList(list: any[], num: number, type: any) {
