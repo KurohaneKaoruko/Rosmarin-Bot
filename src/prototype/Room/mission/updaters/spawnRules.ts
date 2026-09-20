@@ -544,8 +544,17 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         const needHarvestRescue = harvestNum === 0 && energyAvailable < minHarvesterEnergy;
         const needTransportRescue = transporterNum === 0 && energyAvailable < minLogisticEnergy;
 
+        // 0) 低级房常备（防停机核心）：NORMAL 态且物流基建（container/link/storage）
+        //    未成型时，保持少量 UNIV 常驻。harvester（无仓掉落）+ carrier 的分工一旦断环，
+        //    UNIV 立即无缝顶上，而不是等能量跌进 LOW 才触发救援——消除“停机→救援”振荡。
+        const hasLogisticsInfra =
+            (room.container?.length || 0) > 0 || hasStorageLike || (room.link?.length || 0) > 0;
+
         // 1) 控制器降级兜底：仅在低等级且低能量时用 UNIV，常态靠 upgrader
         let target = 0;
+        if (lv <= 2 && !isLowEnergy && !hasLogisticsInfra) {
+            target = Math.max(target, 2);
+        }
         if (lv <= 4 && isLowEnergy) {
             target = getDowngradeUniversalTarget(room);
         }
