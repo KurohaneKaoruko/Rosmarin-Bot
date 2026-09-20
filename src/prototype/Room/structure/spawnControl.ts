@@ -3,7 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/shared/compress';
 import { getRoomData } from '@/shared/memory';
-import { getMyConstructionSites } from '../mission/updaters/spawnMission';
+import { getMyConstructionSites } from '../mission/updaters/spawnRules';
 
 const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
