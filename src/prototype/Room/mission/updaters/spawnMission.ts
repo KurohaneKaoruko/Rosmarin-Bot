@@ -13,6 +13,17 @@ import {
     getMyConstructionSites,
 } from './spawnRules';
 
+// 供测试与外部模块直接使用孵化判定入口（spawnMission 作为统一出口 re-export）
+export {
+    createSpawnCheckContext,
+    getAdjustedSpawnRoleCurrent,
+    shouldSpawnRole,
+    RoleSpawnCheck,
+    getDowngradeUniversalSpawnMissing,
+    getMyConstructionSites,
+    pruneDelayedUpgraderSpawnMissions,
+} from './spawnRules';
+
 export default class SpawnMission extends Room {
     /**
      * spawn 更新入口
