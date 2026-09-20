@@ -326,6 +326,11 @@ interface Room {
      * @returns 房间内所有建筑的数组，结果会缓存
      */
     getStructures(): Structure[];
+
+    /**
+     * 确保控制器旁有能量缓冲工地（storage/terminal，冲级/常驻升级的取能配套）
+     */
+    ensureControllerBufferSite(): void;
     
     /** 
      * 获取房间所有者名字

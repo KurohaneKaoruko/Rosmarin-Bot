@@ -1,4 +1,5 @@
 import { getRoomData, getStructData } from '@/shared/memory';
+import { isRoomTickAligned } from '@/shared/roomPhase';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -34,6 +35,8 @@ export default class RoomExecute extends Room {
         // 自动化处理
         this.autoMarket();       // 自动市场交易
         this.autoBuild();        // 自动建筑
+        // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
+        if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
         if (!lowMode) {
             this.autoLab();          // 自动Lab合成
             this.autoFactory();      // 自动Factory生产
