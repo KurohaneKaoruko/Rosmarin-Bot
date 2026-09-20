@@ -7,7 +7,7 @@ import { GeneratePixel } from '@/modules/Pixel';
 import { Statistics } from '@/modules/Statistics';
 import { ResourceManage } from '@/modules/ResourceManage';
 import { TeamModule } from '@/modules/TeamModule';
-import { DDModule } from '@/modules/DD_Module';
+import { DDModule } from '@/modules/DDModule';
 import { NukeModule } from '@/modules/NukeModule';
 import { ExpandModule } from '@/modules/ExpandModule';
 import { InterShardModule } from '@/modules/InterShardModule';
