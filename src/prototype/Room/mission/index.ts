@@ -4,6 +4,20 @@
  */
 import { getRoomData } from '@/shared/memory';
 
+// 房间相位：按房名哈希错峰。
+// 多个房间不再同一 tick 集中执行 spawnMission/transportMission 等重任务，削平 CPU 尖峰。
+const roomPhaseCache = new Map<string, number>();
+const getRoomPhase = (roomName: string): number => {
+    let phase = roomPhaseCache.get(roomName);
+    if (phase === undefined) {
+        let hash = 0;
+        for (let i = 0; i < roomName.length; i++) hash = (hash * 31 + roomName.charCodeAt(i)) >>> 0;
+        phase = hash % 997;
+        roomPhaseCache.set(roomName, phase);
+    }
+    return phase;
+};
+
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
     declare UpdateTransportMission: (offset?: number) => void;
@@ -39,8 +53,11 @@ export default class Mission extends Room {
             { interval: 1, offset: 0, run: (_) => this.UpdateHighwayScan() },
         ];
 
+        const roomPhase = getRoomPhase(this.name);
         for (const item of schedule) {
-            if (global.qos.isTickAligned(item.interval, item.offset)) item.run(item.offset);
+            // 相位叠加房间哈希：同频任务在房间之间天然错开
+            const offset = (item.offset + roomPhase) % item.interval;
+            if (global.qos.isTickAligned(item.interval, offset)) item.run(item.offset);
         }
     }
 }
