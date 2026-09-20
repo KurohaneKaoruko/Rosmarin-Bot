@@ -1,14 +1,7 @@
 import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features/external/externalMine';
 import { RoadMemory } from '@/modules/features/external/externalRoad';
-import {
-    clearOutCarryRelayIntent,
-    rememberOutCarryRelayIntentTowards,
-    tryOutCarryRelayCollectStep,
-    tryOutCarryRelayHandoff,
-    updateOutCarryMoveTrace
-} from '@/prototype/Creep/function/relayFunction';
+import { tryOutCarryRelayHandoff } from '@/prototype/Creep/function/relayHandoff';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
@@ -214,17 +207,7 @@ const moveOutCarryTo = (
     opts?: MoveToOpts,
     collectRelay = false
 ) => {
-    rememberOutCarryRelayIntentTowards(creep, target);
-    if (
-        collectRelay &&
-        shouldUseOutCarryRelay(creep) &&
-        tryOutCarryRelayCollectStep(
-            creep,
-            (other) => outCarry.isLikelyCollecting(other),
-            OUT_CARRY_STRATEGIES.COLLECT,
-            OUT_CARRY_STRATEGIES.DELIVER
-        )
-    ) {
+    if (collectRelay && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
         return OK;
     }
     return creep.moveTo(target, opts);
@@ -235,7 +218,6 @@ const moveOutCarryToRoom = (
     roomName: string,
     opts?: Record<string, any>
 ) => {
-    clearOutCarryRelayIntent(creep);
     return creep.moveToRoom(roomName, opts);
 };
 
@@ -715,12 +697,7 @@ const outCarry: OutCarryAction = {
         if (!sourceRoom) return;
 
         if (shouldUseOutCarryRelay(creep)) {
-            if (tryOutCarryRelayHandoff(
-                creep,
-                (other) => this.isLikelyCollecting(other),
-                OUT_CARRY_STRATEGIES.COLLECT,
-                OUT_CARRY_STRATEGIES.DELIVER
-            )) return;
+            if (tryOutCarryRelayHandoff(creep)) return;
         }
 
         if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
@@ -791,11 +768,7 @@ const outCarry: OutCarryAction = {
         const cache = getOutCarryCache(creep);
         const sourceCache = getOutCarrySourceCache(creep);
         const targetCache = getOutCarryTargetCache(creep);
-        clearOutCarryRelayIntent(creep);
-        updateOutCarryMoveTrace(creep);
         delete creep.memory.working;
-        // 本 tick 已被接力方下发移动意图时，不再执行后续动作，避免覆盖接力移动。
-        if (hasCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_RECEIVE)) return;
 
         const previousMode = cache.outCarryMode as OutCarryMode | undefined;
         const mode = resolveOutCarryMode(creep, previousMode);
