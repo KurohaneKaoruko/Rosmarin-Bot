@@ -6,6 +6,7 @@ import { ClearModule } from '@/modules/ClearModule';
 import { GeneratePixel } from '@/modules/Pixel';
 import { Statistics } from '@/modules/Statistics';
 import { ResourceManage } from '@/modules/ResourceManage';
+import { FunnelModule } from '@/modules/FunnelModule';
 import { TeamModule } from '@/modules/TeamModule';
 import { DDModule } from '@/modules/DDModule';
 import { NukeModule } from '@/modules/NukeModule';
@@ -25,6 +26,7 @@ const App = createApp();
 App.on(TeamModule);       // 小队模块
 App.on(EventModule);      // 事件模块
 App.on(ResourceManage);   // 资源调度管理
+App.on(FunnelModule);     // 跨房能量漏斗
 App.on(InterShardModule); // InterShardMemory 缓存与清理
 App.on(ExpandModule);     // 跨 shard 扩张
 App.on(NukeModule);       // 核弹打击
