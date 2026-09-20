@@ -96,16 +96,7 @@ const onTarget = (creep: Creep): WorkEvent => {
 
 const AidCarryFunction = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] };
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: (creep) => {
         runWorkLayer(creep, { onSource, onTarget }, { reenter: true });

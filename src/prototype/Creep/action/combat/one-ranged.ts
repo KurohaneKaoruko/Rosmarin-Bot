@@ -1,12 +1,5 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
-const oneRangedBoost = {
-    [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-    [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-    [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
-    [MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
-};
-
 const runCombat = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
     creep.heal(creep);
@@ -74,16 +67,8 @@ const runCombat = (creep: Creep) => {
 
 const one_ranged = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || oneRangedBoost;
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        // boost 配置见 ROLE_BOOST_CONFIGS['one-ranged']
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: runCombat
 };

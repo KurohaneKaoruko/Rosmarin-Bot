@@ -69,11 +69,9 @@ const onTarget = (creep: Creep): WorkEvent => {
 const onSource = (creep: Creep): WorkEvent => {
     if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
 
-    // boost 前置：未完成前不取能不升级
-    if (!creep.memory.boosted) {
-        const result = creep.goBoost((creep.memory as any).boostmap || getUpUpgradeBoostmap());
-        creep.memory.boosted = result === OK;
-        if (result !== OK) return WORK_EVENTS.STAY;
+    // boost 前置：未完成前不取能不升级（配置见 ROLE_BOOST_CONFIGS['up-upgrade']）
+    if (!creep.ensureBoosted({ [WORK]: ['XGH2O', 'GH2O', 'GH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] })) {
+        return WORK_EVENTS.STAY;
     }
 
     if (creep.store.getFreeCapacity() === 0) {

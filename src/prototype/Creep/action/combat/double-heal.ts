@@ -75,20 +75,7 @@ const runLegacy = (creep: Creep) => {
 
 const double_heal = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
-        const boostmap = creep.memory['boostmap'] || {
-            [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
-            [HEAL]: ['XLHO2', 'LHO2', 'LO'],
-            [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'],
-        };
-        if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
-            return true;
-        }
-        const result = creep.goBoost(boostmap);
-        const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
-        return ok;
+        return creep.ensureBoosted(creep.memory['boostmap']);
     },
     run: runLegacy
 };
