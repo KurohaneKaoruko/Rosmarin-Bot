@@ -3,6 +3,7 @@ import { decompress, decompressBodyConfig } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/shared/creepTickIndex';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 // 维修相关
 const REPAIR_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN * 2;
@@ -80,6 +81,29 @@ const countMyConstructionSitesByType = (room: Room, structureType: StructureCons
         if (site.structureType === structureType) count++;
     }
     return count;
+};
+
+// 运力忙碌率采样：
+// 不设静态配比上限，持续采样忙碌占比——均值持续超过在编运力 85% 就补员（封顶 7），
+// 人口自动收敛到「刚好不积压任务」的水平。窗口 100 个采样点 ≈ 500~1000 tick。
+const CARRIER_BUSY_WINDOW = 100;
+const CARRIER_BUSY_SPAWN_RATIO = 0.85;
+const CARRIER_BUSY_MAX_CARRIERS = 7;
+
+const getCarrierBusyStats = (room: Room): { total: number; avgBusy: number } => {
+    const { total, busy } = getRoomTickCacheValue(room, 'carrier_busy_sample', () => {
+        const carriers = room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => c.memory.role === 'carrier'
+        }) as Creep[];
+        return { total: carriers.length, busy: carriers.filter(c => c.store.getUsedCapacity() > 0).length };
+    });
+
+    const mem = room.memory as any;
+    const samples: number[] = mem.carryBusySamples ?? (mem.carryBusySamples = []);
+    samples.push(total > 0 ? busy / total : 0);
+    if (samples.length > CARRIER_BUSY_WINDOW) samples.splice(0, samples.length - CARRIER_BUSY_WINDOW);
+    const avgBusy = samples.length ? samples.reduce((a, b) => a + b, 0) / samples.length : 0;
+    return { total, avgBusy };
 };
 
 // 核心建筑未齐全时，升级器会被延迟以优先补齐基础设施
@@ -387,6 +411,14 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     },
     'carrier': (room: Room, current: number) => {
         const num = RoleLevelData['carrier'][room.level]['num'];
+        const { avgBusy, total } = getCarrierBusyStats(room);
+
+        // 忙碌率反馈：均值持续 >85% 在编运力即补员（封顶 7）——
+        // 需求随布局/战斗阶段波动，任何静态公式都会在某个阶段失真，采样让人口自动收敛。
+        if (total > 0 && avgBusy > CARRIER_BUSY_SPAWN_RATIO && current < CARRIER_BUSY_MAX_CARRIERS) {
+            return true;
+        }
+
         if (num > 0) return current < num;
         if (current >= 1) return false;
 
