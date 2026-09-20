@@ -34,7 +34,7 @@ const tryBindNearestPartner = (
     return partner;
 };
 
-const getDefend2AttackBoost = () => ({
+const getDefend2AttackBoost = (): { [part: string]: MineralBoostConstant[] } => ({
     [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
     [ATTACK]: ['XUH2O', 'UH2O', 'UH'],
     [MOVE]: ['XZHO2', 'ZHO2', 'ZO']
@@ -117,7 +117,10 @@ const runDefend2Attack = (creep: Creep) => {
     const hostileCreeps = creep.findHostileCreeps() as Creep[];
     if (hostileCreeps.length === 0) return;
 
-    const targetRampart = pickDefenseAnchorRampart(creep.room, 'melee', creep.name);
+    // 与 defend-single 保持一致的血量下限：内存候选缺省时按破防状态取 1e5/1e6
+    const defenseMem = creep.room.memory['defenseRamparts'];
+    const minHits = (defenseMem && defenseMem.minHits) ? defenseMem.minHits : (creep.room.memory['breached'] ? 1e5 : 1e6);
+    const targetRampart = pickDefenseAnchorRampart(creep.room, 'melee', creep.name, minHits);
     if (targetRampart && !creep.pos.isEqualTo(targetRampart.pos)) {
         const costCallback = creep.room.getDefenseCreepCostCallback(creep.name);
         creep.moveTo(targetRampart.pos, {
@@ -156,7 +159,10 @@ const runDefend2Attack = (creep: Creep) => {
     creep.room.CallTowerAttack(target);
 
     if (!creep.pos.isNearTo(bindcreep)) {
-        creep.moveTo(bindcreep, { range: 1, costCallback } as any);
+        creep.moveTo(bindcreep, {
+            range: 1,
+            costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
+        });
     }
 };
 

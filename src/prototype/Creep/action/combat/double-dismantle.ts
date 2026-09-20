@@ -102,9 +102,9 @@ function AutoActionDismantle(creep: Creep) {
         ((!c.isWhiteList() &&
         c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 4)) ||
         (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6))
-    ) : undefined;
+    )) : undefined;
 
-    if (target && targetDangerHostiles) {
+    if (target && targetDangerHostiles && targetDangerHostiles.length > 0) {
         creep.memory['targetId'] = null;
         AutoFindTarget(creep);
         target = getCachedDoubleDismantleTarget(creep);
@@ -115,7 +115,7 @@ function AutoActionDismantle(creep: Creep) {
         ((!c.isWhiteList() &&
         c.getActiveBodyparts(ATTACK) > 0 && c.pos.inRangeTo(creep, 5)) ||
         (c.getActiveBodyparts(RANGED_ATTACK) > 0 && c.pos.inRangeTo(creep, 6))
-    );
+    ));
 
     if (closeDangerHostiles.length) {
         let result = creep.doubleFlee();
