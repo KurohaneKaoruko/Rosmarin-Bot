@@ -402,7 +402,8 @@ const WorkerAction = function (creep: Creep): MoveWorkTileCandidate[] {
     
     if (!creep.room.controller?.my) return candidates;
     pushWorkerCandidate(candidates, creep.room.controller.pos);
-    creep.runControllerUpgrade({ sign: false, pickupDropped: false });
+    // worker 已接管常规升级（原 upgrader 职责），顺带维护房间签名
+    creep.runControllerUpgrade({ sign: true, pickupDropped: false });
     return candidates;
 }
 

@@ -9,49 +9,49 @@ export type RoleDefinition = {
 
 export const RoleData = {
     /* 基本房间运营 */
-    harvester: {
+    'harvester': {
         bodypart: [[WORK, 2], [MOVE, 2]],
         level: 3,
         code: 'H',
         executor: 'harvester',
     }, // 采集
-    carrier: {
+    'carrier': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 3,
         code: 'C',
         executor: 'carrier',
     }, // 通用搬运
-    transporter: {
+    'transporter': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 2,
         code: 'T',
         executor: 'transporter',
     }, // 资源搬运
-    manager: {
+    'manager': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 1,
         code: 'M',
         executor: 'manager',
     }, // 中央搬运
-    upgrader: {
+    'upgrader': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'U',
-        executor: 'upgrader',
-    }, // 升级
-    worker: {
+        executor: 'worker',
+    }, // 升级（已并入 worker；保留配置让存量 creep 无缝转 worker 执行，不再孵化新个体）
+    'worker': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'W',
         executor: 'worker',
     }, // 建造、维修、刷墙
-    miner: {
+    'miner': {
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 6,
         code: 'MR',
         executor: 'miner',
     }, // 矿工
-    universal: {
+    'universal': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 0,
         code: 'UNIV',
@@ -59,25 +59,25 @@ export const RoleData = {
     }, // 采集搬运通用机，处理停摆与新房起步
 
     /* 特殊用途 */
-    scout: {
+    'scout': {
         bodypart: [[MOVE, 1]],
         level: 11,
         code: 'S',
         executor: 'scout',
     },
-    logistic: {
+    'logistic': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 11,
         code: 'L',
         executor: 'logistic',
     }, // 长途运输
-    cleaner: {
+    'cleaner': {
         bodypart: [[WORK, 25], [MOVE, 25]],
         level: 11,
         code: 'CLE',
         executor: 'cleaner',
     }, // 清理者
-    dismantle: {
+    'dismantle': {
         bodypart: [[WORK, 40], [MOVE, 10]],
         boostmap: { [WORK]: 'XZH2O', [MOVE]: 'XZHO2' },
         level: 11,
@@ -98,7 +98,7 @@ export const RoleData = {
     }, // 加速维修
 
     /* 占领房间 */
-    claimer: {
+    'claimer': {
         bodypart: [[MOVE, 5], [CLAIM, 1]],
         level: 10,
         code: 'CL',
@@ -213,7 +213,7 @@ export const RoleData = {
     },
 
     /* 外矿相关 */
-    reserver: {
+    'reserver': {
         bodypart: [],
         level: 11,
         code: 'RSV',
@@ -399,6 +399,7 @@ export const RoleLevelData = {
         7: { bodypart: [[CARRY, 25], [MOVE, 1]], num: 1 },
         8: { bodypart: [[CARRY, 39], [MOVE, 1]], num: 1 },
     },
+    // upgrader 数量表保留作为 worker 升级目标的折算基准（见 spawnRules.getWorkerUpgradeTarget）。
     'upgrader': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
         2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },

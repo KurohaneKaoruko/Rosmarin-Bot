@@ -193,7 +193,9 @@ export default class TransportMission extends Room {
 
         const creepNum = this.getCreepNum() || {};
         const highMode = isHighLikeMode(roomMode);
+        // 常规升级已并入 worker，worker 空闲时会顶上控制器升级，也计入缓冲消费者
         const hasUpgradeConsumer =
+            (creepNum['worker'] || 0) +
             (creepNum['upgrader'] || 0) +
             (creepNum['aid-upgrade'] || 0) +
             (creepNum['universal'] || 0) > 0;
