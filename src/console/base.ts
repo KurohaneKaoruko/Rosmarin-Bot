@@ -7,6 +7,12 @@ const MISSION_POOL_NAME_SET = new Set<MissionPoolName>(['transport', 'build', 'r
 
 // 基础与杂项
 const Base = {
+    // 顶层快捷入口：start(...) 等价 room.start(...)，少打一个词
+    // 两个参数都可省略：start() 自动推断房间并使用自动布局
+    start(roomName?: string, layout?: string) {
+        if (!global.room?.start) return Error('room 指令未就绪，请稍后重试。');
+        return (global.room as any).start(roomName, layout);
+    },
     bot: {
         mode(mode: string) {
             if (mode !== 'default' && mode !== 'auto') return Error('请输入正确的模式(default/auto)');

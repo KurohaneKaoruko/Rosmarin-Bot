@@ -765,29 +765,18 @@ const outCarry: OutCarryAction = {
 
     // 统一入口：只做 collect / deliver，修路与建造交给 out-build。
     run: function (creep: Creep) {
-        const cache = getOutCarryCache(creep);
-        const sourceCache = getOutCarrySourceCache(creep);
-        const targetCache = getOutCarryTargetCache(creep);
         delete creep.memory.working;
 
-        const previousMode = cache.outCarryMode as OutCarryMode | undefined;
-        const mode = resolveOutCarryMode(creep, previousMode);
+        runModeCycle(creep);
 
-        if (mode !== previousMode) {
-            // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
-            if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
-                delete targetCache.targetId;
-            } else {
-                delete sourceCache.targetId;
-                delete sourceCache.targetType;
-                delete sourceCache.waitUntil;
-                delete sourceCache.partialLeaveWait;
-                clearAssignedSourceCache(sourceCache);
-            }
+        // 接力后续跑：本 tick 由自己发起过接力（relayedSelfTick）时，memory 已换成新身份，
+        // 立即再决策一轮——转移与移动同 tick 完成，货物单 tick 前进两格。
+        // 例：贴脸队形 A-B-C（C 满载）只传一次 C→B，随后 B 掉头带货行驶、A/C 各自让位分开，
+        // 最终 ABC → BAOC（O 为空位），而不是原地 C→B→A 逐手倒货。
+        // 第二轮中的接力尝试会被同 tick 接力标记阻断，不会连环传递。
+        if ((creep.memory as any).relayedSelfTick === Game.time) {
+            runModeCycle(creep);
         }
-        cache.outCarryMode = mode;
-
-        runOutCarryMode(creep, mode);
     },
 };
 
@@ -917,6 +906,32 @@ const runOutCarryMode = (creep: Creep, mode: OutCarryMode) => {
     }
     outCarry.carry(creep);
     creep.memory.dontPullMe = false;
+};
+
+// 单轮模式决策 + 执行：解析 collect/deliver，切态时清对侧缓存，然后跑对应主流程。
+// 接力后续跑会以交换后的新 memory 再调用一次本函数，缓存按当下 memory 现取现用。
+const runModeCycle = (creep: Creep): void => {
+    const cache = getOutCarryCache(creep);
+    const previousMode = cache.outCarryMode as OutCarryMode | undefined;
+    const mode = resolveOutCarryMode(creep, previousMode);
+
+    if (mode !== previousMode) {
+        // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
+        const sourceCache = getOutCarrySourceCache(creep);
+        const targetCache = getOutCarryTargetCache(creep);
+        if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+            delete targetCache.targetId;
+        } else {
+            delete sourceCache.targetId;
+            delete sourceCache.targetType;
+            delete sourceCache.waitUntil;
+            delete sourceCache.partialLeaveWait;
+            clearAssignedSourceCache(sourceCache);
+        }
+    }
+    cache.outCarryMode = mode;
+
+    runOutCarryMode(creep, mode);
 };
 
 export default outCarry;

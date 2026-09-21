@@ -488,34 +488,42 @@ function getDirection(fromPos, toPos) {
             return TOP_LEFT;
         }
     } else {  // 房间边界点
-        if (fromPos.x <= 1 || fromPos.x >= 48) {  // 左右相邻的房间，只需上下移动（左右边界会自动弹过去）
+        if (fromPos.x <= 1 || fromPos.x >= 48) {  // 左右相邻的房间
             if (toPos.y > fromPos.y) {   // 下一步在下面
                 if (fromPos.x === 1) return BOTTOM_LEFT;
                 if (fromPos.x === 48) return BOTTOM_RIGHT;
+                if (fromPos.x === 0) return BOTTOM_LEFT;   // 站在西边界格：斜跨进左邻房
+                if (fromPos.x === 49) return BOTTOM_RIGHT; // 站在东边界格：斜跨进右邻房
                 return BOTTOM;
             } else if (toPos.y < fromPos.y) { // 下一步在上
                 if (fromPos.x === 1) return TOP_LEFT;
                 if (fromPos.x === 48) return TOP_RIGHT;
+                if (fromPos.x === 0) return TOP_LEFT;
+                if (fromPos.x === 49) return TOP_RIGHT;
                 return TOP
-            } // else 正左正右
-            if (fromPos.x === 1) return LEFT;
-            if (fromPos.x === 48) return RIGHT;
+            } // else 正左正右（跨房同排：站在边界格上必须直接给出跨越方向，否则卡门）
+            if (fromPos.x <= 1) return LEFT;
+            if (fromPos.x >= 48) return RIGHT;
             return 0;
-        } else if (fromPos.y <= 1 || fromPos.y >= 48) {    // 上下相邻的房间，只需左右移动（上下边界会自动弹过去）
+        } else if (fromPos.y <= 1 || fromPos.y >= 48) {    // 上下相邻的房间
             if (toPos.x > fromPos.x) {    // 下一步在右边
                 if (fromPos.y === 1) return TOP_RIGHT;
                 if (fromPos.y === 48) return BOTTOM_RIGHT;
+                if (fromPos.y === 0) return TOP_RIGHT;
+                if (fromPos.y === 49) return BOTTOM_RIGHT;
                 return RIGHT;
             } else if (toPos.x < fromPos.x) {
                 if (fromPos.y === 1) return TOP_LEFT;
                 if (fromPos.y === 48) return BOTTOM_LEFT;
+                if (fromPos.y === 0) return TOP_LEFT;
+                if (fromPos.y === 49) return BOTTOM_LEFT;
                 return LEFT;
-            }// else 正上正下
-            if (fromPos.y === 1) return TOP;
-            if (fromPos.y === 48) return BOTTOM;
+            }// else 正上正下（跨房同列：站在边界格上必须直接给出跨越方向）
+            if (fromPos.y <= 1) return TOP;
+            if (fromPos.y >= 48) return BOTTOM;
             return 0;
         }
-        return 0;       
+        return 0;
     }
 }
 
@@ -1835,7 +1843,17 @@ function direction2Pos(pos, target) {
         }
     }
     if (tarpos.x < 0 || tarpos.y > 49 || tarpos.x > 49 || tarpos.y < 0) {
-        return undefined;
+        // 跨房边界步：换算到邻房坐标。
+        // 原实现直接返回 undefined，会让 betterMove 静默不登记移动意图，
+        // creep 站在出口格上永远无法跨越房间边界（卡门）。
+        const parsed = parseRoomName(pos.roomName);
+        if (!parsed) return undefined;
+        const wx = parsed.baseX + tarpos.x;
+        const wy = parsed.baseY + tarpos.y;
+        const rx = wx / 50 | 0, ry = wy / 50 | 0;
+        const roomName = (rx <= halfWorldSize ? 'W' + (halfWorldSize - rx) : 'E' + (rx - halfWorldSize - 1)) +
+            (ry <= halfWorldSize ? 'N' + (halfWorldSize - ry) : 'S' + (ry - halfWorldSize - 1));
+        return new RoomPosition(wx % 50, wy % 50, roomName);
     } else {
         return new RoomPosition(tarpos.x, tarpos.y, pos.roomName);
     }
@@ -1858,10 +1876,10 @@ function registerMoveIntent(creep, targetPos, priority) {
         targetTile = targetPos;
     } else {
         const targetFormalPos = formalize(targetPos);
-        if (targetPos.roomName !== creep.room.name) {       // 考虑跨房，送进解算算法的都是当前 tick 格子
-            targetFormalPos.x += (targetPos.x === 49) - (targetPos.x === 0);
-            targetFormalPos.y += (targetPos.y === 49) - (targetPos.y === 0);
-        }   // else 如果 targetPos 已经是同一边了，不用处理
+        // 跨房目标直接用世界坐标 tile id（与 formalize 同一坐标系，邻房边界格天然相邻，
+        // 解析器因此能识别门口「互换」结构，让对向 creep 互相穿行）。
+        // 原实现对跨界目标再做 ±1 位移，会把「邻房边界格」折叠成 creep 自己脚下的格子
+        // （target == cur），结算器于是只匹配原地不动——creep 永远跨不出房间（卡门根源之一）。
         targetTile = targetFormalPos.y << 14 | targetFormalPos.x;
     }
     const curTile = formalCreepPos.y << 14 | formalCreepPos.x;
@@ -2318,7 +2336,9 @@ function betterMove(target) {
         return ERR_INVALID_ARGS;
     }
     const nextPos = direction2Pos(this.pos, direction);
-    if (nextPos && Game.rooms[nextPos.roomName].getTerrain().get(nextPos.x, nextPos.y) !== TERRAIN_MASK_WALL) {
+    // 跨房目标可能落在无视野的邻房：无法做地形检查时仍然登记意图（走过去顶多原地重试）
+    const nextRoom = nextPos ? Game.rooms[nextPos.roomName] : undefined;
+    if (nextPos && (!nextRoom || nextRoom.getTerrain().get(nextPos.x, nextPos.y) !== TERRAIN_MASK_WALL)) {
         registerMoveIntent(this, nextPos);
     }
     return OK;
@@ -2355,6 +2375,27 @@ function betterCancelOrder(methodName) {
         checkedTiles.delete(curTile);
     }
     return originCancelOrder.call(this, methodName);
+}
+
+/**
+ * 取消指定 creep 本 tick 已登记的移动意图（不含 squad 关系与其他 order）。
+ *
+ * 使用场景：tick 中途发生"角色/状态交换"（如外矿搬运接力交换双方 memory）后，
+ * 交换前按旧目标登记的移动意图不应再参与 endTickResolve，
+ * 否则旧方向移动会在 tick 末照常执行、导致双方互相穿过后位置关系颠倒。
+ *
+ * 与 cancelOrder 的区别：不调用原生 cancelOrder，因此不会误删
+ * 本 tick 已成功下达的其他意图（例如接力中的 transfer）。
+ *
+ * @param {Creep | PowerCreep | {name: string, pos: RoomPosition}} creep
+ * @returns {boolean} 是否确实清掉了一个待结算意图
+ */
+function cancelMoveIntent(creep) {
+    if (!creep || !creep.name || !creep.pos) return false;
+    const formalCreepPos = formalize(creep.pos);
+    const curTile = formalCreepPos.y << 14 | formalCreepPos.x;
+    checkedTiles.delete(curTile);
+    return cachedMoveIntents.delete(creep.name);
 }
 
 /**
@@ -2987,6 +3028,9 @@ global.BetterMove = {
     squadMoveTo,
     preTickBetterMove,
     endTickResolve,
+    cancelMoveIntent,
+    getDirection,
+    direction2Pos,
     getSquadCostMatrix: function (roomName, ignoreDestructibleStructures) {
         const cache = costMatrixCache[roomName];
         if (cache) {
