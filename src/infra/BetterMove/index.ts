@@ -597,11 +597,14 @@ function isClosedRampart(structure) {
  * @param {boolean} ignoreStructures
  */
 function isObstacleStructure(room, pos, ignoreStructures) {
-    let consSite = room.lookForAt(LOOK_CONSTRUCTION_SITES, pos);
+    // 跨房位置：优先用该房间自己的数据；无视野房间视为可通行（引擎允许直接走进去）
+    const targetRoom = pos.roomName === room.name ? room : Game.rooms[pos.roomName];
+    if (!targetRoom) return false;
+    let consSite = targetRoom.lookForAt(LOOK_CONSTRUCTION_SITES, pos);
     if (_.any(consSite, c => c.my && obstacles.has(c.structureType))) {  // 工地会挡路
         return true;
     }
-    for (const s of room.lookForAt(LOOK_STRUCTURES, pos)) {
+    for (const s of targetRoom.lookForAt(LOOK_STRUCTURES, pos)) {
         if (!s.hits || s.ticksToDeploy) {     // 是新手墙或者无敌中的invaderCore
             return true;
         } else if (obstacles.has(s.structureType)) {  // 挡路的建筑
@@ -1114,7 +1117,9 @@ function routeReduce(temp, item) {
  * @returns 
  */
 function lookCreepAt(pos) {
-    return pos.lookFor(LOOK_CREEPS) || pos.lookFor(LOOK_POWER_CREEPS);
+    // 无视野房间（如外矿未探明）：无法 lookFor，视为无 creep——不可推挤但也不阻塞寻路
+    if (!Game.rooms[pos.roomName]) return [];
+    return pos.lookFor(LOOK_CREEPS) || pos.lookFor(LOOK_POWER_CREEPS) || [];
 }
 
 function bypassHostile(creep) {
