@@ -300,6 +300,25 @@ const scaleWorkerConstructionTarget = (room: Room, baseTarget: number, maxTarget
     return Math.max(baseTarget, Math.min(maxTarget, scaledTarget));
 };
 
+// ==================== worker 总人头上限 ====================
+
+// work 部件预算是为「大体型升级工」设计的；低 RCL 的 worker 每只只有 1 WORK，
+// 直接按 work÷perCreep 折算会孵出几十只。这里给总人口一个按 RCL 的硬上限：
+// 数量受限后，work 预算的缺口表现为「同级 worker 优先升级」而非无限膨胀。
+const WORKER_POP_CAP_BY_LEVEL: Record<number, number> = {
+    1: 4,
+    2: 4,
+    3: 5,
+    4: 6,
+    5: 6,
+    6: 7,
+    7: 7,
+    8: 6,
+};
+
+export const getWorkerPopulationCap = (room: Room): number =>
+    WORKER_POP_CAP_BY_LEVEL[room.level] ?? 6;
+
 // ==================== 控制器工位 ====================
 
 // 控制器升级工位表：range 3 内可站立点位，按到锚点（controller link 优先，否则控制器）的距离排序。
