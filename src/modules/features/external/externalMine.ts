@@ -1,4 +1,5 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { isRoomTickAligned } from '@/shared/roomPhase';
 import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
@@ -519,12 +520,20 @@ class ExternalMineState {
             energyTargetLimit = Math.min(energyTargetLimit, this.CRITICAL_STATE_ENERGY_TARGET_LIMIT);
         }
 
+        // rush：外矿就是主要收入源——预算不打折、能量目标上限放开、不碰危险中心房
+        let allowCenterRoom = energyState !== 'LOW' && energyState !== 'CRITICAL';
+        if (mode === 'rush') {
+            remoteBudget = Math.max(remoteBudget, spawnUsageCapacity);
+            energyTargetLimit = Number.POSITIVE_INFINITY;
+            allowCenterRoom = false;
+        }
+
         return {
             mode,
             energyState,
             remoteBudget,
             energyTargetLimit,
-            allowCenterRoom: energyState !== 'LOW' && energyState !== 'CRITICAL',
+            allowCenterRoom,
         };
     }
 
@@ -547,6 +556,30 @@ class ExternalMineState {
         if (Game.time % interval !== 0) return null;
 
         return { qosLevel, canRunSecondaryAction };
+    }
+
+    // rush 自动扩图：把一圈相邻房间自动加入能量外矿列表
+    static autoAddNearbyEnergyTargets(sourceRoomName: string, known: string[]): string[] {
+        const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
+        if (!match) return known;
+        const px = match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1;
+        const py = match[3] === 'S' ? Number(match[4]) : -Number(match[4]) - 1;
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = px + dx;
+                const y = py + dy;
+                const roomName = `${x >= 0 ? 'E' : 'W'}${Math.abs(x)}${y >= 0 ? 'S' : 'N'}${Math.abs(y)}`;
+                const Mem = getOutMineData(sourceRoomName);
+                Mem.energy ??= [];
+                if (Mem.energy.indexOf(roomName) === -1) {
+                    Mem.energy.push(roomName);
+                    known.push(roomName);
+                }
+            }
+        }
+        return known;
     }
 
     // 同一个源房的 energy / centerRoom 旧桶数据可能串味；
@@ -1797,7 +1830,14 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        const targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
+        let targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
+
+        // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个
+        if (ExternalMine.getRoomMode(room) === 'rush' && targetRooms.length < 4
+            && runState.canRunSecondaryAction && isRoomTickAligned(room.name, 100, 7)) {
+            targetRooms = ExternalMineState.autoAddNearbyEnergyTargets(room.name, targetRooms);
+        }
+
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {
