@@ -14,6 +14,7 @@ import {
     getWorkerBuildTarget,
     getWorkerWallTarget,
     getWorkerUpgradeTarget,
+    getWorkerPopulationCap,
 } from '@/shared/roomWorkforce';
 
 // 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
@@ -240,14 +241,16 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     // worker 同时承担建造/维修与常规升级：
     // 孵化目标 = 建造侧 + 刷墙保底 + 升级侧（相加），
     // 运行时按「建造配额 → 配额外专职升级」做职责切分（见 action/economy/worker.ts）。
+    // 总人口受 getWorkerPopulationCap 硬上限约束——work 部件预算是为大体型升级工设计的，
+    // 低 RCL 的 1-work 体型直接折算会孵出几十只。
     'worker': (room: Room, current: number) => {
         if (Memory['warmode']) return false;
 
         const buildTarget = getWorkerBuildTarget(room);
         const wallTarget = buildTarget > 0 ? 0 : getWorkerWallTarget(room);
         const upgradeTarget = getWorkerUpgradeTarget(room);
-
-        return current < buildTarget + wallTarget + upgradeTarget;
+        const total = buildTarget + wallTarget + upgradeTarget;
+        return current < Math.min(total, getWorkerPopulationCap(room));
     },
     'miner': (room: Room, current: number) => {
         const lv = room.level;

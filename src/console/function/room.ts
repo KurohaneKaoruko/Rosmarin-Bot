@@ -19,8 +19,12 @@ export default {
      * - start()               自动推断房间（旗帜 > 唯一未托管房 > 唯一己方房），使用自动布局
      * - start('W1N1')         指定房间，使用自动布局（或沿用已配置布局）
      * - start('W1N1','clover')指定房间 + 静态布局（需 centerPos 旗帜标记布局中心）
+     *
+     * opts.quiet: 静默模式（供落地自启等自动流程复用），只执行不输出，由调用方自行汇总。
      */
-    start(roomName?: string, layout?: string) {
+    start(roomName?: string, layout?: string, opts?: { quiet?: boolean }) {
+        const quiet = !!opts?.quiet;
+
         // ── 1. 房间推断 ──
         const resolved = resolveRoomName(roomName);
         if (!resolved.roomName) return resolved.error;
@@ -39,30 +43,27 @@ export default {
             );
         }
 
-        // ── 4. 依次执行启动流程 ──
-        global.room.add(target, layoutName);
-        const buildResult = global.layout.build(target, layoutName);
+        // ── 4. 依次执行启动流程（子步骤静音，避免重复刷屏）──
+        global.room.add(target, layoutName, undefined, undefined, { quiet: true });
+        const buildResult = global.layout.build(target, layoutName, { quiet: true });
         if (buildResult !== OK && buildResult !== undefined) {
             return Error(`${target} 布局构建失败（${buildResult}），可手动执行 layout.build('${target}', '${layoutName}') 重试。`);
         }
-        global.layout.auto(target, true);
+        global.layout.auto(target, true, { quiet: true });
 
-        // ── 5. 启动摘要与后续提示 ──
+        if (quiet) return OK;
+
+        // ── 5. 单行启动摘要 ──
         const roomMem = getRoomData(target) as any;
         const center = roomMem?.center;
+        const inferredNote = resolved.source && resolved.source !== 'explicit' ? '（自动选择）' : '';
         global.log(
-            `[start] ${target} 启动完成：布局 ${layoutName}${center ? `，中心 (${center.x},${center.y})` : ''}，自动建筑已开启。`,
-        );
-        if (resolved.source && resolved.source !== 'explicit') {
-            global.log(`[start] 未指定房间名，已自动选择（${ROOM_NAME_SOURCE_TEXT[resolved.source]}）。`);
-        }
-        global.log(
-            `[start] 接下来可以：mine.addarea('${target}') 挂载周边外矿 / room.auto() 开启新占领房自动托管 / helpRoom 查看全部指令。`,
+            `[start] ${target}${inferredNote} 启动完成：布局 ${layoutName}${center ? `，中心 (${center.x},${center.y})` : ''}，自动建筑已开启。`,
         );
         return OK;
     },
     // 添加房间到控制列表（roomName 可省略，推断规则同 start）
-    add(roomName?: string, layout?: string, x?: number, y?: number) {
+    add(roomName?: string, layout?: string, x?: number, y?: number, opts?: { quiet?: boolean }) {
         const resolved = resolveRoomName(roomName);
         if (!resolved.roomName) return resolved.error;
         const target = resolved.roomName;
@@ -71,19 +72,19 @@ export default {
         if (!roomMem['mode']) {
             roomMem['mode'] = 'main';
         }
-        global.log(`已将房间 ${target} 加入控制列表。`);
+        if (!opts?.quiet) global.log(`已将房间 ${target} 加入控制列表。`);
         if (layout) {
             roomMem['layout'] = layout;
-            global.log(`已设置 ${target} 的布局为 ${layout}。`);
+            if (!opts?.quiet) global.log(`已设置 ${target} 的布局为 ${layout}。`);
         }
         if (x && y) {
             roomMem['center'] = { x, y };
-            global.log(`已设置 ${target} 的布局中心为 (${x},${y})。`);
+            if (!opts?.quiet) global.log(`已设置 ${target} 的布局中心为 (${x},${y})。`);
         } else {
             let PosFlag = Game.flags.storagePos || Game.flags.centerPos;
             if (PosFlag && PosFlag.room.name === target) {
                 roomMem['center'] = { x: PosFlag.pos.x, y: PosFlag.pos.y };
-                global.log(`已设置 ${target} 的布局中心为 (${PosFlag.pos.x},${PosFlag.pos.y})。`);
+                if (!opts?.quiet) global.log(`已设置 ${target} 的布局中心为 (${PosFlag.pos.x},${PosFlag.pos.y})。`);
             }
         }
         const room = Game.rooms[target];
