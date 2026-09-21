@@ -399,7 +399,8 @@ export const RoleLevelData = {
         7: { bodypart: [[CARRY, 25], [MOVE, 1]], num: 1 },
         8: { bodypart: [[CARRY, 39], [MOVE, 1]], num: 1 },
     },
-    // upgrader 数量表保留作为 worker 升级目标的折算基准（见 spawnRules.getWorkerUpgradeTarget）。
+    // upgrader 数量表保留作为历史基准参考；worker 升级侧定编现由 shared/roomWorkforce
+    // 按「采集收入 × 能量水平」动态折算。
     'upgrader': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
         2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },

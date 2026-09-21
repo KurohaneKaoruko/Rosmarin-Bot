@@ -1,86 +1,53 @@
-import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/CreepConstant';
-import { decompress, decompressBodyConfig } from '@/shared/compress';
+import { RoleLevelData } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getRoomData } from '@/shared/memory';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/shared/creepTickIndex';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import {
+    getRoomEnergyState,
+    getRoomMode,
+    isHighLikeMode,
+    getStoredEnergy,
+    hasControllerEnergyBuffer,
+    shouldDelayUpgraderForPrimaryBuild,
+    getDowngradeUniversalTarget,
+    getDowngradeUniversalSpawnMissing,
+    getWorkerBuildTarget,
+    getWorkerWallTarget,
+    getWorkerUpgradeTarget,
+} from '@/shared/roomWorkforce';
 
-// 维修相关
-const REPAIR_MIN_ENERGY = THRESHOLDS.ENERGY.WALL_MIN * 2;
+// 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
+export {
+    shouldDelayUpgraderForPrimaryBuild,
+    getDowngradeUniversalTarget,
+    getDowngradeUniversalSpawnMissing,
+    getMyConstructionSites,
+} from '@/shared/roomWorkforce';
+
 // 搬运任务生成阈值
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
 const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
-// Worker 允许孵化的最低能量
-const WORKER_MIN_SPAWN_ENERGY = BODYPART_COST[WORK] + BODYPART_COST[CARRY] + BODYPART_COST[MOVE] * 2;
 // 单矿最大采集 work 上限
 const HARVESTER_MAX_WORK_PER_SOURCE = 8;
-// builder 目标数的参考 work 基线
-const WORKER_BUILD_REFERENCE_WORK = 3;
 // 只有 transporter 允许在恢复期按“缩水物流”扣减 current；
 // manager 是中心单点位，若扣减会把“已有缩水 manager”误判成缺口，导致反复补人堵路。
 const RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET = new Set(['transporter']);
 
-// 优先使用缓存的能量状态，避免重复计算
-const getEnergyState = (room: Room) => {
-    return (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
-};
+const getEnergyState = getRoomEnergyState;
 
-// 以 room.getEnergyProfile 为准，否则退化为 room[RESOURCE_ENERGY] 统计
-const getTotalEnergy = (room: Room) => {
-    return (room as any).getEnergyProfile?.().totalEnergy ?? (room as any)[RESOURCE_ENERGY] ?? 0;
-};
-
-// storage/terminal 的能量用于判断运输体系是否成立
-const getStoredEnergy = (room: Room) => {
-    return (room.storage?.store[RESOURCE_ENERGY] || 0) +
-        (room.terminal?.store[RESOURCE_ENERGY] || 0);
-};
-
-// 房间模式（main/high/rush/low/stop）
-const getRoomMode = (room: Room) => {
-    return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
-};
-
-const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
-
-// wallTask.hits 是目标血量，不是结构当前血量。
-const isUrgentWallTask = (room: Room, wallTask: RepairTask) => {
-    const [x, y] = decompress(wallTask.pos);
-    const structure = room.lookForAt(LOOK_STRUCTURES, x, y)
-        .find((s): s is StructureWall | StructureRampart =>
-            s.structureType === STRUCTURE_WALL || s.structureType === STRUCTURE_RAMPART
-        );
-    if (!structure) return false;
-
-    const urgentHits = structure.structureType === STRUCTURE_RAMPART
-        ? THRESHOLDS.REPAIR.URGENT_RAMPART
-        : THRESHOLDS.REPAIR.URGENT_WALL;
-    return structure.hits <= urgentHits;
-};
-
-// 判断 controller 附近是否具备稳定的能量缓存（link/container）
-const hasControllerEnergyBuffer = (room: Room) => {
-    if (!room.controller) return false;
-    const hasLink = room.link?.some(link => link.pos.inRangeTo(room.controller!.pos, 2));
-    if (hasLink) return true;
-    return !!room.container?.some(container => container.pos.inRangeTo(room.controller!.pos, 3));
-};
-
-// 仅统计自己的工地，避免被他人干扰孵化逻辑
-export const getMyConstructionSites = (room: Room) => {
-    const cachedSites = (room as any).constructionSite as ConstructionSite[] | undefined;
-    const sites = (cachedSites && cachedSites.length > 0)
-        ? cachedSites
-        : room.find(FIND_CONSTRUCTION_SITES);
-    return sites.filter((site) => site && (site as any).my);
-};
-
-const countMyConstructionSitesByType = (room: Room, structureType: StructureConstant) => {
-    let count = 0;
-    for (const site of getMyConstructionSites(room)) {
-        if (site.structureType === structureType) count++;
+// 将已入队但应该被推迟的升级类任务清理掉，避免卡队列
+export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
+    if (!shouldDelayUpgraderForPrimaryBuild(room)) return 0;
+    const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
+    let removed = 0;
+    for (const task of tasks) {
+        const taskData = task.data as SpawnTask
+        const role = taskData?.memory?.role;
+        if (role !== 'upgrader' && role !== 'up-upgrade') continue;
+        room.deleteMissionFromPool?.('spawn', task.id);
+        removed += 1;
     }
-    return count;
+    return removed;
 };
 
 // 运力忙碌率采样：
@@ -104,124 +71,6 @@ const getCarrierBusyStats = (room: Room): { total: number; avgBusy: number } => 
     if (samples.length > CARRIER_BUSY_WINDOW) samples.splice(0, samples.length - CARRIER_BUSY_WINDOW);
     const avgBusy = samples.length ? samples.reduce((a, b) => a + b, 0) / samples.length : 0;
     return { total, avgBusy };
-};
-
-// 核心建筑未齐全时，升级器会被延迟以优先补齐基础设施
-const hasIncompletePrimaryStructures = (room: Room) => {
-    const level = room.level;
-    const spawnCount = (room.spawn?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_SPAWN);
-    const extensionCount = (room.extension?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_EXTENSION);
-    if (spawnCount < (CONTROLLER_STRUCTURES[STRUCTURE_SPAWN][level] || 0)) return true;
-    if (extensionCount < (CONTROLLER_STRUCTURES[STRUCTURE_EXTENSION][level] || 0)) return true;
-    if (level >= 3) {
-        const towerCount = (room.tower?.length || 0) + countMyConstructionSitesByType(room, STRUCTURE_TOWER);
-        if (towerCount < (CONTROLLER_STRUCTURES[STRUCTURE_TOWER][level] || 0)) return true;
-    }
-    if (level >= 4) {
-        const storageCount = (room.storage ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_STORAGE);
-        if (storageCount < 1) return true;
-    }
-    if (level >= 6) {
-        const terminalCount = (room.terminal ? 1 : 0) + countMyConstructionSitesByType(room, STRUCTURE_TERMINAL);
-        if (terminalCount < 1) return true;
-    }
-    return false;
-};
-
-// 低能量阶段且核心建筑未齐时，推迟 upgrader 生成
-export const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
-    const state = getEnergyState(room);
-    const lowPhase = room.level <= 6 || state === 'LOW' || state === 'CRITICAL';
-    if (!lowPhase) return false;
-    return hasIncompletePrimaryStructures(room);
-};
-
-// 将已入队但应该被推迟的升级类任务清理掉，避免卡队列
-export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
-    if (!shouldDelayUpgraderForPrimaryBuild(room)) return 0;
-    const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
-    let removed = 0;
-    for (const task of tasks) {
-        const taskData = task.data as SpawnTask
-        const role = taskData?.memory?.role;
-        if (role !== 'upgrader' && role !== 'up-upgrade') continue;
-        room.deleteMissionFromPool?.('spawn', task.id);
-        removed += 1;
-    }
-    return removed;
-};
-
-// 估算 controller 周围可站位，作为 upgrader 上限
-const getControllerUpgradeSlots = (room: Room) => {
-    const cached = (room as any)._controllerUpgradeSlots;
-    if (typeof cached === 'number') return cached;
-    const controller = room.controller;
-    if (!controller) return 0;
-
-    const terrain = room.getTerrain();
-    const cx = controller.pos.x;
-    const cy = controller.pos.y;
-    let slots = 0;
-
-    for (let x = Math.max(0, cx - 3); x <= Math.min(49, cx + 3); x++) {
-        for (let y = Math.max(0, cy - 3); y <= Math.min(49, cy + 3); y++) {
-            const pos = new RoomPosition(x, y, room.name);
-            if (pos.getRangeTo(controller) > 3) continue;
-            if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
-
-            const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
-            const blocked = structures.some((s: any) =>
-                s.structureType !== STRUCTURE_ROAD &&
-                s.structureType !== STRUCTURE_CONTAINER &&
-                !(s.structureType === STRUCTURE_RAMPART && s.my)
-            );
-            if (blocked) continue;
-            slots++;
-        }
-    }
-
-    (room as any)._controllerUpgradeSlots = slots;
-    return slots;
-};
-
-// storage 能量越多，允许略微提升 upgrader 数量
-const getStorageDrivenUpgraderTarget = (room: Room, baseNum: number) => {
-    if (!room.storage || room.level >= 8) return baseNum;
-    const storageEnergy = room.storage.store[RESOURCE_ENERGY] || 0;
-    const offset = Math.max(0, room.level - 3.5) * 10000;
-    const linearNeed = Math.floor(Math.max(0, storageEnergy - offset) / 100000);
-    if (linearNeed <= 0) return baseNum;
-    return Math.max(baseNum, Math.min(baseNum + 2, linearNeed));
-};
-
-// 控制器降级风险时，强制补 UNIV 作为兜底维修/升级
-export const getDowngradeUniversalTarget = (room: Room) => {
-    const controller = room.controller;
-    if (!controller?.my) return 0;
-    const ttd = controller.ticksToDowngrade || 0;
-    if (ttd < THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TTD) {
-        return THRESHOLDS.UNIVERSAL.CONTROLLER_DOWNGRADE_FORCE_TARGET;
-    }
-    return 0;
-};
-
-// 计算降级兜底还缺多少 UNIV
-export const getDowngradeUniversalSpawnMissing = (room: Room, current: number) => {
-    return Math.max(0, getDowngradeUniversalTarget(room) - current);
-};
-
-// 仅统计核心建筑工地，避免小规模工地影响判断
-const getCoreConstructionSiteCount = (room: Room) => {
-    let count = 0;
-    for (const site of getMyConstructionSites(room)) {
-        if (site.structureType === STRUCTURE_SPAWN ||
-            site.structureType === STRUCTURE_EXTENSION ||
-            site.structureType === STRUCTURE_TOWER ||
-            site.structureType === STRUCTURE_CONTAINER) {
-            count++;
-        }
-    }
-    return count;
 };
 
 // 统计 source 周围可站位，用于估算 harvester 数量上限
@@ -255,27 +104,6 @@ const getWorkPartCount = (body: BodyPartConstant[]) => {
         if (part === WORK) work++;
     }
     return work;
-};
-
-// 根据指定角色当前体型估算其 work 能力，用于动态缩放目标数量（每 tick 每房间缓存）
-const getGeneratedRoleWorkPartCount = (room: Room, role: string) => {
-    const cacheKey = '_generated' + role + 'WorkPartCount';
-    const cached = (room as any)[cacheKey];
-    if (typeof cached === 'number') return cached;
-
-    const bodyConfig = room.GetRoleBodys(role);
-    const body = room.GenerateBodys(bodyConfig, role);
-    const workParts = Math.max(1, getWorkPartCount(body));
-    (room as any)[cacheKey] = workParts;
-    return workParts;
-};
-
-const getGeneratedWorkerWorkPartCount = (room: Room) => getGeneratedRoleWorkPartCount(room, 'worker');
-
-const scaleWorkerConstructionTarget = (room: Room, baseTarget: number, maxTarget: number) => {
-    const workPerWorker = getGeneratedWorkerWorkPartCount(room);
-    const scaledTarget = Math.ceil(baseTarget * WORKER_BUILD_REFERENCE_WORK / workPerWorker);
-    return Math.max(baseTarget, Math.min(maxTarget, scaledTarget));
 };
 
 // 用已建成的 spawn/extension 容量估算“实际可用等级”，避免 controller 刚升 4 但建筑未补齐时误判。
@@ -328,175 +156,12 @@ const getHarvesterSuccessionNeeds = (room: Room): number => {
     return needs;
 };
 
-// ==================== worker 目标计算（吸收原 upgrader 职责） ====================
-// 常规升级已并入 worker：孵化侧按 max(建造目标, 升级目标) 定编，
-// 运行时由 worker 的动作优先级（build > repair > wall > upgrade）动态分配实际工作。
-
-// 冲级编队（up-upgrade）在场时，升级吞吐完全交给编队，worker 不再兼任升级，
-// 避免两套升级人口互相挤占孵化队列与控制器工位。
-const getRushUpgraderCount = (room: Room) => {
-    const creepNum = room.getCreepNum() || {};
-    const spawnMissionNum = room.getSpawnMissionNum() || {};
-    return (creepNum['up-upgrade'] || 0) + (spawnMissionNum['up-upgrade'] || 0);
-};
-
-// RoleLevelData['upgrader'] 的数量表以旧 upgrader 体型为基准，
-// 这里按当前 worker 体型的 work 数折算成等效人口。
-const scaleWorkerUpgradeTarget = (room: Room, num: number) => {
-    if (num <= 0) return 0;
-    const workerWork = getGeneratedWorkerWorkPartCount(room);
-    const upgraderWork = getGeneratedRoleWorkPartCount(room, 'upgrader');
-    return Math.max(1, Math.ceil((num * upgraderWork) / workerWork));
-};
-
-// worker 的升级侧目标数量（0 表示当前不需要为升级定编）
-const getWorkerUpgradeTarget = (room: Room): number => {
-    const lv = room.level;
-    const mode = getRoomMode(room);
-    const highMode = isHighLikeMode(mode);
-    const earlyRush = mode === 'rush';
-    const baseNum = RoleLevelData['upgrader'][lv]?.['num'] ?? 0;
-    if (baseNum <= 0) return 0;
-
-    // 守房 / 降级兜底（universal 接管）/ 基建优先：升级侧让位
-    if (room.memory.defend) return 0;
-    if (getDowngradeUniversalTarget(room) > 0) return 0;
-    if (shouldDelayUpgraderForPrimaryBuild(room)) return 0;
-    // 冲级编队在场时 worker 不参与升级
-    if (getRushUpgraderCount(room) > 0) return 0;
-
-    const state = getEnergyState(room);
-    const ttd = room.controller?.ticksToDowngrade || 0;
-    const slotCap = Math.max(1, getControllerUpgradeSlots(room));
-
-    const highBaseTarget = Math.min(baseNum * 2 + 1, 10);
-    const rushBaseTarget = Math.min(baseNum * 3, 12);
-    let num = highMode ? (earlyRush ? rushBaseTarget : highBaseTarget) : baseNum;
-
-    num = Math.max(num, getStorageDrivenUpgraderTarget(room, baseNum));
-
-    if (earlyRush) {
-        if (lv <= 2) num = Math.max(num, 6);
-        else if (lv === 3) num = Math.max(num, 7);
-        else num = Math.max(num, 6);
-
-        // 核心工地在场时让位 1 个给建造侧
-        const coreSiteCount = getCoreConstructionSiteCount(room);
-        if (coreSiteCount > 0) {
-            num = Math.max(2, num - 1);
-        }
-
-        if (state === 'CRITICAL' && room.energyAvailable < THRESHOLDS.SPAWN.MIN_ENERGY) {
-            num = Math.min(num, 2);
-        }
-    } else if (highMode) {
-        if (state === 'CRITICAL' && ttd > 2000) return 0;
-        if (state === 'LOW' && ttd > 10000) num = Math.min(num, 1);
-
-        const minEnergy = lv >= 8 ? 120e3 : lv >= 6 ? 60e3 : lv >= 5 ? 30e3 : 10e3;
-        if (getTotalEnergy(room) < minEnergy && ttd > 3000) return 0;
-
-        if (!hasControllerEnergyBuffer(room) && lv >= 6) {
-            num = Math.min(num, baseNum + 1);
-        }
-
-        const creepNum = room.getCreepNum() || {};
-        const spawnMissionNum = room.getSpawnMissionNum() || {};
-        const logisticsNum =
-            (creepNum['transporter'] || 0) +
-            (creepNum['manager'] || 0) +
-            (spawnMissionNum['transporter'] || 0) +
-            (spawnMissionNum['manager'] || 0);
-        if (logisticsNum === 0 && lv >= 5) {
-            num = Math.min(num, baseNum + 1);
-        }
-    } else {
-        if (lv == 8 && ttd > 100000 && room[RESOURCE_ENERGY] < 300e3) return 0;
-        if (lv >= 5 && ttd > 10000 && room[RESOURCE_ENERGY] < 50e3) return 0;
-    }
-
-    // 折算到当前 worker 体型的等效人口，再受控制器工位上限约束
-    num = scaleWorkerUpgradeTarget(room, num);
-    return Math.min(num, slotCap);
-};
-
-// worker 的建造侧目标数量（0 表示当前不需要为建造定编）
-const getWorkerBuildTarget = (room: Room): number => {
-    const state = getEnergyState(room);
-    const cap = room.energyCapacityAvailable || 0;
-    const totalEnergy = getTotalEnergy(room);
-    const mode = getRoomMode(room);
-    const highMode = isHighLikeMode(mode);
-    const earlyRush = mode === 'rush';
-    const workerSpawnEnergyMin = Math.max(THRESHOLDS.SPAWN.MIN_ENERGY, WORKER_MIN_SPAWN_ENERGY);
-
-    const hasBuildMission = room.checkMissionInPool('build');
-    const siteCount = getMyConstructionSites(room).length;
-    const coreSiteCount = getCoreConstructionSiteCount(room);
-    const needBuilder = hasBuildMission || siteCount > 0;
-    if (!needBuilder) return 0;
-
-    // 能量不足以孵化 worker 时，建造侧不产生需求
-    const canAffordWorker = room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap;
-    if (!canAffordWorker) return 0;
-
-    const minWorkerTarget = scaleWorkerConstructionTarget(room, 1, room.level <= 2 ? 3 : 2);
-    let target = minWorkerTarget;
-
-    if (earlyRush) {
-        let rushTarget = 5;
-        if (state === 'CRITICAL') rushTarget = 1;
-        if (state === 'LOW') rushTarget = Math.min(rushTarget, room.level <= 2 ? 2 : 3);
-        rushTarget = scaleWorkerConstructionTarget(room, rushTarget, room.level <= 2 ? 6 : 5);
-        target = Math.max(target, rushTarget);
-    }
-
-    if (highMode) {
-        let highTarget = room.level <= 2 ? 2 : 3;
-        if (siteCount >= 6 || coreSiteCount >= 2) highTarget += 1;
-        if (siteCount >= 12 || coreSiteCount >= 5) highTarget += 1;
-        highTarget = Math.min(highTarget, room.level <= 2 ? 3 : 4);
-        if (state === 'CRITICAL') highTarget = 1;
-        if (state === 'LOW') highTarget = Math.min(highTarget, room.level <= 2 ? 2 : 3);
-        highTarget = scaleWorkerConstructionTarget(room, highTarget, room.level <= 2 ? 5 : 4);
-        target = Math.max(target, highTarget);
-    }
-
-    const normalBuildTarget = scaleWorkerConstructionTarget(room, 2, room.level <= 2 ? 4 : 3);
-    if ((state === 'SURPLUS' || state === 'NORMAL') && siteCount >= 6) {
-        target = Math.max(target, normalBuildTarget);
-    }
-    const surplusBuildTarget = scaleWorkerConstructionTarget(room, 3, room.level <= 2 ? 5 : 4);
-    if (state === 'SURPLUS' && siteCount >= 16) {
-        target = Math.max(target, surplusBuildTarget);
-    }
-    if (state === 'LOW') {
-        const lowBuildTarget = Math.min(minWorkerTarget, room.level <= 2 ? 2 : 1);
-        if (totalEnergy >= Math.max(THRESHOLDS.SPAWN.BODY_REDUCTION_THRESHOLD, cap * 2)) {
-            target = Math.max(target, lowBuildTarget);
-        }
-    }
-
-    return target;
-};
-
-// 无建造需求时的刷墙保底（最多 1 个 worker）
-const getWorkerWallTarget = (room: Room): number => {
-    const wallTask = room.getWallMission(null as any);
-    if (!wallTask) return 0;
-
-    const urgentWallTask = isUrgentWallTask(room, wallTask);
-    const minRepairEnergy = urgentWallTask ? THRESHOLDS.ENERGY.WALL_MIN : REPAIR_MIN_ENERGY;
-    if (room[RESOURCE_ENERGY] < minRepairEnergy) return 0;
-
-    if (room.level < 8 || Game.flags[`${room.name}/REPAIR`] || urgentWallTask) {
-        return 1;
-    }
-    if (!room.tower || room.tower.length === 0) {
-        return room.getMissionNumInPool('repair') >= 20 ? 1 : 0;
-    }
-    return 0;
-};
+// ==================== worker 定编 ====================
+// 常规升级已并入 worker，三侧定编（建造/刷墙/升级）统一在 shared/roomWorkforce：
+// - 升级吞吐按「采集收入 × 能量水平」动态缩放，
+//   富余能量优先被控制器吃掉，不再出现“只进不出 → 能量堆地上腐烂”；
+// - 孵化定编 = 建造侧 + 刷墙保底 + 升级侧（相加），
+//   运行时由 worker 动作层的职责切分保证配额外的个体专职升级。
 
 // 每个角色一个检查函数，保持结构清晰
 export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
@@ -573,7 +238,8 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         return false;
     },
     // worker 同时承担建造/维修与常规升级：
-    // 孵化目标 = max(建造目标, 升级目标, 刷墙保底)，运行时按动作优先级动态分配具体工作。
+    // 孵化目标 = 建造侧 + 刷墙保底 + 升级侧（相加），
+    // 运行时按「建造配额 → 配额外专职升级」做职责切分（见 action/economy/worker.ts）。
     'worker': (room: Room, current: number) => {
         if (Memory['warmode']) return false;
 
@@ -581,7 +247,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         const wallTarget = buildTarget > 0 ? 0 : getWorkerWallTarget(room);
         const upgradeTarget = getWorkerUpgradeTarget(room);
 
-        return current < Math.max(buildTarget, wallTarget, upgradeTarget);
+        return current < buildTarget + wallTarget + upgradeTarget;
     },
     'miner': (room: Room, current: number) => {
         const lv = room.level;

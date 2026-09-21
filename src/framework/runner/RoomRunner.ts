@@ -5,6 +5,7 @@ import { isRoomTickAligned } from '@/shared/roomPhase';
 import roomConsole from '@/console/function/room';
 import layoutConsole from '@/console/function/layout';
 import { getAutoData, getMissionPools, getRoomData } from '@/shared/memory';
+import { shouldAutoStartFirstRoom } from '@/shared/bootstrap';
 
 export const roomRunner = function (room: Room) {
     if (!room) return;
@@ -18,12 +19,20 @@ export const roomRunner = function (room: Room) {
     let roomMem = getRoomData(room.name) as any;
     if (!roomMem) {
         const roomAutoStart = getAutoData().RoomAutoStart;
-        if (!roomAutoStart) return;
-
-        roomConsole.room.add(room.name, roomAutoStart.layout);
-        roomConsole.room.mode(room.name, roomAutoStart.mode);
-        layoutConsole.layout.build(room.name, roomAutoStart.layout);
-        layoutConsole.layout.auto(room.name, true);
+        if (shouldAutoStartFirstRoom()) {
+            // 落地自启：有效房间（在列表且属于自己的）为 0、拥有房间为 1 时，
+            // 视为落地后的首个房间，按默认参数（auto 布局 / main 模式）自动 start；
+            // 需要自定义参数时，启动后再用 room.mode / layout.set 等调整即可。
+            global.log('[auto] 检测到落地后的首个己方房间，已按默认参数自动启动。');
+            roomConsole.room.start(room.name);
+        } else if (roomAutoStart) {
+            roomConsole.room.add(room.name, roomAutoStart.layout);
+            roomConsole.room.mode(room.name, roomAutoStart.mode);
+            layoutConsole.layout.build(room.name, roomAutoStart.layout);
+            layoutConsole.layout.auto(room.name, true);
+        } else {
+            return;
+        }
 
         roomMem = getRoomData(room.name) as any;
         if (!roomMem) return;

@@ -137,44 +137,34 @@ pnpm count -- --path src/prototype --top 15
 
 ### 游戏内启动
 
-**快速启动（一条指令完成下面的全部步骤）**
+**快速启动 —— `start(roomName?, layout?)` 一条指令完成全部启动步骤**
+
 ```javascript
-// 使用自动布局一键完成
-bot.start('W1N1')
-// 使用静态布局
-bot.start('W1N1', 'rosemary')
-// 静态布局需要指定布局中心：
-// - 放置旗帜 centerPos 到布局中心位置
+start(roomName, layout)   // 等价写法：room.start(...)
 ```
 
+- `roomName`：房间名，可省略；省略时按 显式房间名 > `centerPos`/`storagePos` 旗帜 > 唯一未托管己方房 > 唯一己方房 自动推断，无法唯一确定时会列出候选并提示补参数
+- `layout`：布局名，可省略；支持 `auto` / `63auto` / `scorpior` 与静态布局名（`rosemary` / `clover` / `hoho` / `tea`）；省略时沿用已配置布局，否则使用 `auto`；静态布局需先放 `centerPos` 旗帜标记布局中心
+- 内部自动完成：加入控制列表 → 构建布局 → 开启自动建筑
+- 落地自启：有效房间（在列表且属于自己的）为 0 且拥有房间为 1 时，首个己方房间会自动按默认参数启动，无需任何指令
+- 常用指令的 `roomName` 参数同样可省略（同一套推断）；`room.mode` 等模式类指令支持只传模式值的单参数写法
+- 新占领房间零操作：`room.auto()` 开启自动托管后，之后占领的房间会自动完成启动流程
 
+<details>
+<summary>手动分步流程（与 start 内部步骤一致，一般无需手动执行）</summary>
 
-**第一步：添加房间**
 ```javascript
+// 第一步：添加房间（roomName 可省略；布局中心可由 centerPos/storagePos 旗帜自动设置）
 room.add('W1N1', 'rosemary', 25, 25)
-// 参数: 房间名, 布局名(可选), 中心X(可选), 中心Y(可选)
-// 可通过旗帜 centerPos 设置布局中心
-```
-
-**第二步：预览布局**
-```javascript
-layout.visual('W1N1')
-// 可选指定布局: layout.visual('W1N1', 'clover')
-// 如果通过room.add或layout.set设置了布局名称, 则可以不输入
-// 使用静态布局需要设置中心, 如果没有设置也可以放置名为centerPos的旗帜
-```
-
-**第三步：生成建筑位置**
-```javascript
+// 第二步：预览布局
+layout.visual('W1N1')   // 可选指定布局: layout.visual('W1N1', 'clover')
+// 第三步：生成建筑位置并保存到 Memory（roomName 可省略）
 layout.build('W1N1')
-// 将建筑位置保存到 Memory
+// 第四步：开启自动建筑（会自动放置工地；enable 不传则按当前状态切换）
+layout.auto('W1N1')
 ```
 
-**第四步：开启自动建筑**
-```javascript
-layout.auto('W1N1')
-// 开启后会自动放置工地
-```
+</details>
 
 ## 📖 控制台指令
 
