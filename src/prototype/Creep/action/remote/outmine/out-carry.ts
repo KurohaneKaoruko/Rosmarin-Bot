@@ -765,6 +765,7 @@ const outCarry: OutCarryAction = {
 
     // 统一入口：只做 collect / deliver，修路与建造交给 out-build。
     run: function (creep: Creep) {
+        (creep.memory as any).lastRunTick = Game.time;
         delete creep.memory.working;
 
         runModeCycle(creep);
@@ -924,6 +925,14 @@ const runOutCarryMode = (creep: Creep, mode: OutCarryMode) => {
 
 // 单轮模式决策 + 执行：解析 collect/deliver，切态时清对侧缓存，然后跑对应主流程。
 // 接力后续跑会以交换后的新 memory 再调用一次本函数，缓存按当下 memory 现取现用。
+// 接力后续跑的跨模块入口：relayHandoff 在完全交接后，
+// 对「本 tick 已跑过、意图被作废」的伙伴 creep 调用此钩子重登记移动意图。
+;(global as any).__outCarryReissue = (creep: Creep) => {
+    if (!creep || !(creep.memory as any)) return;
+    delete creep.memory.working;
+    runModeCycle(creep);
+};
+
 const runModeCycle = (creep: Creep): void => {
     const cache = getOutCarryCache(creep);
     const previousMode = cache.outCarryMode as OutCarryMode | undefined;
