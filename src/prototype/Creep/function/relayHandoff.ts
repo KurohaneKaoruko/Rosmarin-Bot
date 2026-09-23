@@ -64,6 +64,48 @@ const markRelayInitiator = (creep: Creep): void => {
     if (mem) mem[RELAY_SELF_MARK] = Game.time;
 };
 
+// 房间名 → 连续世界坐标（W0 位于 W1 与 E0 之间，与地理一致）
+const parseRoomAxis = (roomName: string): { x: number; y: number } | null => {
+    const m = /^([WE])(\d+)([NS])(\d+)$/.exec(roomName);
+    if (!m) return null;
+    const x = m[1] === 'W' ? -1 - Number(m[2]) : Number(m[2]);
+    const y = m[3] === 'N' ? Number(m[4]) : -1 - Number(m[4]);
+    return { x, y };
+};
+
+const axisCache: Record<string, { dx: number; dy: number }> = {};
+
+// 路线正方向轴（母房 → 外矿）
+const getRouteAxis = (sourceRoom: string, targetRoom: string): { dx: number; dy: number } => {
+    const key = sourceRoom + '>' + targetRoom;
+    let axis = axisCache[key];
+    if (!axis) {
+        const a = parseRoomAxis(sourceRoom);
+        const b = parseRoomAxis(targetRoom);
+        axis = a && b ? { dx: b.x - a.x, dy: b.y - a.y } : { dx: 0, dy: 0 };
+        axisCache[key] = axis;
+    }
+    return axis;
+};
+
+const worldPosOf = (creep: Creep): { x: number; y: number } | null => {
+    const axis = parseRoomAxis(creep.pos.roomName);
+    if (!axis) return null;
+    return { x: axis.x * 50 + creep.pos.x, y: axis.y * 50 + creep.pos.y };
+};
+
+// 方向闸门：供给方必须位于接收方的「外矿侧」。
+// 满足时交换后货物向母房推进；不满足（交叉/反向相遇）时交换会让货物倒退，直接拒绝，
+// 双方自然错开继续各自的路线。
+const isForwardPair = (sourceRoom: string, targetRoom: string, supplier: Creep, fetcher: Creep): boolean => {
+    const axis = getRouteAxis(sourceRoom, targetRoom);
+    if (!axis || (axis.dx === 0 && axis.dy === 0)) return true;
+    const s = worldPosOf(supplier);
+    const f = worldPosOf(fetcher);
+    if (!s || !f) return true;
+    return (s.x - f.x) * axis.dx + (s.y - f.y) * axis.dy >= 0;
+};
+
 // 清掉 creep 本 tick 已登记的移动意图（兼容 BetterMove 延迟结算）。
 // BetterMove 未加载或为旧版本（无此 API）时静默跳过。
 const cancelPendingMoveIntent = (creep: Creep): void => {
@@ -130,6 +172,10 @@ export const tryOutCarryRelayHandoff = (creep: Creep): boolean => {
     // 同对冷却：刚和这位接力过，先各自分开走，冷却结束前不再互接（双向核查）
     if (isPairCoolingDown(creep, partner.name)) return false;
     if (isPairCoolingDown(partner, creep.name)) return false;
+
+    // 方向闸门：供给方必须在接收方的「外矿侧」，货物交接只会向母房推进；
+    // 反向（交叉后）相遇不接力，双方自然错开，杜绝能量倒退与反复对穿。
+    if (!isForwardPair(sourceRoom, targetRoom, supplier, fetcher)) return false;
 
     const resourceType = Object.keys(supplier.store).find(
         (resource) => (supplier.store as any)[resource] > 0
