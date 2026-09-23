@@ -3,6 +3,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/shared/compress';
 import { getRoomData } from '@/shared/memory';
+import { getRoomModeProfile } from '@/shared/roomMode';
 import { getMyConstructionSites } from '../mission/updaters/spawnRules';
 
 const getRoomMode = (room: Room) => {
@@ -65,15 +66,14 @@ const finishSpawnTask = (room: Room, role: RoleId, taskId: string) => {
 export default class SpawnControl extends Room {
 
     private getEmergencyUniversalCap() {
-        const mode = getRoomMode(this);
-        const highMode = mode === 'high' || mode === 'rush';
+        const highIntensity = getRoomModeProfile(this).highIntensity;
         if (this.level <= 2) {
-            return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2;
+            return highIntensity ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL1_2;
         }
         if (this.level === 3) {
-            return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3;
+            return highIntensity ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL3;
         }
-        return highMode ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P;
+        return highIntensity ? THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P_HIGH : THRESHOLDS.SPAWN.UNIV_EMERGENCY_CAP.RCL4P;
     }
 
     private getEmergencyRecoveryUniversalBody() {

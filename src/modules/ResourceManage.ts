@@ -2,6 +2,7 @@ import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, 
 import { log } from '@/utils';
 import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/shared/memory';
 import { getLabAB } from '@/shared/labReservations';
+import { getRoomModeProfile } from '@/shared/roomMode';
 import { getTransactionCostRatio } from '@/shared/marketUtils';
 
 const br = '<br/>';
@@ -288,7 +289,7 @@ export const ResourceManage = {
                 room.storage.owner.username != room.controller.owner.username
             ) continue;
 
-            if (roomMem?.mode !== 'low') {
+            if (getRoomModeProfile(room).productionScheduling) {
                 productionRooms.push(room);
             }
             eligibleRooms.push(room);

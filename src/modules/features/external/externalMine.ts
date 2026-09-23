@@ -1,5 +1,6 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { isRoomTickAligned } from '@/shared/roomPhase';
+import { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
 import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
@@ -126,7 +127,7 @@ class ExternalMineState {
     }
 
     private static isHighLikeMode(mode: string): boolean {
-        return mode === 'high' || mode === 'rush';
+        return isHighLikeMode(mode);
     }
 
     private static getEnergyState(room: Room): ExternalMineEnergyState {
@@ -537,11 +538,9 @@ class ExternalMineState {
         };
     }
 
-    // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
+    // 兼容多处存储路径读取房间模式（统一走 roomMode 单一来源）。
     static getRoomMode(room: Room): string {
-        const roomData = getRoomData(room.name);
-        const legacyRoomMemory = room.memory as LegacyRoomModeMemory;
-        return roomData?.mode || legacyRoomMemory.mode || 'main';
+        return getRoomMode(room);
     }
 
     // 根据 QoS 与间隔判断本 tick 是否运行，返回运行状态快照。
