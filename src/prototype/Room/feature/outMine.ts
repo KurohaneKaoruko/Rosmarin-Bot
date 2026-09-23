@@ -1,4 +1,5 @@
 import { ExternalMine, ExternalMineTiming } from '@/modules/features/external/externalMine';
+import { getRoomModeProfile } from '@/shared/roomMode';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
@@ -15,19 +16,17 @@ export default class OutMine extends Room {
     }
 
     EnergyMine() { // 能量矿
-        const roomMode = ExternalMine.getRoomMode(this);
         const timing: ExternalMineTiming = {
-            normalInterval: roomMode === 'rush' ? 5 : roomMode === 'high' ? 10 : 20,
-            constrainedInterval: roomMode === 'rush' ? 10 : roomMode === 'high' ? 20 : 40,
+            normalInterval: getRoomModeProfile(this).remoteEnergyInterval.normal,
+            constrainedInterval: getRoomModeProfile(this).remoteEnergyInterval.constrained,
         };
         ExternalMine.runEnergy(this, timing);
     }
 
     CenterMine() { // 中央九房
-        const roomMode = ExternalMine.getRoomMode(this);
         const timing: ExternalMineTiming = {
-            normalInterval: roomMode === 'rush' ? 4 : roomMode === 'high' ? 5 : 10,
-            constrainedInterval: roomMode === 'rush' ? 6 : roomMode === 'high' ? 10 : 20,
+            normalInterval: getRoomModeProfile(this).remoteCenterInterval.normal,
+            constrainedInterval: getRoomModeProfile(this).remoteCenterInterval.constrained,
         };
         ExternalMine.runCenter(this, timing);
     }

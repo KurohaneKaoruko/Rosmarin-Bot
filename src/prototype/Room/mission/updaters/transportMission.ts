@@ -1,6 +1,7 @@
 import { compress } from '@/shared/compress';
 import { getLabAB } from '@/shared/labReservations';
 import { getRoomData, getStructData } from '@/shared/memory';
+import { getRoomModeProfile } from '@/shared/roomMode';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 
@@ -29,7 +30,6 @@ const TransportLevelMap: Record<TransportLevelKey, number> = {
 };
 
 const isLowEnergyState = (state?: string) => state === 'LOW' || state === 'CRITICAL';
-const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
 
 /**
  * 房间搬运任务模块（transport）
@@ -186,13 +186,12 @@ export default class TransportMission extends Room {
         source: PrimaryStoreStructure,
         availableEnergy: number,
         energyState: string,
-        roomMode: string,
     ) {
         const controller = this.controller;
         if (!controller || isLowEnergyState(energyState)) return availableEnergy;
 
         const creepNum = this.getCreepNum() || {};
-        const highMode = isHighLikeMode(roomMode);
+        const highMode = getRoomModeProfile(this).highIntensity;
         // 常规升级已并入 worker，worker 空闲时会顶上控制器升级，也计入缓冲消费者
         const hasUpgradeConsumer =
             (creepNum['worker'] || 0) +
@@ -438,7 +437,7 @@ export default class TransportMission extends Room {
         const state = this.memory.energyState || this.updateEnergyState?.(false);
         const roomMode = (getRoomData(this.name) as any)?.mode || (this.memory as any).mode || 'main';
 
-        energy = this.fillControllerBufferEnergy(energySource, energy, state, roomMode);
+        energy = this.fillControllerBufferEnergy(energySource, energy, state);
         energy = this.fillLabEnergy(energy, offset);
 
         if (isLowEnergyState(state)) return;

@@ -15,6 +15,8 @@ import {
     getWorkerWallTarget,
     getWorkerUpgradeTarget,
     getWorkerPopulationCap,
+    getDroppedPileEnergy,
+    getDroppedPileWorkerBoost,
 } from '@/shared/roomWorkforce';
 
 // 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
@@ -220,7 +222,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
 
         // 忙碌率反馈：均值持续 >85% 在编运力即补员（封顶 7）——
         // 需求随布局/战斗阶段波动，任何静态公式都会在某个阶段失真，采样让人口自动收敛。
-        if (total > 0 && avgBusy > CARRIER_BUSY_SPAWN_RATIO && current < CARRIER_BUSY_MAX_CARRIERS) {
+        // 地面堆积兜底：source 旁掉落能量成堆，说明取力端吞吐不足，同样触发补员。
+        const pileShortage = getDroppedPileEnergy(room) > 1500;
+        if ((total > 0 && avgBusy > CARRIER_BUSY_SPAWN_RATIO || pileShortage) && current < CARRIER_BUSY_MAX_CARRIERS) {
             return true;
         }
 
@@ -250,7 +254,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         const wallTarget = buildTarget > 0 ? 0 : getWorkerWallTarget(room);
         const upgradeTarget = getWorkerUpgradeTarget(room);
         const total = buildTarget + wallTarget + upgradeTarget;
-        return current < Math.min(total, getWorkerPopulationCap(room));
+        // 地面出现能量堆积时，允许临时突破人口硬上限加班消化
+        const cap = getWorkerPopulationCap(room) + getDroppedPileWorkerBoost(room);
+        return current < Math.min(total, cap);
     },
     'miner': (room: Room, current: number) => {
         const lv = room.level;

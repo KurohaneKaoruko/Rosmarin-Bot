@@ -2370,6 +2370,14 @@ function betterPull(target) {
  * @param {Creep} this 写好后删这个参数
  * @param {string} methodName 
  */
+// 查询 creep 本 tick 是否已登记移动意图。
+// 供角色层区分「本 tick 会移动」与「空闲原地」：
+// 空闲且滞留在出口格上的 creep 应主动让位，避免堵住跨房交通的必经之路。
+function hasMoveIntent(creep) {
+    if (!creep || !creep.name) return false;
+    return cachedMoveIntents.has(creep.name);
+}
+
 function betterCancelOrder(methodName) {
     // 只拦截取消移动需求
     if (methodName == 'move' || methodName == 'moveTo') {
@@ -3034,6 +3042,7 @@ global.BetterMove = {
     preTickBetterMove,
     endTickResolve,
     cancelMoveIntent,
+    hasMoveIntent,
     getDirection,
     direction2Pos,
     getSquadCostMatrix: function (roomName, ignoreDestructibleStructures) {

@@ -777,7 +777,21 @@ const outCarry: OutCarryAction = {
         if ((creep.memory as any).relayedSelfTick === Game.time) {
             runModeCycle(creep);
         }
+
+        // 空闲让位：本 tick 没有任何移动意图、又滞留在出口格上的搬运工，
+        // 主动向房间内部挪动——出口格是跨房交通的必经之路，停车等于堵门。
+        clearDoorZoneIfIdle(creep);
     },
+};
+
+// 出口格（x/y = 0/49）是跨界交通唯一的必经之路，
+// 没有搬运目标而原地滞留的搬运工必须让位，否则对向 creep 全部被堵在门外。
+const clearDoorZoneIfIdle = (creep: Creep): void => {
+    const pos = creep.pos;
+    if (pos.x > 0 && pos.x < 49 && pos.y > 0 && pos.y < 49) return;
+    const betterMove = (global as any).BetterMove;
+    if (betterMove && typeof betterMove.hasMoveIntent === 'function' && betterMove.hasMoveIntent(creep)) return;
+    creep.moveTo(new RoomPosition(25, 25, creep.room.name), { range: 20, plainCost: 2, swampCost: 10 });
 };
 
 // 判定是否进入采集策略

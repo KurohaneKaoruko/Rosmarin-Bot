@@ -14,6 +14,7 @@
  * 体型信息一律通过 room.GetRoleBodys / room.GenerateBodys 运行时获取。
  */
 import { getEnergyLevel } from '@/shared/energyLevel';
+import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/shared/roomMode';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { decompress } from '@/shared/compress';
 import { getRoomData } from '@/shared/memory';
@@ -44,10 +45,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 export const getRoomEnergyState = (room: Room): string =>
     (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
 
-export const getRoomMode = (room: Room): string =>
-    (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
-
-export const isHighLikeMode = (mode: string) => mode === 'high' || mode === 'rush';
+export { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
 
 // 以 room.getEnergyProfile 为准，否则退化为 room[RESOURCE_ENERGY] 统计
 export const getTotalEnergy = (room: Room): number =>
@@ -198,6 +196,25 @@ export const estimateRoomEnergyIncome = (room: Room): number => {
     });
 };
 
+// 地面堆积能量：采集速度超过「搬运 + 消耗」速度的直接信号。
+// 仓储口径的 energyLevel 看不见地上能量，必须单独计量。
+export const getDroppedPileEnergy = (room: Room): number => {
+    return getRoomTickCacheValue(room, 'workforce_dropped_pile', () => {
+        if (typeof room.find !== 'function') return 0;
+        const dropped = room.find(FIND_DROPPED_RESOURCES) as Resource[] | undefined;
+        if (!dropped) return 0;
+        let total = 0;
+        for (const res of dropped) {
+            if (res && res.resourceType === RESOURCE_ENERGY && res.amount >= 100) total += res.amount;
+        }
+        return total;
+    });
+};
+
+// 地面堆积超过该阈值时，worker 总人口允许临时突破硬上限加班消化（堆积清空后自动回落）
+export const getDroppedPileWorkerBoost = (room: Room): number =>
+    getDroppedPileEnergy(room) > 1500 ? 2 : 0;
+
 // 升级吞吐上限：RCL8 固定 15；有控制器缓冲 90；无缓冲（需往返主仓）30
 export const getUpgradeWorkCapacity = (room: Room): number => {
     const controller = room.controller;
@@ -247,10 +264,8 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 
     const lowerLimit = upgradeNeeded ? 5 : 0;
 
-    // —— 收入跟踪项（rush/high 模式上浮系数）——
-    const mode = getRoomMode(room);
-    const incomeMultiplier = mode === 'rush' ? 1.5 : mode === 'high' ? 1.2 : 1;
-    const scaledIncome = income * incomeMultiplier;
+    // —— 收入跟踪项（rush/high 模式上浮系数，倍率由模式参数表统一定义）——
+    const scaledIncome = income * getRoomModeProfile(room).upgradeIncomeMultiplier;
     let incomeWork: number;
     if (!room.storage && !room.terminal) {
         // 无仓期（RCL<4 常态）：周转能量在 container 里，energyLevel 看不见，
@@ -267,7 +282,10 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     // —— 盈余消耗项 ——
     const surplusWork = Math.max(0, energyLevel - 90);
 
-    return Math.max(lowerLimit, Math.min(capacity, Math.max(incomeWork, surplusWork)));
+    // —— 地面堆积项：每 2000 点掉落能量折算 1 个升级 work，直接消化地上存货 ——
+    const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
+
+    return Math.max(lowerLimit, Math.min(capacity, Math.max(incomeWork, surplusWork, pileWork)));
 };
 
 // ==================== worker 体型折算 ====================
