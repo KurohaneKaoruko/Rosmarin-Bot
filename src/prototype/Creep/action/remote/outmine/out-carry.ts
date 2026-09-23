@@ -511,7 +511,18 @@ const outCarry: OutCarryAction = {
             const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
                 filter: (r: Resource) => r.amount > 0
             })[0];
-            if (nearbyDrop) creep.pickup(nearbyDrop);
+            if (nearbyDrop) {
+                creep.pickup(nearbyDrop);
+                return;
+            }
+            // 拥挤疏散：容器口附近同路线同伴过多时向空旷处让位，
+            // 防止等填装的搬运工把唯一通道和 out-harvest 的工作位全部堵死。
+            const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 2, {
+                filter: (c: Creep) => c.id !== creep.id && c.memory.role === creep.memory.role
+            }).length;
+            if (crowd >= 3) {
+                creep.moveTo(new RoomPosition(25, 25, creep.room.name), { range: 15, plainCost: 2, swampCost: 10 });
+            }
             return;
         }
         delete cache.waitUntil;
