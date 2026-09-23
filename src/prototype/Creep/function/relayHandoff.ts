@@ -111,36 +111,64 @@ export const tryOutCarryRelayHandoff = (creep: Creep): boolean => {
     }) as Creep[];
     if (partners.length === 0) return false;
 
-    // 载荷互补：我有货对方空仓（我交付），或我空仓对方有货（我接货）
-    const partner = hasCargo(creep)
-        ? partners.find((other) => other.store.getUsedCapacity() === 0)
-        : partners.find((other) => hasCargo(other));
-    if (!partner) return false;
+    // 配对：我有货 → 找仍有容纳空间的伙伴（全部倒入）；我空/半载 → 找有货的伙伴（尽量接满）。
+    // 不要求接收方完全空仓——部分载货的相遇同样接力，否则车流会互相穿行浪费运力。
+    const myUsed = creep.store.getUsedCapacity();
+    let supplier: Creep | undefined;
+    let fetcher: Creep | undefined;
+    if (myUsed > 0) {
+        supplier = creep;
+        fetcher = partners.find((other) => other.store.getFreeCapacity() > 0);
+    } else {
+        fetcher = creep;
+        supplier = partners.find((other) => hasCargo(other));
+    }
+    if (!supplier || !fetcher) return false;
 
-    // 同对冷却：刚和这位接力过，先各自分开走，冷却结束前不再互接
+    const partner = supplier === creep ? fetcher : supplier;
+
+    // 同对冷却：刚和这位接力过，先各自分开走，冷却结束前不再互接（双向核查）
     if (isPairCoolingDown(creep, partner.name)) return false;
-
-    const supplier = hasCargo(creep) ? creep : partner;
-    const fetcher = supplier === creep ? partner : creep;
+    if (isPairCoolingDown(partner, creep.name)) return false;
 
     const resourceType = Object.keys(supplier.store).find(
         (resource) => (supplier.store as any)[resource] > 0
     ) as ResourceConstant | undefined;
     if (!resourceType) return false;
 
-    if (supplier.transfer(fetcher, resourceType) !== OK) return false;
+    // 转移量 = 双方容量取短板；接收方装满后供应商仍有剩余 → 半载补给，
+    // 此时双方方向不变，不换 memory、不作废移动意图。
+    const amount = Math.min(supplier.store.getUsedCapacity(resourceType), fetcher.store.getFreeCapacity());
+    if (amount <= 0) return false;
+    const fullHandoff = amount >= supplier.store.getUsedCapacity(resourceType);
 
-    // 记忆交换：双方零重算接管对方的路程
-    const memPartner = Memory.creeps[partner.name];
-    Memory.creeps[creep.name] = memPartner;
-    Memory.creeps[partner.name] = mem;
+    if (supplier.transfer(fetcher, resourceType, amount) !== OK) return false;
+
+    if (fullHandoff) {
+        // 完全交接：记忆交换，双方零重算接管对方的路程
+        const memPartner = Memory.creeps[partner.name];
+        Memory.creeps[creep.name] = memPartner;
+        Memory.creeps[partner.name] = mem;
+    }
+
+    // 标记必须在交换之后写：relayedPartner 要落在交换后各自身上的 memory 里，
+    // 同对冷却才能在下一周期正确配对阻断。
     markRelayed(creep, partner.name);
     markRelayed(partner, creep.name);
     markRelayInitiator(creep);
 
-    // 接力已取代双方此前登记的旧方向移动意图，
-    // 防止 tick 末 BetterMove 结算时按旧意图互相穿行（接力振荡的根源）。
-    cancelPendingMoveIntent(creep);
-    cancelPendingMoveIntent(partner);
+    if (fullHandoff) {
+        // 方向反转：旧的移动意图全部作废。
+        // 发起方由本 tick 的「接力后续跑」重登记；
+        // 伙伴若已跑过本轮（lastRunTick == Game.time），此处立即代为重登记——
+        // 不重登记的话旧方向意图会在 tick 末执行，双方对穿后位置颠倒。
+        cancelPendingMoveIntent(creep);
+        cancelPendingMoveIntent(partner);
+        const betterMove = (global as any).BetterMove;
+        const reissue = (global as any).__outCarryReissue;
+        if ((partner.memory as any).lastRunTick === Game.time && reissue) {
+            reissue(partner);
+        }
+    }
     return true;
 };
