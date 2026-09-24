@@ -37,8 +37,8 @@ export const RoleData = {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'U',
-        executor: 'worker',
-    }, // 升级（已并入 worker；保留配置让存量 creep 无缝转 worker 执行，不再孵化新个体）
+        executor: 'upgrader',
+    }, // 专人升级：high 单独配人减 worker 负担，rush 走冲级策略（定编见 shared/roomWorkforce.getUpgraderTarget）
     'worker': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
@@ -399,8 +399,8 @@ export const RoleLevelData = {
         7: { bodypart: [[CARRY, 25], [MOVE, 1]], num: 1 },
         8: { bodypart: [[CARRY, 39], [MOVE, 1]], num: 1 },
     },
-    // upgrader 数量表保留作为历史基准参考；worker 升级侧定编现由 shared/roomWorkforce
-    // 按「采集收入 × 能量水平」动态折算。
+    // 等级制体型表，由 getUpgraderTarget 决定每个模式下孵几只：
+    // low/main 为 0（worker 兼任升级），high/rush 才有独立升级工。
     'upgrader': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
         2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },
