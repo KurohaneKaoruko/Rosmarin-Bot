@@ -54,28 +54,7 @@ export const pruneDelayedUpgraderSpawnMissions = (room: Room) => {
     return removed;
 };
 
-// 运力忙碌率采样：
-// 不设静态配比上限，持续采样忙碌占比——均值持续超过在编运力 85% 就补员（封顶 7），
-// 人口自动收敛到「刚好不积压任务」的水平。窗口 100 个采样点 ≈ 500~1000 tick。
-const CARRIER_BUSY_WINDOW = 100;
-const CARRIER_BUSY_SPAWN_RATIO = 0.85;
-const CARRIER_BUSY_MAX_CARRIERS = 7;
 
-const getCarrierBusyStats = (room: Room): { total: number; avgBusy: number } => {
-    const { total, busy } = getRoomTickCacheValue(room, 'carrier_busy_sample', () => {
-        const carriers = room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => c.memory.role === 'carrier'
-        }) as Creep[];
-        return { total: carriers.length, busy: carriers.filter(c => c.store.getUsedCapacity() > 0).length };
-    });
-
-    const mem = room.memory as any;
-    const samples: number[] = mem.carryBusySamples ?? (mem.carryBusySamples = []);
-    samples.push(total > 0 ? busy / total : 0);
-    if (samples.length > CARRIER_BUSY_WINDOW) samples.splice(0, samples.length - CARRIER_BUSY_WINDOW);
-    const avgBusy = samples.length ? samples.reduce((a, b) => a + b, 0) / samples.length : 0;
-    return { total, avgBusy };
-};
 
 // 统计 source 周围可站位，用于估算 harvester 数量上限
 const getWalkableSourceSlots = (room: Room, source: Source): number => {
@@ -219,20 +198,17 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     },
     'carrier': (room: Room, current: number) => {
         const num = RoleLevelData['carrier'][room.level]['num'];
-        const { avgBusy, total } = getCarrierBusyStats(room);
 
-        // 忙碌率反馈：均值持续 >85% 在编运力即补员（封顶 7）——
-        // 需求随布局/战斗阶段波动，任何静态公式都会在某个阶段失真，采样让人口自动收敛。
-        // 地面堆积兜底：source 旁掉落能量成堆，说明取力端吞吐不足，同样触发补员。
-        const pileShortage = getDroppedPileEnergy(room) > 1500;
-        if ((total > 0 && avgBusy > CARRIER_BUSY_SPAWN_RATIO || pileShortage) && current < CARRIER_BUSY_MAX_CARRIERS) {
-            return true;
-        }
+        // 地面堆积 = 取力吞吐不足的真实信号：允许在编数之上小幅加编（上限 num+2）。
+        // 「身上有货」不算忙碌——载货是搬运工的常态而非短缺证据，按负载率补员只会超编。
+        const pile = getDroppedPileEnergy(room);
+        const demand = num + (pile > 1000 ? 1 : 0) + (pile > 3000 ? 1 : 0);
+        if (current < demand) return true;
 
-        if (num > 0) return current < num;
+        if (demand > 0) return false;
+
+        // num 为 0 的低配房：仅在明确需求下保留 1 个 carrier
         if (current >= 1) return false;
-
-        // 无仓且急需补能时，至少保留 1 个 carrier
         if (!room.storage && !room.terminal) {
             const creepNum = room.getCreepNum() || {};
             const hasHarvester = (creepNum['harvester'] || 0) > 0;
