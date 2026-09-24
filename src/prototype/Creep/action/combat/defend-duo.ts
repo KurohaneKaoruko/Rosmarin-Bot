@@ -1,77 +1,5 @@
 import { pickDefenseAnchorRampart } from '@/shared/defenseUtils';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-
-const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
-    if (!creep.memory.bind) return null;
-    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
-    if (partner) return partner;
-    delete creep.memory.bind;
-    onMissing?.();
-    return null;
-};
-
-const tryBindNearestPartner = (
-    creep: Creep,
-    cacheKey: string,
-    filter: (candidate: Creep) => boolean
-): Creep | null => {
-    const boundPartner = resolveBoundPartner(creep);
-    if (boundPartner) return boundPartner;
-
-    const candidates = getRoomTickCacheValue(creep.room, cacheKey, () =>
-        creep.room.find(FIND_MY_CREEPS, {
-            filter: (candidate) => candidate.id !== creep.id && filter(candidate as Creep)
-        }) as Creep[]
-    );
-    const available = candidates.filter((candidate) => !candidate.memory.bind);
-    if (available.length <= 0) return null;
-
-    const partner = creep.pos.findClosestByRange(available);
-    if (!partner) return null;
-
-    creep.memory.bind = partner.id;
-    partner.memory.bind = creep.id;
-    return partner;
-};
-
-const defend2HealPrepare = (creep: Creep) => {
-    return creep.ensureBoosted(creep.memory['boostmap']);
-};
-
-const runDefend2Heal = (creep: Creep) => {
-    creep.disableAttackNotificationsOnce();
-
-    if (creep.ticksToLive < 100 && creep.room.my) {
-        creep.unBoost();
-        return;
-    }
-
-    const bindcreep = tryBindNearestPartner(creep, 'defend2_heal_candidates', (candidate) =>
-        candidate.memory.role === 'defend2-attack'
-    );
-
-    if (!bindcreep) {
-        if (creep.hits < creep.hitsMax) creep.heal(creep);
-        return;
-    }
-
-    creep.memory.dontPullMe = !creep.room.my;
-
-    let healed = false;
-    if ((creep.hits < creep.hitsMax) && (creep.hits < bindcreep.hits)) {
-        creep.heal(creep);
-        healed = true;
-    }
-
-    if (!healed && creep.pos.isNearTo(bindcreep)) {
-        creep.heal(bindcreep);
-    } else if (!healed && creep.pos.inRangeTo(bindcreep, 3)) {
-        creep.rangedHeal(bindcreep);
-        creep.moveTo(bindcreep);
-    } else {
-        creep.moveTo(bindcreep);
-    }
-};
+import { tryBindNearestPartner } from '@/prototype/Creep/function/boundPartner';
 
 const runDefend2Attack = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -150,9 +78,4 @@ const defend2Attack = {
     run: runDefend2Attack
 };
 
-const defend2Heal = {
-    prepare: defend2HealPrepare,
-    run: runDefend2Heal
-};
-
-export { defend2Attack, defend2Heal };
+export { defend2Attack };
