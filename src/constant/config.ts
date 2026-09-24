@@ -1,6 +1,6 @@
 import {RESOURCE_ABBREVIATIONS} from './ResourceConstant'
 
-export const VERSION = '1.18.5';
+export const VERSION = '1.19.0';
 
 /**
  * 基础配置
