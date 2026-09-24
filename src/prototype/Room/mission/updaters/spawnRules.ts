@@ -15,6 +15,7 @@ import {
     getWorkerWallTarget,
     getWorkerUpgradeTarget,
     getWorkerPopulationCap,
+    getUpgraderTarget,
     getDroppedPileEnergy,
     getDroppedPileWorkerBoost,
 } from '@/shared/roomWorkforce';
@@ -257,6 +258,16 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         // 地面出现能量堆积时，允许临时突破人口硬上限加班消化
         const cap = getWorkerPopulationCap(room) + getDroppedPileWorkerBoost(room);
         return current < Math.min(total, cap);
+    },
+    // 专人升级工（upgrader）：编制完全由房间模式决定，策略与让位闸门都在
+    // shared/roomWorkforce.getUpgraderTarget：
+    //   low/main → 0（常规升级由 worker 兼任）
+    //   high     → 按升级 work 需求折算，同事把 worker 升级侧扣掉同等份额
+    //   rush     → 布局支持冲级时按升级 work 需求折算；不支持则回退成 2 只普通升级工
+    // 这里只负责把缺口补齐，不重复任何策略判断。
+    'upgrader': (room: Room, current: number) => {
+        if (Memory['warmode']) return false;
+        return current < getUpgraderTarget(room);
     },
     'miner': (room: Room, current: number) => {
         const lv = room.level;

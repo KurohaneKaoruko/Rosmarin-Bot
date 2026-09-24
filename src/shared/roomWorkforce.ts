@@ -158,6 +158,74 @@ export const getRushUpgraderCount = (room: Room) => {
     return (creepNum['up-upgrade'] || 0) + (spawnMissionNum['up-upgrade'] || 0);
 };
 
+// ==================== 冲级工位 ====================
+
+/**
+ * 冲级工位：**同时**满足「与控制器旁的 storage 或 terminal 相邻」和「位于控制器 3 格以内」的
+ * 可站立格位。
+ *
+ * @remarks
+ * 冲级工的取能路径是控制器缓冲（见 `withdrawControllerEnergy`）：link > container > terminal > storage。
+ * 其中只有 terminal / storage 是**大容量且可持续**的来源，所以「能不能冲级」取决于布局——
+ * 仓库必须挨着控制器，而且**旁边要站得下人**：格位要同时贴着仓库、又在控制器 3 格圈内，
+ * 冲级工才能一边取能一边升级，不必来回跑。
+ *
+ * 因此这个数量是**自动判定**出来的：没有这样的格位就说明布局不支持冲级，
+ * 编制侧会回退成普通升级工（见 {@link getUpgraderTarget}）。
+ */
+export const getRushUpgradeSlotList = (room: Room): RoomPosition[] => {
+    return getRoomTickCacheValue(room, 'rush_upgrade_slot_list', () => {
+        const controller = room.controller;
+        if (!controller) return [];
+        if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
+
+        // 前提：仓库本身要位于控制器旁边（3 格内）
+        const stores = ([room.storage, room.terminal] as (StructureStorage | StructureTerminal | undefined)[])
+            .filter((s): s is StructureStorage | StructureTerminal => !!s && s.pos.inRangeTo(controller.pos, 3));
+        if (stores.length === 0) return [];
+
+        const terrain = room.getTerrain();
+        const seen = new Set<string>();
+        const slots: RoomPosition[] = [];
+
+        for (const store of stores) {
+            for (let dx = -1; dx <= 1; dx++) {
+                for (let dy = -1; dy <= 1; dy++) {
+                    if (dx === 0 && dy === 0) continue; // 仓库自己那格站不了人
+                    const x = store.pos.x + dx;
+                    const y = store.pos.y + dy;
+                    if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+
+                    const pos = new RoomPosition(x, y, room.name);
+                    if (pos.getRangeTo(controller) > 3) continue;
+
+                    const key = `${x},${y}`;
+                    if (seen.has(key)) continue;
+                    if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+
+                    const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
+                    const blocked = structures.some((s: any) =>
+                        s.structureType !== STRUCTURE_ROAD &&
+                        s.structureType !== STRUCTURE_CONTAINER &&
+                        !(s.structureType === STRUCTURE_RAMPART && s.my)
+                    );
+                    if (blocked) continue;
+
+                    seen.add(key);
+                    slots.push(pos);
+                }
+            }
+        }
+        return slots;
+    });
+};
+
+export const getRushUpgradeSlotCap = (room: Room): number =>
+    getRoomTickCacheValue(room, 'rush_upgrade_slot_cap', () => getRushUpgradeSlotList(room).length);
+
+/** 房间布局是否支持冲级（控制器旁有 storage/terminal，且它们旁边有可站格位） */
+export const canRushUpgrade = (room: Room): boolean => getRushUpgradeSlotCap(room) > 0;
+
 // ==================== 升级吞吐 ====================
 
 const getSourceEnergyPerTick = () =>
@@ -386,18 +454,34 @@ export const getControllerUpgradeSlotCap = (room: Room) => {
 };
 
 /**
- * 查询某个 worker 家族 creep 的专属升级工位。
- * 名册（worker/upgrader，按名字排序）第 i 位对应工位表第 i 项（超出取模），
+ * 本次 tick 参与升级工位分配的格位池。
+ *
+ * @remarks
+ * `rush` 且布局支持冲级时改用**冲级工位**（控制器旁仓库旁边那些格）——冲级工的取能点在那里，
+ * 站在别处就变成往返跑。其余情况仍用控制器周围的通用升级工位。
+ *
+ * 开头的能力探测不只是防御：工位表全靠「地形 + 结构查询」算出来，
+ * 桩环境 / 未初始化房间连这两个接口都没有，此时连模式都不必读（也就不会去碰 Memory）。
+ */
+const getUpgradeSlotPool = (room: Room): RoomPosition[] => {
+    if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
+    if (getRoomMode(room) === 'rush' && canRushUpgrade(room)) return getRushUpgradeSlotList(room);
+    return getControllerUpgradeSlotList(room);
+};
+
+/**
+ * 查询某个升级个体（worker / upgrader 共用名册）的专属升级工位。
+ * 名册（按名字排序）第 i 位对应工位表第 i 项（超出取模），
  * 同 tick 内结果稳定且互不重复（工位充足时）。
  */
 export const getWorkerUpgradeSlot = (room: Room, creepName: string): RoomPosition | null => {
     if (typeof room.find !== 'function') return null;
     const assignment = getRoomTickCacheValue(room, 'worker_upgrade_slot_map', () => {
         const map = new Map<string, RoomPosition>();
-        const slots = getControllerUpgradeSlotList(room);
+        const slots = getUpgradeSlotPool(room);
         if (!slots.length) return map;
 
-        const family = new Set<string>(WORKER_FAMILY_ROLES);
+        const family = new Set<string>(UPGRADE_SLOT_ROLES);
         const roster = getRoomTickCacheValue(room, 'worker_family_roster', () =>
             ((room.find(FIND_MY_CREEPS, {
                 filter: (c: Creep) => !!(c && c.memory && family.has(c.memory.role || '')),
@@ -512,16 +596,83 @@ export const getWorkerWallTarget = (room: Room): number => {
 };
 
 /**
+ * `upgrader`（专人升级工）的编制。
+ *
+ * @remarks
+ * 分工表（`low`/`main` 交 worker；`high` 单独配人减轻 worker；`rush` 上冲级）：
+ *
+ * | 模式 | 无冲级 | 冲级·布局支持 | 冲级·布局不支持（回退） |
+ * |---|---|---|---|
+ * | low / main | 0（worker 兼任） | 0（worker 兼任） | 0 |
+ * | high | 按升级 work 目标折算 | 1 | 1 |
+ * | rush | —（见左） | 按升级 work 目标折算 | 2 |
+ *
+ * - 「冲级」= 房间模式为 `rush`，或玩家用旗帜手动开了旧冲级编队（`up-upgrade` 在场）。
+ *   后者是**手动开关**：编队已经在干升级，普通升级工只在 `high` 保留 1 只减轻 worker 负担。
+ * - 布局支持与否由 {@link canRushUpgrade} 自动判定（控制器旁仓库旁边有没有可站格位）；
+ *   布局不支持时**不回退行为也不加倍**，而是缩编成少量普通升级工。
+ * - 折算口径与 worker 升级侧同源（都用 `getUpgradeWorkTarget`），只是换角色承接，
+ *   避免两档之间口径漂移。
+ */
+export const getUpgraderTarget = (room: Room): number => {
+    const controller = room.controller;
+    if (!controller?.my) return 0;
+
+    const mode = getRoomMode(room);
+
+    // 手动开关：旧冲级编队已经在承担升级吞吐
+    if (getRushUpgraderCount(room) > 0) {
+        return mode === 'high' && room.level < 8 ? 1 : 0;
+    }
+
+    const workTarget = getUpgradeWorkTarget(room);
+    if (workTarget <= 0) return 0;
+
+    const workPerUpgrader = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
+
+    if (mode === 'rush') {
+        // 满级房冲级爬一孵出来就会走退役流程（见 up-upgrade 的 shouldRetire），别再下单
+        if (room.level >= 8) return 0;
+        if (canRushUpgrade(room)) {
+            // 冲级：编制跟着实际升级 work 需求走，受冲级工位上限约束
+            return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, getRushUpgradeSlotCap(room)));
+        }
+        // 布局不支持冲级：回退成普通升级工，编制缩小
+        return 2;
+    }
+
+    if (mode === 'high') {
+        return clamp(
+            Math.ceil(workTarget / workPerUpgrader),
+            1,
+            Math.max(1, getControllerUpgradeSlotCap(room))
+        );
+    }
+
+    // low / main：明确由 worker 兼任升级，不单独配人
+    return 0;
+};
+
+/**
  * worker 的升级侧目标数量（0 表示当前不需要为升级定编）。
  * 定编依据 getUpgradeWorkTarget 的 WORK 总数折算到当前 worker 体型，
  * 再受控制器工位上限约束。
+ *
+ * @remarks
+ * 已由 `upgrader` 承担的升级 work 会从 worker 这边扣掉——`high`/`rush` 下配了专人升级，
+ * worker 就能把人口留给建造与刷墙（这就是「减轻 worker 负担」的落地）。
  */
 export const getWorkerUpgradeTarget = (room: Room): number => {
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
+
+    const upgraderWork = getUpgraderTarget(room) * getGeneratedRoleWorkPartCount(room, 'upgrader');
+    const remaining = workTarget - upgraderWork;
+    if (remaining <= 0) return 0;
+
     const slotCap = Math.max(1, getControllerUpgradeSlotCap(room));
     const workerWork = getWorkerWorkPartCount(room);
-    return Math.min(slotCap, Math.ceil(workTarget / Math.max(1, workerWork)));
+    return Math.min(slotCap, Math.ceil(remaining / Math.max(1, workerWork)));
 };
 
 /**
@@ -534,8 +685,17 @@ export const getWorkerConstructionQuota = (room: Room): number => {
     return getWorkerWallTarget(room);
 };
 
-/** 房间当前是否需要保留 worker 做升级吞吐（含让位闸门判定） */
-export const hasWorkerUpgradeDemand = (room: Room): boolean => getUpgradeWorkTarget(room) > 0;
+/**
+ * 房间当前是否还需要 worker 保留专职升级人口。
+ *
+ * @remarks
+ * 用的是**扣除 upgrader 已承担部分之后**的升级侧目标：`high`/`rush` 下配了专人升级时，
+ * worker 应该把人口让给建造/刷墙，而不是继续留一批人站控制器。
+ */
+export const hasWorkerUpgradeDemand = (room: Room): boolean => getWorkerUpgradeTarget(room) > 0;
 
 /** worker 家族角色（共享 worker 执行器的定编个体） */
-export const WORKER_FAMILY_ROLES = ['worker', 'upgrader'] as const;
+export const WORKER_FAMILY_ROLES = ['worker'] as const;
+
+/** 控制器升级工位的名册角色：worker 与 upgrader 共用一张名册，避免两族抢同一格 */
+export const UPGRADE_SLOT_ROLES = ['worker', 'upgrader'] as const;
