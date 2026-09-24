@@ -1,6 +1,5 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { createFsmStorage, createLayeredRunner, ensureFsmBucket } from '@/framework/ai/adapters';
-import { createCreepRole } from '@/framework/ai/creepRole';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import {
     getCoreDepotContainer,
@@ -992,7 +991,8 @@ const withdraw = (
         return false;
     }
 
-    const storeTarget = target;
+    // 此处 target 已收窄为 AnyStoreStructure | Ruin | Tombstone，统一按带 store 的目标处理（Ruin/Tombstone 运行时兼容）
+    const storeTarget = target as AnyStoreStructure;
     const resourceType = cache.resourceType || RESOURCE_ENERGY;
     const used = storeTarget.store?.getUsedCapacity?.(resourceType) ?? 0;
     if (used <= 0) {
@@ -1278,7 +1278,7 @@ const createCarrierFlowMachine = (creep: Creep) =>
         ]
     }, createFsmStorage<CarrierFlowState>(creep, CARRIER_LAYERS.FLOW));
 
-const CarrierRole = createCreepRole({
+const CarrierRole = {
     run: (creep: Creep) => {
         seedCarrierStates(creep);
 
@@ -1299,7 +1299,7 @@ const CarrierRole = createCreepRole({
 
         syncCarrierWorkingState(creep);
     }
-});
+};
 
 export default CarrierRole;
 

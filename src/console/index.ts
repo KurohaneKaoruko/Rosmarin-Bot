@@ -1,4 +1,5 @@
 import base from './base';
+import diag from './function/diag';
 import info from './function/info';
 import room from './function/room';
 import mine from './function/mine';
@@ -16,6 +17,7 @@ import helps from './help'
 
 const plugins = [
     base,
+    diag,
     info,
     room,
     layout,

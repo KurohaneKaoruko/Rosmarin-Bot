@@ -2,11 +2,27 @@
 import { parseShardRoomName } from '@/shared/shardRoom';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { createWorkLayerRole } from '@/framework/ai/creepRole';
+import { runWorkLayer } from '@/framework/ai/adapters';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { createFsmStorage, ensureFsmBucket } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+
+// 同 tick 共享的全房扫描结果：同房多个 aid-build 复用一次扫描。
+// 缓存未过滤列表、每次调用重放过滤，与直接 find({filter}) 行为一致。
+const getAidBuildSites = (room: Room): ConstructionSite[] =>
+    getRoomTickCacheValue(room, 'aid_build:construction_sites', () => room.find(FIND_CONSTRUCTION_SITES) as ConstructionSite[]);
+const getAidBuildStructures = (room: Room): Structure[] =>
+    getRoomTickCacheValue(room, 'aid_build:structures', () => room.find(FIND_STRUCTURES) as Structure[]);
+const hasAidBuildSpawn = (room: Room): boolean =>
+    getRoomTickCacheValue(room, 'aid_build:has_spawn', () =>
+        room.find(FIND_MY_STRUCTURES, { filter: (s) => s.structureType === STRUCTURE_SPAWN }).length > 0);
+const hasAidBuildSpawnSite = (room: Room): boolean =>
+    getRoomTickCacheValue(room, 'aid_build:has_spawn_site', () =>
+        room.find(FIND_MY_CONSTRUCTION_SITES, { filter: (s) => s.structureType === STRUCTURE_SPAWN }).length > 0);
+const getAidBuildMyCreeps = (room: Room): Creep[] =>
+    getRoomTickCacheValue(room, 'aid_build:my_creeps', () => room.find(FIND_MY_CREEPS) as Creep[]);
 
 // ==============================
 //  Aid-Build 多层 FSM 状态常量
@@ -271,13 +287,14 @@ const getAidBuildImmediateFleeRange = (hostile: Creep): number => {
     return 0;
 };
 
-const findAidBuildTravelThreats = (room: Room): Creep[] => {
-    return room.find(FIND_HOSTILE_CREEPS, {
-        filter: (hostile) =>
-            !hostile.isWhiteList() &&
-            (hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0)
-    }) as Creep[];
-};
+const findAidBuildTravelThreats = (room: Room): Creep[] =>
+    getRoomTickCacheValue(room, 'aid_build:travel_threats', () =>
+        room.find(FIND_HOSTILE_CREEPS, {
+            filter: (hostile) =>
+                !hostile.isWhiteList() &&
+                (hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0)
+        }) as Creep[]
+    );
 
 const createAidBuildThreatCostCallback = () => {
     return (roomName: string, costs: CostMatrix): CostMatrix => {
@@ -506,13 +523,13 @@ const getAidBuildAssignedTargetPos = (
     const candidates = getAidBuildSpreadCandidates(creep.room, anchorPos, ranges, avoidPos);
     if (candidates.length <= 0) return null;
 
-    const queueMembers = creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) =>
+    const queueMembers = getAidBuildMyCreeps(creep.room).filter(
+        (c) =>
             c.memory.role === creep.memory.role &&
             c.memory.jumpMode === creep.memory.jumpMode &&
             c.memory.targetRoom === creep.memory.targetRoom &&
             c.memory.spawnFlag === creep.memory.spawnFlag
-    });
+    );
     const slotIndex = getAidBuildWaitSlotIndex(queueMembers.map((c) => c.name), creep.name, candidates.length);
 
     for (let offset = 0; offset < candidates.length; offset++) {
@@ -639,12 +656,12 @@ const getBalancedSource = (creep: Creep): Source | null => {
 
     const current = creep.getBoundSource();
     const focusFlag = creep.memory.spawnFlag;
-    const sameRole = creep.room.find(FIND_MY_CREEPS, {
-        filter: (c) =>
+    const sameRole = getAidBuildMyCreeps(creep.room).filter(
+        (c) =>
             c.id !== creep.id &&
             c.memory.role === creep.memory.role &&
             (!focusFlag || c.memory.spawnFlag === focusFlag)
-    });
+    );
 
     const counts: Record<string, number> = {};
     const walkableSlots: Record<string, number> = {};
@@ -682,11 +699,11 @@ const getBalancedSource = (creep: Creep): Source | null => {
 
 // 选择维修目标（命中最低者优先）
 const selectAidBuildRepairTarget = (creep: Creep) => {
-    const repairTargets = creep.room.find(FIND_STRUCTURES, {
-        filter: (s) => s.hits < s.hitsMax * 0.8 &&
+    const repairTargets = getAidBuildStructures(creep.room).filter(
+        (s) => s.hits < s.hitsMax * 0.8 &&
             s.structureType != STRUCTURE_ROAD &&
             s.structureType != STRUCTURE_CONTAINER
-    });
+    );
     if (repairTargets.length <= 0) return null;
     return repairTargets.reduce((a, b) => a.hits < b.hits ? a : b);
 };
@@ -698,7 +715,7 @@ const getAidBuildCache = (creep: Creep) => ensureMemoryCache(creep.memory) as Re
 export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
     const controller = creep.room.controller;
     const owned = !!controller?.my;
-    const sites = creep.room.find(FIND_CONSTRUCTION_SITES);
+    const sites = getAidBuildSites(creep.room);
     const isJumpMode = !!creep.memory.jumpMode;
     const canUpgrade = canAidBuildUpgrade(creep.room);
     const cache = getAidBuildCache(creep);
@@ -717,12 +734,8 @@ export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
     }
     if (downgradeUpgradeLocked) return AID_BUILD_JOB_STATES.UPGRADE;
 
-    const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
-        filter: (s) => s.structureType === STRUCTURE_SPAWN
-    }).length > 0;
-    const hasSpawnSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES, {
-        filter: (s) => s.structureType === STRUCTURE_SPAWN
-    }).length > 0;
+    const hasSpawn = hasAidBuildSpawn(creep.room);
+    const hasSpawnSite = hasAidBuildSpawnSite(creep.room);
     const shouldForceSpawnFirst = isJumpMode && !hasSpawn && hasSpawnSite;
 
     if (controller?.level && controller.level < 2 && !shouldForceSpawnFirst) {
@@ -737,10 +750,7 @@ export const decideAidBuildJob = (creep: Creep): AidBuildJobState => {
 
 // boost 准备阶段：保持与旧逻辑一致
 const prepareAidBuild = (creep: Creep) => {
-    if (creep.memory['boostmap']) {
-        return creep.goBoost(creep.memory['boostmap']) === OK;
-    }
-    return creep.goBoost({ [WORK]: ['XLH2O', 'LH2O', 'LH'] }) === OK;
+    return creep.ensureBoosted({ [WORK]: ['XLH2O', 'LH2O', 'LH'] });
 };
 
 // 采集阶段：收集能量并判断是否进入工作阶段
@@ -814,12 +824,8 @@ const runAidBuildBuild = (creep: Creep) => {
     releaseAidBuildSource(creep);
     const controller = creep.room.controller;
     const isJumpMode = !!creep.memory.jumpMode;
-    const hasSpawn = creep.room.find(FIND_MY_STRUCTURES, {
-        filter: (s) => s.structureType === STRUCTURE_SPAWN
-    }).length > 0;
-    const hasSpawnSite = creep.room.find(FIND_MY_CONSTRUCTION_SITES, {
-        filter: (s) => s.structureType === STRUCTURE_SPAWN
-    }).length > 0;
+    const hasSpawn = hasAidBuildSpawn(creep.room);
+    const hasSpawnSite = hasAidBuildSpawnSite(creep.room);
     const shouldForceSpawnFirst = isJumpMode && !hasSpawn && hasSpawnSite;
 
     if (shouldForceAidBuildDowngradeUpgrade(creep.room)) return;
@@ -994,7 +1000,11 @@ const createAidBuildFlowMachine = (creep: Creep) => {
             states: {
                 [AID_BUILD_FLOW_STATES.COLLECT]: {
                     onTick: (ctx) => {
-                        if (!ctx.creep.memory.ready) return;
+                        // 采集前置 = goBoost 完成（原 prepare 契约）：未完成时每 tick 重试
+                        if (!ctx.creep.memory.ready) {
+                            ctx.creep.memory.ready = prepareAidBuild(ctx.creep);
+                            if (!ctx.creep.memory.ready) return;
+                        }
                         const ready = runAidBuildHarvest(ctx.creep);
                         ctx.readyToWork = ready || shouldAidBuildSwitchToWork(ctx.creep);
                         if (ctx.readyToWork) {
@@ -1215,12 +1225,12 @@ const onAidBuildTarget = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-const aidBuildWork = createWorkLayerRole({
+const aidBuildWork = {
     prepare: prepareAidBuild,
-    onSource: onAidBuildSource,
-    onTarget: onAidBuildTarget,
-    reenter: true
-});
+    run: function (creep: Creep) {
+        runWorkLayer(creep, { onSource: onAidBuildSource, onTarget: onAidBuildTarget }, { reenter: true });
+    }
+};
 
 const aid_build = {
     run: function (creep: Creep) {

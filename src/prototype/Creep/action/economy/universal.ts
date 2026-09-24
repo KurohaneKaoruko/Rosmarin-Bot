@@ -1,5 +1,4 @@
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { createCreepRole } from '@/framework/ai/creepRole';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 type UniversalTargetKind = 'spawn_ext' | 'tower' | 'controller_buffer' | 'power_spawn';
@@ -256,8 +255,8 @@ const runUniversal = (creep: Creep) => {
     runWorkTasks(creep, urgent, forceUpgrade);
 };
 
-const UniversalFunction = createCreepRole({
+const UniversalFunction = {
     run: runUniversal
-});
+};
 
 export default UniversalFunction;

@@ -47,7 +47,7 @@ const shouldSkipSourceMap = () => {
  * @param {Error | string} error 错误或原始追踪栈
  * @returns {string} 映射之后的源代码追踪栈
  */
-const sourceMappedStackTrace = function (error: Error | string): string {
+export const sourceMappedStackTrace = function (error: Error | string): string {
     const stack = error instanceof Error ? error.stack : error
     const stackText = typeof stack === 'string' ? stack : String(error);
     // 有缓存直接用

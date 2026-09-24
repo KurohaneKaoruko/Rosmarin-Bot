@@ -6,8 +6,9 @@ import { ClearModule } from '@/modules/ClearModule';
 import { GeneratePixel } from '@/modules/Pixel';
 import { Statistics } from '@/modules/Statistics';
 import { ResourceManage } from '@/modules/ResourceManage';
+import { FunnelModule } from '@/modules/FunnelModule';
 import { TeamModule } from '@/modules/TeamModule';
-import { DDModule } from '@/modules/DD_Module';
+import { DDModule } from '@/modules/DDModule';
 import { NukeModule } from '@/modules/NukeModule';
 import { ExpandModule } from '@/modules/ExpandModule';
 import { InterShardModule } from '@/modules/InterShardModule';
@@ -25,6 +26,7 @@ const App = createApp();
 App.on(TeamModule);       // 小队模块
 App.on(EventModule);      // 事件模块
 App.on(ResourceManage);   // 资源调度管理
+App.on(FunnelModule);     // 跨房能量漏斗
 App.on(InterShardModule); // InterShardMemory 缓存与清理
 App.on(ExpandModule);     // 跨 shard 扩张
 App.on(NukeModule);       // 核弹打击
@@ -34,4 +36,10 @@ App.on(Statistics);       // 统计数据
 App.on(GeneratePixel);    // 搓像素
 App.on(MoveModule);       // 移动模块
 
-export const loop = App.run;
+import { updateBucketGovernor } from '@/infra/bucketGovernor';
+
+export const loop = () => {
+    // CPU 桶闭环：先更新外矿活跃阈值，再跑主循环（Tier 1-3）
+    updateBucketGovernor();
+    App.run();
+};

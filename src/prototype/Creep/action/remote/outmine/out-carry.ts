@@ -1,14 +1,7 @@
-import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/features/externalMine';
-import { RoadMemory } from '@/features/externalRoad';
-import {
-    clearOutCarryRelayIntent,
-    rememberOutCarryRelayIntentTowards,
-    tryOutCarryRelayCollectStep,
-    tryOutCarryRelayHandoff,
-    updateOutCarryMoveTrace
-} from '@/prototype/Creep/function/relayFunction';
+import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features/external/externalMine';
+import { RoadMemory } from '@/modules/features/external/externalRoad';
+import { OUT_CARRY_HALF_LOAD_RATIO, readRelayDirection, tryOutCarryRelayHandoff } from '@/prototype/Creep/function/relayHandoff';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { CREEP_TICK_ACTION, hasCreepTickAction } from '@/prototype/Creep/function/tickActionFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
 
@@ -34,7 +27,9 @@ const OUT_CARRY_STRATEGIES = {
 } as const;
 
 // collect/deliver 之间保留明显滞回，避免因为修一次路/掉 1 点能量就立刻回头。
-const OUT_CARRY_RETURN_TO_COLLECT_RATIO = 0.5;
+// 这条线必须与接力（relayHandoff）的交接判定共用同一个值：
+// 接力保证交接后落在返程侧的那一方够半仓，正是为了让这里的滞回不会把方向判反。
+const OUT_CARRY_RETURN_TO_COLLECT_RATIO = OUT_CARRY_HALF_LOAD_RATIO;
 
 const shouldUseOutCarryRelay = (creep: Creep): boolean => {
     if ((Memory as any).tightCpu) return false;
@@ -208,26 +203,27 @@ type OutCarryAction = {
     carry: (creep: Creep) => void;
 };
 
+/**
+ * 移动到目标；允许接力时，**先移动（登记本 tick 意图）、再尝试接头**。
+ *
+ * @remarks
+ * 顺序不能反：接头判据是「双方本 tick 都已登记移动意图、且互为对方的目标格」
+ * （见 relayHandoff），所以自己必须先走一步、登记过意图，才有资格接头。
+ * 命中接力时，刚登记的这一笔意图会被立刻作废并换成新方向的意图。
+ *
+ * @param allowRelay 是否在移动后尝试外矿搬运接力。
+ */
 const moveOutCarryTo = (
     creep: Creep,
     target: RoomPosition | { pos: RoomPosition },
     opts?: MoveToOpts,
-    collectRelay = false
+    allowRelay = false
 ) => {
-    rememberOutCarryRelayIntentTowards(creep, target);
-    if (
-        collectRelay &&
-        shouldUseOutCarryRelay(creep) &&
-        tryOutCarryRelayCollectStep(
-            creep,
-            (other) => outCarry.isLikelyCollecting(other),
-            OUT_CARRY_STRATEGIES.COLLECT,
-            OUT_CARRY_STRATEGIES.DELIVER
-        )
-    ) {
+    const result = creep.moveTo(target, opts);
+    if (allowRelay && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
         return OK;
     }
-    return creep.moveTo(target, opts);
+    return result;
 };
 
 const moveOutCarryToRoom = (
@@ -235,7 +231,6 @@ const moveOutCarryToRoom = (
     roomName: string,
     opts?: Record<string, any>
 ) => {
-    clearOutCarryRelayIntent(creep);
     return creep.moveToRoom(roomName, opts);
 };
 
@@ -529,7 +524,18 @@ const outCarry: OutCarryAction = {
             const nearbyDrop = creep.pos.findInRange(FIND_DROPPED_RESOURCES, 1, {
                 filter: (r: Resource) => r.amount > 0
             })[0];
-            if (nearbyDrop) creep.pickup(nearbyDrop);
+            if (nearbyDrop) {
+                creep.pickup(nearbyDrop);
+                return;
+            }
+            // 拥挤疏散：容器口附近同路线同伴过多时向空旷处让位，
+            // 防止等填装的搬运工把唯一通道和 out-harvest 的工作位全部堵死。
+            const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 2, {
+                filter: (c: Creep) => c.id !== creep.id && c.memory.role === creep.memory.role
+            }).length;
+            if (crowd >= 3) {
+                creep.moveTo(new RoomPosition(25, 25, creep.room.name), { range: 15, plainCost: 2, swampCost: 10 });
+            }
             return;
         }
         delete cache.waitUntil;
@@ -714,18 +720,10 @@ const outCarry: OutCarryAction = {
         const sourceRoom = creep.memory.sourceRoom;
         if (!sourceRoom) return;
 
-        if (shouldUseOutCarryRelay(creep)) {
-            if (tryOutCarryRelayHandoff(
-                creep,
-                (other) => this.isLikelyCollecting(other),
-                OUT_CARRY_STRATEGIES.COLLECT,
-                OUT_CARRY_STRATEGIES.DELIVER
-            )) return;
-        }
-
         if (creep.room.name != sourceRoom || creep.pos.isRoomEdge()) {
             if (creep.room.name != sourceRoom && !creep.pos.isRoomEdge()) {
-                if (this.moveAlongRouteExit(creep, sourceRoom)) return;
+                // 返程途中允许接头：先走一步登记意图，接不上就照常移动
+                if (this.moveAlongRouteExit(creep, sourceRoom, true)) return;
             }
             moveOutCarryToRoom(creep, sourceRoom, { plainCost: 2, swampCost: 10 });
             return;
@@ -788,34 +786,34 @@ const outCarry: OutCarryAction = {
 
     // 统一入口：只做 collect / deliver，修路与建造交给 out-build。
     run: function (creep: Creep) {
-        const cache = getOutCarryCache(creep);
-        const sourceCache = getOutCarrySourceCache(creep);
-        const targetCache = getOutCarryTargetCache(creep);
-        clearOutCarryRelayIntent(creep);
-        updateOutCarryMoveTrace(creep);
+        (creep.memory as any).lastRunTick = Game.time;
         delete creep.memory.working;
-        // 本 tick 已被接力方下发移动意图时，不再执行后续动作，避免覆盖接力移动。
-        if (hasCreepTickAction(creep, CREEP_TICK_ACTION.RELAY_RECEIVE)) return;
 
-        const previousMode = cache.outCarryMode as OutCarryMode | undefined;
-        const mode = resolveOutCarryMode(creep, previousMode);
+        runModeCycle(creep);
 
-        if (mode !== previousMode) {
-            // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
-            if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
-                delete targetCache.targetId;
-            } else {
-                delete sourceCache.targetId;
-                delete sourceCache.targetType;
-                delete sourceCache.waitUntil;
-                delete sourceCache.partialLeaveWait;
-                clearAssignedSourceCache(sourceCache);
-            }
+        // 接力后续跑：本 tick 由自己发起过接力（relayedSelfTick）时，memory 已换成新身份，
+        // 立即再决策一轮——转移与移动同 tick 完成，货物单 tick 前进两格。
+        // 例：贴脸队形 A-B-C（C 满载）只传一次 C→B，随后 B 掉头带货行驶、A/C 各自让位分开，
+        // 最终 ABC → BAOC（O 为空位），而不是原地 C→B→A 逐手倒货。
+        // 第二轮中的接力尝试会被同 tick 接力标记阻断，不会连环传递。
+        if ((creep.memory as any).relayedSelfTick === Game.time) {
+            runModeCycle(creep);
         }
-        cache.outCarryMode = mode;
 
-        runOutCarryMode(creep, mode);
+        // 空闲让位：本 tick 没有任何移动意图、又滞留在出口格上的搬运工，
+        // 主动向房间内部挪动——出口格是跨房交通的必经之路，停车等于堵门。
+        clearDoorZoneIfIdle(creep);
     },
+};
+
+// 出口格（x/y = 0/49）是跨界交通唯一的必经之路，
+// 没有搬运目标而原地滞留的搬运工必须让位，否则对向 creep 全部被堵在门外。
+const clearDoorZoneIfIdle = (creep: Creep): void => {
+    const pos = creep.pos;
+    if (pos.x > 0 && pos.x < 49 && pos.y > 0 && pos.y < 49) return;
+    const betterMove = (global as any).BetterMove;
+    if (betterMove && typeof betterMove.hasMoveIntent === 'function' && betterMove.hasMoveIntent(creep)) return;
+    creep.moveTo(new RoomPosition(25, 25, creep.room.name), { range: 20, plainCost: 2, swampCost: 10 });
 };
 
 // 判定是否进入采集策略
@@ -854,8 +852,16 @@ const resolveOutCarryMode = (creep: Creep, previousMode?: OutCarryMode): OutCarr
     const lowHealth = creep.hits < creep.hitsMax * 0.5;
     const collectResumeThreshold = Math.ceil(cap * OUT_CARRY_RETURN_TO_COLLECT_RATIO);
 
-    if (used === 0) return OUT_CARRY_STRATEGIES.COLLECT;
     if (isOutCarryDying(creep)) return OUT_CARRY_STRATEGIES.DELIVER;
+
+    // 接力当 tick 的方向锁：本 tick 下达的动作要到 tick 末才落账，这里读到的 store
+    // 还是交接前的旧载荷，「谁接了货谁返程」推导不出来——所以交接当 tick 直接用
+    // 接力写下的方向（见 relayHandoff.setRelayDirection），只对本 tick 有效。
+    const relayDir = readRelayDirection(creep);
+    if (relayDir === OUT_CARRY_STRATEGIES.COLLECT) return OUT_CARRY_STRATEGIES.COLLECT;
+    if (relayDir === OUT_CARRY_STRATEGIES.DELIVER) return OUT_CARRY_STRATEGIES.DELIVER;
+
+    if (used === 0) return OUT_CARRY_STRATEGIES.COLLECT;
 
     if (previousMode === OUT_CARRY_STRATEGIES.COLLECT) {
         if (lowHealth || free === 0) return OUT_CARRY_STRATEGIES.DELIVER;
@@ -898,20 +904,44 @@ const runCollectMode = (creep: Creep) => {
         return;
     }
 
+    // 接力当 tick 的方向锁：这里的载荷同样还是交接前的旧值（动作 tick 末才落账），
+    // 按载荷挑分支会让刚交出全部货物的供给方落进 carry（返程）而走反方向。
+    // 锁成采集就一律走取货流程：交接后这一方已经是空仓，取货流程会自己把它送回外矿。
+    if (readRelayDirection(creep) === OUT_CARRY_STRATEGIES.COLLECT) {
+        sourceCache.partialLeaveWait = 0;
+        outCarry.withdraw(creep);
+        creep.memory.dontPullMe = false;
+        return;
+    }
+
     if (inTargetRoom && !lowHealth && free > 0) {
-        const before = used;
+        const memBefore = creep.memory;
+
+        // 「这一趟有没有真进到货」不能拿本 tick 的快照自比：动作要到 tick 末才落账，
+        // tick 中间读到的 store 是 tick 开始的快照（见官方「理解游戏循环」），
+        // 前后两次读同一个快照永远相等，等仓计数就再也回不了零。
+        // 只能和上一个 tick 开始时的快照比——那个值已经包含上一 tick 动作的结果。
+        const usedAtTickStart = used;
+        const previousUsed = Number(sourceCache.collectUsedAtTickStart || 0);
+        const gainedSinceLastTick = usedAtTickStart > previousUsed;
+        sourceCache.collectUsedAtTickStart = usedAtTickStart;
+
         outCarry.withdraw(creep);
         creep.memory.dontPullMe = false;
 
-        const after = creep.store.getUsedCapacity();
-        if (after > before) {
+        // 交接会交换双方 memory：此时 sourceCache 已经跟着旧记忆落到伙伴身上了，
+        // 再往它里面写等仓计数就是在污染伙伴的缓存。交接后的补跑由
+        // 「接力后续跑」（relayedSelfTick）按新身份完成，这里直接退出。
+        if (creep.memory !== memBefore) return;
+
+        if (gainedSinceLastTick) {
             sourceCache.partialLeaveWait = 0;
             return;
         }
 
         const wait = Number(sourceCache.partialLeaveWait || 0) + 1;
         sourceCache.partialLeaveWait = wait;
-        if (after === 0) return;
+        if (usedAtTickStart === 0) return;
         if (wait < 18) return;
 
         delete sourceCache.partialLeaveWait;
@@ -944,6 +974,40 @@ const runOutCarryMode = (creep: Creep, mode: OutCarryMode) => {
     }
     outCarry.carry(creep);
     creep.memory.dontPullMe = false;
+};
+
+// 单轮模式决策 + 执行：解析 collect/deliver，切态时清对侧缓存，然后跑对应主流程。
+// 接力后续跑会以交换后的新 memory 再调用一次本函数，缓存按当下 memory 现取现用。
+// 接力后续跑的跨模块入口：relayHandoff 在完全交接后，
+// 对「本 tick 已跑过、意图被作废」的伙伴 creep 调用此钩子重登记移动意图。
+;(global as any).__outCarryReissue = (creep: Creep) => {
+    if (!creep || !(creep.memory as any)) return;
+    delete creep.memory.working;
+    runModeCycle(creep);
+};
+
+const runModeCycle = (creep: Creep): void => {
+    const cache = getOutCarryCache(creep);
+    const previousMode = cache.outCarryMode as OutCarryMode | undefined;
+    const mode = resolveOutCarryMode(creep, previousMode);
+
+    if (mode !== previousMode) {
+        // collect / deliver 切换时必须清掉对侧缓存，避免刚切态就被旧目标拖回去。
+        const sourceCache = getOutCarrySourceCache(creep);
+        const targetCache = getOutCarryTargetCache(creep);
+        if (mode === OUT_CARRY_STRATEGIES.COLLECT) {
+            delete targetCache.targetId;
+        } else {
+            delete sourceCache.targetId;
+            delete sourceCache.targetType;
+            delete sourceCache.waitUntil;
+            delete sourceCache.partialLeaveWait;
+            clearAssignedSourceCache(sourceCache);
+        }
+    }
+    cache.outCarryMode = mode;
+
+    runOutCarryMode(creep, mode);
 };
 
 export default outCarry;

@@ -1,5 +1,4 @@
 import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
-import { createCreepRole } from '@/framework/ai/creepRole';
 import { StateMachine } from '@/framework/ai/stateMachine';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
@@ -189,7 +188,7 @@ const createMineralMaintenanceMachine = (creep: Creep) =>
         ]
     }, createFsmStorage<MineralMaintenanceState>(creep, MINERAL_LAYERS.MAINTENANCE));
 
-const minerRole = createCreepRole({
+const minerRole = {
     run: (creep: Creep) => {
         const ctx: MineralContext = {
             creep,
@@ -211,6 +210,6 @@ const minerRole = createCreepRole({
             creep.clearTarget();
         }
     }
-});
+};
 
 export default minerRole;

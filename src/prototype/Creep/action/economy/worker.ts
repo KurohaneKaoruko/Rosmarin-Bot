@@ -1,11 +1,17 @@
 import { compress, decompress } from '@/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/shared/memory';
-import { createBoostedRole, createCreepRole } from '@/framework/ai/creepRole';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import {
+    WORKER_FAMILY_ROLES,
+    getWorkerConstructionQuota,
+    getWorkerUpgradeSlot,
+    hasWorkerUpgradeDemand,
+} from '@/shared/roomWorkforce';
 import type { CreepCacheTarget } from '@/interface/creep-cache.interface';
 
 type WorkerTaskData = BuildTask | RepairTask;
@@ -143,7 +149,6 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
 
     if (RepairRampart(creep, candidates)) return true;
 
-    // 工地出现时，立即抢占非 build 缓存任务，避免 worker 被 repair 长时间占用。
     if (hasBuildTarget && cache.task && cache.tasktype !== 'build') {
         delete cache.task;
         delete cache.taskid;
@@ -391,6 +396,55 @@ const hasWorkerBuildOrRepairTarget = (cache: WorkerCache): boolean => {
     );
 };
 
+// ==================== 职责切分 ====================
+// 升级是能量的默认出口：建造/刷墙配额之外的 worker 专职升级，
+// 避免「全员建造维修 → 升级饿死 → 采集能量堆积在地上腐烂」。
+// 切分按名字序稳定分配：前 quota 个个体承担建造，其余（存在升级需求时）专职升级。
+
+type WorkerDutySplit = { quota: number; upgradeDemand: boolean };
+
+const WORKER_FAMILY_ROLE_SET = new Set<string>(WORKER_FAMILY_ROLES);
+
+const getWorkerDutySplit = (room: Room): WorkerDutySplit =>
+    getRoomTickCacheValue(room, 'worker_duty_split', () => {
+        // 原型方法缺失（测试桩 / 未初始化房间）时退回旧行为：不切分
+        if (typeof (room as any).GetRoleBodys !== 'function' ||
+            typeof (room as any).checkMissionInPool !== 'function') {
+            return { quota: Number.POSITIVE_INFINITY, upgradeDemand: false };
+        }
+        return {
+            quota: getWorkerConstructionQuota(room),
+            upgradeDemand: hasWorkerUpgradeDemand(room),
+        };
+    });
+
+const isWorkerConstructionSlot = (creep: Creep, split: WorkerDutySplit): boolean => {
+    if (!split.upgradeDemand) return true;
+    if (split.quota <= 0) return false;
+    if (typeof creep.room.find !== 'function') return true;
+
+    const roster = getRoomTickCacheValue(creep.room, 'worker_duty_roster', () =>
+        ((creep.room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => !!(c && c.memory && WORKER_FAMILY_ROLE_SET.has(c.memory.role || '')),
+        }) as Creep[]).slice())
+            .sort((a, b) => a.name.localeCompare(b.name))
+    );
+    const index = roster.findIndex((c) => c.name === creep.name);
+    return index >= 0 && index < split.quota;
+};
+
+const clearWorkerConstructionCache = (cache: WorkerCache) => {
+    delete cache.task;
+    delete cache.taskid;
+    delete cache.tasktype;
+    delete cache.wallPos;
+    delete cache.targetHits;
+    delete cache.buildRampart;
+    delete cache.buildRampartId;
+    delete cache.posInfo;
+    delete cache.repairId;
+};
+
 const resolveWorkerPackedPos = (roomName: string, packed: number | null | undefined): RoomPosition | null => {
     if (typeof packed !== 'number') return null;
     const [x, y] = decompress(packed);
@@ -399,14 +453,41 @@ const resolveWorkerPackedPos = (roomName: string, packed: number | null | undefi
 
 const WorkerAction = function (creep: Creep): MoveWorkTileCandidate[] {
     const candidates: MoveWorkTileCandidate[] = [];
-    // 如果有任务执行，则执行后退出
-    if (BuildRepairWork(creep, candidates)) return candidates;
-    if (RepairWallWork(creep, candidates)) return candidates;
-    
-    // 如果没有任务，则升级控制器
+
+    // 建造配额之外的个体（存在升级需求时）专职升级，不吃建造/维修/刷墙任务
+    const split = getWorkerDutySplit(creep.room);
+    if (isWorkerConstructionSlot(creep, split)) {
+        if (BuildRepairWork(creep, candidates)) return candidates;
+        if (RepairWallWork(creep, candidates)) return candidates;
+    } else {
+        const cache = getCache(creep);
+        if (hasWorkerBuildOrRepairTarget(cache)) clearWorkerConstructionCache(cache);
+    }
+
     if (!creep.room.controller?.my) return candidates;
+
+    // 专属升级工位：
+    // 候选格锁定自己的一格（range 0），堵车解算器会保护该格不被他人挤占；
+    // 站桩升级时关闭前压换位，消除「全员涌向 link + 互相前推」的抢位死锁。
+    const slot = getWorkerUpgradeSlot(creep.room, creep.name);
+    if (slot) {
+        pushWorkerCandidate(candidates, slot, 0);
+        if (creep.pos.getRangeTo(creep.room.controller.pos) > 3) {
+            // 未进入控制器工作圈：先走向专属工位，而不是跟大部队挤向 link
+            creep.moveTo(slot, { visualizePathStyle: { stroke: '#ffffff' }, range: 0, maxRooms: 1 });
+            return candidates;
+        }
+        if (creep.pos.getRangeTo(slot) > 0) {
+            // 已在工作圈内但不在自己的格子上：边升级边归位
+            creep.moveTo(slot, { range: 0, maxRooms: 1, ignoreCreeps: false });
+        }
+        creep.runControllerUpgrade({ sign: true, pickupDropped: false, advanceFront: false });
+        return candidates;
+    }
+
     pushWorkerCandidate(candidates, creep.room.controller.pos);
-    creep.runControllerUpgrade({ sign: false, pickupDropped: false });
+    // worker 已接管常规升级（原 upgrader 职责），顺带维护房间签名
+    creep.runControllerUpgrade({ sign: true, pickupDropped: false });
     return candidates;
 }
 
@@ -429,6 +510,24 @@ const onSource = (creep: Creep, publishMoveWork: (candidates: MoveWorkTileCandid
         publishMoveWork(WorkerAction(creep));
         return WORK_EVENTS.TO_TARGET;
     }
+
+    // 专职升级（身上无建造/维修任务）时优先控制器缓冲取能：
+    // link > container，缓冲不足时回退通用取能，减少升级工往返主仓的运力损耗。
+    if (!hasWorkerBuildOrRepairTarget(getCache(creep))) {
+        const buffer = creep.getControllerLink?.(2) || creep.getControllerContainer?.(3) || null;
+        const bufferEnergy = (buffer as any)?.store?.[RESOURCE_ENERGY] || 0;
+        const free = creep.store.getFreeCapacity(RESOURCE_ENERGY);
+        if (buffer && bufferEnergy >= Math.min(free, 400)) {
+            creep.goWithdraw(buffer, RESOURCE_ENERGY);
+            if (creep.store.getFreeCapacity(RESOURCE_ENERGY) === 0) {
+                if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+                publishMoveWork(WorkerAction(creep));
+                return WORK_EVENTS.TO_TARGET;
+            }
+            return WORK_EVENTS.STAY;
+        }
+    }
+
     const fullAfterTake = creep.acquireEnergy({ pickup: true });
     if (fullAfterTake) {
         if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
@@ -469,7 +568,8 @@ export const syncWorkerMoveWork = (creep: Creep) => {
         creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0 &&
         !hasWorkerBuildOrRepairTarget(cache)
     ) {
-        candidates.push({ pos: creep.room.controller.pos, range: 3 });
+        const slot = getWorkerUpgradeSlot(creep.room, creep.name);
+        candidates.push(slot ? { pos: slot, range: 0 } : { pos: creep.room.controller.pos, range: 3 });
     }
 
     if (candidates.length > 0) {
@@ -479,7 +579,10 @@ export const syncWorkerMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const workerWork = createCreepRole({
+const WorkerFunction = {
+    prepare: (creep) => {
+        return creep.ensureBoosted(creep.memory['boostmap']);
+    },
     run(creep) {
         writeMoveWorkTileCandidates(creep, []);
 
@@ -492,11 +595,6 @@ const workerWork = createCreepRole({
             onTarget: (current) => onTarget(current, publishMoveWork),
         });
     }
-});
+};
 
-const WorkerFunction = createBoostedRole({
-    boost: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    run: workerWork.run
-})
-
-export default WorkerFunction
+export default WorkerFunction;

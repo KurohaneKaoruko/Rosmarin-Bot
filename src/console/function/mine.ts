@@ -1,4 +1,4 @@
-import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/features/externalRoad';
+import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getOutMineData, getRoomData } from '@/shared/memory';
 

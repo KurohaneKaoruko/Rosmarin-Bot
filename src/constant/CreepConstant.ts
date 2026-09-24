@@ -1,4 +1,4 @@
-type RoleDefinition = {
+export type RoleDefinition = {
     bodypart: any[];                    // body 配置
     must?: boolean;                    // 是否无论战争还是和平都得孵化
     level?: number;                    // 孵化优先级，越小越优先
@@ -9,49 +9,49 @@ type RoleDefinition = {
 
 export const RoleData = {
     /* 基本房间运营 */
-    harvester: {
+    'harvester': {
         bodypart: [[WORK, 2], [MOVE, 2]],
         level: 3,
         code: 'H',
         executor: 'harvester',
     }, // 采集
-    carrier: {
+    'carrier': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 3,
         code: 'C',
         executor: 'carrier',
     }, // 通用搬运
-    transporter: {
+    'transporter': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 2,
         code: 'T',
         executor: 'transporter',
     }, // 资源搬运
-    manager: {
+    'manager': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 1,
         code: 'M',
         executor: 'manager',
     }, // 中央搬运
-    upgrader: {
+    'upgrader': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'U',
         executor: 'upgrader',
-    }, // 升级
-    worker: {
+    }, // 专人升级：high 单独配人减 worker 负担，rush 走冲级策略（定编见 shared/roomWorkforce.getUpgraderTarget）
+    'worker': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 8,
         code: 'W',
         executor: 'worker',
     }, // 建造、维修、刷墙
-    miner: {
+    'miner': {
         bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]],
         level: 6,
         code: 'MR',
         executor: 'miner',
     }, // 矿工
-    universal: {
+    'universal': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
         level: 0,
         code: 'UNIV',
@@ -59,25 +59,25 @@ export const RoleData = {
     }, // 采集搬运通用机，处理停摆与新房起步
 
     /* 特殊用途 */
-    scout: {
+    'scout': {
         bodypart: [[MOVE, 1]],
         level: 11,
         code: 'S',
         executor: 'scout',
     },
-    logistic: {
+    'logistic': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
         level: 11,
         code: 'L',
         executor: 'logistic',
     }, // 长途运输
-    cleaner: {
+    'cleaner': {
         bodypart: [[WORK, 25], [MOVE, 25]],
         level: 11,
         code: 'CLE',
         executor: 'cleaner',
     }, // 清理者
-    dismantle: {
+    'dismantle': {
         bodypart: [[WORK, 40], [MOVE, 10]],
         boostmap: { [WORK]: 'XZH2O', [MOVE]: 'XZHO2' },
         level: 11,
@@ -98,7 +98,7 @@ export const RoleData = {
     }, // 加速维修
 
     /* 占领房间 */
-    claimer: {
+    'claimer': {
         bodypart: [[MOVE, 5], [CLAIM, 1]],
         level: 10,
         code: 'CL',
@@ -172,7 +172,7 @@ export const RoleData = {
         boostmap: { [TOUGH]: 'XGHO2', [HEAL]: 'XLHO2', [MOVE]: 'XZHO2' },
         level: 10,
         code: '2H',
-        executor: 'double-heal',
+        executor: 'combat-heal',
     },
 
     /* 四人队 */
@@ -209,11 +209,11 @@ export const RoleData = {
         level: 7,
         code: 'D2H',
         must: true,
-        executor: 'defend-2heal',
+        executor: 'combat-heal',
     },
 
     /* 外矿相关 */
-    reserver: {
+    'reserver': {
         bodypart: [],
         level: 11,
         code: 'RSV',
@@ -259,7 +259,7 @@ export const RoleData = {
         bodypart: [],
         level: 8,
         code: 'O2H',
-        executor: 'out-2heal',
+        executor: 'combat-heal',
     },
     'out-invader': {
         bodypart: [],
@@ -309,7 +309,7 @@ export const RoleData = {
         bodypart: [[HEAL, 25], [MOVE, 25]],
         level: 8,
         code: 'DPH',
-        executor: 'deposit-heal',
+        executor: 'combat-heal',
     },
     'deposit-ranged': {
         bodypart: [[RANGED_ATTACK, 17], [MOVE, 25], [HEAL, 8]],
@@ -399,6 +399,8 @@ export const RoleLevelData = {
         7: { bodypart: [[CARRY, 25], [MOVE, 1]], num: 1 },
         8: { bodypart: [[CARRY, 39], [MOVE, 1]], num: 1 },
     },
+    // 等级制体型表，由 getUpgraderTarget 决定每个模式下孵几只：
+    // low/main 为 0（worker 兼任升级），high/rush 才有独立升级工。
     'upgrader': {
         1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
         2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },

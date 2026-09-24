@@ -1,5 +1,22 @@
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+
 type EnergySourceTarget = AnyStoreStructure | Resource<RESOURCE_ENERGY>;
 type WithdrawTarget = AnyStoreStructure | Resource | Ruin;
+
+// 同 tick 内共享的全房扫描结果：同房 creep 复用一次扫描，避免每 creep 每 tick 重复扫全房。
+// 缓存未过滤列表、每次调用重放过滤，与直接 find({filter}) 行为严格一致。
+const getMyConstructionSites = (room: Room): ConstructionSite[] =>
+    getRoomTickCacheValue(room, 'work:my_construction_sites', () => room.find(FIND_MY_CONSTRUCTION_SITES) as ConstructionSite[]);
+const getAllStructures = (room: Room): Structure[] =>
+    getRoomTickCacheValue(room, 'work:structures', () => room.find(FIND_STRUCTURES) as Structure[]);
+const getDroppedResources = (room: Room): Resource[] =>
+    getRoomTickCacheValue(room, 'work:dropped', () => room.find(FIND_DROPPED_RESOURCES) as Resource[]);
+const getRuins = (room: Room): Ruin[] =>
+    getRoomTickCacheValue(room, 'work:ruins', () => room.find(FIND_RUINS) as Ruin[]);
+const getMyStructures = (room: Room): Structure[] =>
+    getRoomTickCacheValue(room, 'work:my_structures', () => room.find(FIND_MY_STRUCTURES) as Structure[]);
+const getMySpawns = (room: Room): StructureSpawn[] =>
+    getRoomTickCacheValue(room, 'work:my_spawns', () => room.find(FIND_MY_SPAWNS) as StructureSpawn[]);
 
 const TAKE_TARGET_MOVE_OPTS: MoveToOpts = {
     visualizePathStyle: { stroke: '#ffaa00' },
@@ -20,14 +37,14 @@ const getBuildTargetsInRange = (creep: Creep, range?: number): ConstructionSite[
     if (typeof range === 'number' && typeof creep.pos.findInRange === 'function') {
         return creep.pos.findInRange(FIND_MY_CONSTRUCTION_SITES, range) as ConstructionSite[];
     }
-    return creep.room.find(FIND_MY_CONSTRUCTION_SITES);
+    return getMyConstructionSites(creep.room);
 };
 
 const getRepairTargetsInRange = (creep: Creep, range?: number): Structure[] => {
     if (typeof range === 'number' && typeof creep.pos.findInRange === 'function') {
         return creep.pos.findInRange(FIND_STRUCTURES, range) as Structure[];
     }
-    return creep.room.find(FIND_STRUCTURES);
+    return getAllStructures(creep.room);
 };
 
 const getStoreValue = (target: AnyStoreStructure, resourceType: ResourceConstant) =>
@@ -101,11 +118,11 @@ export default class WorkFunction extends Creep {
         }
 
         if (includeDropped) {
-            const dropped = this.room.find(FIND_DROPPED_RESOURCES, {
-                filter: (resource) =>
+            const dropped = getDroppedResources(this.room).filter(
+                (resource) =>
                     resource.resourceType === RESOURCE_ENERGY &&
                     resource.amount >= minAmount
-            }) as Resource<RESOURCE_ENERGY>[];
+            ) as Resource<RESOURCE_ENERGY>[];
             candidates.push(...dropped);
         }
 
@@ -134,18 +151,17 @@ export default class WorkFunction extends Creep {
         const candidates: AnyStoreStructure[] = [];
 
         if (resourceType === RESOURCE_ENERGY) {
-            const spawns = this.room.find(FIND_MY_SPAWNS, {
-                filter: (spawn) => spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-            });
+            const spawns = getMySpawns(this.room).filter(
+                (spawn) => spawn.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            );
             candidates.push(...spawns);
 
-            const structuresNeedingEnergy = this.room.find(FIND_MY_STRUCTURES, {
-                filter: (structure) => (
+            const structuresNeedingEnergy = getMyStructures(this.room).filter(
+                (structure) =>
                     (structure.structureType === STRUCTURE_EXTENSION ||
                     structure.structureType === STRUCTURE_TOWER) &&
-                    structure.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-                )
-            }) as AnyStoreStructure[];
+                    (structure as AnyStoreStructure).store.getFreeCapacity(RESOURCE_ENERGY) > 0
+            ) as AnyStoreStructure[];
             candidates.push(...structuresNeedingEnergy);
         }
 
@@ -241,9 +257,9 @@ export default class WorkFunction extends Creep {
     findWithdrawTarget(
         resourceType: ResourceConstant = RESOURCE_ENERGY
     ): WithdrawTarget | null {
-        const droppedLarge = this.room.find(FIND_DROPPED_RESOURCES, {
-            filter: (resource) => resource.resourceType === resourceType && resource.amount >= 1000
-        }) as Resource[];
+        const droppedLarge = getDroppedResources(this.room).filter(
+            (resource) => resource.resourceType === resourceType && resource.amount >= 1000
+        );
         const closestLargeDrop = getClosestByRange(this, droppedLarge);
         if (closestLargeDrop) return closestLargeDrop;
 
@@ -273,14 +289,14 @@ export default class WorkFunction extends Creep {
             }
         }
 
-        const dropped = this.room.find(FIND_DROPPED_RESOURCES, {
-            filter: (resource) => resource.resourceType === resourceType && resource.amount >= 100
-        }) as Resource[];
+        const dropped = getDroppedResources(this.room).filter(
+            (resource) => resource.resourceType === resourceType && resource.amount >= 100
+        );
         candidates.push(...dropped);
 
-        const ruins = this.room.find(FIND_RUINS, {
-            filter: (ruin) => ruin.store.getUsedCapacity(resourceType) > 0
-        }) as Ruin[];
+        const ruins = getRuins(this.room).filter(
+            (ruin) => ruin.store.getUsedCapacity(resourceType) > 0
+        );
         candidates.push(...ruins);
 
         return getClosestByRange(this, candidates);

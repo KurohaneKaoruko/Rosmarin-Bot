@@ -1,200 +1,38 @@
-import { compress, decompress} from '@/shared/compress';
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 
-// 测试环境有时不会预置 Screeps 全局常量，这里保留一个最小兜底，
-// 避免模块在 import 阶段因为 `MOVE` 缺失直接抛错。
-const WORK_PART: BodyPartConstant = typeof WORK === 'undefined' ? 'work' : WORK;
-const MOVE_PART: BodyPartConstant = typeof MOVE === 'undefined' ? 'move' : MOVE;
+// 冲级催化：WORK 用升级催化（XGH2O 系），MOVE 用加速（XZHO2 系）。
+// goBoost 非强制模式，资源不足时自动放弃并不阻塞工作。
+// 注意：测试环境可能只注入部分全局常量，因此惰性求值避免模块加载期 ReferenceError。
+const getUpUpgradeBoostmap = () => ({
+    [typeof WORK === 'undefined' ? 'work' : WORK]: ['XGH2O', 'GH2O', 'GH'],
+    [typeof MOVE === 'undefined' ? 'move' : MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+} as { [part: string]: any });
 
+// 退役时允许花在卸载 boost 上的最长时间，超时强制自杀回收人口
+const RETIRE_UNBOOST_TIMEOUT = 100;
 
-const upgrade = function (creep: Creep) {
-    if (creep.room.level == 8) {
-        creep.suicide();
-        return false;
-    }
+const isBodyBoosted = (creep: Creep) => creep.body.some((part) => !!part.boost);
 
-    if (!creep.pos.inRangeTo(creep.room.controller, 3)) {
-        creep.moveTo(creep.room.controller.pos, {
-            visualizePathStyle: { stroke: '#ffffff' },
-            range: 3,
-            maxRooms: 1,
-        });
-    }
-    if (creep.pos.inRangeTo(creep.room.controller, 3)) {
-        creep.upgradeController(creep.room.controller)
-        creep.maintainRoomSign();
-    }
-    const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2))
-    if(creep.store[RESOURCE_ENERGY] < 50) {
-        const target = [link, creep.room.storage, creep.room.terminal]
-            .find(l => l && l.store[RESOURCE_ENERGY] > 50 && creep.pos.inRangeTo(l, 1));
-        if(target) creep.withdraw(target, RESOURCE_ENERGY);
-    }
-
-    if (Game.time % 30 == 0 &&
-        !creep.pos.inRangeTo(creep.room.controller, 1) &&
-        creep.pos.inRangeTo(creep.room.controller, 3)){
-        nearController(creep);
-    }
-    return;
-}
-
-const nearController = function(creep: Creep) {
-    const controller = creep.room.controller;
-    const terminal = creep.room.terminal;
-    const storage = creep.room.storage;
-    const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2))
-    if (!terminal && !storage) return;
-    const terrain = new Room.Terrain(creep.room.name);
-    const posT = terminal?.pos;
-    const posS = storage?.pos;
-    const posL = link?.pos;
-    const posC = creep.pos;
-    
-    if (!global.spup_noCreep_area) global.spup_noCreep_area = {};
-    if (!global.spup_noCreep_area[creep.room.name] ||
-        global.spup_noCreep_area[creep.room.name].time != Game.time
-    ) {
-        let posTs = [], posSs = [], posLs = [];
-        if (posT) posTs = [
-            [posT.x - 1, posT.y],[posT.x + 1, posT.y],[posT.x, posT.y - 1],[posT.x, posT.y + 1],
-            [posT.x - 1, posT.y - 1],[posT.x - 1, posT.y + 1],[posT.x + 1, posT.y - 1],[posT.x + 1, posT.y + 1],
-        ]
-        if (posS) posSs = [
-            [posS.x - 1, posS.y],[posS.x + 1, posS.y],[posS.x, posS.y - 1],[posS.x, posS.y + 1],
-            [posS.x - 1, posS.y - 1],[posS.x - 1, posS.y + 1],[posS.x + 1, posS.y - 1],[posS.x + 1, posS.y + 1],
-        ]
-        if (posL) posLs = [
-            [posL.x - 1, posL.y],[posL.x + 1, posL.y],[posL.x, posL.y - 1],[posL.x, posL.y + 1],
-            [posL.x - 1, posL.y - 1],[posL.x - 1, posL.y + 1],[posL.x + 1, posL.y - 1],[posL.x + 1, posL.y + 1],
-        ];
-        let arr = [...posTs, ...posSs];
-        if (arr.length == 0) arr = [...posLs];
-        const noCreep = arr.filter((p) => {
-            return terrain.get(p[0], p[1]) !== TERRAIN_MASK_WALL &&
-            (new RoomPosition(p[0], p[1], creep.room.name)).lookFor(LOOK_CREEPS).length === 0;
-        }).map((p) => compress(p[0], p[1]));
-        global.spup_noCreep_area[creep.room.name] = {
-            time: Game.time,
-            noCreep: noCreep,
-        }
-    }
-
-    const noCreep = global.spup_noCreep_area[creep.room.name].noCreep;
-
-    for (const p of noCreep) {
-        const [x,y] = decompress(p);
-        const pos = new RoomPosition(x, y, creep.room.name);
-        if (creep.pos.isNearTo(pos) &&
-            getDistance(pos, controller.pos) < getDistance(posC, controller.pos)) {
-            creep.moveTo(pos);
-            return;
-        }
-    }
-}
-
-const getDistance = function(pos1: RoomPosition, pos2: RoomPosition) {
-    return Math.abs(pos1.x - pos2.x) + Math.abs(pos1.y - pos2.y);
-}
-
-
-function withdrawEnergy(creep) {
-    // 寻找获取能量的目标
-    const link = creep.room.link.find(l => l.pos.inRangeTo(creep.room.controller, 2)) || null;
-    const container = creep.room.container.find(c => c.pos.inRangeTo(creep.room.controller, 2)) ?? null;
-    const terminal = [creep.room.terminal].find(t => t && t.pos.inRangeTo(creep.room.controller, 3)) ?? null;
-    const storage = [creep.room.storage].find(s => s && s.pos.inRangeTo(creep.room.controller, 4)) ?? null;
-    const terrain = creep.room.getTerrain();
-
-    if ((storage && creep.pos.inRangeTo(storage, 2)) ||
-        (terminal && creep.pos.inRangeTo(terminal, 2))) {
-        // 周围的非冲级爬均允许对穿, 避免堵路
-        creep.room.lookForAtArea(LOOK_CREEPS,
-            Math.max(0, creep.pos.y - 1), Math.max(0, creep.pos.x - 1),
-            Math.min(49,creep.pos.y + 1), Math.min(49,creep.pos.x + 1), true)
-            .filter(c => c.creep.memory?.role !== 'up-upgrade')
-            .forEach(c => {
-                c.creep.memory.dontPullMe = false
-            });
-    }
-
-    let area = [[-1,-1], [-1,0], [-1,1], [0,-1], [0,1], [1,-1], [1,0], [1,1]];
-
-    if (link && link.store[RESOURCE_ENERGY] > 0 && creep.pos.isNearTo(container)) {
-        creep.withdraw(link, RESOURCE_ENERGY)
-    }
-    else if (container && container.store[RESOURCE_ENERGY] > 0 && creep.pos.isNearTo(container)) {
-        creep.withdraw(container, RESOURCE_ENERGY)
-    }
-    else if (terminal && terminal.store[RESOURCE_ENERGY] > 0 && creep.pos.isNearTo(terminal)) {
-        creep.withdraw(terminal, RESOURCE_ENERGY)
-    }
-    else if (storage && storage.store[RESOURCE_ENERGY] > 0 && creep.pos.isNearTo(storage)) {
-        creep.withdraw(storage, RESOURCE_ENERGY)
-    }
-    else if (terminal && terminal.store[RESOURCE_ENERGY] > 0 && area.some(p => {
-            const pos = [terminal.pos.x + p[0], terminal.pos.y + p[1]];
-            return terrain.get(pos[0], pos[1]) !== TERRAIN_MASK_WALL &&
-                !creep.room.lookForAt(LOOK_CREEPS, pos[0], pos[1]).length &&
-                !creep.room.lookForAt(LOOK_STRUCTURES, pos[0], pos[1]).some(s => 
-                    s.structureType !== STRUCTURE_ROAD &&
-                    s.structureType !== STRUCTURE_CONTAINER &&
-                    s.structureType !== STRUCTURE_RAMPART
-                )
-        })
-    ) { creep.goWithdraw(terminal, RESOURCE_ENERGY) }
-    else if (storage && storage.store[RESOURCE_ENERGY] > 0 && area.some(p => {
-            const pos = [storage.pos.x + p[0], storage.pos.y + p[1]];
-            return terrain.get(pos[0], pos[1]) !== TERRAIN_MASK_WALL &&
-                !creep.room.lookForAt(LOOK_CREEPS, pos[0], pos[1]).length &&
-                !creep.room.lookForAt(LOOK_STRUCTURES, pos[0], pos[1]).some(s => 
-                    s.structureType !== STRUCTURE_ROAD &&
-                    s.structureType !== STRUCTURE_CONTAINER &&
-                    s.structureType !== STRUCTURE_RAMPART
-                )
-        })
-    ) { creep.goWithdraw(storage, RESOURCE_ENERGY) }
-    else creep.TakeEnergy();
-}
-
-
-
-const onTarget = (creep: Creep): WorkEvent => {
-    if(creep.ticksToLive < 10) {
-        if(creep.unBoost()) creep.suicide();
-        return WORK_EVENTS.STAY;
-    }
-    if (creep.store.getUsedCapacity() === 0) {
-        return WORK_EVENTS.TO_SOURCE;
-    }
-    if(creep.ticksToLive < 100) {
-        creep.memory.dontPullMe = false;
-    } else if (!creep.memory.dontPullMe) {
-        creep.memory.dontPullMe = true;
-    }
-    upgrade(creep);
-    syncUpUpgradeMoveWork(creep);
-    return WORK_EVENTS.STAY;
+// 冲级爬只在两种情况下退役：房间升满 8 级，或寿命将尽。
+// 退役优先尝试卸载 boost 回收矿物，超时后直接自杀。
+const shouldRetire = (creep: Creep): boolean => {
+    if (creep.room.controller?.my && creep.room.level >= 8) return true;
+    return (creep.ticksToLive ?? 1500) < 50;
 };
 
-const onSource = (creep: Creep): WorkEvent => {
-    if(!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
-    if(!creep.memory.boosted) {
-        const result = creep.goBoost({ [WORK_PART]: ['XGH2O', 'GH2O', 'GH'] });
-        creep.memory.boosted = result === OK;
-        if(result !== OK) return WORK_EVENTS.STAY;
+const retire = (creep: Creep): void => {
+    const memory = creep.memory as any;
+    if (memory.retireStartTick == null) memory.retireStartTick = Game.time;
+    const timedOut = Game.time - memory.retireStartTick > RETIRE_UNBOOST_TIMEOUT;
+
+    if (!timedOut && isBodyBoosted(creep)) {
+        // unBoost 自带移动逻辑：走向紧邻 lab 的容器并触发卸载
+        creep.unBoost();
+        return;
     }
-    if(creep.ticksToLive < 10) {
-        if(creep.unBoost()) creep.suicide();
-        return WORK_EVENTS.STAY;
-    }
-    if (creep.store.getFreeCapacity() === 0) {
-        return WORK_EVENTS.TO_TARGET;
-    }
-    withdrawEnergy(creep);
-    return WORK_EVENTS.STAY;
+    creep.suicide();
 };
 
 export const syncUpUpgradeMoveWork = (creep: Creep) => {
@@ -209,14 +47,60 @@ export const syncUpUpgradeMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-const upUpgradeWork = createWorkLayerRole({
-    onSource,
-    onTarget
-});
+const onTarget = (creep: Creep): WorkEvent => {
+    if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
+    if (shouldRetire(creep)) {
+        retire(creep);
+        return WORK_EVENTS.STAY;
+    }
+    if (creep.store.getUsedCapacity() === 0) {
+        return WORK_EVENTS.TO_SOURCE;
+    }
 
-const UpUpgradeFunction = createBoostedRole({
-    boost: { [WORK_PART]: ['XGH2O'], [MOVE_PART]: ['XZHO2'] },
-    run: upUpgradeWork.run
-})
+    // 站桩升级期间禁止被拉扯；寿命末期解除锁定，允许回收物流接管
+    creep.memory.dontPullMe = (creep.ticksToLive ?? 1500) >= 100;
+
+    // 统一走 runControllerUpgrade：寻路、控制器工位前压、捡能量、升级、签名
+    creep.runControllerUpgrade({ sign: true, pickupDropped: true });
+    syncUpUpgradeMoveWork(creep);
+    return WORK_EVENTS.STAY;
+};
+
+const onSource = (creep: Creep): WorkEvent => {
+    if (!creep.moveToTargetRoom()) return WORK_EVENTS.STAY;
+
+    // boost 前置：未完成前不取能不升级（配置见 ROLE_BOOST_CONFIGS['up-upgrade']）
+    if (!creep.ensureBoosted({ [WORK]: ['XGH2O', 'GH2O', 'GH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] })) {
+        return WORK_EVENTS.STAY;
+    }
+
+    if (creep.store.getFreeCapacity() === 0) {
+        return WORK_EVENTS.TO_TARGET;
+    }
+    if (shouldRetire(creep)) {
+        retire(creep);
+        return WORK_EVENTS.STAY;
+    }
+
+    // 控制器周边缓冲取能：link > container > terminal > storage，无缓冲时回退通用取能
+    const filled = creep.withdrawControllerEnergy({
+        linkRange: 2,
+        containerRange: 2,
+        terminalRange: 3,
+        storageRange: 4,
+        fallbackToTakeEnergy: true,
+    });
+    if (filled && creep.store.getFreeCapacity() === 0) {
+        return WORK_EVENTS.TO_TARGET;
+    }
+    return WORK_EVENTS.STAY;
+};
+
+const UpUpgradeFunction = {
+    run: (creep: Creep) => {
+        writeMoveWorkTileCandidates(creep, []);
+        runWorkLayer(creep, { onSource, onTarget });
+    },
+};
 
 export default UpUpgradeFunction;
