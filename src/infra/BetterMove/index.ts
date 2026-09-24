@@ -2401,6 +2401,30 @@ function isSwapIntent(a, b) {
     return IntentTiles[ia] === IntentTiles[ib + 1] && IntentTiles[ib] === IntentTiles[ia + 1];
 }
 
+/**
+ * 取 creep 本 tick 移动意图的「步进向量」：{dx, dy} = 意图目标格 − 当前格（世界坐标差）。
+ *
+ * BetterMove 是唯一知道每只 creep 本 tick 打算踏进哪一格的地方，
+ * 涉及「将要怎么走」的判定（如外矿搬运接力的平行擦肩）都从这里取，不要自己再推算几何。
+ *
+ * 两侧取的是同一坐标系（formalize 之后的世界坐标），同一房间内的两只 creep
+ * 步进向量可以直接比较。无意图（或索引 0 的「已消费」标记）返回 null。
+ *
+ * @param {{name: string}} creep
+ * @returns {{dx: number, dy: number} | null}
+ */
+function getMoveIntentStep(creep) {
+    if (!creep || !creep.name) return null;
+    const idx = cachedMoveIntents.get(creep.name);
+    if (!idx) return null;
+    const targetTile = IntentTiles[idx];
+    const curTile = IntentTiles[idx + 1];
+    return {
+        dx: (targetTile & 0x3fff) - (curTile & 0x3fff),
+        dy: (targetTile >> 14) - (curTile >> 14),
+    };
+}
+
 function betterCancelOrder(methodName) {
     // 只拦截取消移动需求
     if (methodName == 'move' || methodName == 'moveTo') {
@@ -3067,6 +3091,7 @@ global.BetterMove = {
     cancelMoveIntent,
     hasMoveIntent,
     isSwapIntent,
+    getMoveIntentStep,
     getDirection,
     direction2Pos,
     getSquadCostMatrix: function (roomName, ignoreDestructibleStructures) {

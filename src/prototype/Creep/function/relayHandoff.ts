@@ -2,10 +2,13 @@
  * 外矿搬运接力（记忆交换式）。判定与执行整体照搬参考实现 ../参考实现 的 `getRelayTarget`
  * （`manageLogistics.js:287`），**不自己发明几何条件**。核心只有三条：
  *
- * 1. **正面对穿**：我和相邻的同路线搬运工，互为对方本 tick 的移动意图目标格
- *    （BetterMove 的 `isSwapIntent`）。这是「谁挡着谁」的直接判据——引擎不允许两只 creep
- *    同 tick 交换位置，所以这种队形到 tick 末两边都走不动，接力就是把这个死结解开。
- *    并排同行、同向超越、反向相遇都天然不成立，**不需要另外写几何去排除**。
+ * 1. **反向相遇**：我和相邻的同路线搬运工本 tick 都登记了移动意图、且步进方向相反。两种队形：
+ *    - **正面对穿**：互为对方本 tick 的移动意图目标格（BetterMove 的 `isSwapIntent`）——
+ *      引擎不允许两只 creep 同 tick 交换位置，这种队形到 tick 末两边都走不动，
+ *      接力顺便把这个死结解开；
+ *    - **平行擦肩**（`isPassingBy`）：相邻车道上反向错身，谁也不挡谁，但货物照样能净前进一整步。
+ *    两个判据全部取自引擎本 tick 将要执行的动作（移动意图），不需要另外写几何去排除同向/垂直：
+ *    步进相同的跟随、垂直穿越、原地等待都天然不成立。
  * 2. **航向相反**：往母房走（deliver）的一方是供给方，往矿里走（collect）的一方是接收方。
  *    航向取自 out-carry 自己解析出来的模式，两者相同就不接。
  * 3. 货能一次装进接收方（整仓交空或一次填满，见下面「只接受两种结局」）。
@@ -32,8 +35,8 @@
  * 「还在外出」，把刚接到的能量原路背回外矿。所以整仓交空时要求接收方到手后必须够半仓。
  * 两种交接量同理：整仓交空（供给方空仓 → 确定外出）、或一次填满接收方（满载 → 确定返程）。
  *
- * 其余部分不做额外刹车：接头判据本身就只在「真被挡住」时成立，交接完双方背向离开，
- * 不可能原地反复。
+ * 其余部分不做额外刹车：反向相遇的两个判据都只在「双方本 tick 都要动、且方向相反」时成立，
+ * 交接完双方背向离开，不可能原地反复；同对冷却只是额外的 CPU 保险。
  *
  * 配合 out-carry 的「接力后续跑」（relayedSelfTick 标记）：发起方在接力当 tick
  * 用交换后的新身份再决策一轮，转移与移动同 tick 完成，货物单 tick 前进两格。
@@ -113,6 +116,22 @@ const getHeading = (creep: Creep): 'collect' | 'deliver' | undefined => {
     const cache = getCreepMem(creep)?.cache as Record<string, any> | undefined;
     const mode = cache?.outCarryMode;
     return mode === 'collect' || mode === 'deliver' ? mode : undefined;
+};
+
+/**
+ * 取 creep 本 tick 的移动步进向量（意图目标格 − 当前格）。
+ *
+ * @remarks
+ * BetterMove 是唯一知道每只 creep 本 tick 打算踏进哪一格的地方，从它这里取，
+ * 不自己推算几何。BetterMove 未加载（或为旧版本）时返回 `null`——宁可不错。
+ */
+const getMoveIntentStep = (creep: Creep): { dx: number; dy: number } | null => {
+    const betterMove = (global as any).BetterMove;
+    const step = !!betterMove && typeof betterMove.getMoveIntentStep === 'function'
+        ? betterMove.getMoveIntentStep(creep)
+        : null;
+    if (!step) return null;
+    return typeof step.dx === 'number' && typeof step.dy === 'number' ? step : null;
 };
 
 const markRelayed = (creep: Creep): void => {
@@ -195,27 +214,62 @@ type RelayPlan = {
 };
 
 /**
- * 为「正面对穿」的一对同路线搬运工定分工与交接量。
+ * 平行擦肩：相邻（候选筛选已保证）、双方本 tick 都要移动、步进方向相反，
+ * 且接收方站在供给方「朝母房那一步」的正前方。
  *
  * @remarks
+ * 对穿卡死只是反向相遇的一种；两条相邻车道上反向错身（谁也不挡谁、擦着过去）的那一对
+ * 同样该换手——货物照样沿路线净前进一整步。判据全部用**引擎本 tick 将要执行的动作**：
+ *
+ * - 双方步进方向相反（点积 < 0）：同向跟随（> 0）、垂直穿越（= 0）、原地等待（= 0）都不算；
+ * - 接收方相对供给方的位移，在供给方「这一步」方向上的投影 ≥ 1：货物落到接收方身上才会
+ *   沿路线**净前进一整步**。并排同列（= 0，原地倒手白掉头）、已经错开在往回走
+ *   （< 0，货物倒退）都直接不接——这两种正是「乱传」的来源。
+ *
+ * 供给方的步进取它自己登记的意图：deliver 状态下它的路径本来就是朝母房走的，
+ * 这是「朝哪边算前进」最可靠的引擎级答案，不需要再按房间名推算路线轴。
+ */
+const isPassingBy = (supplier: Creep, fetcher: Creep): boolean => {
+    const stepS = getMoveIntentStep(supplier);
+    const stepF = getMoveIntentStep(fetcher);
+    if (!stepS || !stepF) return false;
+
+    // 步进方向必须相反
+    if (stepS.dx * stepF.dx + stepS.dy * stepF.dy >= 0) return false;
+
+    // 接收方在供给方这一步的前方，货物才会净前进
+    const dx = fetcher.pos.x - supplier.pos.x;
+    const dy = fetcher.pos.y - supplier.pos.y;
+    return dx * stepS.dx + dy * stepS.dy >= 1;
+};
+
+/**
+ * 为「反向相遇」的一对同路线搬运工定分工与交接量。
+ *
+ * @remarks
+ * 反向相遇有两种队形，任一成立即可换手：
+ * - **正面对穿**（`isSwapIntent`）：互为对方本 tick 的移动意图目标格——引擎不允许交换位置，
+ *   两边都被顶死，接力顺便把这个死结解开；
+ * - **平行擦肩**（`isPassingBy`）：相邻车道上反向错身，谁也不挡谁，但货物照样可以净前进一整步。
+ *
  * 分工只看**航向**：往母房走（deliver）的一方是供给方，往矿里走（collect）的一方是接收方。
  * 不看几何、也不看谁身上有货——
  * 几何（按两房间连线算谁在外矿侧）在路线不是直线时会判反，把货交给正在往矿里走的那一方，
  * 那才是真正的「错误传递」；按载荷定角色则会在两人都带货时判反。
- * 航向相同直接不接（同向没有交接的意义，并排同行的情形也一并被排除）。
+ * 航向相同直接不接（同向没有交接的意义，同向跟随的情形也一并被排除）。
  *
  * @returns 可执行的交接计划；`null` 表示这一对不该接、或条件不成立。
  */
 const planRelay = (creep: Creep, partner: Creep): RelayPlan | null => {
-    // ① 正面对穿：互为对方本 tick 的移动意图目标格（引擎不允许交换位置，两边都走不动）
-    if (!isSwapIntent(creep, partner)) return null;
-
-    // ② 航向相反：谁在返程谁是供给方
+    // ① 航向相反：谁在返程谁是供给方
     const creepHeading = getHeading(creep);
     const partnerHeading = getHeading(partner);
     if (!creepHeading || !partnerHeading || creepHeading === partnerHeading) return null;
     const supplier = creepHeading === 'deliver' ? creep : partner;
     const fetcher = supplier === creep ? partner : creep;
+
+    // ② 反向相遇才换手：正面对穿，或平行擦肩
+    if (!isSwapIntent(creep, partner) && !isPassingBy(supplier, fetcher)) return null;
 
     if (!hasCargo(supplier)) return null;
     if (fetcher.store.getFreeCapacity() <= 0) return null;
@@ -297,12 +351,12 @@ const executeRelay = (creep: Creep, plan: RelayPlan, mem: Record<string, any>): 
 };
 
 /**
- * 尝试与「正面对穿」的同路线搬运 creep 完成一次接力：
+ * 尝试与「反向相遇」（对穿或平行擦肩）的同路线搬运 creep 完成一次接力：
  * 供给方把本趟货交给接收方，整仓交空时交换双方 memory，
  * 双方各自接管对方剩余的路程。
  *
  * @remarks
- * 判据（对穿 + 航向相反）要求双方本 tick 都已登记移动意图，
+ * 判据要求双方本 tick 都已登记移动意图，
  * 所以发起方一定是这一对里**后跑**的那一个，伙伴一定已经跑过。
  *
  * @returns `true` 表示接力已完成（双方的旧方向移动意图都已被接力取代）。
@@ -337,7 +391,7 @@ export const tryOutCarryRelayHandoff = (creep: Creep): boolean => {
     }) as Creep[];
     if (partners.length === 0) return false;
 
-    // 逐个候选试配：第一个候选未必是真正的接头对象（可能不是对穿、或航向相同、或已经装满），
+    // 逐个候选试配：第一个候选未必是真正的接头对象（可能不是反向相遇、或航向相同、或已经装满），
     // 抓住第一个就定案会把后面那个合法候选一起丢掉。
     for (const partner of partners) {
         if (isPairCoolingDown(creep.name, partner.name)) continue;
