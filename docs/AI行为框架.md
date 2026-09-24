@@ -16,8 +16,8 @@
 - 多层：统一写入 `creep.memory.fsm.<layerId>`。
 
 辅助工具：
-- `src/framework/ai/adapters.ts` 提供 `createFsmStorage` / `createActionStorage` / `createWorkingStorage`。
-- `src/framework/ai/workMachine.ts` 提供统一的 source/target 迁移模板。
+- `src/framework/ai/adapters.ts` 提供 `createFsmStorage` / `createLayeredRunner`。
+- `src/framework/ai/workMachine.ts` 声明 `WORK_EVENTS`，`adapters.ts` 的 `runWorkLayer` 是统一的 source/target 迁移入口（worker / out-carry 等经济角色均基于它实现）。
 
 ## 行为树（Behavior Tree）
 
@@ -43,15 +43,3 @@
 
 适用场景：
 - 线性流程、可配置/可替换逻辑（例如任务搬运、签名/占领等）
-
-## 函数式管道（Pipeline + Effect）
-
-框架位于 `src/framework/ai/pipeline.ts`。
-
-约定：
-- 纯函数负责“意图/计划”生成
-- 副作用集中在 `Effect.perform` 中执行
-- `Effect.run` 产出 `trace`，作为可观测容器的行为记录
-
-适用场景：
-- 以“决策 -> 执行”链路为主的流程（例如跨房搬运、搜集路径）
