@@ -5,7 +5,7 @@
  */
 
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
-import { RoomArray } from '@/features/Planner/utils/roomArray';
+import { RoomArray } from '@/modules/features/Planner/utils/roomArray';
 import { compress, decompress } from '@/shared/compress';
 import { getLayoutData, getOutMineData } from '@/shared/memory';
 

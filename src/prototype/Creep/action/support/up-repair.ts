@@ -2,8 +2,8 @@ import { compress } from '@/shared/compress';
 import { getLayoutData } from '@/shared/memory';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { createBoostedRole, createWorkLayerRole } from '@/framework/ai/creepRole';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/framework/ai/adapters';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const getUpRepairTargetCache = (creep: Creep): Record<string, any> => {
@@ -41,7 +41,6 @@ const RepairWork = function (creep: Creep) {
         }
         rampartMem = [...new Set(rampartMem.concat(structRampart))];
 
-        // 全部
         const allRamWalls = getRoomTickCacheValue(creep.room, 'up_repair_all_ram_walls', () =>
             creep.room.getStructures().filter((structure) => {
                 if (structure.structureType !== STRUCTURE_RAMPART &&
@@ -54,7 +53,6 @@ const RepairWork = function (creep: Creep) {
             }) as (StructureRampart | StructureWall)[]
         );
         
-        // 附近
         let inRangeRamWalls = []
         const linkId = creep.memory.linkId;
         const link = linkId ? Game.getObjectById(linkId) : null;
@@ -192,14 +190,13 @@ const onSource = (creep: Creep): WorkEvent => {
     return WORK_EVENTS.STAY;
 };
 
-const upRepairWork = createWorkLayerRole({
-    onSource,
-    onTarget
-});
-
-const UpRepairFunction = createBoostedRole({
-    boost: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    run: upRepairWork.run
-})
+const UpRepairFunction = {
+    prepare: (creep) => {
+        return creep.ensureBoosted(creep.memory['boostmap']);
+    },
+    run: (creep) => {
+        runWorkLayer(creep, { onSource, onTarget });
+    }
+};
 
 export default UpRepairFunction;

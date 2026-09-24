@@ -1,10 +1,14 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { isRoomTickAligned } from '@/shared/roomPhase';
+import { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
+import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
-import { RoadBuilder, RoadMemory, RoadVisual } from '@/features/externalRoad';
+import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 import { getOutMineData, getRoomData } from '@/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
 // 目标房间列表的类型：普通外矿（能量）与中心房（SK/中心区）外矿。
 type OutMineTargetListKey = 'energy' | 'centerRoom';
@@ -123,7 +127,7 @@ class ExternalMineState {
     }
 
     private static isHighLikeMode(mode: string): boolean {
-        return mode === 'high' || mode === 'rush';
+        return isHighLikeMode(mode);
     }
 
     private static getEnergyState(room: Room): ExternalMineEnergyState {
@@ -328,7 +332,7 @@ class ExternalMineState {
         };
     }
 
-    private static estimateTargetSelectionStat(sourceRoom: Room, targetRoomName: string): ExternalMineTargetSelectionStat {
+    static estimateTargetSelectionStat(sourceRoom: Room, targetRoomName: string): ExternalMineTargetSelectionStat {
         const targetRoom = Game.rooms[targetRoomName];
         const kind = this.getTargetKind(targetRoomName);
         const fallbackSourceCount = kind === 'centerRoom' ? 3 : 2;
@@ -517,20 +521,26 @@ class ExternalMineState {
             energyTargetLimit = Math.min(energyTargetLimit, this.CRITICAL_STATE_ENERGY_TARGET_LIMIT);
         }
 
+        // rush：外矿就是主要收入源——预算不打折、能量目标上限放开、不碰危险中心房
+        let allowCenterRoom = energyState !== 'LOW' && energyState !== 'CRITICAL';
+        if (mode === 'rush') {
+            remoteBudget = Math.max(remoteBudget, spawnUsageCapacity);
+            energyTargetLimit = Number.POSITIVE_INFINITY;
+            allowCenterRoom = false;
+        }
+
         return {
             mode,
             energyState,
             remoteBudget,
             energyTargetLimit,
-            allowCenterRoom: energyState !== 'LOW' && energyState !== 'CRITICAL',
+            allowCenterRoom,
         };
     }
 
-    // 兼容多处存储路径读取房间模式（更高优先级的配置优先）。
+    // 兼容多处存储路径读取房间模式（统一走 roomMode 单一来源）。
     static getRoomMode(room: Room): string {
-        const roomData = getRoomData(room.name);
-        const legacyRoomMemory = room.memory as LegacyRoomModeMemory;
-        return roomData?.mode || legacyRoomMemory.mode || 'main';
+        return getRoomMode(room);
     }
 
     // 根据 QoS 与间隔判断本 tick 是否运行，返回运行状态快照。
@@ -545,6 +555,30 @@ class ExternalMineState {
         if (Game.time % interval !== 0) return null;
 
         return { qosLevel, canRunSecondaryAction };
+    }
+
+    // rush 自动扩图：把一圈相邻房间自动加入能量外矿列表
+    static autoAddNearbyEnergyTargets(sourceRoomName: string, known: string[]): string[] {
+        const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
+        if (!match) return known;
+        const px = match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1;
+        const py = match[3] === 'S' ? Number(match[4]) : -Number(match[4]) - 1;
+
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = px + dx;
+                const y = py + dy;
+                const roomName = `${x >= 0 ? 'E' : 'W'}${Math.abs(x)}${y >= 0 ? 'S' : 'N'}${Math.abs(y)}`;
+                const Mem = getOutMineData(sourceRoomName);
+                Mem.energy ??= [];
+                if (Mem.energy.indexOf(roomName) === -1) {
+                    Mem.energy.push(roomName);
+                    known.push(roomName);
+                }
+            }
+        }
+        return known;
     }
 
     // 同一个源房的 energy / centerRoom 旧桶数据可能串味；
@@ -1376,7 +1410,25 @@ class ExternalMineSpawner {
         return count;
     }
 
-    // 判断 creep 记录的 sourceRoom 是否与期望源房一致。
+    // spawnInAdvance：TTL 不足以再跑一趟（路程 + 缓冲）的
+    // 采集者不计入覆盖数——接替者在其死亡前就提前孵化，新爬到场时老爬刚好耗尽，外矿不断档。
+    private static getEffectiveOutHarvesterNum(sourceRoom: Room, targetRoomName: string): number {
+        const travelTicks = getRoomTickCacheValue(sourceRoom, `out_harvest_travel_${targetRoomName}`, () =>
+            ExternalMineState.estimateTargetSelectionStat(sourceRoom, targetRoomName).distance
+        );
+        const minUsefulTtl = travelTicks + 15; // 路程 + 缓冲：跑不完一趟的爬不再计入覆盖
+        let count = 0;
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep || creep.memory?.role !== 'out-harvest') continue;
+            if (creep.memory?.targetRoom !== targetRoomName) continue;
+            if (!this.isSameSourceRoom(creep.memory?.sourceRoom, sourceRoom.name)) continue;
+            if ((creep.ticksToLive ?? 0) <= minUsefulTtl) continue;
+            count++;
+        }
+        return count;
+    }
+
     private static isSameSourceRoom(creepSourceRoom: string | undefined, sourceRoomName: string): boolean {
         if (!creepSourceRoom) return false;
         return creepSourceRoom === sourceRoomName;
@@ -1553,12 +1605,13 @@ class ExternalMineSpawner {
 
         // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
         // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
-        const globalActive = this.getActiveRoleNumByTarget('out-harvest', targetRoom.name);
+        // spawnInAdvance：快死的采集者不计入覆盖——接替者提前孵化，外矿不断档
+        const globalEffective = this.getEffectiveOutHarvesterNum(sourceRoom, targetRoom.name);
         const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
         const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-        if (globalActive + globalQueued + globalSpawning >= targetNum) return false;
+        if (globalEffective + globalQueued + globalSpawning >= targetNum) return false;
         if (slotCap > 0) {
-            if (globalActive + globalQueued + globalSpawning >= slotCap) return false;
+            if (globalEffective + globalQueued + globalSpawning >= slotCap) return false;
         }
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
@@ -1776,7 +1829,14 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        const targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
+        let targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
+
+        // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个
+        if (ExternalMine.getRoomMode(room) === 'rush' && targetRooms.length < 4
+            && runState.canRunSecondaryAction && isRoomTickAligned(room.name, 100, 7)) {
+            targetRooms = ExternalMineState.autoAddNearbyEnergyTargets(room.name, targetRooms);
+        }
+
         if (targetRooms.length <= 0) return;
 
         for (const roomName of targetRooms) {
@@ -1792,6 +1852,13 @@ export class ExternalMine {
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum === 0) continue;
+
+            // CPU 桶闭环（Tier 1-3）：桶紧张时按性价比挂起低分外矿
+            const activeThreshold = getActiveRemoteThreshold();
+            if (activeThreshold > 0 && room.level >= 4) {
+                const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
+                if (stat.score < activeThreshold) continue;
+            }
 
             const hostiles = targetRoom.find(FIND_HOSTILE_CREEPS, {
                 filter: (c) => (
@@ -1879,6 +1946,13 @@ export class ExternalMine {
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum <= 0) continue;
+
+            // CPU 桶闭环（Tier 1-3）：桶紧张时按性价比挂起低分中心房外矿
+            const activeThresholdCenter = getActiveRemoteThreshold();
+            if (activeThresholdCenter > 0 && room.level >= 4) {
+                const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
+                if (stat.score < activeThresholdCenter) continue;
+            }
             ExternalMineSpawner.harvester(room, targetRoom, sourceNum, true);
 
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];

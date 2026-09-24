@@ -1,5 +1,3 @@
-import type { CreepRoleHandler } from '@/framework/ai/creepRole';
-
 const runClaimer = (creep: Creep) => {
     if (!creep.memory.targetRoom) {
         creep.say('🚨 无目标');
@@ -97,11 +95,11 @@ const runAttackClaimer = (creep: Creep) => {
     creep.moveTo(controller, { range: 1 });
 };
 
-const claimer: CreepRoleHandler = {
+const claimer = {
     run: runClaimer
 };
 
-const attackClaimer: CreepRoleHandler = {
+const attackClaimer = {
     run: runAttackClaimer
 };
 

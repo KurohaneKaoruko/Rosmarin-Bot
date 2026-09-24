@@ -1,12 +1,16 @@
 import { compress, decompress, compressBatch, decompressBatch } from '@/shared/compress';
-import LayoutVisual from '@/features/Planner/utils/layoutVisual';
-import LayoutPlanner from '@/features/Planner/layoutPlanner';
+import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
+import LayoutPlanner from '@/modules/features/Planner/layoutPlanner';
 import { ensureRoomData, getLayoutData, getRoomData } from '@/shared/memory';
+import { resolveRoomName } from '@/console/argUtils';
 
 export default {
     layout: {
-        // 设置房间布局
+        // 设置房间布局（roomName 可省略）
         set(roomName: string, layout: string, x?: number, y?: number) {
+            const resolvedSet = resolveRoomName(roomName);
+            if (!resolvedSet.roomName) return resolvedSet.error;
+            roomName = resolvedSet.roomName;
             const room = Game.rooms[roomName];
             const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
@@ -35,8 +39,11 @@ export default {
             global.log(`已设置 ${roomName} 的布局为 ${layout}, 布局中心为 (${cx},${cy})`);
             return OK;
         },
-        // 开关自动建筑
-        auto(roomName: string, enable?: boolean) {
+        // 开关自动建筑（roomName 可省略；enable 不传则按当前状态切换）
+        auto(roomName?: string, enable?: boolean, opts?: { quiet?: boolean }) {
+            const resolvedArg = resolveRoomName(roomName);
+            if (!resolvedArg.roomName) return resolvedArg.error;
+            roomName = resolvedArg.roomName;
             const room = Game.rooms[roomName];
             const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
@@ -52,12 +59,15 @@ export default {
             }
             const memory = BotMemRooms[roomName];
             memory.autobuild = enable ?? !memory.autobuild;
-            global.log(`已${memory.autobuild ? '开启' : '关闭'} ${roomName} 的自动建筑.`);
+            if (!opts?.quiet) global.log(`已${memory.autobuild ? '开启' : '关闭'} ${roomName} 的自动建筑.`);
             return OK;
         },
         // 根据布局一键放置工地（放满到结构上限/工地上限为止）
-        // structType: 可选，仅放置某一种结构的工地
-        site(roomName: string, structType?: string) {
+        // structType: 可选，仅放置某一种结构的工地；roomName 可省略
+        site(roomName?: string, structType?: string) {
+            const resolvedArg = resolveRoomName(roomName);
+            if (!resolvedArg.roomName) return resolvedArg.error;
+            roomName = resolvedArg.roomName;
             const room = Game.rooms[roomName];
             const BotMemRooms = getRoomData();
             if (!room || !room.my || !BotMemRooms[roomName]) {
@@ -82,16 +92,20 @@ export default {
             global.log(`已清除 ${roomName} 的布局memory。`);
             return OK;
         },
-        // 构建布局
+        // 构建布局（roomName 可省略，推断规则见 console/argUtils）
         // layoutType: 可选，指定布局类型（传入则覆盖 RoomData.layout，并覆盖布局内存；不传则用当前设置且不覆盖布局内存）
-        build(roomName: string, layoutType?: string) {
+        // opts.quiet: 静默模式（供 start 流程复用，只保留错误输出）
+        build(roomName?: string, layoutType?: string, opts?: { quiet?: boolean }) {
+            const resolvedArg = resolveRoomName(roomName);
+            if (!resolvedArg.roomName) return resolvedArg.error;
+            roomName = resolvedArg.roomName;
             const BotMemRooms = getRoomData();
             if (!BotMemRooms[roomName]) {
                 return Error(`房间 ${roomName} 未添加到控制列表。`);
             }
             const layoutMemory = getLayoutData(roomName);
             if ((!layoutType || layoutType === '') && layoutMemory && Object.keys(layoutMemory).length) {
-                console.log(`房间 ${roomName} 的布局memory已存在，未指定布局类型，本次不覆盖。`);
+                if (!opts?.quiet) console.log(`房间 ${roomName} 的布局memory已存在，未指定布局类型，本次不覆盖。`);
                 return OK;
             }
 
@@ -102,17 +116,27 @@ export default {
             const currentLayout = (layoutType || BotMemRooms[roomName]['layout']) as any;
             // 如果没有设置布局就会使用自动布局
             if (!currentLayout || currentLayout == 'auto') {
-                return LayoutPlanner.buildDynamic(roomName);
+                return LayoutPlanner.buildDynamic(roomName, opts);
             } else if (currentLayout == '63auto') {
-                return LayoutPlanner.buildDynamic63(roomName);
+                return LayoutPlanner.buildDynamic63(roomName, opts);
             } else {
-                return LayoutPlanner.buildStatic(roomName, currentLayout);
+                return LayoutPlanner.buildStatic(roomName, currentLayout, opts);
             }
         },
-        // 查看布局可视化
+        // 查看布局可视化（全空参时：有规划旗帜则按旗帜预览，否则预览唯一可推断的房间）
         visual(roomName?: string, layout?: string) {
             let cpu = Game.cpu.getUsed();
             let result = null;
+            if (!roomName) {
+                // 无房间名：有 pc/pm/pa/pb/centerPos 规划旗帜时保持旗帜预览流程
+                const hasPlanFlags = Object.keys(Game.flags).some(name =>
+                    name === 'centerPos' || name === 'storagePos' ||
+                    name === 'pc' || name === 'pm' || name === 'pa' || name === 'pb');
+                if (!hasPlanFlags) {
+                    const resolvedArg = resolveRoomName(roomName);
+                    if (resolvedArg.roomName) roomName = resolvedArg.roomName;
+                }
+            }
             if (roomName && layout) {
                 if (layout == 'auto') {
                     result = LayoutPlanner.visualDynamic(roomName);

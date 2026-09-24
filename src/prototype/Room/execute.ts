@@ -1,4 +1,6 @@
 import { getRoomData, getStructData } from '@/shared/memory';
+import { isRoomTickAligned } from '@/shared/roomPhase';
+import { getRoomModeProfile } from '@/shared/roomMode';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -7,14 +9,13 @@ export default class RoomExecute extends Room {
 
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
-        const lowMode = mode === 'low';
-        const highMode = mode === 'high' || mode === 'rush';
+        const profile = getRoomModeProfile(this);
         this.updateEnergyState(false);
         // 更新任务池
         this.MissionUpdate();
 
         // 主动防御处理
-        if (!lowMode || Game.time % 15 === 0) {
+        if (profile.defenseInterval === 1 || Game.time % profile.defenseInterval === 0) {
             this.activeDefense();
         }
 
@@ -23,7 +24,7 @@ export default class RoomExecute extends Room {
         this.TowerWork();
         this.LinkWork();
         this.TerminalWork();
-        if (!lowMode) {
+        if (profile.facilities) {
             this.LabWork();
             this.FactoryWork();
             this.PowerSpawnWork();
@@ -32,17 +33,19 @@ export default class RoomExecute extends Room {
         if(!global.qos.shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
         
         // 自动化处理
-        this.autoMarket();       // 自动市场交易
+        if (profile.market) this.autoMarket();       // 自动市场交易（low 关闭）
         this.autoBuild();        // 自动建筑
-        if (!lowMode) {
+        // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
+        if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
+        if (profile.facilities) {
             this.autoLab();          // 自动Lab合成
             this.autoFactory();      // 自动Factory生产
             this.autoPower();        // 自动Power处理
-            this.outMine();          // 外矿采集
-
-            // 显示防御cost矩阵
-            this.showDefenseCostMatrix();
         }
+        if (profile.remoteMining) this.outMine();          // 外矿采集（low 关闭）
+
+        // 显示防御cost矩阵
+        if (profile.defenseCostMatrix) this.showDefenseCostMatrix();
 
         // Observer 工作
         this.ObserveWork();

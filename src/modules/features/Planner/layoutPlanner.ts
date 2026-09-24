@@ -1,9 +1,9 @@
 import { log } from '@/utils';
 import { compress, compressBatch, decompress } from '@/shared/compress';
-import LayoutVisual from '@/features/Planner/utils/layoutVisual';
-import { autoPlanner } from '@/features/Planner/dynamic/autoPlanner';
-import { autoPlanner63 } from '@/features/Planner/dynamic/63Planner';
-import * as StaticPlanner from '@/features/Planner/static';
+import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
+import { autoPlanner } from '@/modules/features/Planner/dynamic/autoPlanner';
+import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
+import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/shared/memory';
 
@@ -1075,7 +1075,7 @@ export const LayoutPlanner = {
      * @param layoutType 静态模板名
      * @returns Screeps 错误码：OK/ERR_INVALID_ARGS/ERR_NOT_FOUND
      */
-    buildStatic(roomName: string, layoutType: string): number {
+    buildStatic(roomName: string, layoutType: string, opts?: { quiet?: boolean }): number {
         const center = resolveCenter(roomName);
         if (!center) {
             log('LayoutPlanner', `静态布局构建失败: ${roomName} 缺少中心点(Memory.center 或 storagePos/centerPos 旗帜)`);
@@ -1092,7 +1092,9 @@ export const LayoutPlanner = {
         Object.assign(layoutMemory, computed.layoutMemory as any);
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
-        log('LayoutPlanner', `静态布局构建成功: ${roomName} layout=${layoutType} center(${center.x},${center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        if (!opts?.quiet) {
+            log('LayoutPlanner', `静态布局构建成功: ${roomName} layout=${layoutType} center(${center.x},${center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        }
         return OK;
     },
 
@@ -1119,7 +1121,7 @@ export const LayoutPlanner = {
      * @param roomName 房间名
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
-    buildDynamic(roomName: string): number {
+    buildDynamic(roomName: string, opts?: { quiet?: boolean }): number {
         const totalStart = cpuNow();
         const computeStart = cpuNow();
         const computed = computeDynamic(roomName, 'auto');
@@ -1136,7 +1138,9 @@ export const LayoutPlanner = {
         Object.assign(layoutMemory, computed.layoutMemory as any);
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        if (!opts?.quiet) {
+            log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        }
         return OK;
     },
 
@@ -1206,7 +1210,7 @@ export const LayoutPlanner = {
      * @param roomName 房间名
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */
-    buildDynamic63(roomName: string): number {
+    buildDynamic63(roomName: string, opts?: { quiet?: boolean }): number {
         const totalStart = cpuNow();
         const computeStart = cpuNow();
         const computed = computeDynamic(roomName, '63auto');
@@ -1223,7 +1227,9 @@ export const LayoutPlanner = {
         Object.assign(layoutMemory, computed.layoutMemory as any);
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
-        log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        if (!opts?.quiet) {
+            log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        }
         return OK;
     },
 

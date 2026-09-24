@@ -3,6 +3,8 @@
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
 import { getRoomData } from '@/shared/memory';
+import { getRoomPhase } from '@/shared/roomPhase';
+import { getRoomModeProfile } from '@/shared/roomMode';
 
 export default class Mission extends Room {    
     declare UpdateSpawnMission: (offset?: number) => void;
@@ -21,10 +23,9 @@ export default class Mission extends Room {
      * @description 按 interval/offset 分帧调度各子模块更新，降低单 tick CPU 峰值
      */
     MissionUpdate() {
-        const mode = (getRoomData(this.name) as any)?.mode || (this.memory as any).mode;
-        const highMode = mode === 'high' || mode === 'rush';
-        const spawnInterval = highMode ? 5 : 10;
-        const transportInterval = highMode ? 10 : 20;
+        const profile = getRoomModeProfile(this);
+        const spawnInterval = profile.spawnMissionInterval;
+        const transportInterval = profile.transportMissionInterval;
 
         const schedule: Array<{ interval: number; offset: number; run: (offset: number) => void }> = [
             { interval: spawnInterval, offset: 0, run: (offset) => this.UpdateSpawnMission(offset) },
@@ -39,8 +40,11 @@ export default class Mission extends Room {
             { interval: 1, offset: 0, run: (_) => this.UpdateHighwayScan() },
         ];
 
+        const roomPhase = getRoomPhase(this.name);
         for (const item of schedule) {
-            if (global.qos.isTickAligned(item.interval, item.offset)) item.run(item.offset);
+            // 相位叠加房间哈希：同频任务在房间之间天然错开
+            const offset = (item.offset + roomPhase) % item.interval;
+            if (global.qos.isTickAligned(item.interval, offset)) item.run(item.offset);
         }
     }
 }

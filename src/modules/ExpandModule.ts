@@ -1,4 +1,4 @@
-import { CreepMemoryTransfer, ExpandController } from '@/features/Expand';
+import { CreepMemoryTransfer, ExpandController } from '@/modules/features/Expand';
 
 /**
  * 扩张系统运行时模块。

@@ -1,6 +1,8 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import type { CreepRoleHandler } from '@/framework/ai/creepRole';
+import { engageTarget } from '@/prototype/Creep/function/combatCore';
 
+// 到岗前置。刻意不共用 combatCore 的同名函数：那边的版本会在赶路途中顺手自愈，
+// 而这一族角色（外矿战斗）的自愈时机是「站定之后」，路上治疗是多余动作。
 const ensureInTargetRoom = (creep: Creep, resetDontPullMe = false): boolean => {
     if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {
         if (resetDontPullMe) creep.memory.dontPullMe = false;
@@ -150,14 +152,7 @@ const runOutRanged = (creep: Creep) => {
         const target = creep.pos.findClosestByRange(hostileCreeps);
         if (!target) return;
 
-        if (creep.pos.isNearTo(target)) {
-            creep.rangedMassAttack();
-        } else if (creep.pos.inRangeTo(target, 3)) {
-            creep.rangedAttack(target);
-            creep.moveTo(target);
-        } else {
-            creep.moveTo(target);
-        }
+        engageTarget(creep, target, { melee: false });
         return;
     }
 
@@ -202,26 +197,7 @@ const runOutDefend = (creep: Creep) => {
         }
         if (!target) return;
 
-        if (creep.getActiveBodyparts(ATTACK) > 0) {
-            if (creep.pos.inRangeTo(target, 1)) {
-                creep.attack(target);
-                creep.rangedMassAttack();
-            } else if (creep.pos.inRangeTo(target, 3)) {
-                creep.rangedAttack(target);
-                creep.moveTo(target);
-            } else {
-                creep.moveTo(target);
-            }
-        } else {
-            if (creep.pos.inRangeTo(target, 1)) {
-                creep.rangedMassAttack();
-            } else if (creep.pos.inRangeTo(target, 3)) {
-                creep.rangedAttack(target);
-                creep.moveTo(target);
-            } else {
-                creep.moveTo(target);
-            }
-        }
+        engageTarget(creep, target, { melee: creep.getActiveBodyparts(ATTACK) > 0 });
 
         if (creep.hits < creep.hitsMax) {
             creep.heal(creep);
@@ -289,19 +265,19 @@ const runOutInvader = (creep: Creep) => {
     if (creep.memory['suicideCount'] >= 10) creep.suicide();
 };
 
-const outAttack: CreepRoleHandler = {
+const outAttack = {
     run: runOutAttack
 };
 
-const outRanged: CreepRoleHandler = {
+const outRanged = {
     run: runOutRanged
 };
 
-const outDefend: CreepRoleHandler = {
+const outDefend = {
     run: runOutDefend
 };
 
-const outInvader: CreepRoleHandler = {
+const outInvader = {
     run: runOutInvader
 };
 

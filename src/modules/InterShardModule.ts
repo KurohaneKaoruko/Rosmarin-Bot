@@ -1,4 +1,4 @@
-import { beginInterShardTick, cleanupInterShardLocalRoot, endInterShardTick } from '@/features/interShard';
+import { beginInterShardTick, cleanupInterShardLocalRoot, endInterShardTick } from '@/modules/features/interShard';
 
 /**
  * 跨 shard 协同运行时模块。

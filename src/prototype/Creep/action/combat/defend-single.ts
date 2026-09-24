@@ -6,7 +6,6 @@ import {
     scoreRampart,
     shouldSwitchDefenseRampart
 } from '@/shared/defenseUtils';
-import { createBoostedRole } from '@/framework/ai/creepRole';
 
 const DEFENSE_RAMPART_LOCK_TTL = 25;
 const DEFEND_ATTACK_SWITCH_THRESHOLD = 2;
@@ -40,14 +39,7 @@ const selectDefenseRampart = (
     const lockActive = isDefenseRampartLockActive(lockUntil);
     const lockedRampartId = creep.memory['defenseRampartId'] as Id<StructureRampart> | undefined;
 
-    const standingRampart = creep.pos.lookFor(LOOK_STRUCTURES)
-        .find((structure) => structure.structureType === STRUCTURE_RAMPART) as StructureRampart | undefined;
-    if (standingRampart && isDefenseRampartValid(creep.room, standingRampart, minHits)) {
-        lockDefenseRampart(creep, standingRampart);
-        targetRampart = standingRampart;
-    }
-
-    if (!targetRampart && lockActive && lockedRampartId) {
+    if (lockActive && lockedRampartId) {
         const rampart = Game.getObjectById(lockedRampartId);
         if (rampart && isDefenseRampartValid(creep.room, rampart, minHits)) {
             if (creep.pos.isEqualTo(rampart.pos) || !isPosOccupiedByOtherCreep(creep.room, rampart.pos, creep.name)) {
@@ -176,28 +168,13 @@ const runDefendRanged = (creep: Creep) => {
         if (state === 'breached' || !hasRamparts) {
             clearDefenseRampartLock(creep);
             creep.moveTo(target, {
-                visualizePathStyle: { stroke: '#0000ff' },
-                range: 3,
+                visualizePathStyle: { stroke: '#ff0000' },
+                range: 1,
                 costCallback: creep.room.getDefenseCreepCostCallback(creep.name)
             });
             creep.room.CallTowerAttack(target);
             return;
         }
-
-        creep.room.CallTowerAttack(target);
-        return;
-    }
-
-    if (range <= 1) {
-        const nearHostiles = hostileCreeps.filter((hostile) => creep.pos.isNearTo(hostile)).length;
-        if (nearHostiles >= 2) {
-            creep.rangedMassAttack();
-            creep.room.CallTowerAttack(target);
-        } else {
-            const result = creep.rangedAttack(target);
-            if (result === OK) creep.room.CallTowerAttack(target);
-        }
-        return;
     }
 
     if (range <= 3) {
@@ -241,16 +218,36 @@ const getDefendRangedBoost = (creep: Creep) => {
     };
 };
 
-const defendAttack = createBoostedRole({
-    boost: (creep) => getDefendAttackBoost(creep).boostmap,
-    must: (creep) => getDefendAttackBoost(creep).must,
+const defendAttack = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const { must, boostmap } = getDefendAttackBoost(creep);
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap, { must });
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run: runDefendAttack
-});
+};
 
-const defendRanged = createBoostedRole({
-    boost: (creep) => getDefendRangedBoost(creep).boostmap,
-    must: (creep) => getDefendRangedBoost(creep).must,
+const defendRanged = {
+    prepare: (creep) => {
+        if (creep.memory.boosted) return true;
+        const { must, boostmap } = getDefendRangedBoost(creep);
+        if (!boostmap || Object.keys(boostmap).length === 0) {
+            creep.memory.boosted = true;
+            return true;
+        }
+        const result = creep.goBoost(boostmap, { must });
+        const ok = result === OK;
+        if (ok) creep.memory.boosted = true;
+        return ok;
+    },
     run: runDefendRanged
-});
+};
 
 export { defendAttack, defendRanged };

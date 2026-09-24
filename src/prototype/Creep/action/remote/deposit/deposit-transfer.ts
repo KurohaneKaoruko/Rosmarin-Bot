@@ -38,24 +38,28 @@ const onSource = (creep: Creep): WorkEvent => {
         }
     }
 
+    // targetType 已区分 dropped/tombstone/harvester，分支内按实际类型收窄
     const target = Game.getObjectById(cache.targetId);
     const targetType = cache.targetType;
     if (target) {
-        if (targetType === 'dropped' && target.amount > 0) {
-            creep.goPickup(target);
+        if (targetType === 'dropped' && (target as Resource<ResourceConstant>).amount > 0) {
+            creep.goPickup(target as Resource<ResourceConstant>);
             return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
-        } else if (targetType === 'tombstone' && target.store.getUsedCapacity() > 0) {
-            const resourceType = getFirstNonEnergyResource(target.store);
+        } else if (targetType === 'tombstone' && (target as Tombstone).store.getUsedCapacity() > 0) {
+            const tombstone = target as Tombstone;
+            const resourceType = getFirstNonEnergyResource(tombstone.store);
             if (!resourceType) return WORK_EVENTS.STAY;
-            creep.goWithdraw(target, resourceType);
+            creep.goWithdraw(tombstone, resourceType);
             return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
-        } else if (targetType === 'harvester' && !creep.pos.isNearTo(target)) {
-            creep.moveTo(target);
+        } else if (targetType === 'harvester' && !creep.pos.isNearTo(target as Creep)) {
+            creep.moveTo(target as Creep);
             return WORK_EVENTS.STAY;
         }
     }
 
-    const droppedResources = creep.room.find(FIND_DROPPED_RESOURCES).filter(s => s.resourceType !== RESOURCE_ENERGY);
+    const droppedResources = getRoomTickCacheValue(creep.room, 'deposit_transfer_dropped', () =>
+        creep.room.find(FIND_DROPPED_RESOURCES) as Resource[]
+    ).filter(s => s.resourceType !== RESOURCE_ENERGY);
     if (droppedResources.length > 0) {
         const closestResource = creep.pos.findClosestByRange(droppedResources);
         cache.targetId = closestResource.id;
@@ -63,9 +67,9 @@ const onSource = (creep: Creep): WorkEvent => {
         creep.goPickup(closestResource);
         return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
     }
-    const tombstones = creep.room.find(FIND_TOMBSTONES, {
-        filter: (s:any) => s.store.getUsedCapacity() > 0 && Object.keys(s.store).some(type => type !== RESOURCE_ENERGY)
-    });
+    const tombstones = getRoomTickCacheValue(creep.room, 'deposit_transfer_tombstones', () =>
+        creep.room.find(FIND_TOMBSTONES) as Tombstone[]
+    ).filter((s:any) => s.store.getUsedCapacity() > 0 && Object.keys(s.store).some(type => type !== RESOURCE_ENERGY));
     if (tombstones.length > 0) {
         const closestTombstone = creep.pos.findClosestByRange(tombstones);
         cache.targetId = closestTombstone.id;

@@ -214,7 +214,7 @@ export default class BaseFunction extends Creep {
                 cache.takeTarget = null;
                 if (target.amount >= freeCapacity) return true;
                 if (updateTakeTarget(takeTarget.id)) {
-                    const nextTarget = Game.getObjectById(cache.takeTarget.id);
+                    const nextTarget = Game.getObjectById(cache.takeTarget.id) as unknown as RoomObject | null;
                     if (nextTarget) moveToTakeTarget(nextTarget);
                     else cache.takeTarget = null;
                 } else moveToHarvestSource();
@@ -244,7 +244,7 @@ export default class BaseFunction extends Creep {
                 cache.takeTarget = null;
                 if (availableEnergy >= freeCapacity) return true;
                 if (updateTakeTarget(takeTarget.id)) {
-                    const nextTarget = Game.getObjectById(cache.takeTarget.id);
+                    const nextTarget = Game.getObjectById(cache.takeTarget.id) as unknown as RoomObject | null;
                     if (nextTarget) moveToTakeTarget(nextTarget);
                     else cache.takeTarget = null;
                 } else moveToHarvestSource();

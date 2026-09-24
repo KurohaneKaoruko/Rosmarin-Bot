@@ -1,4 +1,4 @@
-import {TeamSpawner, TeamController} from "@/features/Team";
+import {TeamSpawner, TeamController} from "@/modules/features/Team";
 
 /**
  * 小队系统运行时模块。

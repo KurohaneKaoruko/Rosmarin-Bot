@@ -1,395 +1,110 @@
-import { StateMachine } from '@/framework/ai/stateMachine';
-import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
-import { createCreepRole } from '@/framework/ai/creepRole';
 import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
 
 const NEAR_RANGE = 2;
-const SOURCE_RANGE = 1;
 const STAY_BUILD_RANGE = 3;
 
-// 多层 FSM layer 标识：同一 creep 的不同层写入不同 key，避免冲突
-export const HARVESTER_LAYERS = {
-    FLOW: 'harvester:flow',
-    DELIVER: 'harvester:deliver'
-} as const;
-
-// 能量流转层：只负责“采集 / 交付”的节奏切换
-export const HARVESTER_FLOW_STATES = {
-    COLLECT: 'collect',
-    DELIVER: 'deliver'
-} as const;
-type HarvesterFlowState = typeof HARVESTER_FLOW_STATES[keyof typeof HARVESTER_FLOW_STATES];
-
-const HARVESTER_FLOW_EVENTS = {
-    HAS_ENERGY: 'has_energy',
-    NEED_ENERGY: 'need_energy'
-} as const;
-type HarvesterFlowEvent = typeof HARVESTER_FLOW_EVENTS[keyof typeof HARVESTER_FLOW_EVENTS];
-
-const HARVESTER_FLOW_GUARDS = {
-    HAS_ENERGY: 'has_energy',
-    NEED_ENERGY: 'need_energy'
-} as const;
-type HarvesterFlowGuard = typeof HARVESTER_FLOW_GUARDS[keyof typeof HARVESTER_FLOW_GUARDS];
-
-// 交付层：只负责“转移 / 建造”两种交付方式的切换
-export const HARVESTER_DELIVER_STATES = {
-    TRANSFER: 'transfer',
-    BUILD: 'build'
-} as const;
-type HarvesterDeliverState = typeof HARVESTER_DELIVER_STATES[keyof typeof HARVESTER_DELIVER_STATES];
-
-const HARVESTER_DELIVER_EVENTS = {
-    NEED_BUILD: 'need_build',
-    NEED_TRANSFER: 'need_transfer'
-} as const;
-type HarvesterDeliverEvent = typeof HARVESTER_DELIVER_EVENTS[keyof typeof HARVESTER_DELIVER_EVENTS];
-
-const HARVESTER_DELIVER_GUARDS = {
-    NEED_BUILD: 'need_build',
-    NEED_TRANSFER: 'need_transfer'
-} as const;
-type HarvesterDeliverGuard = typeof HARVESTER_DELIVER_GUARDS[keyof typeof HARVESTER_DELIVER_GUARDS];
-
-type HarvesterContext = {
-    creep: Creep;
-    // 是否允许进入交付行为（用于避免采集阶段和交付阶段同 tick 冲突）
-    allowDeliver: boolean;
+/** 同步 source 工作位候选（供 BetterMove 的移动规划引用） */
+const syncMoveWork = (creep: Creep, source: Source | null): void => {
+    writeMoveWorkTileCandidates(creep, source ? [{ pos: source.pos, range: 1 }] : []);
 };
 
-const getHarvesterFlowState = (creep: Creep): HarvesterFlowState => {
-    return (creep.memory.fsm?.[HARVESTER_LAYERS.FLOW] as HarvesterFlowState | undefined) || HARVESTER_FLOW_STATES.COLLECT;
-};
-
-const getHarvesterDeliverState = (creep: Creep): HarvesterDeliverState => {
-    return (creep.memory.fsm?.[HARVESTER_LAYERS.DELIVER] as HarvesterDeliverState | undefined) || HARVESTER_DELIVER_STATES.TRANSFER;
-};
-
-export const syncHarvesterMoveWork = (creep: Creep) => {
-    const candidates = [];
-    const source = creep.getBoundSource();
-    if (source && (
-        getHarvesterFlowState(creep) === HARVESTER_FLOW_STATES.COLLECT ||
-        getHarvesterDeliverState(creep) === HARVESTER_DELIVER_STATES.BUILD
-    )) {
-        candidates.push({ pos: source.pos, range: SOURCE_RANGE });
-    }
-    writeMoveWorkTileCandidates(creep, candidates);
-};
-
-const shouldRunDeliverLayer = (ctx: HarvesterContext): boolean => {
-    if (!ctx.allowDeliver) return false;
-    return getHarvesterFlowState(ctx.creep) === HARVESTER_FLOW_STATES.DELIVER;
-};
-
-/**
- * 获取当前绑定 source 周边可用的交付结构。
- *
- * @param creep 当前 harvester。
- * @returns source 周边的 link 与 container；找不到时对应字段为 `null`。
- *
- * @remarks
- * `harvester` 的交付判定应围绕“绑定 source 的工作面”做判断，
- * 而不是围绕 creep 当前所在位置做短视扫描。
- * 否则 creep 在返回源点的过程中，会把“远离 source 的临时位置”误判成
- * “source 周边没有 link / container”，导致交付层错误切到 `BUILD`。
- */
-const getSourceDeliveryTargets = (creep: Creep): {
-    link: StructureLink | null;
-    container: StructureContainer | null;
-} => ({
-    link: creep.getNearbySourceLink(NEAR_RANGE),
-    container: creep.getNearbySourceContainer(NEAR_RANGE),
-});
-
-/**
- * 查找适合投递的 Link。
- *
- * @param creep 当前 harvester。
- * @returns source 周边仍有容量的 link；找不到时返回 `null`。
- */
-function findTransferLink(creep: Creep): StructureLink | null {
-    const link = getSourceDeliveryTargets(creep).link;
-    if (!link) return null;
-    return link.store.getFreeCapacity(RESOURCE_ENERGY) > 0 ? link : null;
-}
-
-/**
- * 原地尝试建造附近的工地
- * @description 如果身上有能量且周围有工地，则进行建造；不产生移动
- * @returns 是否进行了建造
- */
-function stayAndBuildNearby(creep: Creep): boolean {
+/** 原地建造附近工地 */
+const stayAndBuildNearby = (creep: Creep): boolean => {
     if (creep.store[RESOURCE_ENERGY] === 0) return false;
-    const constructionSites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, STAY_BUILD_RANGE);
-    const target = creep.pos.findClosestByRange(constructionSites);
+    const sites = creep.pos.findInRange(FIND_CONSTRUCTION_SITES, STAY_BUILD_RANGE);
+    const target = creep.pos.findClosestByRange(sites);
     if (!target) return false;
     creep.build(target);
     return true;
-}
-
-/**
- * 交付层判定：是否应当转入“建造”模式
- * @description 附近没有 Link/Container 时，说明需要维护容器
- */
-const shouldDeliverByBuild = (creep: Creep) => {
-    const { link, container } = getSourceDeliveryTargets(creep);
-    return !link && !container;
 };
 
 /**
- * 采集层判定：是否满足进入交付阶段
- * @description 接近满仓 / 源枯竭时允许切换，避免在源点空转
+ * harvester：绑定 source 的专职采集。
+ *
+ * 默认身体 [[WORK,2],[MOVE,2]] 无 CARRY：站上工作位持续采集，
+ * 能量掉落在工作位，由 carrier / transporter 收取。
+ * 有 CARRY 的体型满仓后自行交付：link > container > 建容器工地 > 丢弃。
+ *
+ * 顺序逻辑，无状态机：采集与交付由仓库余量直接判定，天然免疫状态失联。
  */
-const shouldSwitchToDeliver = (creep: Creep) => {
-    if (creep.store.getFreeCapacity() === 0) return true;
-    const source = creep.getBoundSource();
-    if (!source) return false;
-    if (source.energy === 0 && creep.store.getUsedCapacity() > 0) return true;
-
-    // 预测本 tick 采集后就会满仓时提前切换，避免“采一跳就卡满”
-    const income = creep.calculateHarvestIncomePerTick();
-    return creep.store.getFreeCapacity() <= income;
-};
-
-/**
- * 采集层判定：是否需要回到采集阶段
- * @description 只要能量耗尽就应当回到采集
- */
-const shouldSwitchToCollect = (creep: Creep) => {
-    return creep.store[RESOURCE_ENERGY] === 0;
-};
-
-/**
- * 采集阶段
- * @description 采集能量，自动对齐到 Container，满载前预判切换
- * @returns 是否应该切换到交付阶段
- */
-const runHarvest = (creep: Creep): boolean => {
-    if (creep.store.getFreeCapacity() === 0) return true;
-    const targetSource = creep.getBoundSource();
-    if (!targetSource) {
-        creep.memory.ready = false;
-        return false;
-    }
-
-    // 源枯竭时优先尝试抽容器（与旧逻辑一致）
-    if (targetSource.energy === 0) {
-        if (creep.store.getUsedCapacity() > 0) return true;
-        if (creep.pos.isNearTo(targetSource)) {
-            if (!creep.room.container || !creep.room.link) return false;
-            const candidates = creep.room.container.filter(
-                c => c.store.getUsedCapacity(RESOURCE_ENERGY) > 0 && creep.pos.inRangeTo(c, SOURCE_RANGE)
-            );
-            const container = candidates.length > 0 ? creep.pos.findClosestByRange(candidates) : null;
-            const link = findTransferLink(creep);
-            if (!container || !link) return false;
-            creep.goWithdraw(container, RESOURCE_ENERGY);
-        }
-        return false;
-    }
-
-    if (!creep.moveToSourceWorkTile(targetSource)) return false;
-
-    const result = creep.goHaverst(targetSource);
-    if (!result) return false;
-    if (creep.store.getCapacity() === 0) return false;
-
-    // 预测下一次采集会满仓时切换到交付阶段
-    const energyIncome = creep.calculateHarvestIncomePerTick();
-    if (creep.store.getFreeCapacity() <= energyIncome) return true;
-
-    return false;
-};
-
-/**
- * 转移阶段
- * @description 将能量转移到 Link 或 Container，若无处可放则原地建造或丢弃
- */
-const runTransfer = (creep: Creep) => {
-    if (creep.store[RESOURCE_ENERGY] === 0) return;
-
-    if (creep.transferToSourceStructure()) return;
-
-    if (stayAndBuildNearby(creep)) return;
-    creep.drop(RESOURCE_ENERGY);
-};
-
-/**
- * 建造容器阶段
- * @description 当 Source 旁没有 Container/Link 时，负责维护和建造 Container
- */
-const runBuild = (creep: Creep) => {
-    if (creep.store[RESOURCE_ENERGY] === 0) return;
-
-    // 尝试维护或建造
-    const maintainResult = creep.maintainSourceContainer();
-    if (maintainResult === 'acted') return;
-
-    if (maintainResult === 'blocked') {
-        if (!stayAndBuildNearby(creep)) {
-            creep.drop(RESOURCE_ENERGY);
-        }
-        return;
-    }
-
-    // 如果无法维护（例如距离不够，或者已经有容器/Link了），则靠近源后等待交付层切换
-    const targetSource = creep.getBoundSource();
-    if (targetSource && !creep.pos.inRangeTo(targetSource, SOURCE_RANGE)) {
-        creep.moveTo(targetSource);
-    }
-};
-
-// 构建 Harvester 的能量流转层
-const createHarvesterFlowMachine = (creep: Creep) => {
-    const storage = createFsmStorage<HarvesterFlowState>(creep, HARVESTER_LAYERS.FLOW);
-    return new StateMachine<HarvesterContext, HarvesterFlowState, HarvesterFlowEvent, HarvesterFlowGuard>(
-        {
-            initial: HARVESTER_FLOW_STATES.COLLECT,
-            states: {
-                [HARVESTER_FLOW_STATES.COLLECT]: {
-                    onTick: (ctx) => {
-                        // 未完成准备阶段则停留（由上层负责调用 prepare）
-                        if (!ctx.creep.memory.ready) return;
-                        const readyToDeliver = runHarvest(ctx.creep);
-                        ctx.allowDeliver = readyToDeliver || shouldSwitchToDeliver(ctx.creep);
-                        if (ctx.allowDeliver) return [HARVESTER_FLOW_EVENTS.HAS_ENERGY];
-                        syncHarvesterMoveWork(ctx.creep);
-                    }
-                },
-                [HARVESTER_FLOW_STATES.DELIVER]: {
-                    onTick: (ctx) => {
-                        ctx.allowDeliver = true;
-                        if (shouldSwitchToCollect(ctx.creep)) {
-                            ctx.allowDeliver = false;
-                            return [HARVESTER_FLOW_EVENTS.NEED_ENERGY];
-                        }
-                    }
-                }
-            },
-            transitions: [
-                {
-                    from: HARVESTER_FLOW_STATES.COLLECT,
-                    event: HARVESTER_FLOW_EVENTS.HAS_ENERGY,
-                    to: HARVESTER_FLOW_STATES.DELIVER,
-                    guard: HARVESTER_FLOW_GUARDS.HAS_ENERGY
-                },
-                {
-                    from: HARVESTER_FLOW_STATES.DELIVER,
-                    event: HARVESTER_FLOW_EVENTS.NEED_ENERGY,
-                    to: HARVESTER_FLOW_STATES.COLLECT,
-                    guard: HARVESTER_FLOW_GUARDS.NEED_ENERGY
-                }
-            ],
-            guards: {
-                [HARVESTER_FLOW_GUARDS.HAS_ENERGY]: (ctx) => shouldSwitchToDeliver(ctx.creep),
-                [HARVESTER_FLOW_GUARDS.NEED_ENERGY]: (ctx) => shouldSwitchToCollect(ctx.creep)
-            }
-        },
-        storage
-    );
-};
-
-// 构建 Harvester 的交付层
-const createHarvesterDeliverMachine = (creep: Creep) => {
-    const storage = createFsmStorage<HarvesterDeliverState>(creep, HARVESTER_LAYERS.DELIVER);
-    return new StateMachine<HarvesterContext, HarvesterDeliverState, HarvesterDeliverEvent, HarvesterDeliverGuard>(
-        {
-            initial: HARVESTER_DELIVER_STATES.TRANSFER,
-            states: {
-                [HARVESTER_DELIVER_STATES.TRANSFER]: {
-                    onTick: (ctx) => {
-                        // 采集阶段尚未完成时不进入交付行为
-                        if (!shouldRunDeliverLayer(ctx)) return;
-                        runTransfer(ctx.creep);
-                        if (shouldDeliverByBuild(ctx.creep)) {
-                            return [HARVESTER_DELIVER_EVENTS.NEED_BUILD];
-                        }
-                    }
-                },
-                [HARVESTER_DELIVER_STATES.BUILD]: {
-                    onTick: (ctx) => {
-                        if (!shouldRunDeliverLayer(ctx)) return;
-                        runBuild(ctx.creep);
-                        if (!shouldDeliverByBuild(ctx.creep)) {
-                            return [HARVESTER_DELIVER_EVENTS.NEED_TRANSFER];
-                        }
-                        syncHarvesterMoveWork(ctx.creep);
-                    }
-                }
-            },
-            transitions: [
-                {
-                    from: HARVESTER_DELIVER_STATES.TRANSFER,
-                    event: HARVESTER_DELIVER_EVENTS.NEED_BUILD,
-                    to: HARVESTER_DELIVER_STATES.BUILD,
-                    guard: HARVESTER_DELIVER_GUARDS.NEED_BUILD
-                },
-                {
-                    from: HARVESTER_DELIVER_STATES.BUILD,
-                    event: HARVESTER_DELIVER_EVENTS.NEED_TRANSFER,
-                    to: HARVESTER_DELIVER_STATES.TRANSFER,
-                    guard: HARVESTER_DELIVER_GUARDS.NEED_TRANSFER
-                }
-            ],
-            guards: {
-                [HARVESTER_DELIVER_GUARDS.NEED_BUILD]: (ctx) => shouldDeliverByBuild(ctx.creep),
-                [HARVESTER_DELIVER_GUARDS.NEED_TRANSFER]: (ctx) => !shouldDeliverByBuild(ctx.creep)
-            }
-        },
-        storage
-    );
-};
-
-const HarvesterAction = createCreepRole({
-    /**
-     * Harvester 准备阶段。
-     *
-     * @remarks
-     * 这里保留原有“每只 harvester 绑定一个 source”设计，
-     * 只把 source 选择统一收敛到已有原型 helper，避免角色层再维护一套分配逻辑。
-     */
-    prepare: function (creep: Creep) {
-        if (!creep.room.source || creep.room.source.length === 0) return false;
-        const boundSource = creep.getBoundSource();
-        const targetSource = creep.resolveSourceByPriority(boundSource || creep.room.closestSource(creep));
-        if (!targetSource) return false;
-        creep.setBoundSourceId(targetSource.id);
-        return true;
-    },
-    /**
-     * Harvester 主运行逻辑。
-     *
-     * @remarks
-     * 这是当前项目里“多层状态机保留型角色”的参考实现：
-     * - `FLOW` 层只决定 collect / deliver 节奏；
-     * - `DELIVER` 层只决定 transfer / build 交付方式；
-     * - 两层通过 `allowDeliver` 做最小同步，不把职责重新揉回一个大循环。
-     */
+export default {
     run: function (creep: Creep) {
         if (!creep.moveHomeRoom()) return;
 
-        const ctx: HarvesterContext = {
-            creep,
-            allowDeliver: shouldSwitchToDeliver(creep)
-        };
-
-        const flowMachine = createHarvesterFlowMachine(creep);
-        const deliverMachine = createHarvesterDeliverMachine(creep);
-        const runner = createLayeredRunner<HarvesterContext>({
-            [HARVESTER_LAYERS.FLOW]: flowMachine,
-            [HARVESTER_LAYERS.DELIVER]: deliverMachine
-        });
-
-        runner.step(ctx, {
-            [HARVESTER_LAYERS.FLOW]: { reenter: true },
-            [HARVESTER_LAYERS.DELIVER]: { reenter: true }
-        });
-
-        if (getHarvesterFlowState(creep) === HARVESTER_FLOW_STATES.COLLECT) {
-            deliverMachine.setState(HARVESTER_DELIVER_STATES.TRANSFER);
+        // 绑定 source：未绑定时按优先级挑一个（无可用 source 则等待）
+        let source = creep.getBoundSource();
+        if (!source) {
+            source = creep.resolveSourceByPriority(creep.room.closestSource(creep));
+            if (!source) return;
+            creep.setBoundSourceId(source.id);
         }
-    }
-})
 
-export default HarvesterAction;
+        const carryCapacity = creep.store.getCapacity();
+        const free = creep.store.getFreeCapacity();
+        const income = creep.calculateHarvestIncomePerTick();
+        // 交付判定：满仓 / 本 tick 再采就满 / 源枯竭但身上有货
+        const shouldDeliver = carryCapacity > 0 && (free === 0 || free <= income || source.energy === 0);
+
+        // ── 采集：有空间且源有能量 ──
+        if (source.energy > 0 && !shouldDeliver) {
+            if (!creep.moveToSourceWorkTile(source)) {
+                syncMoveWork(creep, source);
+                return;
+            }
+            // 首次到场：实测「出生 → 工作位」路程，供孵化系统无缝换班
+            if (!creep.memory.calibrated) {
+                const roomMem = creep.room.memory as any;
+                roomMem.sourceTiming ??= {};
+                const timing = roomMem.sourceTiming[source.id] ?? (roomMem.sourceTiming[source.id] = {});
+                timing.pathTime = Math.max(10, Math.min(500, Game.time - (creep.memory.spawnTick ?? Game.time)));
+                creep.memory.calibrated = true;
+            }
+            creep.goHaverst(source);
+            // 快满时同 tick 顺带进入交付，避免“采一跳卡满”原地空转
+            if (carryCapacity === 0 || creep.store.getFreeCapacity() > income) {
+                syncMoveWork(creep, source);
+                return;
+            }
+        }
+
+        // 无仓体型：能量已掉落在工作位，到此为止
+        if (carryCapacity === 0) {
+            syncMoveWork(creep, source);
+            return;
+        }
+
+        // 源枯竭且空仓：顺手吸干旁边容器的余量，然后等待再生
+        if (creep.store[RESOURCE_ENERGY] === 0 && source.energy === 0) {
+            const container = creep.getNearbySourceContainer(1);
+            if (container && creep.pos.isNearTo(container) && container.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+                creep.withdraw(container, RESOURCE_ENERGY);
+            }
+            syncMoveWork(creep, source);
+            return;
+        }
+
+        // ── 交付：相邻 link/container → 原地建造 → 兜底 ──
+        if (creep.transferToSourceStructure()) return;
+
+        const hasDeliveryNearSource =
+            !!creep.getNearbySourceLink(NEAR_RANGE) || !!creep.getNearbySourceContainer(NEAR_RANGE);
+        if (hasDeliveryNearSource) {
+            // 交付结构满 / 不相邻：先建附近工地；cargo 快满时丢能量保采集
+            if (stayAndBuildNearby(creep)) return;
+            if (creep.store.getFreeCapacity() <= income) creep.drop(RESOURCE_ENERGY);
+            syncMoveWork(creep, source);
+            return;
+        }
+
+        // 无 link 无 container：维护容器工地（修理 / 建造布局给的工地）
+        const maintain = creep.maintainSourceContainer();
+        if (maintain === 'acted') return;
+        if (maintain === 'blocked') {
+            if (!stayAndBuildNearby(creep)) creep.drop(RESOURCE_ENERGY);
+            return;
+        }
+        if (stayAndBuildNearby(creep)) return;
+        if (!creep.pos.inRangeTo(source, 1)) creep.moveTo(source);
+        syncMoveWork(creep, source);
+    },
+};

@@ -1,5 +1,5 @@
 import { parseShardRoomName } from '@/shared/shardRoom';
-import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/features/interShard';
+import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/features/interShard';
 import { getBotMemory, getMissionPools } from '@/shared/memory';
 import { getExpandCreepCountsAll } from '@/shared/creepTickIndex';
 
