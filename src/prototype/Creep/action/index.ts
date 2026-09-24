@@ -20,19 +20,19 @@ import outBuild from './remote/outmine/out-build';
 import reserver from './remote/outmine/reserver';
 import { outAttack, outDefend, outInvader, outRanged } from './remote/outmine/out-combat';
 import outMineral from './remote/outmine/out-mineral';
-import { out2Attack, out2Heal } from './remote/outmine/out-duo';
+import { out2Attack } from './remote/outmine/out-duo';
 import powerCarry from './remote/power/power-carry';
 import { powerAttack, powerHeal, powerRanged } from './remote/power/power-combat';
 import depositHarvest from './remote/deposit/deposit-harvest';
 import depositTransfer from './remote/deposit/deposit-transfer';
-import { depositAttack, depositHeal, depositRanged } from './remote/deposit/deposit-combat';
+import { depositAttack, depositRanged } from './remote/deposit/deposit-combat';
+import combatHeal from './combat/combatHeal';
 import oneRanged from './combat/one-ranged';
 import aio from './combat/aio';
 import doubleAttack from './combat/double-attack';
 import doubleDismantle from './combat/double-dismantle';
-import doubleHeal from './combat/double-heal';
 import pcHeal from './combat/pc-heal';
-import { defend2Attack, defend2Heal } from './combat/defend-duo';
+import { defend2Attack } from './combat/defend-duo';
 import { defendAttack, defendRanged } from './combat/defend-single';
 
 type RoleHandler = {
@@ -63,11 +63,9 @@ export const roleRegistry: Record<string, RoleHandler> = {
     'up-upgrade': upUpgrade,
     'deposit-attack': depositAttack,
     'deposit-harvest': depositHarvest,
-    'deposit-heal': depositHeal,
     'deposit-ranged': depositRanged,
     'deposit-transfer': depositTransfer,
     'out-2attack': out2Attack,
-    'out-2heal': out2Heal,
     'out-attack': outAttack,
     'out-build': outBuild,
     'out-carry': outCarry,
@@ -82,13 +80,14 @@ export const roleRegistry: Record<string, RoleHandler> = {
     'power-ranged': powerRanged,
     'reserver': reserver,
     'aio': aio,
+    // 治疗型角色统一执行器：out-2heal / deposit-heal / defend-2heal / double-heal
+    // 由 creep.memory.role 选策略，见 action/combat/combatHeal.ts
+    'combat-heal': combatHeal,
     'double-attack': doubleAttack,
     'double-dismantle': doubleDismantle,
-    'double-heal': doubleHeal,
     'one-ranged': oneRanged,
     'pc-heal': pcHeal,
     'defend-2attack': defend2Attack,
-    'defend-2heal': defend2Heal,
     'defend-attack': defendAttack,
     'defend-ranged': defendRanged,
 };

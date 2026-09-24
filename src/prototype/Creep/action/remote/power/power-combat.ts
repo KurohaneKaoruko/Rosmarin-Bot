@@ -1,39 +1,6 @@
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-
-const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
-    if (!creep.memory.bind) return null;
-
-    const partner = Game.getObjectById(creep.memory.bind);
-    if (partner) return partner;
-
-    delete creep.memory.bind;
-    onMissing?.();
-    return null;
-};
-
-const tryBindNearestPartner = (
-    creep: Creep,
-    cacheKey: string,
-    filter: (candidate: Creep) => boolean
-): Creep | null => {
-    const boundPartner = resolveBoundPartner(creep);
-    if (boundPartner) return boundPartner;
-
-    const candidates = getRoomTickCacheValue(creep.room, cacheKey, () =>
-        creep.room.find(FIND_MY_CREEPS, {
-            filter: (candidate) => candidate.id !== creep.id && filter(candidate as Creep)
-        }) as Creep[]
-    );
-    const available = candidates.filter((candidate) => !candidate.memory.bind);
-    if (available.length <= 0) return null;
-
-    const partner = creep.pos.findClosestByRange(available);
-    if (!partner) return null;
-
-    creep.memory.bind = partner.id;
-    partner.memory.bind = creep.id;
-    return partner;
-};
+import { resolveBoundPartner, runHealAndFollow, tryBindNearestPartner } from '@/prototype/Creep/function/boundPartner';
+import { ensureInTargetRoomForCombat, runRangedCombat } from '@/prototype/Creep/function/combatCore';
 
 const noBindAction = (creep: Creep) => {
     const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_room_hostiles', () =>
@@ -194,97 +161,35 @@ const runPowerHeal = (creep: Creep) => {
     const bindcreep = resolveBoundPartner(creep, () => creep.suicide());
     if (!bindcreep) return;
 
-    let healed = false;
-    if (creep.hits < creep.hitsMax && creep.hits < bindcreep.hits) {
-        creep.heal(creep);
-        healed = true;
-    }
-
-    if (!healed && creep.pos.isNearTo(bindcreep)) {
-        creep.heal(bindcreep);
-    } else if (!healed && creep.pos.inRangeTo(bindcreep, 3)) {
-        creep.rangedHeal(bindcreep);
-        creep.moveTo(bindcreep);
-    } else {
-        creep.moveTo(bindcreep);
-    }
+    runHealAndFollow(creep, bindcreep);
 };
 
 const runPowerRanged = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
-    if (creep.room.name !== creep.memory.targetRoom || creep.pos.isRoomEdge()) {
-        creep.moveToRoom(creep.memory.targetRoom);
-        if (creep.hits < creep.hitsMax) creep.heal(creep);
-        return;
-    }
+    if (!ensureInTargetRoomForCombat(creep)) return;
 
-    let healOK = false;
-    let rangedOK = false;
-    let moveOK = false;
-
-    if (creep.hits < creep.hitsMax) {
-        creep.heal(creep);
-        healOK = true;
-    }
-
-    const roomCombatHostiles = getRoomTickCacheValue(creep.room, 'power_ranged_combat_hostiles', () =>
-        creep.room.find(FIND_HOSTILE_CREEPS, {
-            filter: (hostile) =>
-                hostile.body.some((part) => part.type === HEAL || part.type === ATTACK || part.type === RANGED_ATTACK)
-        }) as Creep[]
-    );
-    const hostileCreeps = roomCombatHostiles.filter((hostile) => creep.pos.inRangeTo(hostile, 8));
-    if (hostileCreeps.length > 0) {
-        const healer = hostileCreeps.find((hostile) => hostile.body.some((part) => part.type === HEAL));
-        const attacker = hostileCreeps.find((hostile) => hostile.body.some((part) => part.type === ATTACK));
-        const target = healer || attacker;
-        if (target && !creep.pos.inRangeTo(target, 1)) {
-            creep.moveTo(target, { ignoreCreeps: false, range: 1 });
-            moveOK = true;
-        }
-
-        const range3hostiles = hostileCreeps.filter((hostile) => creep.pos.inRangeTo(hostile, 3));
-        if (range3hostiles.length >= 10) {
-            creep.rangedMassAttack();
-            rangedOK = true;
-        } else if (range3hostiles.filter((hostile) => creep.pos.inRangeTo(hostile, 2)).length >= 3) {
-            creep.rangedMassAttack();
-            rangedOK = true;
-        } else if (range3hostiles.filter((hostile) => creep.pos.inRangeTo(hostile, 1)).length >= 1) {
-            creep.rangedMassAttack();
-            rangedOK = true;
-        } else {
-            const range3healer = range3hostiles.find((hostile) => hostile.body.some((part) => part.type === HEAL));
-            const range3attacker = range3hostiles.find((hostile) => hostile.body.some((part) => part.type === ATTACK));
-            const range3target = range3healer || range3attacker || range3hostiles[0];
-            if (range3target) {
-                creep.rangedAttack(range3target);
-                rangedOK = true;
-            }
-        }
-    }
-
-    if (!healOK || !rangedOK || !moveOK) {
-        const injuredMyCreeps = getRoomTickCacheValue(creep.room, 'power_ranged_injured_mine', () =>
-            creep.room.find(FIND_MY_CREEPS, {
-                filter: (ally) => ally.hits < ally.hitsMax
-            }) as Creep[]
-        );
-        const myCreeps = injuredMyCreeps.filter((ally) =>
-            ally.hits < ally.hitsMax && (creep.pos.inRangeTo(ally, 3) || ally.memory.role === 'power-ranged')
-        );
-        let healTarget = myCreeps.find((ally) => creep.pos.inRangeTo(ally, 1));
-        if (healTarget) {
-            if (!healOK) creep.heal(healTarget);
-        } else if (myCreeps.length > 0) {
-            healTarget = creep.pos.findClosestByRange(myCreeps);
-            if (!healTarget) return;
-            if (!moveOK) creep.moveTo(healTarget, { ignoreCreeps: false });
-            if (!rangedOK && creep.pos.isNearTo(healTarget)) creep.rangedHeal(healTarget);
-        }
-    }
-
-    if (rangedOK || moveOK || healOK) return;
+    const acted = runRangedCombat(creep, {
+        hostilesInRange: (self) => {
+            const roomCombatHostiles = getRoomTickCacheValue(self.room, 'power_ranged_combat_hostiles', () =>
+                self.room.find(FIND_HOSTILE_CREEPS, {
+                    filter: (hostile) =>
+                        hostile.body.some((part) => part.type === HEAL || part.type === ATTACK || part.type === RANGED_ATTACK)
+                }) as Creep[]
+            );
+            return roomCombatHostiles.filter((hostile) => self.pos.inRangeTo(hostile, 8));
+        },
+        injuredAllies: (self) => {
+            const injuredMyCreeps = getRoomTickCacheValue(self.room, 'power_ranged_injured_mine', () =>
+                self.room.find(FIND_MY_CREEPS, {
+                    filter: (ally) => ally.hits < ally.hitsMax
+                }) as Creep[]
+            );
+            return injuredMyCreeps.filter((ally) =>
+                ally.hits < ally.hitsMax && (self.pos.inRangeTo(ally, 3) || ally.memory.role === 'power-ranged')
+            );
+        },
+    });
+    if (acted) return;
 
     let powerBank = creep.room.powerBank?.[0];
     if (!powerBank) {

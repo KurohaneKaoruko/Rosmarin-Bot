@@ -1,39 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-
-const resolveBoundPartner = (creep: Creep, onMissing?: () => void): Creep | null => {
-    if (!creep.memory.bind) return null;
-
-    const partner = Game.getObjectById(creep.memory.bind as Id<Creep>);
-    if (partner) return partner;
-
-    delete creep.memory.bind;
-    onMissing?.();
-    return null;
-};
-
-const tryBindNearestPartner = (
-    creep: Creep,
-    cacheKey: string,
-    filter: (candidate: Creep) => boolean
-): Creep | null => {
-    const boundPartner = resolveBoundPartner(creep);
-    if (boundPartner) return boundPartner;
-
-    const candidates = getRoomTickCacheValue(creep.room, cacheKey, () =>
-        creep.room.find(FIND_MY_CREEPS, {
-            filter: (candidate) => candidate.id !== creep.id && filter(candidate as Creep)
-        }) as Creep[]
-    );
-    const available = candidates.filter((candidate) => !candidate.memory.bind);
-    if (available.length <= 0) return null;
-
-    const partner = creep.pos.findClosestByRange(available);
-    if (!partner) return null;
-
-    creep.memory.bind = partner.id;
-    partner.memory.bind = creep.id;
-    return partner;
-};
+import { resolveBoundPartner } from '@/prototype/Creep/function/boundPartner';
 
 const runOut2Attack = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
@@ -69,42 +34,8 @@ const runOut2Attack = (creep: Creep) => {
     }
 };
 
-const runOut2Heal = (creep: Creep) => {
-    creep.disableAttackNotificationsOnce();
-
-    let healed = false;
-    if (!creep.memory.bind) {
-        tryBindNearestPartner(
-            creep,
-            'out_2heal_attackers',
-            (candidate) => candidate.memory.role === 'out-2attack'
-        );
-    }
-
-    if (creep.hits < creep.hitsMax) {
-        creep.heal(creep);
-        healed = true;
-    }
-
-    const bindcreep = resolveBoundPartner(creep);
-    if (!bindcreep) return;
-
-    if (!healed && creep.pos.isNearTo(bindcreep)) {
-        creep.heal(bindcreep);
-    } else if (!healed && creep.pos.inRangeTo(bindcreep, 3)) {
-        creep.rangedHeal(bindcreep);
-        creep.moveTo(bindcreep);
-    } else {
-        creep.moveTo(bindcreep);
-    }
-};
-
 const out2Attack = {
     run: runOut2Attack
 };
 
-const out2Heal = {
-    run: runOut2Heal
-};
-
-export { out2Attack, out2Heal };
+export { out2Attack };
