@@ -2378,6 +2378,29 @@ function hasMoveIntent(creep) {
     return cachedMoveIntents.has(creep.name);
 }
 
+/**
+ * 两只 creep 本 tick 是否「正面对穿」：互为对方移动意图的目标格。
+ *
+ * 引擎不允许两只 creep 在同一 tick 交换位置，所以这种队形到 tick 末结算时两边都走不动。
+ * 这是「谁挡着谁」最直接的判据——比任何几何推算都可靠。
+ * 外矿搬运接力用它认接头对象：并排同行、同向超越、反向相遇都天然不成立，不需要额外排除。
+ *
+ * 两侧都必须**本 tick 已经登记过**移动意图才算数（只见过一面不构成对穿）；
+ * 索引 0 是 endTickResolve 用过的「已消费」标记，按无意图处理。
+ *
+ * @param {{name: string}} a
+ * @param {{name: string}} b
+ * @returns {boolean}
+ */
+function isSwapIntent(a, b) {
+    if (!a || !b || !a.name || !b.name || a.name === b.name) return false;
+    const ia = cachedMoveIntents.get(a.name);
+    const ib = cachedMoveIntents.get(b.name);
+    if (!ia || !ib) return false;
+    // IntentTiles[idx] = 目标格，IntentTiles[idx + 1] = creep 自己脚下的格子
+    return IntentTiles[ia] === IntentTiles[ib + 1] && IntentTiles[ib] === IntentTiles[ia + 1];
+}
+
 function betterCancelOrder(methodName) {
     // 只拦截取消移动需求
     if (methodName == 'move' || methodName == 'moveTo') {
@@ -3043,6 +3066,7 @@ global.BetterMove = {
     endTickResolve,
     cancelMoveIntent,
     hasMoveIntent,
+    isSwapIntent,
     getDirection,
     direction2Pos,
     getSquadCostMatrix: function (roomName, ignoreDestructibleStructures) {
