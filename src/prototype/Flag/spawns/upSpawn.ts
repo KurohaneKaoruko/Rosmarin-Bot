@@ -29,18 +29,18 @@ export default class UpSpawnFunction extends Flag {
         const spawnMissionNum = room.getSpawnMissionNum() || {};
         // 换代感知计数：退役中（RCL8 满级 / TTL<100 进卸 boost 流程）的爬不计入在编，
         // 接替者在其退役期间就提前下单（含 boost 耗时），缩短冲级编队换代的升级空窗。
-        const active = ((getCreepByTargetRoom(room.name)['up-upgrade'] || []) as any[]).filter((c) => {
+        const active = ((getCreepByTargetRoom(room.name)['upgrader'] || []) as any[]).filter((c) => {
             if (!c || c.spawning) return false;
             if (c.room.level >= 8) return false;
             if ((c.ticksToLive ?? 1500) < 100) return false;
             return true;
         }).length;
-        const current = active + (spawnMissionNum['up-upgrade'] || 0);
+        const current = active + (spawnMissionNum['upgrader'] || 0);
         const missing = Math.max(0, target - current);
         if (missing <= 0) return true;
 
         for (let i = 0; i < missing; i++) {
-            room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { homeRoom: room.name, targetRoom: room.name, spawnFlag: flagName } as CreepMemory);
+            room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'upgrader', { homeRoom: room.name, targetRoom: room.name, spawnFlag: flagName } as CreepMemory);
         }
         return true;
     }

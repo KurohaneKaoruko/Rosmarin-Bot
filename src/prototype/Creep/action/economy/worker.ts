@@ -418,9 +418,19 @@ const getWorkerDutySplit = (room: Room): WorkerDutySplit =>
         };
     });
 
+// 职责滞回带宽：配额 ±1 的抖动不翻转边界 worker 的职责，
+// 消除「工地出现/完工 → 配额抖动 → 建造/升级来回切 → 走来走去」
+const DUTY_HYSTERESIS = 1;
+
 const isWorkerConstructionSlot = (creep: Creep, split: WorkerDutySplit): boolean => {
-    if (!split.upgradeDemand) return true;
-    if (split.quota <= 0) return false;
+    if (!split.upgradeDemand) {
+        delete (creep.memory as any).duty;   // 无升级需求 → 全员建造，职责标记清除
+        return true;
+    }
+    if (split.quota <= 0) {
+        delete (creep.memory as any).duty;   // 无建造配额 → 全员升级
+        return false;
+    }
     if (typeof creep.room.find !== 'function') return true;
 
     const roster = getRoomTickCacheValue(creep.room, 'worker_duty_roster', () =>
@@ -430,7 +440,37 @@ const isWorkerConstructionSlot = (creep: Creep, split: WorkerDutySplit): boolean
             .sort((a, b) => a.name.localeCompare(b.name))
     );
     const index = roster.findIndex((c) => c.name === creep.name);
-    return index >= 0 && index < split.quota;
+    if (index < 0) return true;
+
+    const mem = creep.memory as any;
+
+    // 粘滞职责：已有明确职责的个体优先保持，配额小幅波动不翻转
+    if (mem.duty === 'build') {
+        // 建造工：配额扩张或处于滞回带内都保持在岗，直到配额明显收缩
+        if (index < split.quota + DUTY_HYSTERESIS) {
+            mem.duty = 'build';
+            return true;
+        }
+        mem.duty = 'upgrade';
+        return false;
+    }
+    if (mem.duty === 'upgrade') {
+        // 升级工：只有名字序明确进入建造配额（有建造槽空出）才转建造
+        if (index < split.quota) {
+            mem.duty = 'build';
+            return true;
+        }
+        mem.duty = 'upgrade';
+        return false;
+    }
+
+    // 新个体 / 无记录：按名字序一次性定岗
+    if (index < split.quota) {
+        mem.duty = 'build';
+        return true;
+    }
+    mem.duty = 'upgrade';
+    return false;
 };
 
 const clearWorkerConstructionCache = (cache: WorkerCache) => {

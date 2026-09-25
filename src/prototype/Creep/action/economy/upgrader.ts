@@ -91,6 +91,10 @@ const onSource = (creep: Creep): WorkEvent => {
 
 const UpgraderFunction = {
     run(creep: Creep) {
+        // 跨房增援（AID-UUP）：目标房不在当前所在时先赶路；到位后按目标房状态干活
+        if ((creep.memory as any).targetRoom && creep.memory.targetRoom !== creep.room.name) {
+            if (!creep.moveToTargetRoom()) return;
+        }
         // 冲级模式下先把上一位留下的移动工位清掉，再交给冲级实现自己登记
         if (isRushing(creep)) {
             writeMoveWorkTileCandidates(creep, []);

@@ -13,4 +13,7 @@ interface Flag {
 
     // 房间内冲级/刷墙旗帜（UP-UPGRADE/UP-REPAIR）
     handleUpSpawnFlag(): boolean;
+
+    // 布局预览旗（layoutVisual：持续显示所在房布局）
+    handleLayoutVisualFlag(): boolean;
 }
