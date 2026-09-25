@@ -17,7 +17,7 @@ import { getEnergyLevel } from '@/shared/energyLevel';
 import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/shared/roomMode';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 import { decompress } from '@/shared/compress';
-import { getRoomData } from '@/shared/memory';
+import { getRoomData, getOutMineData } from '@/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 // —— 能量水平档位 ——
@@ -151,12 +151,6 @@ export const getDowngradeUniversalSpawnMissing = (room: Room, current: number) =
     return Math.max(0, getDowngradeUniversalTarget(room) - current);
 };
 
-// 冲级编队（up-upgrade）在场时，升级吞吐完全交给编队
-export const getRushUpgraderCount = (room: Room) => {
-    const creepNum = room.getCreepNum?.() || {};
-    const spawnMissionNum = room.getSpawnMissionNum?.() || {};
-    return (creepNum['up-upgrade'] || 0) + (spawnMissionNum['up-upgrade'] || 0);
-};
 
 // ==================== 冲级工位 ====================
 
@@ -283,6 +277,26 @@ export const getDroppedPileEnergy = (room: Room): number => {
 export const getDroppedPileWorkerBoost = (room: Room): number =>
     getDroppedPileEnergy(room) > 1500 ? 2 : 0;
 
+// 外矿房（energy + centerRoom 列表内、有视野的）掉落能量堆积计量（tick 缓存）
+export const getRemotePileEnergy = (sourceRoom: Room): number => {
+    return getRoomTickCacheValue(sourceRoom, 'remote_dropped_pile', () => {
+        if (typeof getOutMineData !== 'function') return 0;
+        const data = getOutMineData(sourceRoom.name) as Record<string, string[]> | undefined;
+        if (!data) return 0;
+        let total = 0;
+        for (const bucket of ['energy', 'centerRoom'] as const) {
+            for (const roomName of data[bucket] || []) {
+                const room = Game.rooms[roomName];
+                if (!room || typeof room.find !== 'function') continue;
+                for (const res of room.find(FIND_DROPPED_RESOURCES) as Resource[]) {
+                    if (res && res.resourceType === RESOURCE_ENERGY && res.amount >= 100) total += res.amount;
+                }
+            }
+        }
+        return total;
+    });
+};
+
 // 升级吞吐上限：RCL8 固定 15；有控制器缓冲 90；无缓冲（需往返主仓）30
 export const getUpgradeWorkCapacity = (room: Room): number => {
     const controller = room.controller;
@@ -306,7 +320,7 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     if ((room.memory as any).defend) return 0;
     if (getDowngradeUniversalTarget(room) > 0) return 0;
     if (shouldDelayUpgraderForPrimaryBuild(room)) return 0;
-    if (getRushUpgraderCount(room) > 0) return 0;
+    
 
     const capacity = getUpgradeWorkCapacity(room);
     if (capacity <= 0) return 0;
@@ -352,6 +366,15 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 
     // —— 地面堆积项：每 2000 点掉落能量折算 1 个升级 work，直接消化地上存货 ——
     const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
+
+    // —— rush 冲级：不节流——收入 + 地面堆积（本房 + 外矿房）全额折算，
+    //    容量放宽到控制器周边站位；能量堆积就是「消耗端不足」的直接信号 ——
+    if (getRoomMode(room) === 'rush') {
+        const pileAll = getDroppedPileEnergy(room) + getRemotePileEnergy(room);
+        const rushWork = Math.ceil(scaledIncome + pileAll / 2000);
+        const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
+        return Math.max(lowerLimit, Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
+    }
 
     return Math.max(lowerLimit, Math.min(capacity, Math.max(incomeWork, surplusWork, pileWork)));
 };
@@ -607,7 +630,7 @@ export const getWorkerWallTarget = (room: Room): number => {
  * | high | 按升级 work 目标折算 | 1 | 1 |
  * | rush | —（见左） | 按升级 work 目标折算 | 2 |
  *
- * - 「冲级」= 房间模式为 `rush`，或玩家用旗帜手动开了旧冲级编队（`up-upgrade` 在场）。
+ * - 「冲级」= 房间模式为 `rush`，或玩家用旗帜手动开了旧冲级编队。
  *   后者是**手动开关**：编队已经在干升级，普通升级工只在 `high` 保留 1 只减轻 worker 负担。
  * - 布局支持与否由 {@link canRushUpgrade} 自动判定（控制器旁仓库旁边有没有可站格位）；
  *   布局不支持时**不回退行为也不加倍**，而是缩编成少量普通升级工。
@@ -621,9 +644,7 @@ export const getUpgraderTarget = (room: Room): number => {
     const mode = getRoomMode(room);
 
     // 手动开关：旧冲级编队已经在承担升级吞吐
-    if (getRushUpgraderCount(room) > 0) {
-        return mode === 'high' && room.level < 8 ? 1 : 0;
-    }
+    
 
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
@@ -634,8 +655,9 @@ export const getUpgraderTarget = (room: Room): number => {
         // 满级房冲级爬一孵出来就会走退役流程（见 up-upgrade 的 shouldRetire），别再下单
         if (room.level >= 8) return 0;
         if (canRushUpgrade(room)) {
-            // 冲级：编制跟着实际升级 work 需求走，受冲级工位上限约束
-            return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, getRushUpgradeSlotCap(room)));
+            // 冲级：编制跟着实际升级 work 需求走；站位上限放宽到控制器周边全部可站格
+            const rushCap = Math.max(getRushUpgradeSlotCap(room), getControllerUpgradeSlotCap(room));
+            return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, rushCap));
         }
         // 布局不支持冲级：回退成普通升级工，编制缩小
         return 2;
@@ -663,6 +685,9 @@ export const getUpgraderTarget = (room: Room): number => {
  * worker 就能把人口留给建造与刷墙（这就是「减轻 worker 负担」的落地）。
  */
 export const getWorkerUpgradeTarget = (room: Room): number => {
+    // rush 模式：升级整体交给专人 upgrader（冲级工位），worker 只负责建造/刷墙；
+    // 没有建造任务时，存活的 worker 仍可在行为层兜底升级（不占定编）。
+    if (getRoomMode(room) === 'rush') return 0;
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
 

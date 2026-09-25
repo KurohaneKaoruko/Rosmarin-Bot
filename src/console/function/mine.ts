@@ -81,8 +81,13 @@ function getNearbyRooms(sourceRoom: string, range = 1): string[] {
 // 外矿设置
 export default {
     mine: {
-        add(sourceRoom: string, targetRoom: string) {
-            return addOutMineTarget(sourceRoom, targetRoom) === -1 ? -1 : OK;
+        add(sourceRoom: string, ...targetRooms: string[]) {
+            if (!sourceRoom || targetRooms.length === 0) return -1;
+            let hadError = false;
+            for (const targetRoom of targetRooms) {
+                if (addOutMineTarget(sourceRoom, targetRoom) === -1) hadError = true;
+            }
+            return hadError ? -1 : OK;
         },
         // 批量添加周围外矿
         addarea(sourceRoom: string, range: number = 1) {

@@ -657,6 +657,11 @@ const outCarry: OutCarryAction = {
             return;
         }
 
+        // 兜底拾取链只允许在【目标外矿房】运行：
+        // 在母房/途经房拾取会倒腾 home storage/source 的能量——
+        // collect 拿了 deliver 又放回，形成「拿了又放」的死循环。
+        if (creep.room.name !== creep.memory.targetRoom) return;
+
         const droppedPickupThreshold = Math.min(500, creep.store.getCapacity());
         if (creep.collectDroppedResource(undefined, droppedPickupThreshold)) return;
         if (creep.collectFromTombstone(undefined, 0)) return;

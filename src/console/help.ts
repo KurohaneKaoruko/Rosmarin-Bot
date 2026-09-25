@@ -173,7 +173,7 @@ const helpTexts: Record<string, string> = {
     helpMine: [
         title('⛏️', '外矿指令列表'),
         line(),
-        `${cmd('mine.add(sourceRoom, targetRoom)')}：添加外矿房间`,
+        `${cmd('mine.add(sourceRoom, ...targetRoom)')}：添加外矿房间（支持一次多个目标）`,
         `- 普通房间：添加到 energy 列表`,
         `- 过道房间：添加到 highway 监控列表`,
         `- 中间房间：添加到 centerRoom 采矿列表`,
@@ -337,7 +337,7 @@ const helpTexts: Record<string, string> = {
         sub('🆘', '援助/占领（aidSpawn）'),
         `- ${cmd('AID-BUILD/<孵化房>/S-来源房?/B-boost?/T-间隔')}：孵化 aid-build`,
         `- ${cmd('AID-UPGRADE/<孵化房>/B-boost?/T-间隔')}：孵化 aid-upgrade`,
-        `- ${cmd('AID-UUP/<孵化房>/T-间隔')}：孵化 up-upgrade（远程冲级；本地请用 UP-UPGRADE）`,
+        `- ${cmd('AID-UUP/<孵化房>/T-间隔')}：孵化 rush 强化版 upgrader（远程冲级；本地请用 UP-UPGRADE）`,
         `- ${cmd('AID-ENERGY/<孵化房>/B-(T3|BIG)?/T-间隔')}：孵化 aid-carry 运能`,
         `- ${cmd('JUMP/<孵化房>/B-建造/E-能量/PB-后续建造')}：占领+援建一体化流程（完成起房自动收尾）`,
         `- JUMP 参数：B=占领前建造数量；PB=占领后建造数量；E=占领前准备能量（默认 B=4，PB=B，E=3000）`,

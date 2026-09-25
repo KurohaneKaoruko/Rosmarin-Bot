@@ -89,7 +89,7 @@ export const RoleData = {
         level: 11,
         code: 'UUP',
         executor: 'up-upgrade',
-    }, // 加速升级
+    }, // 加速升级（跨房 AID-UUP）
     'up-repair': {
         bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]],
         level: 11,

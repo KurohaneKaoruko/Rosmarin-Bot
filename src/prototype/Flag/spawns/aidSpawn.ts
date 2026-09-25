@@ -170,12 +170,29 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'up-upgrade',
+            'aid-upgrade',
             (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
-        room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'up-upgrade', { homeRoom: room.name, targetRoom, spawnFlag: flagName } as CreepMemory);
+        // 大体型冲级 upgrader（50 部件）+ boost 任务接线（同 aid-build 模式：资源足则由 BoostMission 灌 lab）
+        const bodys = room.GetRoleBodys('aid-upgrade');
+        const boostmap: Record<string, MineralBoostConstant[]> = { [WORK]: ['XGH2O', 'GH2O', 'GH'] };
+        const memory: CreepMemory = {
+            homeRoom: room.name,
+            targetRoom,
+            spawnFlag: flagName,
+            aidRush: true,
+        } as CreepMemory;
+
+        if (bodys?.length && room.CheckBoostRes(bodys, boostmap)) {
+            const ownerId = `${flagName}:${Game.time}`;
+            room.AssignBoostTaskByBody(bodys, boostmap, ownerId);
+            (memory as any).boostmap = boostmap;
+            (memory as any).boostOwnerId = ownerId;
+        }
+
+        room.SpawnMissionAdd('', compressBodyConfig(bodys ?? []), -1, 'aid-upgrade', memory);
         return true;
     }
 
