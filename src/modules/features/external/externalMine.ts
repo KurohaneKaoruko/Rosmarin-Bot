@@ -1,4 +1,7 @@
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+
+// 各外矿房最后已知源数（有视野时刷新）：无视野补采集工时按它补给，防外矿停摆
+const lastKnownSourceNum = new Map<string, number>();
 import { isRoomTickAligned } from '@/shared/roomPhase';
 import { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
 import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
@@ -1598,8 +1601,10 @@ class ExternalMineSpawner {
     }
 
     // 外矿采集者：根据源数、站位上限与 body 配置决定目标数量。
-    static harvester(sourceRoom: Room, targetRoom: Room, sourceNum: number, upbody?: boolean): boolean {
-        const slotCap = ExternalMineMath.getOutHarvesterSlotCap(targetRoom);
+    static harvester(sourceRoom: Room, targetRoom: Room | undefined, sourceNum: number, upbody?: boolean): boolean {
+        // 目标房无视野时站位上限不可测：退回「源数 × 每源编制」补给，
+        // 绝不因视野丢失而停发采集工（否则外矿一次视野间隙就整体停摆）。
+        const slotCap = targetRoom ? ExternalMineMath.getOutHarvesterSlotCap(targetRoom) : undefined;
         const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap);
         if (targetNum <= 0) return false;
 
@@ -1845,6 +1850,9 @@ export class ExternalMine {
                 if (runState.canRunSecondaryAction) {
                     ExternalMineSpawner.scout(room, roomName);
                 }
+                // 无视野也必须补采集工（按最后已知源数，缺省 2）：否则采集工死光 → 视野丢失 →
+                // 永远不再补位，外矿整体停摆。
+                ExternalMineSpawner.harvester(room, undefined, lastKnownSourceNum.get(roomName) ?? 2);
                 continue;
             }
 
@@ -1852,6 +1860,7 @@ export class ExternalMine {
 
             const sourceNum = targetRoom.source?.length || targetRoom.find(FIND_SOURCES).length || 0;
             if (sourceNum === 0) continue;
+            lastKnownSourceNum.set(roomName, sourceNum);
 
             // CPU 桶闭环（Tier 1-3）：桶紧张时按性价比挂起低分外矿
             const activeThreshold = getActiveRemoteThreshold();
