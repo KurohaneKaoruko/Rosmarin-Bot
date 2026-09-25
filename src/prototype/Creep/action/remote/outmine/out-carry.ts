@@ -705,16 +705,21 @@ const outCarry: OutCarryAction = {
             return;
         }
 
+        // 无能量可取：保持与 source 的待机距离（8 格），别堵在源头挤采集工的容器和站位
         const nearestSource = creep.pos.findClosestByRange(FIND_SOURCES);
-        if (nearestSource) {
-            moveOutCarryTo(creep, nearestSource, {
-                ignoreCreeps: false,
-                range: 3,
-                maxRooms: 1,
-                plainCost: 2,
-                swampCost: 10
-            }, true);
+        if (nearestSource && creep.pos.getRangeTo(nearestSource) < 8) {
+            const dx = Math.sign(creep.pos.x - nearestSource.pos.x) || 1;
+            const dy = Math.sign(creep.pos.y - nearestSource.pos.y);
+            const away = new RoomPosition(
+                Math.max(2, Math.min(48, creep.pos.x + dx * 8)),
+                Math.max(2, Math.min(48, creep.pos.y + dy * 8)),
+                creep.pos.roomName
+            );
+            moveOutCarryTo(creep, away, { range: 2, maxRooms: 1, plainCost: 2, swampCost: 10 });
+            return;
         }
+        // 待机位上：短待机等容器有货（期间顺手捡脚边掉落）
+        cache.waitUntil = Game.time + 3;
     },
 
     /**
