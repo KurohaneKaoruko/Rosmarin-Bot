@@ -57,6 +57,8 @@ const RELAY_MIN_TTL = 50;
  * 写在 memory 里的记录会随交换易主、换手一次就被抹掉（实测冷却会完全失效）。
  */
 const RELAY_PAIR_COOLDOWN_TICKS = 6;
+/** 方向锁硬上限：超过这个 tick 数还没卸货/取货，交回常规判定 */
+const RELAY_DIR_MAX_TICKS = 50;
 const RELAY_MARK = 'relayedTick';
 const RELAY_SELF_MARK = 'relayedSelfTick';
 const RELAY_DIR_MARK = 'relayDir';
@@ -190,9 +192,20 @@ export const setRelayDirection = (creep: Creep, dir: 'collect' | 'deliver'): voi
  */
 export const readRelayDirection = (creep: Creep): 'collect' | 'deliver' | undefined => {
     const mem = getCreepMem(creep);
-    if (!mem || mem[RELAY_DIR_TICK_MARK] !== Game.time) return undefined;
+    if (!mem) return undefined;
     const dir = mem[RELAY_DIR_MARK];
-    return dir === 'collect' || dir === 'deliver' ? dir : undefined;
+    if (dir !== 'collect' && dir !== 'deliver') return undefined;
+    // 硬上限：锁最长 50t，超时交回常规判定
+    const age = Game.time - (mem[RELAY_DIR_TICK_MARK] || 0);
+    if (age > RELAY_DIR_MAX_TICKS) return undefined;
+    // 交接当 tick（age=0）：store 读到的还是交接前快照，载荷判不出新身份，锁无条件有效——
+    // 这正是「当 tick 掉头、货物单 tick 前进两格」的机制本体。
+    if (age === 0) return dir;
+    // 之后载荷已是真值：按载荷自校验（deliver 卸货即失效；collect 取货即失效），
+    // 小批整仓交接因此不会被滞回规则原路背回外矿。
+    if (dir === 'deliver' && creep.store.getUsedCapacity() <= 0) return undefined;
+    if (dir === 'collect' && creep.store.getUsedCapacity() > 0) return undefined;
+    return dir;
 };
 
 // 清掉 creep 本 tick 已登记的移动意图（兼容 BetterMove 延迟结算）。
@@ -279,24 +292,20 @@ const planRelay = (creep: Creep, partner: Creep): RelayPlan | null => {
     ) as ResourceConstant | undefined;
     if (!resourceType) return null;
 
-    const capacity = supplier.store.getCapacity();
-    if (capacity <= 0 || fetcher.store.getCapacity() !== capacity) return null;
+    // 跨体型接力：换代期大小体型并存，同容量硬性要求会让跨体型相遇永远对穿不接。
+    // 半仓线按【接收方】自身容量折算——被一次填满本身就意味着返程，
+    // 半仓线只约束「整仓交空但接收方装不满」的情形。
+    const fetcherCapacity = fetcher.store.getCapacity();
+    if (fetcherCapacity <= 0) return null;
 
     const supplierUsed = supplier.store.getUsedCapacity(resourceType);
     const amount = Math.min(supplierUsed, fetcher.store.getFreeCapacity());
     if (amount <= 0) return null;
 
-    // 交接量由「谁被端到边界」决定，两种结局都让接收方落在确定的返程侧：
-    // - 整仓交空：接收方接管全部货物——但它必须够半仓，否则会被滞回规则判成外出，
-    //   把刚接到的能量原路背回外矿（这是接力最典型的传递错误，直接不做）；
-    // - 填满接收方：接收方满载，滞回规则必然判成返程，无需求助半仓线；
-    //   供给方剩下的余量无论多少都无害——不够半仓时它掉头回外矿补货，正是它该做的事。
-    const halfLoad = Math.ceil(capacity * OUT_CARRY_HALF_LOAD_RATIO);
+    // 整仓交空不再要求「够半仓」：方向锁自带自校验（deliver 锁卸货即失效、
+    // collect 锁取货即失效），小批货交接后会被锁护着直达母房，
+    // 不会被滞回规则原路背回外矿。拒绝交接的代价是对穿，比背回更糟。
     const fullHandoff = amount >= supplierUsed;
-    if (fullHandoff) {
-        const fetcherAfter = fetcher.store.getUsedCapacity(resourceType) + amount;
-        if (fetcherAfter < halfLoad) return null;
-    }
 
     return { partner, supplier, fetcher, resourceType, amount, fullHandoff };
 };
@@ -373,10 +382,7 @@ export const tryOutCarryRelayHandoff = (creep: Creep): boolean => {
     const targetRoom = creep.memory.targetRoom;
     if (!mem || !sourceRoom || !targetRoom) return false;
 
-    const capacity = creep.store.getCapacity();
-    if (capacity <= 0) return false;
-
-    // 相邻的同角色搬运者：同路线、同容量、TTL 达标、本 tick 未接力、不在房间边缘
+    // 相邻的同角色搬运者：同路线、TTL 达标、本 tick 未接力、不在房间边缘（体型不限，支持跨体型接力）
     const partners = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
         filter: (other: Creep) =>
             other.id !== creep.id &&
@@ -385,7 +391,6 @@ export const tryOutCarryRelayHandoff = (creep: Creep): boolean => {
             other.memory.targetRoom === targetRoom &&
             isRelayableHauler(other) &&
             !other.pos.isRoomEdge() &&
-            other.store.getCapacity() === capacity &&
             !hasRelayedThisTick(other) &&
             !isPairCoolingDown(other.name, creep.name),
     }) as Creep[];

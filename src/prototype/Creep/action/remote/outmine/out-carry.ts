@@ -229,9 +229,14 @@ const moveOutCarryTo = (
 const moveOutCarryToRoom = (
     creep: Creep,
     roomName: string,
-    opts?: Record<string, any>
+    opts?: Record<string, any>,
+    allowRelay = false
 ) => {
-    return creep.moveToRoom(roomName, opts);
+    const result = creep.moveToRoom(roomName, opts);
+    if (allowRelay && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
+        return OK;
+    }
+    return result;
 };
 
 const outCarry: OutCarryAction = {
@@ -542,7 +547,7 @@ const outCarry: OutCarryAction = {
 
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             if (this.moveAlongRouteExit(creep, creep.memory.targetRoom, true)) return;
-            moveOutCarryToRoom(creep, creep.memory.targetRoom, { plainCost: 2, swampCost: 10 });
+            moveOutCarryToRoom(creep, creep.memory.targetRoom, { plainCost: 2, swampCost: 10 }, true);
             return;
         }
 
@@ -730,7 +735,7 @@ const outCarry: OutCarryAction = {
                 // 返程途中允许接头：先走一步登记意图，接不上就照常移动
                 if (this.moveAlongRouteExit(creep, sourceRoom, true)) return;
             }
-            moveOutCarryToRoom(creep, sourceRoom, { plainCost: 2, swampCost: 10 });
+            moveOutCarryToRoom(creep, sourceRoom, { plainCost: 2, swampCost: 10 }, true);
             return;
         }
 
