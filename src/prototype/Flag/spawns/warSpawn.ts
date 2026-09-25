@@ -3,6 +3,9 @@ import { log } from "@/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 
+/** 战争族旗前缀（新增战争旗在此加一行即可） */
+const WAR_FLAG_PREFIXES = ['AIO/', 'CLEAN/', 'ACLAIM/', 'DIS/', 'LOOT/'] as const;
+
 type SpawnMemoryMatcher = (memory: any) => boolean;
 
 const matchesFlagSpawnMemory = (
@@ -48,7 +51,9 @@ const getFlagSpawnLoad = (
 export default class WarSpawnFunction extends Flag {
     handleWarSpawnFlag(): boolean {
         const flagName = this.name
-        if (Game.time % 10) return true
+        // 战争族旗共享 10t 节流（每旗独立计时）；非战争旗直接放行，不劫持旗链
+        if (!WAR_FLAG_PREFIXES.some(p => flagName.startsWith(p))) return false
+        if (!tickThrottle(this, 10, 'warScanTick')) return true
         if (flagName.startsWith('AIO/')) return this.handleAioFlag(flagName)
         if (flagName.startsWith('CLEAN/')) return this.handleCleanFlag(flagName)
         if (flagName.startsWith('ACLAIM/')) return this.handleAttackClaimFlag(flagName)

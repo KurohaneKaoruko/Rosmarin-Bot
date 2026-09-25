@@ -46,8 +46,11 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
     handleAidSpawnFlag(): boolean {
         const flagName = this.name;
         if (flagName.startsWith('JUMP/') || flagName.startsWith('AID-JUMP/')) return this.handleJumpFlag(flagName);
-        // 节流：普通援助旗每 10 tick 扫描一次，减少 CPU 开销
-        if (Game.time % 10) return true;
+        // 节流只作用于援助族旗自身：非援助旗必须放行到后续处理器（否则整条旗链被 90% 的 tick 掐断）
+        const isAidFlag = /^(AID-BUILD\/|AID-UPGRADE\/|AID-UUP\/|AID-ENERGY\/|CLAIM\/|RESERVE\/)/.test(flagName);
+        if (!isAidFlag) return false;
+        // 节流：援助旗每 10 tick 扫描一次（每旗独立计时），减少 CPU 开销
+        if (!tickThrottle(this, 10, 'aidScanTick')) return true;
         if (flagName.startsWith('AID-BUILD/')) return this.handleAidBuildFlag(flagName);
         if (flagName.startsWith('AID-UPGRADE/')) return this.handleAidUpgradeFlag(flagName);
         if (flagName.startsWith('AID-UUP/')) return this.handleAidUupFlag(flagName);
