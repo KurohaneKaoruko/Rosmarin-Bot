@@ -996,6 +996,51 @@ const runOutCarryMode = (creep: Creep, mode: OutCarryMode) => {
     runModeCycle(creep);
 };
 
+// 拥堵疏散：同路线搬运工在原地连续 6t 未挪动且身边扎堆（≥2 只同角色）时，
+// 取消本 tick 移动意图、朝「人数最少」的相邻可站格挪一步——先解结，下 tick 恢复正常行进。
+const easeCorridorJam = (creep: Creep): void => {
+    const cache = getOutCarryCache(creep);
+    const posKey = creep.pos.x * 50 + creep.pos.y;
+    if (cache.jamKey !== posKey) {
+        cache.jamKey = posKey;
+        cache.jamSince = Game.time;
+        return;
+    }
+    if (Game.time - (cache.jamSince || Game.time) < 6) return;
+
+    const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+        filter: (o: Creep) => o.id !== creep.id && o.memory.role === creep.memory.role
+    }) as Creep[];
+    if (crowd.length < 2) {
+        cache.jamSince = Game.time;
+        return;
+    }
+
+    let best: RoomPosition | null = null;
+    let bestCount = Infinity;
+    for (let dx = -1; dx <= 1; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+            const x = creep.pos.x + dx;
+            const y = creep.pos.y + dy;
+            if (x < 1 || x > 48 || y < 1 || y > 48) continue;   // 不往房间边缘挤
+            if (x === creep.pos.x && y === creep.pos.y) continue;
+            const pos = new RoomPosition(x, y, creep.pos.roomName);
+            if (pos.lookFor(LOOK_TERRAIN)[0] === 'wall') continue;
+            const count = pos.lookFor(LOOK_CREEPS).length;
+            if (count < bestCount) {
+                bestCount = count;
+                best = pos;
+            }
+        }
+    }
+    if (best) {
+        const betterMove = (global as any).BetterMove;
+        betterMove?.cancelMoveIntent?.(creep);
+        cache.jamSince = Game.time;
+        creep.moveTo(best, { range: 0 });
+    }
+};
+
 const runModeCycle = (creep: Creep): void => {
     const cache = getOutCarryCache(creep);
     const previousMode = cache.outCarryMode as OutCarryMode | undefined;
@@ -1017,6 +1062,7 @@ const runModeCycle = (creep: Creep): void => {
     }
     cache.outCarryMode = mode;
 
+    easeCorridorJam(creep);
     runOutCarryMode(creep, mode);
 };
 
