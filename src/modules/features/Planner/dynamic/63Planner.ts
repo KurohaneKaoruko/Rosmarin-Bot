@@ -6,20 +6,37 @@ import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual'
 
 const minPlaneCnt = 140;
 
-let visited = new RoomArray();
-let roomWalkable = new RoomArray();
-let nearWall = new RoomArray();
-let routeDistance = new RoomArray();
-let roomObjectCache = new RoomArray();
+// 惰性初始化：这些结构含 WASM 实例化与 2500 格数组，模块加载即建会在 CPU 有限的服务器上
+// 触发「上传代码 → 初始化超时 → 丢弃 → 重来」的启动死循环。改为首次使用时构建。
+let visited = null;
+let roomWalkable = null;
+let nearWall = null;
+let routeDistance = null;
+let roomObjectCache = null;
 
-let nearWallWithInterpolation = new RoomArray();
-let interpolation = new RoomArray();
+let nearWallWithInterpolation = null;
+let interpolation = null;
 
-let queMin = new PriorityQueue(true);
-let queMin2 = new PriorityQueue(true);
-let startPoint = new PriorityQueue(true);
+let queMin = null;
+let queMin2 = null;
+let startPoint = null;
 
-let unionFind = new UnionFind(50 * 50);
+let unionFind = null;
+
+export function ensurePlannerState() {
+    if (visited) return;
+    visited = new RoomArray();
+    roomWalkable = new RoomArray();
+    nearWall = new RoomArray();
+    routeDistance = new RoomArray();
+    roomObjectCache = new RoomArray();
+    nearWallWithInterpolation = new RoomArray();
+    interpolation = new RoomArray();
+    queMin = new PriorityQueue(true);
+    queMin2 = new PriorityQueue(true);
+    startPoint = new PriorityQueue(true);
+    unionFind = new UnionFind(50 * 50);
+}
 
 /**
  * controller mineral source posList
@@ -83,6 +100,7 @@ const ManagerPlanner = {
 	},
 
 	createObjects() {
+        ensurePlannerState();
 		if (!visited) visited = new RoomArray();
 		if (!roomWalkable) roomWalkable = new RoomArray();
 		if (!nearWall) nearWall = new RoomArray();
@@ -100,6 +118,7 @@ const ManagerPlanner = {
 	 * 优化不动了
 	 */
 	getBlockPutAbleCnt(roomWalkable, visited, queMin, unionFind, tarRoot, putAbleCacheMap, AllCacheMap) {
+        ensurePlannerState();
 		if (putAbleCacheMap[tarRoot]) return [putAbleCacheMap[tarRoot], AllCacheMap[tarRoot]];
 		// let t = Game.cpu.getUsed() //这很吃性能，但是是必须的
 		const roomManor = routeDistance;
@@ -209,6 +228,7 @@ const ManagerPlanner = {
 	 * @param roomName
 	 */
 	computeBlock(roomName, blocked?) {
+        ensurePlannerState();
 		ManagerPlanner.createObjects();
 		const visual = new RoomVisual(roomName);
 
@@ -579,6 +599,7 @@ const ManagerPlanner = {
 	 * @return result { roomName:roomName,storagePos:{x,y},labPos:{x,y},structMap:{ "rampart" : [[x1,y1],[x2,y2] ...] ...} }
 	 */
 	computeManor(roomName, points, fixedCenter?, blocked?) {
+        ensurePlannerState();
 		ManagerPlanner.init();
 		for (const p of points) {
 			if (p && p.roomName == roomName) objects.push(p);
