@@ -243,6 +243,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     // 这里只负责把缺口补齐，不重复任何策略判断。
     'upgrader': (room: Room, current: number) => {
         if (Memory['warmode']) return false;
+        // 能量储备闸：spawn/extension 里的能量必须留足房间运作底仓（≈两次基础孵化），
+        // 只用盈余孵升级工——rush 冲级也不许把开局能量无脑烧光。
+        if (room.energyAvailable < room.energyCapacityAvailable * 0.6 && room.energyAvailable < 800) return false;
         return current < getUpgraderTarget(room);
     },
     'miner': (room: Room, current: number) => {
