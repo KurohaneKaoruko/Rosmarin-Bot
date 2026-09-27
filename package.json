@@ -53,7 +53,7 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild", "@screeps/driver", "screeps", "isolated-vm"
     ],
     "overrides": {
       "axios": "0.30.3",

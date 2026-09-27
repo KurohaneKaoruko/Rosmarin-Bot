@@ -114,6 +114,8 @@ const helpTexts: Record<string, string> = {
         `- 指定布局为 scorpior：将使用 scorpior 动态布局`,
         `- 无房间视野：需要设置 flag：pc（控制器）、pm（矿）、pa/pb（能量源）`,
         `${cmd('layout.visual(roomName, layout?)')}：显示布局可视化`,
+        `- 持续预览：插名为 layoutVisual 的旗到目标房，每 tick 自动重绘（拔旗即停）；辅助规划旗：pc/pm/pa/pb/centerPos/storagePos`,
+        `${cmd('ALL/stats 或 房间名/stats')}：房间数据 HUD（CPU/Bucket/GCL/GPL/RCL/能量/市场/creep 数；拔旗即停）`,
         `${cmd('layout.save(roomName, struct?)')}：将房间建筑保存到布局 Memory`,
         `${cmd('layout.site(roomName, structType?)')}：根据布局 Memory 一键放满工地（到结构上限/工地上限）`,
         `${cmd('layout.ramhits(roomName)')}：查看 rampart 最小/最大血量`,

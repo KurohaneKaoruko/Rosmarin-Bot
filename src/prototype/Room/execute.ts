@@ -1,6 +1,7 @@
 import { getRoomData, getStructData } from '@/shared/memory';
 import { isRoomTickAligned } from '@/shared/roomPhase';
-import { getRoomModeProfile } from '@/shared/roomMode';
+import { getRoomMode, getRoomModeProfile } from '@/shared/roomMode';
+import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -43,6 +44,11 @@ export default class RoomExecute extends Room {
             this.autoPower();        // 自动Power处理
         }
         if (profile.remoteMining) this.outMine();          // 外矿采集（low 关闭）
+
+        // rush 冲级特殊机制：spawn 贴控制器时 source 旁补 ext + 自爆拉能（有 link 自动停）
+        if (getRoomMode(this) === 'rush') rushBoost(this);
+        // spawn 错位重建：建完第二个 spawn 后，把不在布局位的旧 spawn 拆到布局位（所有模式）
+        if (isRoomTickAligned(this.name, 60)) relocateOldSpawn(this);
 
         // 显示防御cost矩阵
         if (profile.defenseCostMatrix) this.showDefenseCostMatrix();

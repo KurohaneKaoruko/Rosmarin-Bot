@@ -161,7 +161,9 @@ const resolveTransferTarget = (creep: Creep, cache: UniversalTargetCache) => {
     return { target: picked.target, kind: picked.kind };
 };
 
-const runWorkTasks = (creep: Creep, urgent: boolean, forceUpgrade: boolean) => {
+const runWorkTasks = (creep: Creep) => {
+    const urgent = isUrgentRefill(creep.room);
+    const forceUpgrade = shouldForceUpgrade(creep.room);
     const cache = getUniversalTargetCache(creep);
 
     if (forceUpgrade) {
@@ -219,20 +221,24 @@ const runWorkTasks = (creep: Creep, urgent: boolean, forceUpgrade: boolean) => {
     creep.runControllerUpgrade({ pickupDropped: false });
 };
 
-const getMinWorkPayload = (cap: number, urgent: boolean, forceUpgrade: boolean) => {
-    return forceUpgrade
-        ? 1
-        : urgent
-            ? Math.min(cap, Math.max(50, Math.floor(cap * 0.5)))
-            : cap;
+// 填充目标（需要能量的 spawn/tower）是否就在身旁一步：
+// 是 → 无需移动即可交付，允许带着部分载荷直接进入工作态（边交边采，互不阻塞）
+const hasAdjacentFillTarget = (creep: Creep): boolean => {
+    return !!creep.pos.findClosestByRange(FIND_MY_STRUCTURES, {
+        filter: (s: AnyStoreStructure) =>
+            (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_TOWER) &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+    });
 };
 
-const shouldGatherBeforeWork = (creep: Creep, urgent: boolean, forceUpgrade: boolean) => {
-    const used = creep.store.getUsedCapacity();
-    const free = creep.store.getFreeCapacity();
-    const cap = creep.store.getCapacity();
-    const minWorkPayload = getMinWorkPayload(cap, urgent, forceUpgrade);
-    return used === 0 || (free > 0 && used < minWorkPayload);
+/**
+ * 是否继续采集：**无条件采满才切工作态**——不存在任何「紧急提前切换」的例外。
+ * 唯一例外：需能的 spawn/tower 就在身旁（一步不用动），此时带着部分载荷直接交付，
+ * 且交付不阻塞采集——身旁有源就原地边采边交。
+ */
+const shouldGatherBeforeWork = (creep: Creep): boolean => {
+    if (creep.store.getFreeCapacity() <= 0) return false;   // 满载 → 工作
+    return !hasAdjacentFillTarget(creep);                   // 身旁无填充目标 → 继续采满
 };
 
 // 通用机不再走“管道框架”，直接按顺序执行 Screeps 场景所需的判断。
@@ -241,10 +247,8 @@ const runUniversal = (creep: Creep) => {
     if (creep.handleRoomEdge()) return;
 
     delete creep.memory.working;
-    const urgent = isUrgentRefill(creep.room);
-    const forceUpgrade = shouldForceUpgrade(creep.room);
 
-    if (shouldGatherBeforeWork(creep, urgent, forceUpgrade)) {
+    if (shouldGatherBeforeWork(creep)) {
         getEnergy(creep);
         return;
     }
@@ -252,7 +256,7 @@ const runUniversal = (creep: Creep) => {
     if (creep.memory.targetSourceId) {
         delete creep.memory.targetSourceId;
     }
-    runWorkTasks(creep, urgent, forceUpgrade);
+    runWorkTasks(creep);
 };
 
 const UniversalFunction = {
