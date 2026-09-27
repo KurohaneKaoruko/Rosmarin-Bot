@@ -1601,7 +1601,7 @@ class ExternalMineSpawner {
     }
 
     // 外矿采集者：根据源数、站位上限与 body 配置决定目标数量。
-    static harvester(sourceRoom: Room, targetRoom: Room | undefined, sourceNum: number, upbody?: boolean): boolean {
+    static harvester(sourceRoom: Room, targetRoomName: string, targetRoom: Room | undefined, sourceNum: number, upbody?: boolean): boolean {
         // 目标房无视野时站位上限不可测：退回「源数 × 每源编制」补给，
         // 绝不因视野丢失而停发采集工（否则外矿一次视野间隙就整体停摆）。
         const slotCap = targetRoom ? ExternalMineMath.getOutHarvesterSlotCap(targetRoom) : undefined;
@@ -1611,15 +1611,15 @@ class ExternalMineSpawner {
         // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
         // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
         // spawnInAdvance：快死的采集者不计入覆盖——接替者提前孵化，外矿不断档
-        const globalEffective = this.getEffectiveOutHarvesterNum(sourceRoom, targetRoom.name);
-        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-        const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+        const globalEffective = this.getEffectiveOutHarvesterNum(sourceRoom, targetRoomName);
+        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoomName);
+        const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoomName);
         if (globalEffective + globalQueued + globalSpawning >= targetNum) return false;
         if (slotCap > 0) {
             if (globalEffective + globalQueued + globalSpawning >= slotCap) return false;
         }
 
-        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
+        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoomName);
         if (upbody) {
             sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], this.PRIORITY.harvest, 'out-harvest', memory);
         } else {
@@ -1852,7 +1852,7 @@ export class ExternalMine {
                 }
                 // 无视野也必须补采集工（按最后已知源数，缺省 2）：否则采集工死光 → 视野丢失 →
                 // 永远不再补位，外矿整体停摆。
-                ExternalMineSpawner.harvester(room, undefined, lastKnownSourceNum.get(roomName) ?? 2);
+                ExternalMineSpawner.harvester(room, roomName, undefined, lastKnownSourceNum.get(roomName) ?? 2);
                 continue;
             }
 
@@ -1905,7 +1905,7 @@ export class ExternalMine {
             if (controller.reservation &&
                 controller.reservation.username !== myUserName) continue;
 
-            ExternalMineSpawner.harvester(room, targetRoom, sourceNum);
+            ExternalMineSpawner.harvester(room, roomName, targetRoom, sourceNum);
 
             const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
             const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, false, carryCapacity);
@@ -1962,7 +1962,7 @@ export class ExternalMine {
                 const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
                 if (stat.score < activeThresholdCenter) continue;
             }
-            ExternalMineSpawner.harvester(room, targetRoom, sourceNum, true);
+            ExternalMineSpawner.harvester(room, roomName, targetRoom, sourceNum, true);
 
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];
             if (mineral && mineral.mineralAmount > 0) {
