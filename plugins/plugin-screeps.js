@@ -114,6 +114,8 @@ function formatScreepsUploadError(err, { endpoint, branch, usingToken }) {
 }
 // 上传编译后的代码到 Screeps 服务器
 async function uploadSource(config, options) {
+    // 自托管服务器证书过期/自签时，可在 .secret.json 对应条目加 "insecure": true 跳过校验
+    if (config?.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
     if (!config) {
         throw new Error('screeps() 需要提供 config/configFile，例如 screeps({configFile: \'./screeps.json\'})');
     }
