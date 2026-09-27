@@ -652,15 +652,12 @@ export const getUpgraderTarget = (room: Room): number => {
     const workPerUpgrader = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
 
     if (mode === 'rush') {
-        // 满级房冲级爬一孵出来就会走退役流程（见 up-upgrade 的 shouldRetire），别再下单
+        // 满级房冲级爬一孵出来就会走退役流程，别再下单
         if (room.level >= 8) return 0;
-        if (canRushUpgrade(room)) {
-            // 冲级：编制跟着实际升级 work 需求走；站位上限放宽到控制器周边全部可站格
-            const rushCap = Math.max(getRushUpgradeSlotCap(room), getControllerUpgradeSlotCap(room));
-            return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, rushCap));
-        }
-        // 布局不支持冲级：回退成普通升级工，编制缩小
-        return 2;
+        // 编制跟着实际升级 work 需求走：冲级工位只是取能优化，不作为人口上限——
+        // 布局没有紧贴仓库的冲级位时，升级工照样编满（站位退而求其次用控制器周边工位）
+        const rushCap = Math.max(getRushUpgradeSlotCap(room), getControllerUpgradeSlotCap(room));
+        return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, rushCap));
     }
 
     if (mode === 'high') {
