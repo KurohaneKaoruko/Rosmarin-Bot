@@ -160,6 +160,20 @@ export class RoadMemory {
     private static groupPositionsCache: {
         [key: string]: { lastUpdate: number; positions: RoomPosition[] };
     } = {};
+    /**
+     * 已解码的路线缓存（key 为 `源房:目标房`）。
+     *
+     * @remarks
+     * 路线在内存里存的是 `[房名, 压缩xy]`，读出来要逐点 `new RoomPosition`；
+     * 引擎侧每次构造都要解析一遍房名，成本不低。而 `getAllPaths` 会被每个
+     * 正在跨房的中转 creep、以及每 tick 的工地维护反复调用，调用方都只读，
+     * 所以按 `RoadData.lastUpdate` 缓存整个解码结果。
+     *
+     * 注意：返回值是进程内共享对象，调用方**不得就地修改**其中的数组或 Map。
+     */
+    private static allPathsCache: {
+        [key: string]: { lastUpdate: number; paths: Map<string, RoomPosition[]> };
+    } = {};
     private static roomRoadIndexCacheTick = -1;
     private static roomRoadIndexCache: Record<string, number[]> = {};
 
@@ -206,6 +220,7 @@ export class RoadMemory {
         
         mem.lastUpdate = Game.time;
         delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
+        delete this.allPathsCache[`${sourceRoom}:${targetRoom}`];
     }
 
     /**
@@ -236,6 +251,7 @@ export class RoadMemory {
         
         mem.lastUpdate = Game.time;
         delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
+        delete this.allPathsCache[`${sourceRoom}:${targetRoom}`];
     }
 
     /**
@@ -261,12 +277,25 @@ export class RoadMemory {
      * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
      * @returns 路径映射 { "x:y": positions[] }
+     * @remarks
+     * 结果按 `RoadData.lastUpdate` 缓存，同 tick 内多次调用（多个 creep、
+     * 多轮工地维护）只解压一次。**返回值为共享对象，调用方只读。**
      */
     static getAllPaths(sourceRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
-        const result = new Map<string, RoomPosition[]>();
+        const mem = this.getMemory(sourceRoom);
         const group = this.getRouteGroup(sourceRoom, targetRoom);
-        if (!group?.paths) return result;
+        if (!group?.paths) return new Map<string, RoomPosition[]>();
 
+        const cacheKey = `${sourceRoom}:${targetRoom}`;
+        const lastUpdate = mem?.lastUpdate;
+        if (lastUpdate !== undefined) {
+            const cached = this.allPathsCache[cacheKey];
+            if (cached && cached.lastUpdate === lastUpdate) {
+                return cached.paths;
+            }
+        }
+
+        const result = new Map<string, RoomPosition[]>();
         for (const targetPos in group.paths) {
             const pathData = group.paths[targetPos];
             const positions = pathData.path.map(([roomName, compressed]) => {
@@ -276,6 +305,9 @@ export class RoadMemory {
             result.set(targetPos, positions);
         }
 
+        if (lastUpdate !== undefined) {
+            this.allPathsCache[cacheKey] = { lastUpdate, paths: result };
+        }
         return result;
     }
 
@@ -385,6 +417,7 @@ export class RoadMemory {
         delete mem.routes[targetRoom];
         mem.lastUpdate = Game.time;
         delete this.groupPositionsCache[`${sourceRoom}:${targetRoom}`];
+        delete this.allPathsCache[`${sourceRoom}:${targetRoom}`];
         return true;
     }
 
@@ -1497,10 +1530,6 @@ export class RoadVisual {
         };
     } = {};
 
-    private static mapPathsCache: {
-        [key: string]: { lastUpdate: number; paths: Map<string, RoomPosition[]> };
-    } = {};
-
     /**
      * 可视化指定路线
      * @param sourceRoom 源头房间名
@@ -1846,7 +1875,7 @@ export class RoadVisual {
 
         let colorIndex = 0;
         for (const target of targets) {
-            const paths = this.getAllPathsCached(sourceRoom, target);
+            const paths = RoadMemory.getAllPaths(sourceRoom, target);
             
             if (paths.size === 0) continue;
 
@@ -1898,19 +1927,5 @@ export class RoadVisual {
             fill: color,
             opacity: 0.6,
         });
-    }
-
-    private static getAllPathsCached(sourceRoom: string, targetRoom: string): Map<string, RoomPosition[]> {
-        const lastUpdate = getOutMineData()?.[sourceRoom]?.RoadData?.lastUpdate;
-        const cacheKey = `${sourceRoom}:${targetRoom}`;
-        const cached = this.mapPathsCache[cacheKey];
-        if (lastUpdate !== undefined && cached && cached.lastUpdate === lastUpdate) {
-            return cached.paths;
-        }
-        const paths = RoadMemory.getAllPaths(sourceRoom, targetRoom);
-        if (lastUpdate !== undefined) {
-            this.mapPathsCache[cacheKey] = { lastUpdate, paths };
-        }
-        return paths;
     }
 }
