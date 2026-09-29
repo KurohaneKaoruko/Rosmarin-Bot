@@ -273,6 +273,21 @@ export class RoadMemory {
     }
 
     /**
+     * 读取某源房外矿路线数据的版本号（`RoadData.lastUpdate`）。
+     *
+     * @remarks
+     * `setPath` / `setPaths` / `deleteRoute` 都会推进它。调用方若持有从
+     * `getAllPaths` 派生出来的缓存（例如按房间切分的路线索引），可以用这个
+     * 版本号做失效判断——比重新解码整条路线便宜得多。
+     *
+     * @param sourceRoom 源头房间名。
+     * @returns 版本号；该源房还没有路线数据时返回 0。
+     */
+    static getRouteVersion(sourceRoom: string): number {
+        return this.getMemory(sourceRoom)?.lastUpdate ?? 0;
+    }
+
+    /**
      * 获取目标房间内所有目标的路径
      * @param sourceRoom 源头房间名
      * @param targetRoom 目标房间名
