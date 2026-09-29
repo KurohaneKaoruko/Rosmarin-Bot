@@ -2,6 +2,7 @@
 import { RoleData } from '@/constant/CreepConstant';
 import { getCreepRoleCountsAll } from '@/modules/shared/creepTickIndex';
 import { getAllOrdersCached, hasMarketCredits, hasMarketOrderApi } from '@/modules/shared/marketUtils';
+import { getOutMineData } from '@/modules/shared/memory';
 
 // --- Configuration Constants ---
 const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)
@@ -234,11 +235,17 @@ function getStatsTargets(): string[] {
     let useAll = false;
 
     for (const flagName in Game.flags) {
+        // 纯 `stats` 旗帜：可视化旗帜所在房间
+        if (flagName === 'stats') {
+            const roomName = Game.flags[flagName].pos.roomName;
+            if (Game.rooms[roomName]) targets.add(roomName);
+            continue;
+        }
         if (!flagName.endsWith(suffix)) continue;
         const prefix = flagName.slice(0, -suffix.length);
         if (prefix === 'ALL') {
             useAll = true;
-            break;
+            continue;
         }
         if (prefix) targets.add(prefix);
     }
@@ -257,19 +264,106 @@ function getStatsTargets(): string[] {
 // --- Visualization Constants & Helpers ---
 
 const STYLE = {
-    font: '0.65 monospace',
-    fontBold: 'bold 0.7 monospace',
+    font: '0.62 monospace',
+    fontBold: 'bold 0.72 monospace',
+    fontTitle: 'bold 0.85 monospace',
+    fontSmall: '0.55 monospace',
     color: '#e6e6e6',
-    colorSub: '#aaaaaa',
+    colorSub: '#9e9e9e',
     colorWarn: '#f0d44e',
     colorErr: '#e65c5c',
     colorGood: '#76e094',
-    bg: '#000000',
-    bgOpacity: 0.6,
-    barBg: '#444444',
+    colorAccent: '#4dd0e1',
+    bg: '#0a0a0c',
+    bgOpacity: 0.72,
+    barBg: '#3a3a3a',
     barGcl: '#76e094',
     barGpl: '#6b99e6',
     barRcl: '#f0d44e',
+    sectionLine: '#3a4a55',
+    sectionText: '#7fd4e8',
+};
+
+type StatRow = {
+    kind: 'text' | 'bar' | 'section' | 'gap';
+    text?: string;
+    color?: string;
+    font?: string;
+    align?: 'left' | 'center' | 'right';
+    pct?: number;
+    barColor?: string;
+    barLabel?: string;
+    gap?: number;
+};
+
+function gatherRoomLive(room: Room) {
+    const mem = room.memory as any;
+    const sites = room.find(FIND_CONSTRUCTION_SITES);
+    const siteCount: Record<string, number> = {};
+    for (const s of sites) siteCount[s.structureType] = (siteCount[s.structureType] || 0) + 1;
+    const siteSummary = Object.entries(siteCount)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+        .map(([t, n]) => `${shortStructName(t as StructureConstant)}×${n}`)
+        .join(' ');
+
+    const spawn0 = room.spawn?.[0];
+    const spawning = spawn0?.spawning
+        ? `${spawn0.spawning.name.replace(/^.*?@(.*?)@.*$/, '$1')} ${spawn0.spawning.remainingTime}/${spawn0.spawning.needTime}`
+        : null;
+
+    // 外矿：列表源数 + 在岗采集/搬运（按 targetRoom 归属外矿列表）
+    const outData = getOutMineData(room.name) as any;
+    const outList: string[] = outData?.energy || [];
+    let outHarvest = 0;
+    let outCarry = 0;
+    if (outList.length > 0) {
+        for (const name in Game.creeps) {
+            const c = Game.creeps[name];
+            const role = c.memory?.role;
+            if (role !== 'out-harvest' && role !== 'out-carry' && role !== 'out-car') continue;
+            if (!outList.includes(c.memory?.targetRoom || '')) continue;
+            if (role === 'out-harvest') outHarvest += 1;
+            else outCarry += 1;
+        }
+    }
+
+    const hostiles = room.find(FIND_HOSTILE_CREEPS).filter(c => !c.isWhiteList());
+    const controller = room.controller;
+
+    return {
+        energyState: mem.energyState || '-',
+        ea: room.energyAvailable,
+        ecap: room.energyCapacityAvailable,
+        queue: room.getAllMissionFromPool ? room.getAllMissionFromPool('spawn').length : 0,
+        spawning,
+        siteCount: sites.length,
+        siteSummary,
+        outSources: outList.length,
+        outHarvest,
+        outCarry,
+        hostiles: hostiles.length,
+        ttd: controller ? (controller.ticksToDowngrade || 0) : 0,
+        safeMode: controller?.safeMode || 0,
+        creepsInRoom: room.find(FIND_MY_CREEPS).length,
+    };
+}
+
+function shortStructName(t: StructureConstant): string {
+    const map: Partial<Record<StructureConstant, string>> = {
+        extension: 'ext', container: 'cont', storage: 'stor', spawn: 'spawn',
+        road: 'road', tower: 'twr', link: 'link', rampart: 'ramp', constructedWall: 'wall',
+        terminal: 'term', lab: 'lab', factory: 'fact', extractor: 'extr',
+        powerSpawn: 'pwsp', observer: 'obs', nuker: 'nuker',
+    };
+    return map[t] || t;
+}
+
+const ENERGY_STATE_STYLE: Record<string, { text: string; color: string }> = {
+    NORMAL: { text: 'NORMAL', color: '#76e094' },
+    SURPLUS: { text: 'SURPLUS', color: '#4dd0e1' },
+    LOW: { text: 'LOW', color: '#f0d44e' },
+    CRITICAL: { text: 'CRITICAL', color: '#e65c5c' },
 };
 
 function drawStatsHUD(roomNames: string[]) {
@@ -278,7 +372,8 @@ function drawStatsHUD(roomNames: string[]) {
     const roleSummaryLines = getTopRolesSummaryLines(stats.creeps);
     for (const roomName of roomNames) {
         if (!Game.rooms[roomName]) continue;
-        renderStatsHUD(Game.rooms[roomName].visual, roomName, stats, creepCount, roleSummaryLines);
+        const live = gatherRoomLive(Game.rooms[roomName]);
+        renderStatsHUD(Game.rooms[roomName].visual, roomName, stats, creepCount, roleSummaryLines, live);
     }
 }
 
@@ -287,148 +382,132 @@ function renderStatsHUD(
     roomName: string,
     stats: any,
     creepCount: number,
-    roleSummaryLines: string[]
+    roleSummaryLines: string[],
+    live: ReturnType<typeof gatherRoomLive>,
 ) {
-    let x = 1;
-    let y = 1;
-    const width = 14; 
-    const lineHeight = 0.8;
-    
-    const startY = y;
-    const padding = 0.4; // Increased padding slightly
-    
-    // --- Pre-calculate Height ---
-    let totalHeight = 0;
-    
-    // Header (Room+RCL, CPU, QoS/Perf) - 3 rows
-    totalHeight += lineHeight * 3;
-    
-    // GCL & GPL (2 rows + padding)
-    totalHeight += 0.8 * 2;
-    
-    // RCL Progress Bar (Only if < 8)
-    const rclLvl = stats.rclLevel?.[roomName];
-    if (typeof rclLvl === 'number' && rclLvl < 8) {
-        totalHeight += 0.8; 
-    }
-    // Note: If RCL is 8, it's just in the header, no extra row needed.
-    
-    // Extra spacing before Economy section
-    totalHeight += 0.4;
-    
-    // Economy & Stats (3 rows: Credits, Energy, Market)
-    totalHeight += lineHeight * 3;
-    
-    // Creeps (1 or 2 rows)
-    totalHeight += lineHeight; 
-    if (roleSummaryLines.length > 0) {
-        totalHeight += lineHeight * roleSummaryLines.length; 
-    }
-    
-    totalHeight += 0.2;
+    const x = 0.5;
+    const width = 17;
+    const lineHeight = 0.72;
+    const rows: StatRow[] = [];
 
-    // Draw Background Rect FIRST
-    visual.rect(x - padding, startY - padding, width + padding * 2, totalHeight + padding * 2, {
-        fill: STYLE.bg,
-        opacity: STYLE.bgOpacity,
-        stroke: '#000000',
-        strokeWidth: 0.05
-    });
-
-    // --- Row 1: Room Name + RCL Status ---
-    let title = roomName;
-    let rclColor = STYLE.color;
-    if (typeof rclLvl === 'number') {
-        title += ` RCL ${rclLvl}`;
-        if (rclLvl === 8) {
-            rclColor = STYLE.barRcl;
-        }
-    }
-    visual.text(title, x, y + 0.2, { align: 'left', font: 'bold 0.8 monospace', color: rclColor });
-    y += lineHeight;
-
-    // --- Row 2: CPU & Bucket ---
     const cpu = typeof stats.cpu === 'number' ? stats.cpu : 0;
-    const bucket = typeof stats.bucket === 'number' ? stats.bucket : 0;
     const avgCpu = typeof stats.AvgCpuUsed === 'number' ? stats.AvgCpuUsed : 0;
-
-    const cpuColor = cpu > (avgCpu * 1.5) && cpu > 20 ? STYLE.colorWarn : STYLE.color;
-    const bucketColor = bucket < 1000 ? STYLE.colorErr : (bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood);
-    
-    visual.text(`CPU: ${cpu.toFixed(2)}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: cpuColor });
-    visual.text(`Avg: ${avgCpu.toFixed(2)}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
-    y += lineHeight;
-
+    const bucket = typeof stats.bucket === 'number' ? stats.bucket : 0;
     const qosLevel = stats.qos?.level || '-';
-    visual.text(`Bkt: ${bucket}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: bucketColor });
-    visual.text(`QoS: ${qosLevel}`, x + 7, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
-    y += lineHeight;
-
-    // --- Global Progress: GCL & GPL (Vertical Stack) ---
+    const rclLvl = typeof stats.rclLevel?.[roomName] === 'number' ? stats.rclLevel[roomName] : undefined;
     const gclLvl = stats.gclLevel || 0;
     const gclPct = stats.gcl || 0;
     const gplLvl = stats.gplLevel || 0;
     const gplPct = stats.gpl || 0;
     const gclEta = typeof stats.gclUpTime === 'number' ? stats.gclUpTime : 0;
     const gplEta = typeof stats.gplUpTime === 'number' ? stats.gplUpTime : 0;
-    const gclLabel = gclEta > 0 ? `GCL ${gclLvl} - ${formatSeconds(gclEta)}` : `GCL ${gclLvl}`;
-    const gplLabel = gplEta > 0 ? `GPL ${gplLvl} - ${formatSeconds(gplEta)}` : `GPL ${gplLvl}`;
-
-    // Row 3: GCL
-    drawProgressBar(visual, x, y, width, 0.5, gclPct / 100, STYLE.barGcl, gclLabel);
-    y += 0.8; // Increased padding to prevent overlap with GPL or Credits
-
-    // Row 4: GPL
-    drawProgressBar(visual, x, y, width, 0.5, gplPct / 100, STYLE.barGpl, gplLabel);
-    y += 0.8; // Increased padding
-
-    // --- Room Progress: RCL (If < 8) ---
-    if (typeof rclLvl === 'number' && rclLvl < 8) {
-        const rclPct = stats.rclProgress?.[roomName] || 0;
-        const upTime = stats.rclUpTime?.[roomName];
-        let label = `${(rclPct).toFixed(1)}%`;
-        if (upTime > 0) label += ` - ${formatSeconds(upTime)}`;
-        
-        drawProgressBar(visual, x, y, width, 0.5, rclPct / 100, STYLE.barRcl, label);
-        y += 0.8; // Increased padding
-    }
-
-    // Extra spacing before Economy section
-    y += 0.4;
-
-    // --- Economy & Stats ---
     const credit = stats.credit || 0;
     const creditChange = stats.creditChanges || 0;
     const energy = stats.energy?.[roomName] || 0;
     const energyChange = stats.energyRise?.[roomName] || 0;
-    const spawnCap = stats.SpawnEnergy?.[roomName] || 0;
-
-    // Row: Credits
-    const crColor = creditChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
-    const crStr = `Cr: ${formatK(credit)} (${formatSigned(creditChange)})`;
-    visual.text(crStr, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
-    y += lineHeight;
-
-    // Row: Room Energy (Swapped to be above Market)
-    const eColor = energyChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
-    const eStr = `E: ${formatK(energy)} (${formatSigned(energyChange)})`;
-    const capStr = `Cap: ${formatK(spawnCap)}`;
-    visual.text(`${eStr}  ${capStr}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
-    y += lineHeight;
-
-    // Row: Market Prices (Moved below Energy)
     const buy = stats.energyAveragePrice?.toFixed(3) || '-';
     const sell = stats.energyAverageSellPrice?.toFixed(3) || '-';
-    const mktStr = `Mkt: Buy ${buy} / Sell ${sell}`;
-    visual.text(mktStr, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.colorSub });
-    y += lineHeight;
 
-    // Row: Creeps
-    visual.text(`Creeps: ${creepCount}`, x, y + 0.2, { align: 'left', font: STYLE.font, color: STYLE.color });
-    y += lineHeight;
+    // ── 标题区：房名 · RCL · 能量状态徽章 ──
+    const es = ENERGY_STATE_STYLE[live.energyState] || { text: live.energyState, color: STYLE.colorSub };
+    rows.push({
+        kind: 'text',
+        text: `${roomName}  RCL${rclLvl ?? '?'}  [${es.text}]`,
+        font: STYLE.fontTitle,
+        color: rclLvl === 8 ? STYLE.barRcl : STYLE.color,
+    });
+
+    // ── 性能区 ──
+    const cpuColor = cpu > avgCpu * 1.5 && cpu > 20 ? STYLE.colorWarn : STYLE.color;
+    const bucketColor = bucket < 1000 ? STYLE.colorErr : bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood;
+    rows.push({ kind: 'text', text: `CPU ${cpu.toFixed(2)} (μ${avgCpu.toFixed(2)})  Bkt ${bucket}`, color: cpuColor, font: STYLE.font });
+    rows.push({ kind: 'text', text: `QoS ${qosLevel}`, color: qosLevel === 'normal' ? STYLE.colorSub : STYLE.colorWarn, font: STYLE.font });
+
+    // ── 全局进度条 ──
+    rows.push({ kind: 'bar', pct: gclPct / 100, barColor: STYLE.barGcl, barLabel: `GCL${gclLvl} ${gclEta > 0 ? '· ' + formatSeconds(gclEta) : ''}` });
+    if (gplLvl > 0 || gplPct > 0) rows.push({ kind: 'bar', pct: gplPct / 100, barColor: STYLE.barGpl, barLabel: `GPL${gplLvl}` });
+
+    // ── 本房 RCL 进度 ──
+    if (typeof rclLvl === 'number' && rclLvl < 8) {
+        const rclPct = stats.rclProgress?.[roomName] || 0;
+        const upTime = stats.rclUpTime?.[roomName];
+        let label = `${rclPct.toFixed(1)}%`;
+        if (upTime > 0) label += ` · ${formatSeconds(upTime)}`;
+        rows.push({ kind: 'bar', pct: rclPct / 100, barColor: STYLE.barRcl, barLabel: `RCL${rclLvl + 1} ${label}` });
+    }
+
+    // ── 经济区 ──
+    rows.push({ kind: 'section', text: 'ECONOMY' });
+    const eColor = energyChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
+    rows.push({ kind: 'text', text: `E ${formatK(energy)} (${formatSigned(energyChange)})  Cap ${formatK(live.ecap)}`, color: eColor, font: STYLE.font });
+    rows.push({ kind: 'text', text: `Cr ${formatK(credit)} (${formatSigned(creditChange)})  Mkt ${buy}/${sell}`, color: STYLE.colorSub, font: STYLE.font });
+
+    // ── 孵化 / 建造区 ──
+    rows.push({ kind: 'section', text: 'SPAWN & BUILD' });
+    const eaColor = live.ea < live.ecap * 0.2 ? STYLE.colorErr : live.ea < live.ecap * 0.5 ? STYLE.colorWarn : STYLE.colorGood;
+    rows.push({ kind: 'text', text: `Ea ${live.ea}/${live.ecap}  Queue ${live.queue}`, color: eaColor, font: STYLE.font });
+    rows.push({ kind: 'text', text: live.spawning ? `⚙ ${live.spawning}` : `Creeps ${live.creepsInRoom}`, color: STYLE.colorSub, font: STYLE.font });
+    if (live.siteCount > 0) rows.push({ kind: 'text', text: `Sites ${live.siteCount}: ${live.siteSummary}`, color: STYLE.colorSub, font: STYLE.font });
+
+    // ── 外矿区 ──
+    if (live.outSources > 0) {
+        rows.push({ kind: 'section', text: 'OUTMINE' });
+        rows.push({
+            kind: 'text',
+            text: `${live.outSources}源 · 采${live.outHarvest} · 搬${live.outCarry}`,
+            color: live.outHarvest === 0 ? STYLE.colorWarn : STYLE.color,
+            font: STYLE.font,
+        });
+    }
+
+    // ── 威胁 / 控制器健康 ──
+    const ttdColor = live.ttd < 5000 ? STYLE.colorErr : live.ttd < 20000 ? STYLE.colorWarn : STYLE.colorSub;
+    const threatBits: string[] = [];
+    if (live.hostiles > 0) threatBits.push(`敌 ${live.hostiles}`);
+    if (live.safeMode > 0) threatBits.push(`SafeMode ${live.safeMode}`);
+    threatBits.push(`TTD ${formatK(live.ttd)}`);
+    rows.push({ kind: 'section', text: 'STATUS' });
+    rows.push({ kind: 'text', text: threatBits.join('  '), color: live.hostiles > 0 ? STYLE.colorErr : ttdColor, font: STYLE.font });
+
+    // ── 角色摘要 ──
     if (roleSummaryLines.length > 0) {
         for (const line of roleSummaryLines) {
-            visual.text(line, x, y + 0.2, { align: 'left', font: '0.6 monospace', color: STYLE.colorSub });
+            rows.push({ kind: 'text', text: line, color: STYLE.colorSub, font: STYLE.fontSmall });
+        }
+    }
+
+    // ── 两遍法渲染：量高 → 背景板 → 逐行 ──
+    const padding = 0.4;
+    const y0 = 0.6;
+    let height = padding * 2;
+    for (const row of rows) {
+        if (row.kind === 'section') height += 0.55;
+        else if (row.kind === 'bar') height += 0.62;
+        else if (row.kind === 'gap') height += (row.gap ?? 0.25);
+        else height += lineHeight;
+    }
+
+    visual.rect(x - padding, y0 - padding, width + padding * 2, height, {
+        fill: STYLE.bg,
+        opacity: STYLE.bgOpacity,
+        stroke: '#1e2a30',
+        strokeWidth: 0.06,
+    });
+
+    let y = y0;
+    for (const row of rows) {
+        if (row.kind === 'section') {
+            y += 0.3;
+            visual.text(row.text || '', x, y + 0.2, { align: 'left', font: `bold ${STYLE.fontSmall}`, color: STYLE.sectionText });
+            visual.line(x + 2.6, y + 0.14, x + width - 0.2, y + 0.14, { color: STYLE.sectionLine, width: 0.06, opacity: 0.9 });
+            y += 0.5;
+        } else if (row.kind === 'bar') {
+            drawProgressBar(visual, x, y, width, 0.5, row.pct ?? 0, row.barColor || STYLE.barRcl, row.barLabel);
+            y += 0.62;
+        } else if (row.kind === 'gap') {
+            y += row.gap ?? 0.25;
+        } else {
+            visual.text(row.text || '', x, y + 0.25, { align: row.align || 'left', font: row.font || STYLE.font, color: row.color || STYLE.color });
             y += lineHeight;
         }
     }
