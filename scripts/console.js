@@ -1,22 +1,14 @@
 // 连接 Screeps 控制台实时交互 (移植自 vscode-plugin-screeps-console)
-// 登录数据与 submit 共用 .secret.json, 用法: pnpm console [用户名]
+// 登录数据与 submit 共用 .secret.json, 用法: pnpm console [服务器[@账号]]
 import { select, confirm } from '@inquirer/prompts';
 import readline from 'node:readline';
 import { EventEmitter } from 'node:events';
 import WebSocket from 'ws';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { getSecretPath, loadSecret, getServers, getServerAccounts, resolveTarget, matchName } from './secret.js';
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-
-const userConfigPath = path.resolve(__dirname, '../.secret.json');
-let userConfig;
-if (fs.existsSync(userConfigPath)) {
-    userConfig = JSON.parse(fs.readFileSync(userConfigPath, 'utf-8'));
-} else {
-    console.error('配置文件未找到:', userConfigPath);
+const secret = loadSecret();
+if (!secret) {
+    console.error('配置文件未找到:', getSecretPath());
     process.exit(1);
 }
 
@@ -666,6 +658,10 @@ const startRepl = (client) => {
 
 // 官网主服有多个 shard 可选, 默认 shard3 (与插件一致, 也是通常有实际活动的 shard);
 // 私服/季节服固定 shard0
+const shardFor = (config) => (
+    (config.hostname === 'screeps.com' && (!config.path || config.path === '/')) ? 'shard3' : 'shard0'
+);
+
 const pickShard = async (config) => {
     const isOfficialMain = config.hostname === 'screeps.com' && (!config.path || config.path === '/');
     if (!isOfficialMain) return 'shard0';
@@ -680,31 +676,103 @@ const pickShard = async (config) => {
     }
 };
 
-// 只保留可以登录的条目 (有 token 或有 email/password), 过滤掉纯 copyPath 的本地条目
-const connectableUsers = Object.keys(userConfig).filter((name) => {
-    const config = userConfig[name];
-    return Boolean(config.token || (config.email && config.password));
-});
+// ── 目标解析: .secret.json 中账号挂在服务器下, 目标形如 服务器@账号 (如 服务器IP@账号名) ──
+// 可连接目标 = 有 hostname 的服务器及其下账号; local 等纯复制目标只用于 push
+const remoteServers = Object.entries(getServers(secret)).filter(([, cfg]) => cfg.hostname);
 
-const selectUser = async () => {
+const serverAccountNames = (serverName) => (
+    Object.keys(getServerAccounts(remoteServers.find(([name]) => name === serverName)?.[1] ?? {}))
+);
+
+// 非交互兜底: 第一台配置了账号的服务器
+const firstConnectable = () => {
+    for (const [serverName] of remoteServers) {
+        const accounts = serverAccountNames(serverName);
+        if (accounts.length) return [serverName, accounts[0]];
+    }
+    return ['', ''];
+};
+
+// 只给账号名时, 定位它所在的服务器
+const accountOwnerServers = (accountName) => (
+    remoteServers.filter(([, cfg]) => Object.keys(getServerAccounts(cfg)).includes(accountName)).map(([name]) => name)
+);
+
+const pickFrom = async (message, names, input) => {
+    const candidates = matchName(names, input);
+    if (candidates.length === 1 && input) {
+        if (candidates[0] === input || await confirm({ message: `确定${message} ${candidates[0]} 吗？` })) {
+            return candidates[0];
+        }
+        return '';
+    }
+    const list = candidates.length > 1 ? candidates : names;
     try {
         return await select({
-            message: '连接到',
-            choices: connectableUsers.map((name) => {
-                return {
-                    name,
-                    value: name
-                };
-            })
+            message,
+            choices: list.map((name) => ({ name, value: name }))
         });
     } catch (error) {
         return '';
     }
 };
 
-const exec = async (user) => {
-    const config = userConfig[user];
-    logConsole(`目标: ${user} (${getHttpBase(config)})`);
+// 确定连接目标, 返回 [服务器名, 账号名]; 支持缩写与 服务器@账号 两种写法
+const pickTarget = async (input) => {
+    const at = input ? input.indexOf('@') : -1;
+    const inputServer = at === -1 ? input : input.slice(0, at);
+    const inputAccount = at === -1 ? '' : input.slice(at + 1);
+
+    let serverName = '';
+    if (input && at === -1 && !matchName(remoteServers.map(([name]) => name), input).length) {
+        const owners = accountOwnerServers(input);
+        if (owners.length === 1) serverName = owners[0];
+        else if (owners.length > 1) serverName = await pickFrom('连接到服务器', owners, '');
+    }
+    if (!serverName) {
+        serverName = await pickFrom('连接到服务器', remoteServers.map(([name]) => name), inputServer);
+    }
+    if (!serverName) return ['', ''];
+
+    let accountName = '';
+    const accountNames = serverAccountNames(serverName);
+    if (inputAccount) {
+        if (!accountNames.includes(inputAccount)) {
+            logConsole(`服务器 ${serverName} 下没有账号 ${inputAccount}`);
+            process.exit(1);
+        }
+        accountName = inputAccount;
+    } else if (accountNames.length === 1) {
+        accountName = accountNames[0];
+    } else if (accountNames.length > 1) {
+        accountName = await pickFrom('连接到账号', accountNames, '');
+    }
+    if (!accountName) return ['', ''];
+    return [serverName, accountName];
+};
+
+// 非交互模式的目标解析: 不弹任何选择, 解析不出就用第一台有账号的服务器
+const resolveTargetArg = (input) => {
+    const at = input ? input.indexOf('@') : -1;
+    if (input && at !== -1) {
+        return [input.slice(0, at), input.slice(at + 1)];
+    }
+    if (input) {
+        const serverNames = remoteServers.map(([name]) => name);
+        if (serverNames.includes(input)) {
+            return [input, serverAccountNames(input)[0] ?? ''];
+        }
+        const owners = accountOwnerServers(input);
+        if (owners.length) {
+            return [owners[0], input];
+        }
+    }
+    return firstConnectable();
+};
+
+const exec = async (serverName, accountName) => {
+    const config = resolveTarget(secret, serverName, accountName);
+    logConsole(`目标: ${serverName}@${accountName} (${getHttpBase(config)})`);
 
     // 私服自签证书时与 plugin-screeps.js 保持一致, 可在条目加 "insecure": true
     if (config.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -725,24 +793,49 @@ const exec = async (user) => {
 };
 
 const run = async () => {
-    let user = process.argv[2];
+    const argv = process.argv.slice(2);
 
-    if (connectableUsers.includes(user)) {
-        await exec(user);
+    // ── 非交互模式：console <目标> -e "表达式" [-e "…"] [--wait 秒] ──
+    // 连接后依次发送命令, 收集 --wait 秒(默认 4s)的输出后自动退出。
+    if (argv.some((a) => a === '-e' || a === '--exec')) {
+        const waitIdx = argv.indexOf('--wait');
+        const waitSeconds = waitIdx !== -1 ? Math.max(1, Number(argv[waitIdx + 1]) || 4) : 4;
+        const commands = [];
+        for (let i = 0; i < argv.length; i += 1) {
+            if (argv[i] !== '-e' && argv[i] !== '--exec') continue;
+            const expr = argv[i + 1];
+            if (expr) commands.push(expr);
+        }
+        if (commands.length === 0) {
+            console.error('非交互模式需要 -e "表达式"（可重复）');
+            process.exit(1);
+        }
+        const nameArg = argv.find((a) => !a.startsWith('-') && a !== commands.find((c) => true) && a !== String(waitSeconds));
+        const [serverName, accountName] = resolveTargetArg(nameArg);
+        if (!serverName || !accountName) { console.error('无可连接目标（.secret.json）'); process.exit(1); }
+
+        const config = resolveTarget(secret, serverName, accountName);
+        logConsole(`非交互执行 -> ${serverName}@${accountName} (${getHttpBase(config)}), ${commands.length} 条命令, 收集窗口 ${waitSeconds}s`);
+        if (config.insecure) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+
+        const client = new ScreepsClient(config);
+        client.activeShard = shardFor(config);
+        wireClientEvents(client);
+        await client.connect();
+
+        for (const cmd of commands) {
+            await client.sendCommand(cmd);
+        }
+        setTimeout(() => {
+            client.disconnect();
+            process.exit(0);
+        }, waitSeconds * 1000);
         return;
     }
 
-    user = connectableUsers.find((name) => name.includes(user));
-    if (user) {
-        if (await confirm({ message: `确定连接到 ${user} 吗？` })) {
-            await exec(user);
-            return;
-        }
-    }
-
-    user = await selectUser();
-    if (user) {
-        await exec(user);
+    const [serverName, accountName] = await pickTarget(argv[0]);
+    if (serverName && accountName) {
+        await exec(serverName, accountName);
     }
 };
 

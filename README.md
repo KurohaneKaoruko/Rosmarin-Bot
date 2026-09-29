@@ -83,45 +83,41 @@ pnpm install
 
 ### 配置
 
-创建 `.secret.json` 文件（已在 `.gitignore` 中忽略）：
+创建 `.secret.json` 文件（已在 `.gitignore` 中忽略）。服务器在下、账号挂在各自服务器下面，避免搞混账号属于哪台服务器：
 
 ```json
 {
-    "main": {
-        "token": "你的Screeps Token",
-        "protocol": "https",
-        "hostname": "screeps.com",
-        "port": 443,
-        "path": "/",
-        "branch": "main"
-    },
-    "sim": {
-        "token": "你的Screeps Token",
-        "protocol": "https",
-        "hostname": "screeps.com",
-        "port": 443,
-        "path": "/",
-        "branch": "sim"
-    },
-    "local": {
-        "copyPath": "本地客户端代码路径"
+    "servers": {
+        "screeps.com": {
+            "protocol": "https",
+            "hostname": "screeps.com",
+            "port": 443,
+            "path": "/",
+            "branch": "main",
+            "accounts": {
+                "Kaoruko": { "token": "你的Screeps Token" }
+            }
+        },
+        "local": {
+            "copyPath": "本地客户端代码路径"
+        }
     }
 }
 ```
 
 > 💡 **Token 获取**：登录 [Screeps 官网](https://screeps.com/) → Account → Auth Tokens → Generate Token
 >
-> 💡 `.secret.json` 的顶层 key（如 main/sim/local）就是可选的推送目标名：`pnpm push` 会列出这些目标供选择；也可以自行新增更多目标。
+> 💡 `servers` 下的 key 就是可选的推送目标名：`pnpm push` 会先列出服务器、再列出所选服务器下的账号；也可以自行新增更多服务器或账号。
 
 ### 构建命令
 
 | 命令 | 说明 |
 |------|------|
 | `pnpm build` | 仅构建，输出到 `dist/`（未指定 DEST 时不会上传） |
-| `pnpm push` / `pnpm submit` | 交互选择目标并执行构建 + 上传/复制 |
-| `pnpm push:main` | 构建并上传到 `.secret.json` 的 `main` 配置 |
-| `pnpm push:sim` | 构建并上传到 `.secret.json` 的 `sim` 配置 |
-| `pnpm push:local` | 构建并复制到 `.secret.json` 的 `local.copyPath` |
+| `pnpm push` / `pnpm submit` | 交互选择服务器和账号，执行构建 + 上传/复制 |
+| `pnpm push:official` | 构建并上传到官网主服（`screeps.com@Kaoruko`） |
+| `pnpm push:season` | 构建并上传到赛季服（`screeps.com/season@Kaoruko`） |
+| `pnpm push:local` | 构建并复制到 `local.copyPath` |
 | `pnpm count` | 统计代码概览（支持目录和 Top N 参数） |
 | `pnpm ver` | 更新版本号 |
 | `pnpm test` | 运行测试（Vitest） |
@@ -245,9 +241,11 @@ resource.manage.set('W1N1', 'energy', {source: 500000, target: 100000})
 ```
 rosmarin-bot/
 ├── plugins/                 # Rolldown 插件
-│   └── plugin-screeps.js
+│   ├── plugin-screeps.js    # 构建后上传 (复用 upload.js)
+│   └── upload.js            # Screeps 上传核心 (构建/自定义上传共用)
 ├── scripts/                 # 开发脚本
 │   ├── countFiles.js        # 统计代码量
+│   ├── secret.js            # .secret.json 读取与目标解析
 │   ├── submit.js            # 提交代码到游戏
 │   └── updateVersion.js     # 更新版本号
 ├── src/
@@ -300,8 +298,8 @@ rosmarin-bot/
 ## 📝 注意事项
 
 ### 首次使用
-- 建议先在 sim 目标测试：`pnpm push:sim`
-- `pnpm push` 会从 `.secret.json` 读取可用目标并交互选择
+- 建议先在 sim 目标测试：`pnpm push` 里选好服务器和账号（或 `pnpm push:season`）
+- `pnpm push` 会从 `.secret.json` 读取服务器和账号并两步交互选择
 
 ### 布局相关
 - 手动布局时需确保 **Storage、Terminal、Factory 与一个 Link 集中放置**

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import screeps from './plugins/plugin-screeps.js';
+import { loadSecret, resolveTarget } from './scripts/secret.js';
 import { defineConfig } from 'rolldown';
 import { minify as terserMinify } from 'terser';
 
@@ -34,13 +35,6 @@ const copyFiles = ({ fromDir, toDir }) => {
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.copyFileSync(file, target);
 	}
-};
-
-const loadSecret = () => {
-	const secretPath = path.resolve(process.cwd(), '.secret.json');
-	if (!fs.existsSync(secretPath)) return undefined;
-	const raw = fs.readFileSync(secretPath, 'utf-8');
-	return JSON.parse(raw);
 };
 
 const cleanDistPlugin = ({ distDir }) => ({
@@ -204,10 +198,14 @@ export default defineConfig(() => {
 	const secret = loadSecret();
 	const dest = process.env.DEST;
 	if (dest && !secret) throw new Error('配置文件未找到: .secret.json');
-	const config = dest ? secret?.[dest] : undefined;
+	// 目标格式: server 或 server@account
+	const at = dest ? dest.indexOf('@') : -1;
+	const config = dest
+		? resolveTarget(secret, at === -1 ? dest : dest.slice(0, at), at === -1 ? undefined : dest.slice(at + 1))
+		: undefined;
 
 	if (!dest) console.log('未指定目标, 代码将被编译但不会上传');
-	else if (!config) throw new Error('无效目标，请检查 .secret.json 中是否包含对应配置');
+	else if (!config) throw new Error('无效目标，请检查 .secret.json 中的 servers 配置');
 
 	const outputFile = 'dist/main.js';
 	const distDir = path.dirname(path.resolve(process.cwd(), outputFile));
