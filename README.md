@@ -135,6 +135,31 @@ pnpm count -- src/modules 20
 pnpm count -- --path src/prototype --top 15
 ```
 
+### 报错定位（sourcemap）
+
+构建默认使用 `readable` 模式：压缩但保留函数名、多行输出，控制台报错堆栈直接显示函数名和行号（如 `at selectTargetStats (main:13109:9)`），且产物比旧的单行混淆更小。
+
+需要还原成源码位置时，用 `scripts/stackmap.js` 把 `main:行:列` 映射回 `src/` 下的 TS 文件：
+
+```bash
+node scripts/stackmap.js -t "at selectTargetStats (main:13109:9)"
+type trace.txt | node scripts/stackmap.js        # 整段粘贴控制台输出
+node scripts/stackmap.js dist/main.js.map -t "..."  # 指定其他 map
+```
+
+> ⚠️ `dist/main.js.map` 只对应最近一次构建；`pnpm push` 会先构建再上传，所以 push 后没再本地构建时，本地 map 与线上代码一致，解析结果才可靠。>
+> ℹ️ sourcemap **默认不上传服务器**（实测服务器对 >3~4MB 的请求体会直接掐断连接，而 map 比代码本体还大；且 xxscreeps 控制台不消费 map）。push 时它会被重命名为 `dist/main.js.map.js` 留在本地，`stackmap.js` 两个文件名都能识别。如确需上传（如 Steam 客户端连私服做符号化），在 `.secret.json` 对应目标加 `"uploadSourceMap": true`。
+
+构建模式可用环境变量切换：
+
+| 变量 | 说明 |
+|------|------|
+| `OBFUSCATE_LEVEL=readable` | 默认。压缩 + 保留函数名 + 多行，报错可直接定位 |
+| `OBFUSCATE_LEVEL=fast` | 旧的单行极限混淆（随机 seed 重命名，仅靠 sourcemap 还原） |
+| `OBFUSCATE_LEVEL=balanced` | 折中模式 |
+| `OBFUSCATE=0` | 关闭混淆（rolldown 原始产物） |
+| `SOURCE_MAP=0` | 不生成 sourcemap |
+
 ### 游戏内启动
 
 **快速启动 —— `start(roomName?, layout?)` 一条指令完成全部启动步骤**

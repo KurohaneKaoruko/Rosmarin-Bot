@@ -137,19 +137,43 @@ const obfuscateBundlePlugin = ({ outputFile, sourcemap, enabled, mode }) => ({
 				// 避免旧运行时把 `typeof globalThis` 优化成直接访问导致崩溃。
 				typeofs: false
 			}
-			: false;
+			: mode === 'fast' || mode === 'readable'
+				? {
+					defaults: true,
+					passes: 1,
+					toplevel: true,
+					drop_debugger: true,
+					keep_fargs: false,
+					typeofs: false
+				}
+				: false;
 
-		const result = await terserMinify(code, {
-			compress: compressOptions,
-			mangle: {
+		// readable: 压缩但保留标识符并格式化为多行，控制台报错可直接看到函数名与行号；
+		// fast: 旧的单行混淆模式（随机 seed 重命名，仅靠 sourcemap 还原）。
+		const isReadable = mode === 'readable';
+		const mangleOptions = isReadable
+			? false
+			: {
 				toplevel: true,
 				eval: true,
 				nth_identifier: createFastIdentifierStrategy(seed)
-			},
-			format: {
+			};
+		const formatOptions = isReadable
+			? {
+				comments: false,
+				ascii_only: true,
+				beautify: true,
+				indent_level: 1
+			}
+			: {
 				comments: false,
 				ascii_only: true
-			},
+			};
+
+		const result = await terserMinify(code, {
+			compress: compressOptions,
+			mangle: mangleOptions,
+			format: formatOptions,
 			sourceMap: hasMap ? {
 				content: fs.readFileSync(mapPath, 'utf8'),
 				filename: path.basename(outputFile),
@@ -167,7 +191,12 @@ const obfuscateBundlePlugin = ({ outputFile, sourcemap, enabled, mode }) => ({
 			fs.writeFileSync(mapPath, mapOutput);
 		}
 
-		console.log(`[obfuscate] seed=0x${seed.toString(16)}`);
+		if (isReadable) {
+			const lineCount = result.code.split('\n').length;
+			console.log(`[obfuscate] readable mode: ${lineCount} 行, 保留函数名便于报错定位`);
+		} else {
+			console.log(`[obfuscate] seed=0x${seed.toString(16)}`);
+		}
 	}
 });
 
@@ -184,7 +213,9 @@ export default defineConfig(() => {
 	const distDir = path.dirname(path.resolve(process.cwd(), outputFile));
 	const enableSourceMap = process.env.SOURCE_MAP !== '0';
 	const enableObfuscation = process.env.OBFUSCATE !== '0';
-	const obfuscateMode = process.env.OBFUSCATE_LEVEL === 'balanced' ? 'balanced' : 'fast';
+	// 默认 readable：压缩但保留函数名、多行输出，报错堆栈可直接定位；
+	// 需要旧的极限混淆时设 OBFUSCATE_LEVEL=fast。
+	const obfuscateMode = ['fast', 'balanced', 'readable'].find((m) => process.env.OBFUSCATE_LEVEL === m) ?? 'readable';
 	const pluginObfuscate = obfuscateBundlePlugin({
 		outputFile,
 		sourcemap: enableSourceMap,
