@@ -3,6 +3,7 @@ import { RoleData } from '@/constant/CreepConstant';
 import { getCreepRoleCountsAll } from '@/modules/shared/creepTickIndex';
 import { getAllOrdersCached, hasMarketCredits, hasMarketOrderApi } from '@/modules/shared/marketUtils';
 import { getOutMineData } from '@/modules/shared/memory';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 // --- Configuration Constants ---
 const STAT_INTERVAL = 20;           // 常规统计间隔 (ticks)
@@ -290,17 +291,19 @@ const STYLE = {
 };
 
 function gatherRoomLive(room: Room) {
-    const mem = room.memory as any;
-    const sites = room.find(FIND_CONSTRUCTION_SITES);
-    const siteCount: Record<string, number> = {};
-    for (const s of sites) siteCount[s.structureType] = (siteCount[s.structureType] || 0) + 1;
-    const siteSummary = Object.entries(siteCount)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3)
-        .map(([t, n]) => `${shortStructName(t as StructureConstant)}×${n}`)
-        .join(' ');
+    // 每 tick 只算一次（同房间多个 HUD 消费共享）；find 结果来自引擎缓存，成本可控
+    return getRoomTickCacheValue(room, 'stats_room_live', () => {
+        const mem = room.memory as any;
+        const sites = room.find(FIND_CONSTRUCTION_SITES);
+        const siteCount: Record<string, number> = {};
+        for (const s of sites) siteCount[s.structureType] = (siteCount[s.structureType] || 0) + 1;
+        const siteSummary = Object.entries(siteCount)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 3)
+            .map(([t, n]) => `${shortStructName(t as StructureConstant)}×${n}`)
+            .join(' ');
 
-    const spawn0 = room.spawn?.[0];
+        const spawn0 = room.spawn?.[0];
     const spawning = spawn0?.spawning
         ? `${spawn0.spawning.name.replace(/^.*?@(.*?)@.*$/, '$1')} ${spawn0.spawning.remainingTime}/${spawn0.spawning.needTime}`
         : null;
@@ -340,7 +343,8 @@ function gatherRoomLive(room: Room) {
         ttd: controller ? (controller.ticksToDowngrade || 0) : 0,
         safeMode: controller?.safeMode || 0,
         creepsInRoom: room.find(FIND_MY_CREEPS).length,
-    };
+        };
+    });
 }
 
 function shortStructName(t: StructureConstant): string {

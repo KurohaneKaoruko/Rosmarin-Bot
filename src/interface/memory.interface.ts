@@ -792,6 +792,12 @@ interface StatsMemory {
     SpawnEnergy?: Record<string, number>;
 
     /**
+     * 房间能量趋势（HUD sparkline 用）
+     * @description key 为房间名，最多保留 24 个采样点
+     */
+    energyTrend?: Record<string, number[]>;
+
+    /**
      * 当前市场 credits
      */
     credit?: number;
