@@ -121,28 +121,55 @@ export default {
             if (existedRooms.length > 0) console.log(`已存在: ${existedRooms.join(', ')}`);
             return OK;
         },
-        // 删除外矿
-        remove(sourceRoom: string, targetRoom: string) {
-            if (!sourceRoom || !targetRoom) return -1;
+        // 删除外矿：支持多个房间名；传 'all' 清空该源房全部外矿数据
+        // 例：mine.remove('W5N8', 'W4N8', 'W5N7') / mine.remove('W5N8', 'all')
+        remove(sourceRoom: string, ...targetRooms: string[]) {
+            if (!sourceRoom || targetRooms.length === 0) return -1;
             const BotMem = getOutMineData();
             if (!BotMem[sourceRoom]) return ERR_NOT_FOUND;
             const Mem = BotMem[sourceRoom];
             const buckets: OutMineBucket[] = ['energy', 'centerRoom', 'highway'];
-            const removedBuckets = buckets.filter((bucket) => {
-                const list = Mem[bucket];
-                if (!Array.isArray(list)) return false;
-                const index = list.indexOf(targetRoom);
-                if (index === -1) return false;
-                list.splice(index, 1);
-                return true;
-            });
-            if (removedBuckets.length <= 0) {
-                return Error(`房间 ${targetRoom} 不存在于 ${sourceRoom} 的外矿列表中。`);
+            const removedRooms: string[] = [];
+            const notFoundRooms: string[] = [];
+
+            const removeAll = targetRooms.some((t) => typeof t === 'string' && t.toLowerCase() === 'all');
+            if (removeAll) {
+                for (const bucket of buckets) {
+                    const list = Mem[bucket];
+                    if (!Array.isArray(list)) continue;
+                    removedRooms.push(...list);
+                    Mem[bucket] = [];
+                }
+            } else {
+                for (const targetRoom of targetRooms) {
+                    const removedBuckets = buckets.filter((bucket) => {
+                        const list = Mem[bucket];
+                        if (!Array.isArray(list)) return false;
+                        const index = list.indexOf(targetRoom);
+                        if (index === -1) return false;
+                        list.splice(index, 1);
+                        return true;
+                    });
+                    if (removedBuckets.length > 0) removedRooms.push(targetRoom);
+                    else notFoundRooms.push(targetRoom);
+                }
             }
 
-            delete Memory.rooms[targetRoom]?.['road'];
-            console.log(`房间 ${targetRoom} 已从 ${sourceRoom} 的列表中删除: ${removedBuckets.join(', ')}`);
-            return OK;
+            for (const room of removedRooms) {
+                if (Memory.rooms[room]) delete Memory.rooms[room]['road'];
+            }
+
+            if (removeAll) {
+                console.log(`[mine.remove] 已清空 ${sourceRoom} 的全部外矿数据（共 ${removedRooms.length} 个房间）。`);
+                return OK;
+            }
+            if (removedRooms.length > 0) {
+                console.log(`已从 ${sourceRoom} 的列表中删除: ${removedRooms.join(', ')}`);
+            }
+            if (notFoundRooms.length > 0) {
+                console.log(`未在 ${sourceRoom} 的列表中找到: ${notFoundRooms.join(', ')}`);
+            }
+            return removedRooms.length > 0 ? OK : ERR_NOT_FOUND;
         },
         // 获取外矿列表
         list(sourceRoom: string) {

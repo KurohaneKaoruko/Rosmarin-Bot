@@ -638,22 +638,29 @@ export class ExternalMineState {
         return { qosLevel, canRunSecondaryAction };
     }
 
-    // rush 自动扩图：把一圈相邻房间自动加入能量外矿列表（跳过 novice/respawn/closed 等不可达扇区）
+    // rush 自动扩图：把**上下左右四个正交相邻**房间自动加入能量外矿列表
+    // （跳过 novice/respawn/closed 等不可达扇区；斜对角距离太远，不扩）。
+    // 仅当列表**完全为空**时生效（首次引导语义：空 = 没配置，帮我自动来）；
+    // 用户一旦手动管理过列表（非空），自动扩图彻底退出——否则手动 remove/add 会被
+    // 下一轮扩图写回，表现为「莫名其妙自动乱加外矿」。上限 4 与触发条件对齐。
     static autoAddNearbyEnergyTargets(sourceRoomName: string, known: string[]): string[] {
+        if (known.length > 0) return known;
         const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
         if (!match) return known;
         const px = match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1;
         const py = match[3] === 'S' ? Number(match[4]) : -Number(match[4]) - 1;
 
+        const Mem = getOutMineData(sourceRoomName);
+        Mem.energy ??= [];
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
+                if (dx !== 0 && dy !== 0) continue; // 只允许上下左右四个正交方向，斜角太远不扩
+                if (Mem.energy.length >= 4) break;
                 const x = px + dx;
                 const y = py + dy;
                 const roomName = `${x >= 0 ? 'E' : 'W'}${Math.abs(x)}${y >= 0 ? 'S' : 'N'}${Math.abs(y)}`;
                 if (!isRoomReachable(roomName)) continue;
-                const Mem = getOutMineData(sourceRoomName);
-                Mem.energy ??= [];
                 if (Mem.energy.indexOf(roomName) === -1) {
                     Mem.energy.push(roomName);
                     known.push(roomName);
