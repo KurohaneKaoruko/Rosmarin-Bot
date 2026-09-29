@@ -428,6 +428,34 @@ const WORKER_POP_CAP_BY_LEVEL: Record<number, number> = {
 export const getWorkerPopulationCap = (room: Room): number =>
     WORKER_POP_CAP_BY_LEVEL[room.level] ?? 6;
 
+// ==================== 升级工人头上限 ====================
+
+// 与 WORKER_POP_CAP_BY_LEVEL 同源的坑：升级侧的预算是按 **work** 给的（30/90 work），
+// 人口要靠 work ÷ 每只 WORK 部件数折算。低 RCL 能量容量撑不起大体型（容量 400 时
+// GetRoleBodys 会一路退到 1 WORK 的体型），同一笔 work 预算就会折出几十只——
+// 线上 RCL3 冲级房实测 38 只升级工，根因就是「40 work ÷ 1 work/只」。
+// 这里按 RCL 给硬上限；高 RCL 的体型本身就大（例如 15 WORK），
+// 折算结果 90÷15=6，正常落在上限之内，因此该上限只对低 RCL 生效，不会误伤正常编制。
+//
+// ⚠️ 取值权衡：`high`/`mini` 模式下超出上限的缺口会转由 worker 承接升级
+// （见 `getWorkerUpgradeTarget`），上限不影响总升级吞吐；但 `rush` 模式里 worker 不兜底，
+// **上限就是吞吐上限**。所以表不能压到最小：低 RCL 的体型太小（1 WORK），
+// 按「income ÷ 每只 WORK」配会配出几十只并独占 spawn 队列（线上实测 38 只、房间停摆）；
+// 压到 3~4 只又会让冲级明显变慢。取 5~6 是折中——既不吃穿收入，也不独占 spawn。
+const UPGRADER_POP_CAP_BY_LEVEL: Record<number, number> = {
+    1: 3,
+    2: 4,
+    3: 6,
+    4: 6,
+    5: 7,
+    6: 8,
+    7: 8,
+    8: 6,
+};
+
+export const getUpgraderPopulationCap = (room: Room): number =>
+    UPGRADER_POP_CAP_BY_LEVEL[room.level] ?? 6;
+
 // ==================== 控制器工位 ====================
 
 // 控制器升级工位表：range 3 内可站立点位，按到锚点（controller link 优先，否则控制器）的距离排序。
@@ -622,18 +650,18 @@ export const getWorkerWallTarget = (room: Room): number => {
  * `upgrader`（专人升级工）的编制。
  *
  * @remarks
- * 分工表（`low`/`main` 交 worker；`high` 单独配人减轻 worker；`rush` 上冲级）：
+ * 定编口径（只有 `high` / `mini` / `rush` 单独配人，其余交 worker 兼任）：
  *
- * | 模式 | 无冲级 | 冲级·布局支持 | 冲级·布局不支持（回退） |
- * |---|---|---|---|
- * | low / main | 0（worker 兼任） | 0（worker 兼任） | 0 |
- * | high | 按升级 work 目标折算 | 1 | 1 |
- * | rush | —（见左） | 按升级 work 目标折算 | 2 |
+ * | 模式 | 定编 |
+ * |---|---|
+ * | low / main / stop | 0（升级由 worker 兼任） |
+ * | high / mini | `min(RCL 人口上限, ceil(升级 work ÷ 每只 WORK 部件), 控制器工位数)` |
+ * | rush | 同上，但工位数取 `max(冲级工位, 控制器工位)`；RCL8 直接 0 |
  *
- * - 「冲级」= 房间模式为 `rush`，或玩家用旗帜手动开了旧冲级编队。
- *   后者是**手动开关**：编队已经在干升级，普通升级工只在 `high` 保留 1 只减轻 worker 负担。
- * - 布局支持与否由 {@link canRushUpgrade} 自动判定（控制器旁仓库旁边有没有可站格位）；
- *   布局不支持时**不回退行为也不加倍**，而是缩编成少量普通升级工。
+ * - **人口上限**（{@link getUpgraderPopulationCap}）是后加的硬闸：升级预算按 WORK 给，
+ *   低 RCL 的 1-WORK 体型会把同一笔预算折成几十只，必须按 RCL 封顶。
+ * - 工位判定由 {@link getRushUpgradeSlotCap} / {@link getControllerUpgradeSlotCap} 自动完成，
+ *   布局不支持冲级时不会加倍，只是正常缩编。
  * - 折算口径与 worker 升级侧同源（都用 `getUpgradeWorkTarget`），只是换角色承接，
  *   避免两档之间口径漂移。
  */
@@ -643,30 +671,31 @@ export const getUpgraderTarget = (room: Room): number => {
 
     const mode = getRoomMode(room);
 
-    // 手动开关：旧冲级编队已经在承担升级吞吐
-    
-
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
 
     const workPerUpgrader = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
+    // 人口上限：升级侧的预算是按 **work** 给的（30/90 work），折算只数时要除上每只的 WORK 部件数。
+    // 低 RCL 的能量容量撑不起大体型（例如容量 400 时 GetRoleBodys 会一路退到 1 WORK 的体型），
+    // 于是同样一笔 work 预算会折出几十只——线上 RCL3 冲级房实测 38 只升级工，
+    // 原因就是「40 work ÷ 1 work/只」。这里补一个按 RCL 的人口上限，
+    // 与 worker 的 WORKER_POP_CAP_BY_LEVEL 同源问题同一套解法：
+    // 数量受限后，work 预算的缺口表现为「先升级」而不是「无限加人」。
+    const popCap = Math.max(1, UPGRADER_POP_CAP_BY_LEVEL[room.level] ?? 8);
+    const target = Math.min(popCap, Math.ceil(workTarget / workPerUpgrader));
 
     if (mode === 'rush') {
         // 满级房冲级爬一孵出来就会走退役流程，别再下单
         if (room.level >= 8) return 0;
-        // 编制跟着实际升级 work 需求走：冲级工位只是取能优化，不作为人口上限——
-        // 布局没有紧贴仓库的冲级位时，升级工照样编满（站位退而求其次用控制器周边工位）
+        // rush 既要跟 work 需求走，又不能被 1-WORK 体型撑爆：先用 RCL 人口上限 `target` 封顶，
+        // 再叠冲级工位上限。冲级工位本身只作取能优化，不是唯一约束。
         const rushCap = Math.max(getRushUpgradeSlotCap(room), getControllerUpgradeSlotCap(room));
-        return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, rushCap));
+        return clamp(target, 1, Math.max(1, rushCap));
     }
 
     if (mode === 'high' || mode === 'mini') {
         // mini 迷你房：常驻升级 farm，同 high 口径配专人升级工
-        return clamp(
-            Math.ceil(workTarget / workPerUpgrader),
-            1,
-            Math.max(1, getControllerUpgradeSlotCap(room))
-        );
+        return clamp(target, 1, Math.max(1, getControllerUpgradeSlotCap(room)));
     }
 
     // low / main：明确由 worker 兼任升级，不单独配人

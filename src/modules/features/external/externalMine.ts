@@ -19,6 +19,7 @@ import {
     OUTMINE_CARRY_ROLE_SET,
     OUTMINE_HARVEST_ROLE_SET,
     pickBestCarryRoomName,
+    shouldDropPlannedMission,
     sortOutMineSpawnTargets,
 } from '@/modules/features/external/externalScheduler';
 
@@ -1481,6 +1482,24 @@ export class ExternalMineSpawner {
         })));
     }
 
+    // 清空本源房 spawn 池里「上一轮」的外矿经济任务。
+    // 每轮派单都会按当前需求 + 先近后远重新铺一遍队列，残留旧任务必须先作废，
+    // 否则：① 旧任务永远占着队头，「先近后远」只作用于追加位置、实际顺序仍是旧顺序；
+    // ② 旧任务把单房挂单额度占满，新任务永远排不进去，外矿补员被整体冻结。
+    // （线上实测：165 条挂单里 77 条是早期 level=15 的遗留搬运任务，
+    //   结果所有外矿房 0 个采集工、补员一条都排不进来。）
+    static clearPlannedEconomyMissions(sourceRoom: Room): number {
+        const tasks = sourceRoom.getAllMissionFromPool?.('spawn') || [];
+        let removed = 0;
+        for (const task of [...tasks]) {
+            const memory = this.getSpawnTaskMemory(task);
+            if (!shouldDropPlannedMission(memory, sourceRoom.name)) continue;
+            sourceRoom.deleteMissionFromPool('spawn', task.id);
+            removed++;
+        }
+        return removed;
+    }
+
     // 采集工挂单是否已达上限。采集工定编小、又是搬运的前置，
     // 所以额度独立：搬运队列排满也不能挡住采集工补员（否则断档后要等一整个搬运周期）。
     static isHarvestAtPendingCap(sourceRoom: Room, targetRoomName: string): boolean {
@@ -2072,6 +2091,10 @@ export class ExternalMine {
         // 注意：外矿侦查/离线补员也走这个顺序，保证近房先建立视野与工位记录。
         const orderedTargets = ExternalMineSpawner.orderTargetsForSpawn(room, targetRooms);
 
+        // 队列 = 本轮需求：先作废上一轮的外矿经济挂单，再按上面的顺序重新铺。
+        // 不做这一步，「先近后远」只会作用于队尾，队头永远是历史遗留顺序（线上即如此）。
+        ExternalMineSpawner.clearPlannedEconomyMissions(room);
+
         for (const roomName of orderedTargets) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
@@ -2164,6 +2187,9 @@ export class ExternalMine {
 
         // 同 runEnergy：先近后远 + 挂单少的先派，避免单房独占总 spawn。
         const orderedTargets = ExternalMineSpawner.orderTargetsForSpawn(room, targetRooms);
+
+        // 同 runEnergy：先作废上一轮外矿经济挂单，队列 = 本轮需求（先近后远）。
+        ExternalMineSpawner.clearPlannedEconomyMissions(room);
 
         for (const roomName of orderedTargets) {
             const targetRoom = Game.rooms[roomName];
