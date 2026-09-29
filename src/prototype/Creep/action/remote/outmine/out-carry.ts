@@ -164,6 +164,43 @@ const getPreferredCarrySource = (creep: Creep): ExternalMineSourceStat | null =>
     return ExternalMineAnalysis.pickBestCarrySource(creep);
 };
 
+// 跨房重平衡的最小间隔：换房本身要重走一趟路，换得太勤净亏在路程上。
+const CARRY_ROOM_SWITCH_COOLDOWN = 40;
+
+/**
+ * 外矿搬运工的目标房不再固定为孵化时那一个（动态选房）。
+ *
+ * @remarks
+ * 参考实现里搬运工是「母房级共享池」，不绑定具体外矿房，谁积压多就去谁那儿；
+ * 这里在不改孵化结构的前提下补上等价能力：出发前 / 空等时重新评估各托管房积压，
+ * 把 memory.targetRoom 改到更值得跑的房。改房时房内取货缓存与「已预约源点」全部作废，
+ * 否则会把上一个房的容器 ID 带到新房里。换房受冷却约束，避免来回横跳。
+ *
+ * @param creep 当前外矿搬运 creep。
+ * @returns 本 tick 是否发生了换房（调用方应直接 return，下一 tick 按新目标房上路）。
+ */
+const maybeRebalanceCarryTargetRoom = (creep: Creep): boolean => {
+    const cache = getOutCarryCache(creep);
+    const lastSwitchTick = Number(cache.roomSwitchTick || 0);
+    if (Game.time - lastSwitchTick < CARRY_ROOM_SWITCH_COOLDOWN) return false;
+
+    const nextRoom = ExternalMineAnalysis.pickBestCarryTargetRoom(creep);
+    if (!nextRoom || nextRoom === creep.memory.targetRoom) return false;
+
+    creep.memory.targetRoom = nextRoom;
+    cache.roomSwitchTick = Game.time;
+
+    const sourceCache = getOutCarrySourceCache(creep);
+    delete sourceCache.targetId;
+    delete sourceCache.targetType;
+    delete sourceCache.waitUntil;
+    delete sourceCache.partialLeaveWait;
+    clearAssignedSourceCache(sourceCache);
+
+    creep.say(`⇄${nextRoom}`, true);
+    return true;
+};
+
 const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefined): RoomPosition | null => {
     const sourceRoom = creep.memory.sourceRoom;
     const taskTargetRoom = creep.memory.targetRoom;
@@ -566,6 +603,9 @@ const outCarry: OutCarryAction = {
                 creep.pickup(nearbyDrop);
                 return;
             }
+            // 「大批量干等」的逃逸口：挤在同一个空容器口等填装是最典型的浪费，
+            // 这时允许改去积压更足的托管房；换不了（冷却/余量不足）才原地等。
+            if (maybeRebalanceCarryTargetRoom(creep)) return;
             // 拥挤疏散：容器口附近同路线同伴过多时向空旷处让位，
             // 防止等填装的搬运工把唯一通道和 out-harvest 的工作位全部堵死。
             const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 2, {
@@ -577,6 +617,10 @@ const outCarry: OutCarryAction = {
             return;
         }
         delete cache.waitUntil;
+
+        // 尚未锁定房内取货目标时（空仓出发 / 返程续航），允许改去更值得跑的托管房；
+        // 已锁定目标则先打完这一单再评估，避免半途弃单。
+        if (!cache.targetId && maybeRebalanceCarryTargetRoom(creep)) return;
 
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             if (this.moveAlongRouteExit(creep, creep.memory.targetRoom, true)) return;
