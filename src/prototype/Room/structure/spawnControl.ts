@@ -4,6 +4,7 @@ import { GenCreepName } from '@/utils';
 import { decompressBodyConfig } from '@/modules/shared/compress';
 import { getRoomData } from '@/modules/shared/memory';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getMyConstructionSites } from '../mission/updaters/spawnRules';
 
 const getRoomMode = (room: Room) => {
@@ -210,7 +211,7 @@ export default class SpawnControl extends Room {
     }
 
     SpawnCreep() {
-        if (Game.time % 5) return;
+        if (!isRoomTickAligned(this.name, 5)) return;
         if (this.energyAvailable < 200) return;
 
         const spawn = getAvailableSpawn(this);
@@ -237,7 +238,7 @@ export default class SpawnControl extends Room {
             return;
         }
 
-        if (Game.time % 10) return;
+        if (!isRoomTickAligned(this.name, 10)) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
             const allowEmergencyDownsize = EMERGENCY_DOWNSIZE_ROLES.has(role);

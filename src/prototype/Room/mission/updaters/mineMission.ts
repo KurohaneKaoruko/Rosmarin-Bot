@@ -1,6 +1,7 @@
 import { OUTMINE_CONFIG } from '@/constant/config';
 import { getOutMineData, getRoomData } from '@/modules/shared/memory';
 import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 const SURROUNDING_OFFSETS: Array<[number, number]> = [
     [-1, -1], [0, -1], [1, -1],
@@ -175,7 +176,7 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, sp
     }
 
     const targetRoomObj = Game.rooms[targetRoom];
-    if (targetRoomObj && Game.time % (lookInterval * 5) === 1) {
+    if (targetRoomObj && isRoomTickAligned(targetRoom, lookInterval * 5, lookInterval * 5 - 1)) {
         depositWorkerNum = getDepositHarvestCount(targetRoomObj);
         if (depositWorkerNum > 0) {
             mineData.num = depositWorkerNum;
@@ -318,7 +319,7 @@ export default class MineMission extends Room {
      */
     UpdateHighwayScan() {
         const lookInterval = OUTMINE_CONFIG.LOOK_INTERVAL;
-        if (Game.time % lookInterval !== 0) return;
+        if (!isRoomTickAligned(this.name, lookInterval)) return;
 
         if (this[RESOURCE_ENERGY] < 50000) return;
         const outminePower = getRoomData()[this.name]['outminePower'];
@@ -399,7 +400,7 @@ export default class MineMission extends Room {
         if (!tasks || tasks.length === 0) return;
 
         const lookInterval = OUTMINE_CONFIG.LOOK_INTERVAL;
-        if (Game.time % lookInterval !== 1) return;
+        if (!isRoomTickAligned(this.name, lookInterval, lookInterval - 1)) return;
 
         const spawnMissionNum = this.getSpawnMissionNum() || {};
 

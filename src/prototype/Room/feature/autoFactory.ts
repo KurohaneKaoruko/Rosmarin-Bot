@@ -1,10 +1,11 @@
 import { AUTO_FACTORY_CONFIG, AUTO_FACTORY_FALLBACK, Goods, PRODUCTION_MIN, zipMap } from "@/constant/ResourceConstant";
 import { getAutoFactoryData, getMissionPools, getStructData } from "@/modules/shared/memory";
+import { isRoomTickAligned } from "@/modules/shared/roomPhase";
 import { sanitizeMissionPoolMemory } from "../mission/pool/MissionPools";
 
 export default class AutoFactory extends Room {
     autoFactory() {
-        if (Game.time % AUTO_FACTORY_CONFIG.tickInterval) return;
+        if (!isRoomTickAligned(this.name, AUTO_FACTORY_CONFIG.tickInterval)) return;
         if (!this.factory) return;
         const botmem = getStructData(this.name) as any;
         if (!botmem) return;

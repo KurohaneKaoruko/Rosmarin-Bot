@@ -15,8 +15,8 @@ export default class RoomExecute extends Room {
         // 更新任务池
         this.MissionUpdate();
 
-        // 主动防御处理
-        if (profile.defenseInterval === 1 || Game.time % profile.defenseInterval === 0) {
+        // 主动防御处理（叠加房间相位错峰，defenseInterval=1 时保持每 tick）
+        if (profile.defenseInterval === 1 || isRoomTickAligned(this.name, profile.defenseInterval)) {
             this.activeDefense();
         }
 

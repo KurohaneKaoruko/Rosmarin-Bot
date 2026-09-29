@@ -1,6 +1,7 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
 import { ensureLabAB, getLabAB } from '@/modules/shared/labReservations';
 import { getStructData } from '@/modules/shared/memory';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 export default class LabControl extends Room {
     LabWork() {
@@ -53,8 +54,8 @@ export default class LabControl extends Room {
     }
 
     RunReaction() {
-        // 每 5 tick 执行一次
-        if (Game.time % 5 !== 1) return;
+        // 每 5 tick 执行一次（叠加房间相位错峰，原节奏位置 t%5==1）
+        if (!isRoomTickAligned(this.name, 5, 4)) return;
         // lab数量不足时不处理
         if (!this.lab || this.lab.length < 3) return;
         if (this.memory.defend) return;

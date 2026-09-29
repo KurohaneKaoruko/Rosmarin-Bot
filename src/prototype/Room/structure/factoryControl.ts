@@ -1,4 +1,5 @@
 import { getStructData } from '@/modules/shared/memory';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 export default class FactoryControl extends Room {
     FactoryWork() {
@@ -33,7 +34,7 @@ export default class FactoryControl extends Room {
 
         let result = factory.produce(product as CommodityConstant);
         
-        if (Game.time % 100 == 0 || result != OK){
+        if (isRoomTickAligned(this.name, 100) || result != OK){
             if(factory.store[product] > 0) {
                 this.ManageMissionAdd('f', 's', product, factory.store[product]);
             }

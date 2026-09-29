@@ -1,5 +1,6 @@
 import { getStructureSignature } from '@/utils';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 type DefenderCounts = {
     attack: number;
@@ -61,8 +62,8 @@ export default class RoomDefense extends Room {
         // 处于防御时, 检查是否需要激活安全模式
         if (this.memory.defend && this.activateSafeMode()) return true;
 
-        // 关于主动防御的检查
-        if (Game.time % 5) return;
+        // 关于主动防御的检查（每 5 tick，叠加房间相位错峰）
+        if (!isRoomTickAligned(this.name, 5)) return;
         
         if (!Memory['whitelist']) Memory['whitelist'] = [];
         const roomHostiles = this.findEnemyCreeps({

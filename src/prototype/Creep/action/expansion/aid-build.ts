@@ -8,6 +8,7 @@ import { createFsmStorage, ensureFsmBucket } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 // 同 tick 共享的全房扫描结果：同房多个 aid-build 复用一次扫描。
 // 缓存未过滤列表、每次调用重放过滤，与直接 find({filter}) 行为一致。
@@ -794,7 +795,7 @@ const runAidBuildHarvest = (creep: Creep): boolean => {
 
     // 如果没有找到资源，尝试从 source 采集
     if (!creep.room.source) {
-        if (Game.time % 10 !== 0) return false;
+        if (!isRoomTickAligned(creep.room.name, 10)) return false;
         creep.room.update();
     }
 

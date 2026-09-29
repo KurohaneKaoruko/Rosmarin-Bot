@@ -1,9 +1,11 @@
 import { log } from "@/utils";
 import { THRESHOLDS } from "@/constant/Thresholds";
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 export default class TerminalControl extends Room {
     TerminalWork() {
-        if (Game.time % THRESHOLDS.TERMINAL.CHECK_MOD !== THRESHOLDS.TERMINAL.CHECK_OFFSET) return;
+        // 每 30 tick 一检，叠加房间相位错峰（保持原 offset 的节奏位置，仅消除多房同 tick 共振）
+        if (!isRoomTickAligned(this.name, THRESHOLDS.TERMINAL.CHECK_MOD, -THRESHOLDS.TERMINAL.CHECK_OFFSET)) return;
         const terminal = this.terminal;
         if (!terminal || terminal.cooldown > 0) return;
 

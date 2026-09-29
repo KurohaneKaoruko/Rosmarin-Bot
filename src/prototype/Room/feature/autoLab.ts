@@ -2,10 +2,11 @@ import { AUTO_LAB_CONFIG, LabMap, LabLevel, PRODUCTION_MIN, RESOURCE_PRODUCTION,
 import { log } from '@/utils';
 import { getLabAB } from '@/modules/shared/labReservations';
 import { getAutoLabData, getStructData } from '@/modules/shared/memory';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 export default class AutoLab extends Room {
     autoLab() {
-        if (Game.time % AUTO_LAB_CONFIG.tickInterval) return;
+        if (!isRoomTickAligned(this.name, AUTO_LAB_CONFIG.tickInterval)) return;
         if (!this.lab || !this.lab.length) return;
         const botmem = getStructData(this.name) as any;
         if (botmem.lab === undefined) botmem.lab = true;
@@ -128,7 +129,7 @@ const getCustomizeTask = (room: Room, getAvail: (res: ResourceConstant) => numbe
 }
 
 const getT1Task = (room: Room) => {
-    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
+    if (!isRoomTickAligned(room.name, AUTO_LAB_CONFIG.fallbackCheckInterval)) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
 
@@ -178,7 +179,7 @@ const getT1Task = (room: Room) => {
 }
 
 const getT2Task = (room: Room) => {
-    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
+    if (!isRoomTickAligned(room.name, AUTO_LAB_CONFIG.fallbackCheckInterval)) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
     const batch = AUTO_LAB_CONFIG.fallbackBatchAmount;
@@ -198,7 +199,7 @@ const getT2Task = (room: Room) => {
 }
 
 const getT3Task = (room: Room) => {
-    if (Game.time % AUTO_LAB_CONFIG.fallbackCheckInterval) return [ null, 0 ];
+    if (!isRoomTickAligned(room.name, AUTO_LAB_CONFIG.fallbackCheckInterval)) return [ null, 0 ];
 
     const r = (res: string) => room.getResAmount(res);
     const batch = AUTO_LAB_CONFIG.fallbackBatchAmount;

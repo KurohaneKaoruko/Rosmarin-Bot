@@ -2,6 +2,7 @@ import { log } from "@/utils"
 import { BASE_CONFIG } from "@/constant/config";
 import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/shared/memory";
+import { isRoomTickAligned } from "@/modules/shared/roomPhase";
 import {
     calcTransactionCostSafe,
     findMyOrderCached,
@@ -110,7 +111,7 @@ function hasEnergyReceiverRoom(sourceRoom: Room, balanceAt: number) {
 export default class AutoMarket extends Room {
     // 自动市场交易
     autoMarket() {
-        if (Game.time % AUTO_MARKET_CONFIG.tickInterval !== 0) return;
+        if (!isRoomTickAligned(this.name, AUTO_MARKET_CONFIG.tickInterval)) return;
         if (!hasMarketOrderApi()) return;
         const autoMaket = getAutoMarketData(this.name);
         injectDefaultAutoMarket(this, autoMaket);

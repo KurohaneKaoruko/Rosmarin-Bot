@@ -1,6 +1,6 @@
 import { compress } from '@/modules/shared/compress';
 import { estimateHealPower, getTowerEffectByDistance } from '@/modules/shared/combatCalc';
-import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { isRoomTickAligned, getRoomPhase } from '@/modules/shared/roomPhase';
 import { pickTowerFocusTarget } from '@/modules/shared/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
@@ -166,7 +166,7 @@ export default class TowerControl extends Room {
 
     // 治疗己方单位
     TowerHealCreep() {
-        if (!towerHealTargetsByRoom[this.name] || Game.time % 10 == 0) {
+        if (!towerHealTargetsByRoom[this.name] || isRoomTickAligned(this.name, 10)) {
             const targets: TowerTargetId[] = [];
             towerHealTargetsByRoom[this.name] = targets;
             targets.push(...this.find(FIND_POWER_CREEPS, {
@@ -202,7 +202,7 @@ export default class TowerControl extends Room {
 
     // 攻击NPC单位
     TowerAttackNPC() {
-        if (!towerAttackNpcTargetsByRoom[this.name] || Game.time % 10 == 0) {
+        if (!towerAttackNpcTargetsByRoom[this.name] || isRoomTickAligned(this.name, 10)) {
             towerAttackNpcTargetsByRoom[this.name] = this.find(FIND_HOSTILE_CREEPS, {
                 filter: c => c.owner.username == 'Source Keeper' || c.owner.username == 'Invader'
             }).map(c => c.id);
@@ -224,7 +224,7 @@ export default class TowerControl extends Room {
     // 攻击敌人
     TowerAttackEnemy() {
         // 搜寻敌人
-        if (!towerAttackTargetsByRoom[this.name] || Game.time % 10 == 0) {
+        if (!towerAttackTargetsByRoom[this.name] || isRoomTickAligned(this.name, 10)) {
             towerAttackTargetsByRoom[this.name] =
                 [
                     ...this.find(FIND_HOSTILE_CREEPS, {
@@ -255,7 +255,8 @@ export default class TowerControl extends Room {
         }
 
         // 打不动的目标不要每 tick 浪费 tower 能量：低频点射用于逼退/打断（ 有些极限 boost 需要等防御兵到位）。
-        if (Game.time % 20 >= 5) return false;
+        // 开火窗口按房间相位错峰（每 20 tick 开 5 tick 窗，窗口位置随房间相位平移）
+        if ((Game.time + getRoomPhase(this.name)) % 20 >= 5) return false;
         this.tower.forEach(tower => {
             if (tower['attacked']) return;
             tower.attack(hostile);
