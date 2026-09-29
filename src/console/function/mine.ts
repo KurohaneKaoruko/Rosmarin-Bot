@@ -78,6 +78,18 @@ function getNearbyRooms(sourceRoom: string, range = 1): string[] {
     return rooms;
 }
 
+// 上下左右四个正交相邻房间（不含斜角）
+function getOrthogonalRooms(sourceRoom: string): string[] {
+    const parsed = parseRoomCoord(sourceRoom);
+    if (!parsed) return [];
+    return [
+        { x: parsed.x, y: parsed.y + 1 },
+        { x: parsed.x, y: parsed.y - 1 },
+        { x: parsed.x + 1, y: parsed.y },
+        { x: parsed.x - 1, y: parsed.y },
+    ].map((c) => formatRoomCoord(c.x, c.y));
+}
+
 // 外矿设置
 export default {
     mine: {
@@ -89,38 +101,49 @@ export default {
             }
             return hadError ? -1 : OK;
         },
-        // 批量添加周围外矿
-        addarea(sourceRoom: string, range: number = 1) {
-            if (!sourceRoom) return -1;
-            if (range < 1) return ERR_INVALID_ARGS;
+    // 批量添加外矿：
+    // - adds(sourceRoom, '+')        只添加上下左右四个正交相邻房间
+    // - adds(sourceRoom, 2)          添加 range 圈内的所有房间（8 方向）
+    adds(sourceRoom: string, pattern: '+' | number = 1) {
+        if (!sourceRoom) return -1;
 
-            const nearbyRooms = getNearbyRooms(sourceRoom, Math.floor(range));
-            if (nearbyRooms.length <= 0) {
-                console.log(`房间 ${sourceRoom} 周围没有可添加的房间。`);
-                return ERR_NOT_FOUND;
+        let nearbyRooms: string[];
+        let desc: string;
+        if (pattern === '+') {
+            nearbyRooms = getOrthogonalRooms(sourceRoom);
+            desc = '上下左右四房';
+        } else {
+            const range = Math.floor(Number(pattern));
+            if (!(range >= 1)) return ERR_INVALID_ARGS;
+            nearbyRooms = getNearbyRooms(sourceRoom, range);
+            desc = `范围 ${range} 圈`;
+        }
+        if (nearbyRooms.length <= 0) {
+            console.log(`房间 ${sourceRoom} 周围没有可添加的房间。`);
+            return ERR_NOT_FOUND;
+        }
+
+        const addedRooms: string[] = [];
+        const existedRooms: string[] = [];
+
+        for (const targetRoom of nearbyRooms) {
+            const result = addOutMineTarget(sourceRoom, targetRoom, false);
+            if (result === -1) continue;
+            if (result.added) {
+                addedRooms.push(`${targetRoom}[${result.bucket}]`);
+            } else {
+                existedRooms.push(`${targetRoom}[${result.bucket}]`);
             }
+        }
 
-            const addedRooms: string[] = [];
-            const existedRooms: string[] = [];
-
-            for (const targetRoom of nearbyRooms) {
-                const result = addOutMineTarget(sourceRoom, targetRoom, false);
-                if (result === -1) continue;
-                if (result.added) {
-                    addedRooms.push(`${targetRoom}[${result.bucket}]`);
-                } else {
-                    existedRooms.push(`${targetRoom}[${result.bucket}]`);
-                }
-            }
-
-            console.log(
-                `[mine.addarea] ${sourceRoom} 范围 ${range} 圈: ` +
-                `新增 ${addedRooms.length}, 已存在 ${existedRooms.length}`
-            );
-            if (addedRooms.length > 0) console.log(`新增: ${addedRooms.join(', ')}`);
-            if (existedRooms.length > 0) console.log(`已存在: ${existedRooms.join(', ')}`);
-            return OK;
-        },
+        console.log(
+            `[mine.adds] ${sourceRoom} ${desc}: ` +
+            `新增 ${addedRooms.length}, 已存在 ${existedRooms.length}`
+        );
+        if (addedRooms.length > 0) console.log(`新增: ${addedRooms.join(', ')}`);
+        if (existedRooms.length > 0) console.log(`已存在: ${existedRooms.join(', ')}`);
+        return OK;
+    },
         // 删除外矿：支持多个房间名；传 'all' 清空该源房全部外矿数据
         // 例：mine.remove('W5N8', 'W4N8', 'W5N7') / mine.remove('W5N8', 'all')
         remove(sourceRoom: string, ...targetRooms: string[]) {
