@@ -972,7 +972,7 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
 }
 
 // 特殊冲级 ext 的并发工地上限（只数 source ring-2 的自有工地，建完再补）
-const SOURCE_EXT_SITE_CAP = 2;
+
 
 /**
  * 特殊冲级（rush 子模式 / mini）：在 source 的 ring-2（切比雪夫距离恰为 2）放 ext 工地。
@@ -994,7 +994,6 @@ function createSourceExtSites(room: Room, budget: number): number {
 
     // 并发预算只数 source ring-2 的自有工地，其他来源的 ext 工地不占这份名额
     const ownSites = sites.filter(site => (room.source || []).some(source => site.pos.getRangeTo(source.pos) === 2)).length;
-
     // 每个 source 各自生成 ring-2 候选格（过滤墙/边界/既有结构与工地）
     const candidates = (room.source || []).map((source) => {
         const cells: { x: number; y: number }[] = [];
@@ -1017,10 +1016,10 @@ function createSourceExtSites(room: Room, budget: number): number {
     // 双（多）source 轮转交替落位：round-robin 保证两个矿的 ext 数量均衡
     let created = 0;
     let round = 0;
-    while (created < budget && ownSites + created < SOURCE_EXT_SITE_CAP) {
+    while (created < budget && ownSites + created < buildMax) {
         let progressed = false;
         for (const cells of candidates) {
-            if (created >= budget || ownSites + created >= SOURCE_EXT_SITE_CAP) break;
+            if (created >= budget || ownSites + created >= buildMax) break;
             const cell = cells[round];
             if (!cell) continue;
             cells[round] = undefined as unknown as { x: number; y: number };
