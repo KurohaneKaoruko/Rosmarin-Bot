@@ -38,6 +38,72 @@ const BUFFERED_WORK_CAP = 90;
 const getRcl8MaxWork = () =>
     typeof CONTROLLER_MAX_UPGRADE_PER_TICK === 'number' ? CONTROLLER_MAX_UPGRADE_PER_TICK : 15;
 
+// ==================== link 供能几何吞吐封顶 ====================
+//
+// 升级编制不只看「需求」（收入/盈余），还要看「供能几何」：controller link 的补给速率存在
+// 硬上限——link 一个 cooldown（15t）才能发一次车、路上有 3% 损耗、manager 从 storage 搬运
+// 补链也有往返距离。超出几何上限刷出来的编制只会集体饿肚子（喂不饱的空转人口）。
+//
+// 公式（work 单位 = 每 tick 能量口径）：
+//   throughput = LINK_CAPACITY×(1−0.03) / ((max(4, dist)+2)×LINK_COOLDOWN)   —— link 泵送基线
+//              + 0.2×manager载量/(2×dist) + (RCL7 ? 8 : 0)                    —— manager 搬运回补
+// 其中 dist 是 storage→controller link 的切比雪夫距离（设计期量纲，不寻路）；
+// 「距离下限 4 + 搬运修正 2」防近距布局吞吐虚高。
+//
+// ⚠️ 只收紧 getUpgradeWorkCapacity 的上限，不改收入驱动项——定编曲线方向不变，
+// 只是几何喂不饱时不再全额放量。若实测低 RCL 误伤，回滚本 helper 即可（单项可回退）。
+const LINK_LOSS_RATIO = 0.03;
+const LINK_THROUGHPUT_MIN_DIST = 4;
+const LINK_HAUL_DISTANCE_CORRECTION = 2;
+/** manager 时间占比折算（manager 约 20% 的时间在喂 link 链） */
+const LINK_MANAGER_TIME_SHARE = 0.2;
+/** RCL7 直加项（双 spawn 期 spawn 填充链额外产能） */
+const LINK_RCL7_BONUS = 8;
+/** manager 载量探测失败时的兜底值（≈基础 manager 配置 4×CARRY 的两倍，宁保守不冒进） */
+const LINK_MANAGER_CARRY_FALLBACK = 400;
+/** 几何封顶的吞吐下限：极端远距也保底这点升级吞吐（≈1 只小体型升级工），配合降级保底兜底 */
+const LINK_THROUGHPUT_WORK_FLOOR = 4;
+
+// 估算 manager 体型载量（与 getGeneratedRoleWorkPartCount 同款探测式，桩环境返回兜底值）
+const getManagerCarryCapacity = (room: Room): number => {
+    if (typeof (room as any).GetRoleBodys !== 'function' ||
+        typeof (room as any).GenerateBodys !== 'function') {
+        return LINK_MANAGER_CARRY_FALLBACK;
+    }
+    const bodyConfig = (room as any).GetRoleBodys('manager');
+    const body = (room as any).GenerateBodys(bodyConfig, 'manager') as BodyPartConstant[];
+    let carry = 0;
+    for (const part of body || []) {
+        if (part === CARRY) carry += 50;
+    }
+    return carry > 0 ? carry : LINK_MANAGER_CARRY_FALLBACK;
+};
+
+export const getLinkThroughputWorkCap = (room: Room): number => {
+    const controller = room.controller!;
+    // 没有 controller link 就没有这条几何约束（container 供能分支维持原 30/90 常量）
+    const link = (room.link || []).find(l => l.pos.inRangeTo(controller.pos, 2));
+    if (!link) return Infinity;
+
+    const storage = room.storage;
+    const dist = storage
+        ? Math.max(LINK_THROUGHPUT_MIN_DIST, storage.pos.getRangeTo(link.pos))
+        : LINK_THROUGHPUT_MIN_DIST;
+
+    const linkCapacity = typeof LINK_CAPACITY === 'number' ? LINK_CAPACITY : 800;
+    const linkCooldown = typeof LINK_COOLDOWN === 'number' ? LINK_COOLDOWN : 15;
+    const pumpThroughput = linkCapacity * (1 - LINK_LOSS_RATIO) /
+        ((dist + LINK_HAUL_DISTANCE_CORRECTION) * linkCooldown);
+    const managerThroughput = LINK_MANAGER_TIME_SHARE * getManagerCarryCapacity(room) / (2 * dist);
+    const rclBonus = room.level === 7 ? LINK_RCL7_BONUS : 0;
+
+    return clamp(
+        Math.floor(pumpThroughput + managerThroughput + rclBonus),
+        LINK_THROUGHPUT_WORK_FLOOR,
+        BUFFERED_WORK_CAP
+    );
+};
+
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 // ==================== 通用房间状态 ====================
@@ -297,12 +363,14 @@ export const getRemotePileEnergy = (sourceRoom: Room): number => {
     });
 };
 
-// 升级吞吐上限：RCL8 固定 15；有控制器缓冲 90；无缓冲（需往返主仓）30
+// 升级吞吐上限：RCL8 固定 15；有控制器缓冲 90，且叠加「link 供能几何」封顶
+// （只认 controller link 供能分支；container-only / 无 link 分支维持原常量不变）
 export const getUpgradeWorkCapacity = (room: Room): number => {
     const controller = room.controller;
     if (!controller?.my) return 0;
     if (room.level >= 8) return getRcl8MaxWork();
-    return hasControllerEnergyBuffer(room) ? BUFFERED_WORK_CAP : NO_BUFFER_WORK_CAP;
+    if (!hasControllerEnergyBuffer(room)) return NO_BUFFER_WORK_CAP;
+    return Math.min(BUFFERED_WORK_CAP, getLinkThroughputWorkCap(room));
 };
 
 /**
