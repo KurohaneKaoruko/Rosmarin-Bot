@@ -104,6 +104,71 @@ export const getLinkThroughputWorkCap = (room: Room): number => {
     );
 };
 
+// ==================== upgrader starved 负反馈环 ====================
+//
+// 取能落空 = 供能断流的直接信号：
+// 计数 → 缩升级编制，避免「空转升级工继续抢 spawn 队列与地面能量」的二次伤害；
+// 供能恢复后计数自动衰减，编制随之回扩——形成闭合负反馈。
+//
+// 防线语义（保守化取值）：
+// - 控制器缓冲（link/container）还有能量就不算饿——可能只是还没走到；
+// - ttd 已进降级风险区（< UPGRADE_NEEDED_TTD）不缩编——此时升级是保命项，降级保底优先；
+// - RCL≥8 不计数：满级房是固定小编制 + link 常供，缩编无意义。
+const STARVED_MAX = 200;
+/** starved 超过该值追加第二轮缩编（ 原值） */
+const STARVED_SECOND_STAGE = 100;
+
+// 控制器缓冲（link/container）是否彻底断流——starved 记账的前提
+export const isControllerBufferEmpty = (room: Room): boolean => {
+    const controller = room.controller;
+    if (!controller) return true;
+    const link = (room.link || []).find(l => l.pos.inRangeTo(controller.pos, 2));
+    if (link && (link.store[RESOURCE_ENERGY] || 0) > 0) return false;
+    const container = (room.container || []).find(c => c.pos.inRangeTo(controller.pos, 3));
+    if (container && (container.store[RESOURCE_ENERGY] || 0) > 0) return false;
+    return true;
+};
+
+// 惰性衰减：按流逝 tick 数补扣（每 tick −1），不依赖固定调用频率
+const decayUpgradersStarved = (room: Room): number => {
+    const mem = room.memory as any;
+    if (typeof mem.upgradersStarved !== 'number') mem.upgradersStarved = 0;
+    const last = mem.upgradersStarvedTick;
+    if (mem.upgradersStarved > 0 && typeof last === 'number' && Game.time > last) {
+        mem.upgradersStarved = Math.max(0, mem.upgradersStarved - (Game.time - last));
+    }
+    mem.upgradersStarvedTick = Game.time;
+    return mem.upgradersStarved;
+};
+
+export const getUpgradersStarved = (room: Room): number => decayUpgradersStarved(room);
+
+/**
+ * 升级取能失败记账（由 upgrader 行为层在「取能落空」时调用，见 action/economy/upgrader.ts）。
+ */
+export const registerUpgraderStarve = (room: Room): void => {
+    const controller = room.controller;
+    if (!controller?.my) return;
+    if (room.level >= 8) return;
+    if ((controller.ticksToDowngrade || 0) < UPGRADE_NEEDED_TTD) return;
+    if (!isControllerBufferEmpty(room)) return;
+    const starved = decayUpgradersStarved(room);
+    (room.memory as any).upgradersStarved =
+        Math.min(STARVED_MAX, Math.max(1, starved + Math.floor(room.level / 2)));
+};
+
+// 缩编：starved>0 缩一轮、>100 再缩一轮，
+// 每轮 round(×0.75)−1；下限为 1 只升级工的产能（不归零，降级保底另有闸门）
+const shrinkByStarved = (room: Room, demandWork: number): number => {
+    const starved = getUpgradersStarved(room);
+    if (starved <= 0) return demandWork;
+    const floorWork = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
+    let shrunk = demandWork;
+    if (starved > 0) shrunk = Math.round(shrunk * 0.75) - 1;
+    if (starved > STARVED_SECOND_STAGE) shrunk = Math.round(shrunk * 0.75) - 1;
+    return Math.max(Math.min(floorWork, demandWork), shrunk);
+};
+
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 // ==================== 通用房间状态 ====================
@@ -444,7 +509,8 @@ export const getUpgradeWorkTarget = (room: Room): number => {
         return Math.max(lowerLimit, Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
     }
 
-    return Math.max(lowerLimit, Math.min(capacity, Math.max(incomeWork, surplusWork, pileWork)));
+    // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩 ——
+    return Math.max(lowerLimit, Math.min(capacity, shrinkByStarved(room, Math.max(incomeWork, surplusWork, pileWork))));
 };
 
 // ==================== worker 体型折算 ====================

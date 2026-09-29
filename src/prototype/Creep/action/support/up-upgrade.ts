@@ -1,6 +1,7 @@
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
+import { registerUpgraderStarve } from '@/modules/shared/roomWorkforce';
 
 // 冲级催化：WORK 用升级催化（XGH2O 系），MOVE 用加速（XZHO2 系）。
 // goBoost 非强制模式，资源不足时自动放弃并不阻塞工作。
@@ -92,6 +93,10 @@ const onSource = (creep: Creep): WorkEvent => {
     });
     if (filled && creep.store.getFreeCapacity() === 0) {
         return WORK_EVENTS.TO_TARGET;
+    }
+    // 全部来源落空且仍空载：供能断流信号，进 starved 负反馈记账
+    if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+        registerUpgraderStarve(creep.room);
     }
     return WORK_EVENTS.STAY;
 };

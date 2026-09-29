@@ -1,7 +1,7 @@
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
-import { canRushUpgrade, getRoomMode, getWorkerUpgradeSlot } from '@/modules/shared/roomWorkforce';
+import { canRushUpgrade, getRoomMode, getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/roomWorkforce';
 import upUpgradeFunction from '@/prototype/Creep/action/support/up-upgrade';
 
 /**
@@ -85,6 +85,10 @@ const onSource = (creep: Creep): WorkEvent => {
         creep.say('⚡');
         creep.runControllerUpgrade();
         return WORK_EVENTS.TO_TARGET;
+    }
+    // 取能落空且仍是空载：供能断流信号，进 starved 负反馈记账
+    if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
+        registerUpgraderStarve(creep.room);
     }
     return WORK_EVENTS.STAY;
 };
