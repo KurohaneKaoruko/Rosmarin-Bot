@@ -305,7 +305,7 @@ function gatherRoomLive(room: Room) {
         ? `${spawn0.spawning.name.replace(/^.*?@(.*?)@.*$/, '$1')} ${spawn0.spawning.remainingTime}/${spawn0.spawning.needTime}`
         : null;
 
-    // 外矿：列表源数 + 在岗采集/搬运（按 targetRoom 归属外矿列表）
+    // 外矿：列表源数 + 在岗采集/搬运（按 targetRoom 归属外矿列表，且只统计本源房派出的）
     const outData = getOutMineData(room.name) as any;
     const outList: string[] = outData?.energy || [];
     let outHarvest = 0;
@@ -315,6 +315,7 @@ function gatherRoomLive(room: Room) {
             const c = Game.creeps[name];
             const role = c.memory?.role;
             if (role !== 'out-harvest' && role !== 'out-carry' && role !== 'out-car') continue;
+            if (c.memory?.sourceRoom !== room.name) continue;
             if (!outList.includes(c.memory?.targetRoom || '')) continue;
             if (role === 'out-harvest') outHarvest += 1;
             else outCarry += 1;
@@ -398,7 +399,7 @@ function renderStatsHUD(
 ) {
     const x = 0.5;
     const width = 17;
-    const lineHeight = 0.72;
+    const lineHeight = 0.58;
     const rows: StatRow[] = [];    const cpu = typeof stats.cpu === 'number' ? stats.cpu : 0;
     const avgCpu = typeof stats.AvgCpuUsed === 'number' ? stats.AvgCpuUsed : 0;
     const bucket = typeof stats.bucket === 'number' ? stats.bucket : 0;
@@ -459,7 +460,12 @@ function renderStatsHUD(
     const eaPct = live.ecap > 0 ? live.ea / live.ecap : 0;
     const eaColor = eaPct < 0.2 ? STYLE.colorErr : eaPct < 0.5 ? STYLE.colorWarn : STYLE.colorGood;
     rows.push({ kind: 'bar', pct: eaPct, barColor: eaColor, barLabel: `Ea ${live.ea}/${live.ecap}` });
-    rows.push({ kind: 'text', text: `Queue ${live.queue}`, color: live.queue >= 6 ? STYLE.colorWarn : STYLE.colorSub, font: STYLE.font, sub: live.spawning ? { text: `⚙ ${live.spawning}`, color: STYLE.colorAccent } : undefined });
+    rows.push({
+        kind: 'text',
+        text: `Queue ${live.queue}${live.spawning ? ` · ⚙ ${live.spawning}` : ''}`,
+        color: live.queue >= 6 ? STYLE.colorWarn : STYLE.colorSub,
+        font: STYLE.font,
+    });
     if (live.siteCount > 0) rows.push({ kind: 'text', text: `Sites ${live.siteCount}: ${live.siteSummary}`, color: STYLE.colorSub, font: STYLE.font });
 
     // ── 外矿区 ──
@@ -470,7 +476,8 @@ function renderStatsHUD(
             text: `${live.outSources}源 · 采 ${live.outHarvest} · 搬 ${live.outCarry}`,
             color: live.outHarvest === 0 ? STYLE.colorWarn : STYLE.color,
             font: STYLE.font,
-            sub: { text: live.outHarvest === 0 ? '● 断档' : '● 在岗', color: live.outHarvest === 0 ? STYLE.colorErr : STYLE.colorGood },
+            sub: { text: live.outHarvest === 0 ? '断档' : '在岗', color: '#000000' },
+            badgeColor: live.outHarvest === 0 ? STYLE.colorErr : STYLE.colorGood,
         });
     }
 
@@ -495,9 +502,9 @@ function renderStatsHUD(
     const y0 = 0.6;
     let height = padding * 2;
     for (const row of rows) {
-        if (row.kind === 'section') height += 0.6;
-        else if (row.kind === 'bar') height += 0.62;
-        else if (row.kind === 'spark') height += 0.85;
+        if (row.kind === 'section') height += 0.5;
+        else if (row.kind === 'bar') height += 0.56;
+        else if (row.kind === 'spark') height += 0.5;
         else if (row.kind === 'gap') height += (row.gap ?? 0.25);
         else height += lineHeight;
     }
@@ -512,19 +519,19 @@ function renderStatsHUD(
     let y = y0;
     for (const row of rows) {
         if (row.kind === 'section') {
-            y += 0.28;
+            y += 0.24;
             // 分区底板 + 左侧 accent 色条
-            visual.rect(x, y, width, 0.34, { fill: row.accent || STYLE.sectionText, opacity: 0.08 });
-            visual.rect(x, y, 0.12, 0.34, { fill: row.accent || STYLE.sectionText, opacity: 0.95 });
+            visual.rect(x, y, width, 0.3, { fill: row.accent || STYLE.sectionText, opacity: 0.08 });
+            visual.rect(x, y, 0.12, 0.3, { fill: row.accent || STYLE.sectionText, opacity: 0.95 });
             visual.text(row.text || '', x + 0.3, y + 0.26, { align: 'left', font: `bold ${STYLE.fontSmall}`, color: STYLE.sectionText });
-            y += 0.48;
+            y += 0.42;
         } else if (row.kind === 'bar') {
             drawProgressBar(visual, x, y, width, 0.5, row.pct ?? 0, row.barColor || STYLE.barRcl, row.barLabel);
             y += 0.62;
         } else if (row.kind === 'spark') {
             const values = (row.values || []).filter((v) => Number.isFinite(v));
             if (values.length >= 2) {
-                const max = Math.max(...values, 1);
+                const max = maxVal;
                 const slot = (width - 0.4) / values.length;
                 const baseY = y + 0.68;
                 for (let i = 0; i < values.length; i += 1) {
@@ -537,7 +544,7 @@ function renderStatsHUD(
                 }
                 visual.line(x + 0.1, baseY, x + width - 0.2, baseY, { color: '#333333', width: 0.04 });
             }
-            y += 0.85;
+            y += maxVal > 0 ? 0.78 : 0.3;
         } else if (row.kind === 'badge') {
             // 保留占位：徽章已在标题行以 sub+badgeColor 渲染
         } else if (row.kind === 'gap') {
