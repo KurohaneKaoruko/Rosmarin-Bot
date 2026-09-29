@@ -1,6 +1,6 @@
 import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/features/external/externalRoad';
-import { HighwayMineVisual } from '@/shared/highwayMineVisual';
-import { getOutMineData, getRoomData } from '@/shared/memory';
+import { HighwayMineVisual } from '@/modules/shared/highwayMineVisual';
+import { getOutMineData, getRoomData } from '@/modules/shared/memory';
 
 const CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
 const NON_HIGHWAY_ROOM_REGEX = /^[EW]\d*[1-9][NS]\d*[1-9]$/;

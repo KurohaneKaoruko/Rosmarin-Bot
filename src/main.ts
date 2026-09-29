@@ -14,9 +14,9 @@ import { ExpandModule } from '@/modules/ExpandModule';
 import { InterShardModule } from '@/modules/InterShardModule';
 import { MoveModule } from '@/modules/MoveModule';
 
-import '@/infra/qos';    // QoS 全局挂载
-import '@/infra/BetterMove';    // creep移动优化
-import '@/infra/structureCache';  // 极致建筑缓存
+import '@/modules/infra/qos';    // QoS 全局挂载
+import '@/modules/infra/BetterMove';    // creep移动优化
+import '@/modules/infra/structureCache';  // 极致建筑缓存
 
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展
@@ -36,7 +36,7 @@ App.on(Statistics);       // 统计数据
 App.on(GeneratePixel);    // 搓像素
 App.on(MoveModule);       // 移动模块
 
-import { updateBucketGovernor } from '@/infra/bucketGovernor';
+import { updateBucketGovernor } from '@/modules/infra/bucketGovernor';
 
 export const loop = () => {
     // CPU 桶闭环：先更新外矿活跃阈值，再跑主循环（Tier 1-3）

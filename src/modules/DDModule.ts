@@ -1,4 +1,4 @@
-import { mountDD, checkDDMessages, ddTools } from '../infra/ddcomm'
+import { mountDD, checkDDMessages, ddTools } from './infra/ddcomm'
 
 /**
  * DD 通信运行时模块。

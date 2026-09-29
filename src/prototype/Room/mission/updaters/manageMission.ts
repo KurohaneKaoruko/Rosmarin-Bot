@@ -1,6 +1,6 @@
 import { LabMap, Goods, BarList } from "@/constant/ResourceConstant";
 import { BASE_CONFIG } from "@/constant/config";
-import { getStructData } from "@/shared/memory";
+import { getStructData } from "@/modules/shared/memory";
 import { THRESHOLDS } from "@/constant/Thresholds";
 
 const MANAGE_BALANCE = {

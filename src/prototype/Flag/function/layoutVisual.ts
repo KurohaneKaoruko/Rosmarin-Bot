@@ -1,6 +1,6 @@
 import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
-import { getLayoutData } from '@/shared/memory';
-import { decompressBatch } from '@/shared/compress';
+import { getLayoutData } from '@/modules/shared/memory';
+import { decompressBatch } from '@/modules/shared/compress';
 
 export default class LayoutVisualFunction extends Flag {
     // layoutVisual 旗：持续显示所在房的布局预览（数据取自布局 memory，每 tick 重绘）

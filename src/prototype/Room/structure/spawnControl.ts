@@ -1,9 +1,9 @@
 import { isRoleId, RoleData, type RoleId } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { GenCreepName } from '@/utils';
-import { decompressBodyConfig } from '@/shared/compress';
-import { getRoomData } from '@/shared/memory';
-import { getRoomModeProfile } from '@/shared/roomMode';
+import { decompressBodyConfig } from '@/modules/shared/compress';
+import { getRoomData } from '@/modules/shared/memory';
+import { getRoomModeProfile } from '@/modules/shared/roomMode';
 import { getMyConstructionSites } from '../mission/updaters/spawnRules';
 
 const getRoomMode = (room: Room) => {

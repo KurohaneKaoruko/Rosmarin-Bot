@@ -1,4 +1,4 @@
-import { buildCombatProfile, estimateDismantlePower } from '@/shared/combatCalc';
+import { buildCombatProfile, estimateDismantlePower } from '@/modules/shared/combatCalc';
 
 export type DefenseRampartMode = 'melee' | 'ranged';
 

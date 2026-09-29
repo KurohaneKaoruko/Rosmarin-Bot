@@ -7,7 +7,7 @@
  * - 捐赠量 = min(接收方缺口, 捐助方 terminal 能量一半)，保证捐助方等级不跌破 100
  * - 同一接收方 500 tick 冷却，给能量在途留时间
  */
-import { getEnergyLevel, getStandardReserve } from '@/shared/energyLevel';
+import { getEnergyLevel, getStandardReserve } from '@/modules/shared/energyLevel';
 
 const FUNNEL_CHECK_INTERVAL = 20;
 const FUNNEL_EMERGENCY_LEVEL = 30;

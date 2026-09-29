@@ -5,7 +5,7 @@ import {
     pickDefenseAnchorRampart,
     scoreRampart,
     shouldSwitchDefenseRampart
-} from '@/shared/defenseUtils';
+} from '@/modules/shared/defenseUtils';
 
 const DEFENSE_RAMPART_LOCK_TTL = 25;
 const DEFEND_ATTACK_SWITCH_THRESHOLD = 2;

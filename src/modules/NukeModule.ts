@@ -1,4 +1,4 @@
-import { getNukerData } from "@/shared/memory";
+import { getNukerData } from "@/modules/shared/memory";
 
 /**
  * 核弹请求同步模块。

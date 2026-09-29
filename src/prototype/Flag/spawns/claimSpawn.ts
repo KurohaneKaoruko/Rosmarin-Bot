@@ -1,5 +1,5 @@
-import { compressBodyConfig } from "@/shared/compress";
-import { getRoomData } from "@/shared/memory";
+import { compressBodyConfig } from "@/modules/shared/compress";
+import { getRoomData } from "@/modules/shared/memory";
 import { log } from "@/utils";
 import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
 import { getSpawnRoomOrRemove, tickThrottle } from "../utils";

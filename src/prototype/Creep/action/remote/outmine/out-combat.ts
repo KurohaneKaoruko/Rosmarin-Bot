@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { engageTarget } from '@/prototype/Creep/function/combatCore';
 
 // 到岗前置。刻意不共用 combatCore 的同名函数：那边的版本会在赶路途中顺手自愈，

@@ -1,4 +1,4 @@
-import { getStructData } from '@/shared/memory';
+import { getStructData } from '@/modules/shared/memory';
 
 export default class FactoryControl extends Room {
     FactoryWork() {

@@ -1,4 +1,4 @@
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 const NEAR_RANGE = 2;
 const STAY_BUILD_RANGE = 3;

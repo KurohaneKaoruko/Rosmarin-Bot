@@ -1,5 +1,5 @@
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { recordSourceSlotCounts } from '@/shared/memory';
+import { recordSourceSlotCounts } from '@/modules/shared/memory';
 
 type ScoutCache = {
     stompSiteId?: Id<ConstructionSite> | null;

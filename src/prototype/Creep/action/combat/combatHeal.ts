@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {
     CombatHealPriority,
     resolveBoundPartner,

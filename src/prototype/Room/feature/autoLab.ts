@@ -1,7 +1,7 @@
 import { AUTO_LAB_CONFIG, LabMap, LabLevel, PRODUCTION_MIN, RESOURCE_PRODUCTION, t2, t3 } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
-import { getLabAB } from '@/shared/labReservations';
-import { getAutoLabData, getStructData } from '@/shared/memory';
+import { getLabAB } from '@/modules/shared/labReservations';
+import { getAutoLabData, getStructData } from '@/modules/shared/memory';
 
 export default class AutoLab extends Room {
     autoLab() {

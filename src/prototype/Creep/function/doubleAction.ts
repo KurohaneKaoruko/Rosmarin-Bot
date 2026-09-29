@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 export default class DoubleAction extends Creep {
     // 双人小队移动
     doubleMove(Direction: DirectionConstant): number {

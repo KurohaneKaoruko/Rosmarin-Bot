@@ -1,6 +1,6 @@
 import { CompoundColor } from '@/constant/ResourceConstant';
-import { ensureLabAB, getLabAB } from '@/shared/labReservations';
-import { getStructData } from '@/shared/memory';
+import { ensureLabAB, getLabAB } from '@/modules/shared/labReservations';
+import { getStructData } from '@/modules/shared/memory';
 
 export default class LabControl extends Room {
     LabWork() {

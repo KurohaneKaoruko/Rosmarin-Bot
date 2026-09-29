@@ -1,9 +1,9 @@
 import { AUTO_FACTORY_CONFIG, DYNAMIC_THRESHOLD_CONFIG, Goods, LAB_T1_PRIORITY, LabMap, PRIORITY_CONFIG, PRODUCTION_MIN, PRODUCTION_MONITOR_CONFIG, RESOURCE_BALANCE, RESOURCE_DISPATCH_CONFIG, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant'
 import { log } from '@/utils';
-import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/shared/memory';
-import { getLabAB } from '@/shared/labReservations';
-import { getRoomModeProfile } from '@/shared/roomMode';
-import { getTransactionCostRatio } from '@/shared/marketUtils';
+import { getAutoFactoryData, getAutoLabData, getMissionPools, getResourceManage, getRoomData, getStructData } from '@/modules/shared/memory';
+import { getLabAB } from '@/modules/shared/labReservations';
+import { getRoomModeProfile } from '@/modules/shared/roomMode';
+import { getTransactionCostRatio } from '@/modules/shared/marketUtils';
 
 const br = '<br/>';
 const LOG_COLORS = {

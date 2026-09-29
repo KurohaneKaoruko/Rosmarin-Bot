@@ -1,7 +1,7 @@
 /**
  * 任务提交
  */
-import { getMissionPools } from '@/shared/memory';
+import { getMissionPools } from '@/modules/shared/memory';
 
 export default class MissionSubmit extends Room {
     // 提交运输任务

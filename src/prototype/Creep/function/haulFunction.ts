@@ -1,4 +1,4 @@
-import { getCoreDepotContainer, isCoreDepotContainer } from '@/shared/coreDepot';
+import { getCoreDepotContainer, isCoreDepotContainer } from '@/modules/shared/coreDepot';
 
 /**
  * 搬运通用功能

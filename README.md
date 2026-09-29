@@ -239,11 +239,9 @@ rosmarin-bot/
 │   ├── framework/           # 框架核心
 │   │   ├── createApp.ts     # 应用创建
 │   │   └── errorMapper.ts   # 错误映射
-│   ├── infra/               # 基础设施（移动优化/QoS/缓存等）
 │   ├── interface/           # TypeScript 类型定义
 │   ├── prototype/           # 原型扩展
-│   ├── modules/             # Tick 级运行时模块
-│   ├── shared/              # 跨模块复用工具
+│   ├── modules/             # Tick 级运行时模块（含 infra/ 基础设施与 shared/ 复用工具）
 │   ├── wasm/                # 独立的 WebAssembly 资源
 │   ├── main.ts              # 入口文件
 │   └── utils.ts             # 通用工具

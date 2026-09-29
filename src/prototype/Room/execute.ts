@@ -1,6 +1,6 @@
-import { getRoomData, getStructData } from '@/shared/memory';
-import { isRoomTickAligned } from '@/shared/roomPhase';
-import { getRoomMode, getRoomModeProfile } from '@/shared/roomMode';
+import { getRoomData, getStructData } from '@/modules/shared/memory';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
 
 export default class RoomExecute extends Room {

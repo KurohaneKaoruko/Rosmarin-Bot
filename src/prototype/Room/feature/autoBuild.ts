@@ -1,6 +1,6 @@
 import LayoutPlanner from "@/modules/features/Planner/layoutPlanner"
-import { getLayoutData, getRoomData } from "@/shared/memory";
-import { getRoomMode } from "@/shared/roomMode";
+import { getLayoutData, getRoomData } from "@/modules/shared/memory";
+import { getRoomMode } from "@/modules/shared/roomMode";
 
 
 

@@ -1,6 +1,6 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
 // 迁移条件集中声明：采满 -> 交付，空包 -> 继续采集

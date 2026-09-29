@@ -2,16 +2,16 @@ import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 
 // 各外矿房最后已知源数（有视野时刷新）：无视野补采集工时按它补给，防外矿停摆
 const lastKnownSourceNum = new Map<string, number>();
-import { isRoomTickAligned } from '@/shared/roomPhase';
-import { getRoomMode, getRoomModeProfile, isHighLikeMode } from '@/shared/roomMode';
-import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { getRoomMode, getRoomModeProfile, isHighLikeMode } from '@/modules/shared/roomMode';
+import { getActiveRemoteThreshold } from '@/modules/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
-import { HighwayMineVisual } from '@/shared/highwayMineVisual';
-import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
-import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/shared/memory';
+import { HighwayMineVisual } from '@/modules/shared/highwayMineVisual';
+import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
+import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/modules/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {
     CarryRoomCandidateStat,
     countPendingEconomyMissions,

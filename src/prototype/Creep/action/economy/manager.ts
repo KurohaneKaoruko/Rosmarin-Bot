@@ -1,4 +1,4 @@
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 type LinkPlan =
     | { type: 'transfer-to-manage'; target: StructureLink }

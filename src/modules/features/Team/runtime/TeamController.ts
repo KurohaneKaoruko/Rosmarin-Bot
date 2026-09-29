@@ -1,7 +1,7 @@
 import Team from "../core/TeamClass";
 import TeamCalc from "../core/TeamCalc";
-import { getTeamData } from "@/shared/memory";
-import { getTeamCreeps } from "@/shared/creepTickIndex";
+import { getTeamData } from "@/modules/shared/memory";
+import { getTeamCreeps } from "@/modules/shared/creepTickIndex";
 
 /**
  * Team 执行调度器（运行时）。

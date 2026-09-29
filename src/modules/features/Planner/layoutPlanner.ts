@@ -1,12 +1,12 @@
 import { log } from '@/utils';
-import { compress, compressBatch, decompress } from '@/shared/compress';
+import { compress, compressBatch, decompress } from '@/modules/shared/compress';
 import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
 import { autoPlanner } from '@/modules/features/Planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
 import * as StaticPlanner from '@/modules/features/Planner/static';
-import { getCoreDepotPointFromLayout } from '@/shared/coreDepot';
-import { getLayoutData, getRoomData } from '@/shared/memory';
-import { isSpecialRushActive } from '@/shared/roomMode';
+import { getCoreDepotPointFromLayout } from '@/modules/shared/coreDepot';
+import { getLayoutData, getRoomData } from '@/modules/shared/memory';
+import { isSpecialRushActive } from '@/modules/shared/roomMode';
 
 /**
  * 布局计算与可视化/落盘的通用模块

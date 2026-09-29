@@ -1,5 +1,5 @@
 import { evaluateSourceWorkTiles } from '@/prototype/Creep/function/sourceFunction';
-import { getProfilerReport } from '@/infra/cpuProfiler';
+import { getProfilerReport } from '@/modules/infra/cpuProfiler';
 
 /**
  * 采集/搬运决策诊断命令

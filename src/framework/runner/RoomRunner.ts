@@ -1,11 +1,11 @@
 /**
  * 房间控制
  */
-import { isRoomTickAligned } from '@/shared/roomPhase';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import roomConsole from '@/console/function/room';
 import layoutConsole from '@/console/function/layout';
-import { getAutoData, getMissionPools, getRoomData } from '@/shared/memory';
-import { shouldAutoStartFirstRoom } from '@/shared/bootstrap';
+import { getAutoData, getMissionPools, getRoomData } from '@/modules/shared/memory';
+import { shouldAutoStartFirstRoom } from '@/modules/shared/bootstrap';
 
 export const roomRunner = function (room: Room) {
     if (!room) return;

@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 type EnergySourceTarget = AnyStoreStructure | Resource<RESOURCE_ENERGY>;
 type WithdrawTarget = AnyStoreStructure | Resource | Ruin;

@@ -1,6 +1,6 @@
-import { isSpecialRushActive } from '@/shared/roomMode';
-import { getLayoutData } from '@/shared/memory';
-import { decompressBatch } from '@/shared/compress';
+import { isSpecialRushActive } from '@/modules/shared/roomMode';
+import { getLayoutData } from '@/modules/shared/memory';
+import { decompressBatch } from '@/modules/shared/compress';
 
 function directionTo(from: RoomPosition, to: RoomPosition): DirectionConstant {
     const dx = Math.sign(to.x - from.x), dy = Math.sign(to.y - from.y);

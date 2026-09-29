@@ -1,8 +1,8 @@
 import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/CreepConstant';
-import { decompress, decompressBodyConfig } from '@/shared/compress';
+import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getRoomData } from '@/shared/memory';
-import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/shared/creepTickIndex';
+import { getRoomData } from '@/modules/shared/memory';
+import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
     pruneDelayedUpgraderSpawnMissions,
     createSpawnCheckContext,

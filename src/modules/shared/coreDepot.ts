@@ -1,5 +1,5 @@
-import { decompress } from '@/shared/compress';
-import { getLayoutData } from '@/shared/memory';
+import { decompress } from '@/modules/shared/compress';
+import { getLayoutData } from '@/modules/shared/memory';
 
 export const CORE_DEPOT_KINDS = ['storage', 'terminal'] as const;
 

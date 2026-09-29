@@ -1,5 +1,5 @@
 import { BehaviorTree, BtStatus, condition, fail, leaf, selector, sequence } from '@/framework/ai/behaviorTree';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 type AioContext = {
     creep: Creep;

@@ -1,5 +1,5 @@
 import { runWorkLayer } from '@/framework/ai/adapters';
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 

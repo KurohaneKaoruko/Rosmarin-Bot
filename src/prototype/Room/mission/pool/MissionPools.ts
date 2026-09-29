@@ -3,8 +3,8 @@
  * 其中 transport/mine/terminal 为共享池，通过 task.type 区分具体子任务。
  */
 
-import { decompress } from "@/shared/compress";
-import { getMissionPools } from "@/shared/memory";
+import { decompress } from "@/modules/shared/compress";
+import { getMissionPools } from "@/modules/shared/memory";
 
 export const MISSION_POOL_NAMES = [
     'transport',

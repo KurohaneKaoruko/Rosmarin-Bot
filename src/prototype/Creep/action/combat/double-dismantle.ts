@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 const getCachedDoubleDismantleTarget = (creep: Creep): Structure | null => {
     const targetId = creep.memory['targetId'] as Id<Structure> | null | undefined;

@@ -1,7 +1,7 @@
-import { compress } from '@/shared/compress';
-import { getLabAB } from '@/shared/labReservations';
-import { getRoomData, getStructData } from '@/shared/memory';
-import { getRoomModeProfile } from '@/shared/roomMode';
+import { compress } from '@/modules/shared/compress';
+import { getLabAB } from '@/modules/shared/labReservations';
+import { getRoomData, getStructData } from '@/modules/shared/memory';
+import { getRoomModeProfile } from '@/modules/shared/roomMode';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 

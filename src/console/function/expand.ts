@@ -1,6 +1,6 @@
-import { parseShardRoomName } from '@/shared/shardRoom';
+import { parseShardRoomName } from '@/modules/shared/shardRoom';
 import { getKnownShardNames, pushInterShardCommand, readInterShardLocalRoot, readInterShardRemoteRoot } from '@/modules/features/interShard';
-import { getBotMemory } from '@/shared/memory';
+import { getBotMemory } from '@/modules/shared/memory';
 
 /**
  * 生成扩张计划 ID。

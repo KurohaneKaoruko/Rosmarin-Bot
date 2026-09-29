@@ -1,6 +1,6 @@
-import { compressBodyConfig } from "@/shared/compress";
+import { compressBodyConfig } from "@/modules/shared/compress";
 import { THRESHOLDS } from "@/constant/Thresholds";
-import { getCreepByTargetRoom } from "@/shared/creepTickIndex";
+import { getCreepByTargetRoom } from "@/modules/shared/creepTickIndex";
 
 export default class UpSpawnFunction extends Flag {
     // 房间内 UP 类旗帜触发孵化（UP-UPGRADE / UP-REPAIR）

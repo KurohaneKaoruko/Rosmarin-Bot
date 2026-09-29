@@ -1,7 +1,7 @@
-import { parseShardRoomName } from '@/shared/shardRoom';
+import { parseShardRoomName } from '@/modules/shared/shardRoom';
 import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/features/interShard';
-import { getBotMemory, getMissionPools } from '@/shared/memory';
-import { getExpandCreepCountsAll } from '@/shared/creepTickIndex';
+import { getBotMemory, getMissionPools } from '@/modules/shared/memory';
+import { getExpandCreepCountsAll } from '@/modules/shared/creepTickIndex';
 
 type LocalExpandPlan = {
     id: string;

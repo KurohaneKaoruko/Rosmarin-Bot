@@ -1,4 +1,4 @@
-import { pickDefenseAnchorRampart } from '@/shared/defenseUtils';
+import { pickDefenseAnchorRampart } from '@/modules/shared/defenseUtils';
 import { tryBindNearestPartner } from '@/prototype/Creep/function/boundPartner';
 
 const runDefend2Attack = (creep: Creep) => {

@@ -6,8 +6,8 @@
 
 import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 import { RoomArray } from '@/modules/features/Planner/utils/roomArray';
-import { compress, decompress } from '@/shared/compress';
-import { getLayoutData, getOutMineData } from '@/shared/memory';
+import { compress, decompress } from '@/modules/shared/compress';
+import { getLayoutData, getOutMineData } from '@/modules/shared/memory';
 
 const hasLayoutMemory = (roomName: string): boolean => {
     const layout = getLayoutData();

@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { resolveBoundPartner } from '@/prototype/Creep/function/boundPartner';
 import { ensureInTargetRoomForCombat, runRangedCombat } from '@/prototype/Creep/function/combatCore';
 

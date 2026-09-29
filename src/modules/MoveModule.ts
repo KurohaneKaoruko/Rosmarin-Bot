@@ -1,4 +1,4 @@
-import { MoveWorkTileCandidate, readMoveWorkTileCandidates } from '@/shared/moveWork';
+import { MoveWorkTileCandidate, readMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 const isSamePosition = (left: RoomPosition, right: RoomPosition): boolean => {
     return left.roomName === right.roomName && left.x === right.x && left.y === right.y;

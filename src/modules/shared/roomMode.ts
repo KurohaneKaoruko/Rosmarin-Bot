@@ -16,7 +16,7 @@
  * 不再各自维护字符串比较与魔数。
  */
 
-import { getRoomData } from '@/shared/memory';
+import { getRoomData } from '@/modules/shared/memory';
 
 export type RoomModeName = 'low' | 'main' | 'high' | 'rush' | 'mini';
 

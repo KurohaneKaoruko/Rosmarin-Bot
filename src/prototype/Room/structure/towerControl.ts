@@ -1,7 +1,7 @@
-import { compress } from '@/shared/compress';
-import { estimateHealPower, getTowerEffectByDistance } from '@/shared/combatCalc';
-import { isRoomTickAligned } from '@/shared/roomPhase';
-import { pickTowerFocusTarget } from '@/shared/defenseUtils';
+import { compress } from '@/modules/shared/compress';
+import { estimateHealPower, getTowerEffectByDistance } from '@/modules/shared/combatCalc';
+import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { pickTowerFocusTarget } from '@/modules/shared/defenseUtils';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type TowerTargetId = Id<Creep> | Id<PowerCreep>

@@ -1,6 +1,6 @@
 import { log } from "@/utils";
-import { compressBodyConfig } from "@/shared/compress";
-import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/shared/memory";
+import { compressBodyConfig } from "@/modules/shared/compress";
+import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/modules/shared/memory";
 import { TEAM_CONFIG } from "../config/TeamConfig";
 
 export default class TeamSpawner {

@@ -1,7 +1,7 @@
 import { log } from "@/utils"
 import { BASE_CONFIG } from "@/constant/config";
 import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
-import { getAutoMarketData } from "@/shared/memory";
+import { getAutoMarketData } from "@/modules/shared/memory";
 import {
     calcTransactionCostSafe,
     findMyOrderCached,
@@ -11,7 +11,7 @@ import {
     hasEnergyReceiverRoomCached,
     hasEnergySupplierRoomCached,
     hasMarketOrderApi,
-} from "@/shared/marketUtils";
+} from "@/modules/shared/marketUtils";
 
 const br = '<br/>';
 const LOG_COLORS = {

@@ -1,4 +1,4 @@
-import { getNukerData } from "@/shared/memory";
+import { getNukerData } from "@/modules/shared/memory";
 
 export default class NukerControl extends Room {
     /**

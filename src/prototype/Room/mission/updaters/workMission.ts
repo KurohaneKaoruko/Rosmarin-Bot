@@ -1,5 +1,5 @@
-import { compress, decompress } from '@/shared/compress';
-import { getLayoutData, getStructData } from '@/shared/memory';
+import { compress, decompress } from '@/modules/shared/compress';
+import { getLayoutData, getStructData } from '@/modules/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 type WorkPoolName = 'build' | 'repair';

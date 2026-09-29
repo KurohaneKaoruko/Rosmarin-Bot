@@ -1,4 +1,4 @@
-import { getStructData } from '@/shared/memory';
+import { getStructData } from '@/modules/shared/memory';
 
 // 颜色常量
 const COLORS = {

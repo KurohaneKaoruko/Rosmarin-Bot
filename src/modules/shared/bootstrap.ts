@@ -7,7 +7,7 @@
  *
  * 判定实时计算（调用方少、成本低），不引入额外缓存。
  */
-import { getRoomData } from '@/shared/memory';
+import { getRoomData } from '@/modules/shared/memory';
 
 export const shouldAutoStartFirstRoom = (): boolean => {
     let ownedCount = 0;

@@ -1,4 +1,4 @@
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { ROLE_BOOST_CONFIGS } from '@/prototype/Creep/function/boostFunction';

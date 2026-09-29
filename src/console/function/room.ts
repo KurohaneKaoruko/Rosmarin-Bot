@@ -1,7 +1,7 @@
 import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
-import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/shared/memory";
-import { parseShardRoomName } from "@/shared/shardRoom";
+import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/modules/shared/memory";
+import { parseShardRoomName } from "@/modules/shared/shardRoom";
 import { clearMemoryCache } from "@/prototype/Creep/function/cacheFunction";
 import { ROOM_NAME_SOURCE_TEXT, resolveRoomName } from "@/console/argUtils";
 

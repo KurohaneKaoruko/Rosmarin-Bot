@@ -1,5 +1,5 @@
 import { LAB_T1_PRIORITY, LabMap, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant';
-import { resolveLabFromMem } from '@/shared/labReservations';
+import { resolveLabFromMem } from '@/modules/shared/labReservations';
 import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';
 
 const COLORS = {

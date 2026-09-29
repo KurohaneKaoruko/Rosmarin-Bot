@@ -9,7 +9,7 @@
  * 5. 唯一已托管房间
  * 无法唯一确定时返回带候选列表的 Error，提示补参数。
  */
-import { getRoomData } from '@/shared/memory';
+import { getRoomData } from '@/modules/shared/memory';
 
 export const ROOM_NAME_PATTERN = /^[EW][0-9]+[NS][0-9]+$/;
 

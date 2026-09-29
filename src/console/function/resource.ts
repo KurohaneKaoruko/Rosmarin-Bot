@@ -1,4 +1,4 @@
-import { getResourceManage } from '@/shared/memory';
+import { getResourceManage } from '@/modules/shared/memory';
 import { BASE_CONFIG } from '@/constant/config';
 
 /**

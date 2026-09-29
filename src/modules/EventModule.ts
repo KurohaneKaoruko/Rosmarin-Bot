@@ -1,4 +1,4 @@
-import { ensureEventApi, runEventPhase } from '../infra/event';
+import { ensureEventApi, runEventPhase } from '@/modules/infra/event';
 
 const EventModule: RuntimeModule = {
     init: () => {

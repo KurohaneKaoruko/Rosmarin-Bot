@@ -1,6 +1,6 @@
 import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
 import { StateMachine } from '@/framework/ai/stateMachine';
-import { writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 export const MINERAL_LAYERS = {
     FLOW: 'mineral:flow',

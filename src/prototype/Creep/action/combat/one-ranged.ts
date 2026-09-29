@@ -1,4 +1,4 @@
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 const runCombat = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();

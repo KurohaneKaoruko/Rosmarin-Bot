@@ -13,11 +13,11 @@
  * 本模块不依赖 CreepConstant（避免测试环境缺全局常量时模块加载失败），
  * 体型信息一律通过 room.GetRoleBodys / room.GenerateBodys 运行时获取。
  */
-import { getEnergyLevel } from '@/shared/energyLevel';
-import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/shared/roomMode';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
-import { decompress } from '@/shared/compress';
-import { getRoomData, getOutMineData } from '@/shared/memory';
+import { getEnergyLevel } from '@/modules/shared/energyLevel';
+import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { decompress } from '@/modules/shared/compress';
+import { getRoomData, getOutMineData } from '@/modules/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 // —— 能量水平档位 ——
@@ -45,7 +45,7 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
 export const getRoomEnergyState = (room: Room): string =>
     (room.memory as any).energyState || (room as any).updateEnergyState?.(false) || 'NORMAL';
 
-export { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
+export { getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
 
 // 以 room.getEnergyProfile 为准，否则退化为 room[RESOURCE_ENERGY] 统计
 export const getTotalEnergy = (room: Room): number =>

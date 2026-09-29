@@ -1,5 +1,5 @@
-import { compress } from '@/shared/compress';
-import { getStructData } from '@/shared/memory';
+import { compress } from '@/modules/shared/compress';
+import { getStructData } from '@/modules/shared/memory';
 
 /**
  * Lab 预留/解析工具

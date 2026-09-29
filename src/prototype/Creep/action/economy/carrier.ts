@@ -7,7 +7,7 @@ import {
     getCoreDepotTarget,
     hasCoreDepotTarget,
     isCoreDepotContainer
-} from '@/shared/coreDepot';
+} from '@/modules/shared/coreDepot';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 type CarrierWithdrawTarget = Resource | Tombstone | Ruin | AnyStoreStructure;

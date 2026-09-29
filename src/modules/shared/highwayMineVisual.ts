@@ -1,4 +1,4 @@
-import { getOutMineData, getRoomData } from '@/shared/memory';
+import { getOutMineData, getRoomData } from '@/modules/shared/memory';
 
 export class HighwayMineVisual {
     private static readonly MAP_DRAW_INTERVAL = 1;

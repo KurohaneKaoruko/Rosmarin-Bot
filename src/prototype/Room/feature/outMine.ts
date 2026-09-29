@@ -1,5 +1,5 @@
 import { ExternalMine, ExternalMineTiming } from '@/modules/features/external/externalMine';
-import { getRoomModeProfile } from '@/shared/roomMode';
+import { getRoomModeProfile } from '@/modules/shared/roomMode';
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {

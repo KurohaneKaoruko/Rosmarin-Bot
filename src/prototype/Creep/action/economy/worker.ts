@@ -1,17 +1,17 @@
-import { compress, decompress } from '@/shared/compress';
+import { compress, decompress } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getRoomData } from '@/shared/memory';
+import { getRoomData } from '@/modules/shared/memory';
 import { runWorkLayer } from '@/framework/ai/adapters';
-import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/shared/moveWork';
+import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {
     WORKER_FAMILY_ROLES,
     getWorkerConstructionQuota,
     getWorkerUpgradeSlot,
     hasWorkerUpgradeDemand,
-} from '@/shared/roomWorkforce';
+} from '@/modules/shared/roomWorkforce';
 import type { CreepCacheTarget } from '@/interface/creep-cache.interface';
 
 type WorkerTaskData = BuildTask | RepairTask;

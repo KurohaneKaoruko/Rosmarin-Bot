@@ -1,5 +1,5 @@
-import { getLabAB, ensureBoostLabs, type BoostLabsMemory } from '@/shared/labReservations';
-import { getStructData, getTeamData } from '@/shared/memory';
+import { getLabAB, ensureBoostLabs, type BoostLabsMemory } from '@/modules/shared/labReservations';
+import { getStructData, getTeamData } from '@/modules/shared/memory';
 
 const BOOST_LAB_CAPACITY = 3000;
 const BOOST_LAB_ENERGY_TARGET = 2000;

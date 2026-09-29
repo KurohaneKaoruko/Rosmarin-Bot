@@ -1,7 +1,7 @@
 import { RoleLevelData } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/shared/creepTickIndex';
-import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
+import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {
     getRoomEnergyState,
     getRoomMode,
@@ -18,7 +18,7 @@ import {
     getUpgraderTarget,
     getDroppedPileEnergy,
     getDroppedPileWorkerBoost,
-} from '@/shared/roomWorkforce';
+} from '@/modules/shared/roomWorkforce';
 
 // 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
 export {
@@ -26,7 +26,7 @@ export {
     getDowngradeUniversalTarget,
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
-} from '@/shared/roomWorkforce';
+} from '@/modules/shared/roomWorkforce';
 
 // 搬运任务生成阈值
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
