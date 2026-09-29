@@ -2,6 +2,8 @@ import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/Creep
 import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
+import { getUpgradeWorkTarget } from '@/modules/shared/roomWorkforce';
+import { buildUpgraderBodyConfig } from '@/modules/shared/upgradeBody';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
     pruneDelayedUpgraderSpawnMissions,
@@ -61,9 +63,14 @@ export default class SpawnMission extends Room {
                 }
             }
             if (shouldSpawnRole(role, context, adjusted)) {
+                // 升级工特化：按「WORK 定编缺口 + 当前可用容量」一次孵最大体型
+                // （能量越多单只越强，替代固定分档的小体型爬群）
+                const body = role === 'upgrader'
+                    ? buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this))
+                    : '';
                 this.SpawnMissionAdd(
                     RoleData[role].code,
-                    '',
+                    body,
                     RoleData[role].level,
                     role,
                     { home: this.name } as CreepMemory
