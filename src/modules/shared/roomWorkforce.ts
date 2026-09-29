@@ -836,6 +836,62 @@ export const getUpgraderTarget = (room: Room): number => {
     return 0;
 };
 
+// ==================== upgrader 无缝替班 ====================
+//
+// 模式与 spawnRules.getHarvesterSuccessionNeeds（harvester 换班）同源：
+// 实测一次 spawn→controller 的路程，场上所有 upgrader 的 TTL 都覆盖不住
+// 「路程 + 孵化期 + 缓冲」时立即预孵 1 只接班者——接班爬还在路上时前任仍在升级，
+// 控制器功率不出现「死后空窗」的周期性锯齿。
+//
+// 边界：
+// - 没有专人编制（getUpgraderTarget=0，low/main 由 worker 兼任）不产生替班需求；
+// - rush 的 up-upgrade（boost 流程）不接入——boost 前置的孵化工序不同，保持原退役/补员机制；
+// - 路程实测低频重测（5000 tick），寻路不可用（桩环境/异常）时静默退化为无替班需求。
+const UPGRADE_TIMING_REFRESH_INTERVAL = 5000;
+const UPGRADER_SUCCESSION_BUFFER = 10;
+const UPGRADER_MIN_INCUBATION = 12;
+
+/** 实测 spawn→controller 路程（缓存 room.memory.upgradeTiming，低频重测） */
+export const getUpgraderPathTime = (room: Room): number | undefined => {
+    const mem = room.memory as any;
+    const timing = mem.upgradeTiming;
+    if (timing && typeof timing.pathTime === 'number'
+        && Game.time - (timing.measuredAt || 0) < UPGRADE_TIMING_REFRESH_INTERVAL) {
+        return timing.pathTime;
+    }
+    const spawn = room.spawn?.[0];
+    const controller = room.controller;
+    if (!spawn || !controller || typeof room.findPath !== 'function') return timing?.pathTime;
+    const path = room.findPath(spawn.pos, controller.pos, { ignoreCreeps: true });
+    if (!path || path.length === 0) return timing?.pathTime;
+    mem.upgradeTiming = { pathTime: path.length, measuredAt: Game.time };
+    return path.length;
+};
+
+/**
+ * upgrader 的接班缺口数（0/1）：没有任何在编 upgrader 的 TTL 覆盖得住
+ * 「实测路程 + 孵化期 + 缓冲」时返回 1（spawnRules 用它把下单时机提前到「死前」）。
+ */
+export const getUpgraderSuccessionNeeds = (room: Room): number => {
+    if (getUpgraderTarget(room) <= 0) return 0;
+    const pathTime = getUpgraderPathTime(room);
+    if (typeof pathTime !== 'number') return 0;
+    const upgraders = getRoomTickCacheValue(room, 'succession_upgraders', () =>
+        typeof room.find !== 'function' ? [] as Creep[] :
+        ((room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'upgrader'),
+        }) as Creep[]) || []).slice()
+    );
+    if (upgraders.length === 0) return 0;
+    const incubation = Math.max(
+        UPGRADER_MIN_INCUBATION,
+        ...upgraders.map(h => (h.body ? h.body.length * 3 : UPGRADER_MIN_INCUBATION))
+    );
+    const covered = upgraders.some(h =>
+        (h.ticksToLive || 0) > pathTime + incubation + UPGRADER_SUCCESSION_BUFFER);
+    return covered ? 0 : 1;
+};
+
 /**
  * worker 的升级侧目标数量（0 表示当前不需要为升级定编）。
  * 定编依据 getUpgradeWorkTarget 的 WORK 总数折算到当前 worker 体型，

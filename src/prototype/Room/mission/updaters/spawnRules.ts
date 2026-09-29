@@ -16,6 +16,7 @@ import {
     getWorkerUpgradeTarget,
     getWorkerPopulationCap,
     getUpgraderTarget,
+    getUpgraderSuccessionNeeds,
     getDroppedPileEnergy,
     getDroppedPileWorkerBoost,
 } from '@/modules/shared/roomWorkforce';
@@ -247,7 +248,13 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         // 能量储备闸：spawn/extension 里的能量必须留足房间运作底仓（≈两次基础孵化），
         // 只用盈余孵升级工——rush 冲级也不许把开局能量无脑烧光。
         if (room.energyAvailable < room.energyCapacityAvailable * 0.6 && room.energyAvailable < 800) return false;
-        return current < getUpgraderTarget(room);
+        const target = getUpgraderTarget(room);
+        if (target <= 0) return false;
+        // 无缝替班：在编 upgrader 的 TTL 都覆盖不住「实测路程 + 孵化期 + 缓冲」时，
+        // 立即预孵 1 只接班者（同 harvester 换班语义）——接班爬还在路上时
+        // 前任仍在升级，控制器功率不出现死后空窗的锯齿。
+        if (getUpgraderSuccessionNeeds(room) > 0 && current < target + 1) return true;
+        return current < target;
     },
     'miner': (room: Room, current: number) => {
         const lv = room.level;
