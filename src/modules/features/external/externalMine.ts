@@ -652,6 +652,7 @@ export class ExternalMineState {
 
         const Mem = getOutMineData(sourceRoomName);
         Mem.energy ??= [];
+        const addedRooms: string[] = [];
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
@@ -664,8 +665,12 @@ export class ExternalMineState {
                 if (Mem.energy.indexOf(roomName) === -1) {
                     Mem.energy.push(roomName);
                     known.push(roomName);
+                    addedRooms.push(roomName);
                 }
             }
+        }
+        if (addedRooms.length > 0) {
+            console.log(`[自动扩图] ${sourceRoomName} 自动加入相邻外矿: ${addedRooms.join(', ')}`);
         }
         return known;
     }
