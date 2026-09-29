@@ -30,12 +30,20 @@ export {
 } from '@/modules/shared/roomWorkforce';
 
 // ── CRITICAL 复苏闸门 ──
-// 能量枯竭（CRITICAL）时孵化只保留采集/救援线（harvester/universal），
-// 其余角色一律暂缓提交并清出队列——把稀缺能量集中孵出大体型 harvester 破局。
+// 能量枯竭（CRITICAL）时孵化只保留采集/救援线，其余角色一律暂缓提交并清出队列——
+// 把稀缺能量集中孵出大体型 harvester 破局。
 // 否则会陷入「小爬流水线」贫困陷阱：低配爬群吃光全部能量，谁也长不大，
 // CRITICAL 永久化（线上实例：95 万 tick 卡在 RCL2，升级速度 0.02/tick）。
 // 能量回到 NORMAL/SURPLUS 后闸门自动解除，恢复正常孵化。
-export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set(['harvester', 'universal']);
+//
+// 豁免集（换班线）：harvester/universal 是内部采集救援；
+// out-harvest/out-carry 是外矿采集/搬运——外矿收入正是复苏的粮仓，
+// 它们的「存量换班补员」不受闸门限制（数量由各自定编闸管住，只接力不扩编）：
+// 外矿采集工断档会让搬运工集体闲置、外矿收入归零，比省下的孵化能量亏得多。
+export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set([
+    'harvester', 'universal',
+    'out-harvest', 'out-carry', 'out-car',
+]);
 
 export const pruneCriticalNonRecoveryMissions = (room: Room): number => {
     if (getEnergyState(room) !== 'CRITICAL') return 0;

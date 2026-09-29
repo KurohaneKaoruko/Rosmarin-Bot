@@ -1536,6 +1536,11 @@ export class ExternalMineSpawner {
     // 统一到采集工那一层后，两者按入队先后轮流孵化（同房按 采集→搬运 入队，谁缺谁先补）。
     private static readonly OUTMINE_PIPELINE_LEVEL = RoleData['out-harvest'].level;
 
+    // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
+    // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线
+    // （universal=0 / manager=1 / transporter=2 / harvester=3）——生命线优先，其次无缝接力。
+    private static readonly OUTMINE_REPLACEMENT_LEVEL = 5;
+
     // 单个目标房在 spawn 池中允许挂的外矿任务上限（按角色分列）。
     // 外矿体型很大（RCL8 搬运工 48 格 ≈ 144 tick 孵化），单房一次把定编全塞进队列，
     // 就会独占总 spawn 数百 tick，其它外矿房一个 creep 都排不上；
@@ -1938,10 +1943,15 @@ export class ExternalMineSpawner {
         }
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoomName);
+        // 换班接力：目标房还有本源房的采集工在岗、但 TTL 覆盖已不足——
+        // 接替孵化必须抢在本地 worker 之前，否则排队时间让老爬先死，采集断档、
+        // 搬运工集体闲置（无缝接力的核心）。
+        const isReplacement = this.getAllLiveOutHarvesterNum(targetRoomName) > 0;
+        const replaceLevel = isReplacement ? this.OUTMINE_REPLACEMENT_LEVEL : this.OUTMINE_PIPELINE_LEVEL;
         if (upbody) {
-            sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], this.OUTMINE_PIPELINE_LEVEL, 'out-harvest', memory);
+            sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, 'out-harvest', memory);
         } else {
-            sourceRoom.SpawnMissionAdd('OH', [], this.OUTMINE_PIPELINE_LEVEL, 'out-harvest', memory);
+            sourceRoom.SpawnMissionAdd('OH', [], replaceLevel, 'out-harvest', memory);
         }
         return true;
     }
