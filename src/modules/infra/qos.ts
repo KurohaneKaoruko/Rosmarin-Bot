@@ -25,6 +25,10 @@ export type QoSAPI = {
     getQoS: () => QoSState | null;
     shouldRun: (options?: ShouldRunOptions) => boolean;
     isTickAligned: (mod: number, offset?: number, tick?: number) => boolean;
+    /** tick 末上报本 tick CPU 使用量（连续超限触发熔断降级） */
+    noteTickCpu: (used: number) => void;
+    /** CPU 超限熔断是否生效中 */
+    isCpuBreakerTripped: () => boolean;
 };
 
 const LEVEL_ORDER: Record<QoSLevel, number> = {
@@ -32,6 +36,44 @@ const LEVEL_ORDER: Record<QoSLevel, number> = {
     constrained: 1,
     normal: 2,
 };
+
+// ── CPU 超限熔断（与 bucket 解耦）──
+// cpuLimit 超限不消耗 bucket（bucket 满桶时 QoS 原判定永远 normal，看不到超限），
+// 而 Script timed out 后下一 tick 原样再跑同量逻辑 → 无限超时刷屏。
+// 社区标准做法：连续超限 N tick → 降级档位（全部 shouldRun 闸门自动响应），
+// 并给一个自动恢复窗口；窗口内低优模块被既有 QoS 门自然跳过。
+const overState = {
+    streak: 0,   // 连续超限 tick 数
+    until: 0,    // 熔断截止 tick
+    lastUsed: 0, // 上一 tick 末的 CPU 使用量（tick 开头判定用）
+};
+
+/** 每个 tick 末上报本 tick 的 CPU 使用量；超过 limit 计入连续超限 */
+export function noteTickCpu(used: number): void {
+    overState.lastUsed = used;
+    const limit = Game.cpu.limit || 20;
+    if (used > limit) {
+        overState.streak += 1;
+        // 连续 3 tick 超限 → 熔断 200 tick；连续 6 tick → 熔断 400 tick
+        if (overState.streak >= 3) overState.until = Game.time + 200;
+        if (overState.streak >= 6) overState.until = Game.time + 400;
+    } else {
+        overState.streak = 0;
+    }
+}
+
+/** 熔断是否生效中（供诊断/面板展示） */
+export function isCpuBreakerTripped(): boolean {
+    return Game.time < overState.until;
+}
+
+/** 熔断对档位的降级：熔断期内至少 constrained，重度（streak≥6）直接 emergency */
+function applyOverLimitDegrade(level: QoSLevel): QoSLevel {
+    if (Game.time < overState.until) {
+        return overState.streak >= 6 ? 'emergency' : 'constrained';
+    }
+    return level;
+}
 
 function ensureStatsRoot() {
     const mem = Memory as any;
@@ -51,6 +93,11 @@ export function updateQoS(): QoSState {
     let level: QoSLevel = 'normal';
     if (bucket < 2000) level = 'emergency';
     else if (bucket < 5000) level = 'constrained';
+
+    // CPU 超限熔断降级：比 bucket 更早发现超限（超限不消耗 bucket）
+    if (overState.lastUsed > (Game.cpu.limit || 20)) {
+        level = applyOverLimitDegrade(level);
+    }
 
     const state: QoSState = { level, bucket, used, tick: Game.time };
 
@@ -150,6 +197,8 @@ const qosApi: QoSAPI = {
     getQoS,
     shouldRun,
     isTickAligned,
+    noteTickCpu,
+    isCpuBreakerTripped,
 };
 
 /**

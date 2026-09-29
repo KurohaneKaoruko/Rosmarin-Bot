@@ -20,7 +20,7 @@ export const createApp = () => {
     const modules: Record<EventType, RunnerFn[]> = { init: [], start: [], tick: [], end: [] };
     const runners: Record<RunnerType, RunnerFn> = {
         room: () => runRunner(Game.rooms, roomRunner, 'room'),
-        creep: () => runRunner(Game.creeps, creepRunner, 'creep'),
+        creep: () => runCreeps(),
         powerCreep: () => runRunner(Game.powerCreeps, powerCreepRunner, 'pc'),
         flag: () => runRunner(Game.flags, flagRunner, 'flag'),
     };
@@ -110,6 +110,53 @@ export const createApp = () => {
         }
     };
 
+    // creep 的公平轮转游标：CPU 预算耗尽被顺延的 creep，下一 tick 优先执行
+    let creepCursor = 0;
+
+    /**
+     * creep 专用 runner：带 CPU 预算闸与公平轮转。
+     *
+     * 社区标准防超时做法：不再「全量跑、超了被引擎逐个掐断」（超时报错刷屏 +
+     * 被掐 creep 的动作丢失），而是在预算线（cpuLimit×0.85）处停止启动新 creep，
+     * 剩余 creep 顺延到下一 tick 优先执行（游标轮转，公平不饿死）。
+     */
+    const runCreeps = () => {
+        const profiling = isProfilingEnabled();
+        const keys = Object.keys(Game.creeps);
+        const total = keys.length;
+        if (total === 0) return;
+
+        const limit = Game.cpu.limit || 20;
+        const softCap = limit * 0.85;
+        const start = creepCursor % total;
+        let ran = 0;
+
+        for (let k = 0; k < total; k += 1) {
+            if (Game.cpu.getUsed() > softCap) break;
+            const creep = Game.creeps[keys[(start + k) % total]];
+            if (!creep) continue;
+            ran += 1;
+            const id = keys[(start + k) % total];
+            if (!profiling) {
+                try {
+                    creepRunner(creep);
+                } catch (e) {
+                    collectRunnerError(`creep:${id}`, e);
+                }
+                continue;
+            }
+            const startCpu = Game.cpu.getUsed();
+            try {
+                creepRunner(creep);
+            } catch (e) {
+                collectRunnerError(`creep:${id}`, e);
+            } finally {
+                recordObjectCost(`creep:${id}`, Game.cpu.getUsed() - startCpu);
+            }
+        }
+        creepCursor = (start + ran) % total;
+    };
+
     /** 添加模块 */
     const on = (callbacks: RuntimeModule) => {
         if (!callbacks) return;
@@ -172,13 +219,15 @@ export const createApp = () => {
         runInit();
         profileStage('start', () => runCall('start'));
         profileStage('rooms', () => runners.room());
-        profileStage('creeps', () => runners.creep());
+        profileStage('creeps', () => runCreeps());
         profileStage('powerCreeps', () => runners.powerCreep());
         profileStage('flags', () => runners.flag());
         profileStage('tick', () => runCall('tick'));
         profileStage('end', () => runCall('end'));
         // tick 末统一输出隔离收集的错误
         flushCollectedErrors();
+        // 上报本 tick CPU：连续超限触发 QoS 熔断降级（bucket 满时 QoS 原判定看不到超限）
+        global.qos.noteTickCpu(Game.cpu.getUsed());
     };
 
     /** 运行 */
