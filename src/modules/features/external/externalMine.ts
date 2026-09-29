@@ -16,6 +16,7 @@ import {
     CarryRoomCandidateStat,
     countPendingEconomyMissions,
     countPendingMissions,
+    OUT_CARRY_DYING_TTL,
     OUTMINE_CARRY_ROLE_SET,
     OUTMINE_HARVEST_ROLE_SET,
     pickBestCarryRoomName,
@@ -1243,14 +1244,34 @@ export class ExternalMineAnalysis {
         });
     }
 
+    // 每 tick 每源房缓存一次：各目标房在册的搬运工数量（含在途与孵化中，不含濒死返程的）。
+    // 这是搬运重平衡的主键（人数最少者优先），单次统计全房搬运工复用。
+    private static getCarryCountByTargetRoom(sourceRoom: Room): Record<string, number> {
+        return getRoomTickCacheValue(sourceRoom, 'outmine_carry_count', () => {
+            const counts: Record<string, number> = {};
+            for (const name in Game.creeps) {
+                const creep = Game.creeps[name];
+                const memory = creep?.memory as any;
+                if (!memory) continue;
+                if (memory.role !== 'out-carry' && memory.role !== 'out-car') continue;
+                if (memory.sourceRoom !== sourceRoom.name) continue;
+                const targetRoom = memory.targetRoom;
+                if (!targetRoom) continue;
+                // 濒死返程的搬运工这趟交完就退休，不再计入在册
+                if (typeof creep.ticksToLive === 'number' && creep.ticksToLive <= OUT_CARRY_DYING_TTL) continue;
+                counts[targetRoom] = (counts[targetRoom] || 0) + 1;
+            }
+            return counts;
+        });
+    }
+
     /**
      * 为一个外矿搬运工挑「更值得跑」的目标房（搬运工动态选房）。
      *
      * @remarks
-     * 参考实现里搬运工是母房级共享池（不绑定外矿房），谁积压多就去谁那儿；
-     * 这里在不改孵化结构的前提下补上等价能力：每次出发 / 空等前重新评估各托管房的积压，
-     * 按「这一趟能不能装满」为主要评分，积压过剩给小加成，按线性距离收就近惩罚，
-     * 并给当前房一个滞回余量——只有明显更划算的房才值得改目标房，避免来回横跳。
+     * 负载均衡以「在册搬运数」为主键：优先派往人最少的托管房，让各外矿房的搬运工数量趋平；
+     * 同人数时才比积压（这一趟能不能装满）与距离。选择时机由调用方约束在
+     * 「一趟起点」（刚交付完、空仓在母房），上路后目标锁定，避免途中反复横跳。
      *
      * @param creep 当前外矿搬运 creep。
      * @param candidatesOverride 候选目标房（测试/外部注入用；不传则按当前目标房的类别取托管列表）。
@@ -1283,6 +1304,7 @@ export class ExternalMineAnalysis {
         if (candidates.length <= 1) return null;
 
         const backlog = backlogOverride || this.getManagedRoomBacklogMap(sourceRoom);
+        const carryCount = sourceRoom ? this.getCarryCountByTargetRoom(sourceRoom) : {};
         const carryNeed = Math.max(1, getExternalMineStoreFreeCapacity(creep.store as ExternalMineStoreLike, RESOURCE_ENERGY));
 
         const stats: CarryRoomCandidateStat[] = [];
@@ -1293,6 +1315,7 @@ export class ExternalMineAnalysis {
                 available: Math.max(0, backlog[roomName]),
                 distance: Math.max(1, Game.map.getRoomLinearDistance(sourceRoomName, roomName, true)),
                 creepInRoom: creep.room?.name === roomName,
+                assigned: carryCount[roomName] || 0,
             });
         }
 

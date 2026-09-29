@@ -1,4 +1,5 @@
 import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features/external/externalMine';
+import { OUT_CARRY_DYING_TTL } from '@/modules/features/external/externalScheduler';
 import { RoadMemory } from '@/modules/features/external/externalRoad';
 import { OUT_CARRY_HALF_LOAD_RATIO, readRelayDirection, tryOutCarryRelayHandoff } from '@/prototype/Creep/function/relayHandoff';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
@@ -43,7 +44,6 @@ const shouldUseOutCarryRelay = (creep: Creep): boolean => {
     const effectiveLevel = sourceRoom.getEffectiveRoomLevel?.() ?? sourceRoom.controller.level;
     return effectiveLevel < 7;
 };
-const OUT_CARRY_DYING_TTL = 80;
 
 /**
  * 判断外矿搬运 creep 是否已经进入濒死返程阶段。
@@ -168,13 +168,14 @@ const getPreferredCarrySource = (creep: Creep): ExternalMineSourceStat | null =>
 const CARRY_ROOM_SWITCH_COOLDOWN = 40;
 
 /**
- * 外矿搬运工的目标房不再固定为孵化时那一个（动态选房）。
+ * 外矿搬运工的跨房重平衡（只在「一趟起点」调用）。
  *
  * @remarks
- * 参考实现里搬运工是「母房级共享池」，不绑定具体外矿房，谁积压多就去谁那儿；
- * 这里在不改孵化结构的前提下补上等价能力：出发前 / 空等时重新评估各托管房积压，
- * 把 memory.targetRoom 改到更值得跑的房。改房时房内取货缓存与「已预约源点」全部作废，
- * 否则会把上一个房的容器 ID 带到新房里。换房受冷却约束，避免来回横跳。
+ * 目标房的选择时机被严格约束：**刚交付完**（空仓、身在母房、未锁定房内取货点）时
+ * 按「各外矿房在册搬运数」重新均衡一次，随后目标锁定——取货途中、空等填装、返程途中
+ * 一律不再换房，直到下一次交付完成。换房时房内取货缓存与「已预约源点」全部作废，
+ * 否则会把上一个房的容器 ID 带到新房里。
+ * 评估本身也按冷却记账：无论是否真的换房，一个冷却窗口内只评估一次。
  *
  * @param creep 当前外矿搬运 creep。
  * @returns 本 tick 是否发生了换房（调用方应直接 return，下一 tick 按新目标房上路）。
@@ -183,12 +184,13 @@ const maybeRebalanceCarryTargetRoom = (creep: Creep): boolean => {
     const cache = getOutCarryCache(creep);
     const lastSwitchTick = Number(cache.roomSwitchTick || 0);
     if (Game.time - lastSwitchTick < CARRY_ROOM_SWITCH_COOLDOWN) return false;
+    // 评估即记账：不管最后换没换，本窗口内不再重复评估
+    cache.roomSwitchTick = Game.time;
 
     const nextRoom = ExternalMineAnalysis.pickBestCarryTargetRoom(creep);
     if (!nextRoom || nextRoom === creep.memory.targetRoom) return false;
 
     creep.memory.targetRoom = nextRoom;
-    cache.roomSwitchTick = Game.time;
 
     const sourceCache = getOutCarrySourceCache(creep);
     delete sourceCache.targetId;
@@ -700,9 +702,7 @@ const outCarry: OutCarryAction = {
                 creep.pickup(nearbyDrop);
                 return;
             }
-            // 「大批量干等」的逃逸口：挤在同一个空容器口等填装是最典型的浪费，
-            // 这时允许改去积压更足的托管房；换不了（冷却/余量不足）才原地等。
-            if (maybeRebalanceCarryTargetRoom(creep)) return;
+            // 空等填装期间不换房：目标房在一趟起点已经锁定，反复横跳只会把一整趟路白走。
             // 拥挤疏散：容器口附近同路线同伴过多时向空旷处让位，
             // 防止等填装的搬运工把唯一通道和 out-harvest 的工作位全部堵死。
             const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 2, {
@@ -715,9 +715,12 @@ const outCarry: OutCarryAction = {
         }
         delete cache.waitUntil;
 
-        // 尚未锁定房内取货目标时（空仓出发 / 返程续航），允许改去更值得跑的托管房；
-        // 已锁定目标则先打完这一单再评估，避免半途弃单。
-        if (!cache.targetId && maybeRebalanceCarryTargetRoom(creep)) return;
+        // 目标房只在一趟的起点重选：刚交付完（空仓、身在母房、未锁定房内取货点）时，
+        // 按「各外矿房在册搬运数」重新均衡一次；上路后目标锁定，直到下一次交付完成。
+        if (!cache.targetId
+            && creep.store.getUsedCapacity() === 0
+            && creep.room.name === creep.memory.sourceRoom
+            && maybeRebalanceCarryTargetRoom(creep)) return;
 
         if (creep.room.name != creep.memory.targetRoom || creep.pos.isRoomEdge()) {
             if (this.moveAlongRouteExit(creep, creep.memory.targetRoom, true)) return;

@@ -131,24 +131,36 @@ export type CarryRoomCandidateStat = {
     distance: number;
     /** 搬运 creep 是否已经站在该房里（站在里面视为在途，不收距离惩罚）。 */
     creepInRoom: boolean;
+    /** 该房当前在册的搬运工数量（含在途与孵化中，不含濒死返程的）。 */
+    assigned: number;
 };
 
 // 候选房必须比当前房「好」这么多才值得改目标房，抑制来回横跳。
 export const CARRY_ROOM_SWITCH_MARGIN = 0.25;
 // 每格线性距离折算的评分惩罚，保留就近倾向。
 export const CARRY_ROOM_DISTANCE_PENALTY = 0.01;
+// 「够装一趟」积压项的权重（同人数候选房之间比积压）。
+export const CARRY_BACKLOG_WEIGHT = 0.5;
+// 超出一次载量的过剩积压权重（只为过剩积压长途折返不划算）。
+export const CARRY_SURPLUS_WEIGHT = 0.1;
+/** 外矿搬运工的濒死 TTL：低于它的搬运工只回程交付、不再接新单。 */
+export const OUT_CARRY_DYING_TTL = 80;
 
 /**
- * 给单个候选房打分（0 附近可正可负）。
+ * 给单个候选房打分（人数优先，同人数时比积压）。
  *
  * @remarks
- * 主项是「这一趟能不能装满」（0..1）；超出一次载量的积压给一点小加成，
- * 避免搬运工全挤在一个刚好够装的房、而放任另一个房严重积压。
+ * 主项是「在册搬运数取负」：每少一人 +1，严格压过其余所有小项——
+ * 这保证负载均衡永远先看人数（各外矿房搬运数趋平），积压与距离只在同人数时起作用：
+ * - 积压项：「这一趟能不能装满」（0..1），超出一次载量的积压只给小加成，
+ *   避免搬运工全挤在一个刚好够装的房、而放任另一个房无人问津；
+ * - 距离项：只对还没站在房里的候选收取，保留就近倾向。
  */
 export const scoreCarryRoomCandidate = (stat: CarryRoomCandidateStat, carryNeed: number): number => {
+    let score = -Math.max(0, stat.assigned);
     const need = Math.max(1, carryNeed);
-    let score = Math.min(stat.available, need) / need;
-    score += (Math.min(need, Math.max(0, stat.available - need)) / need) * 0.2;
+    score += (Math.min(stat.available, need) / need) * CARRY_BACKLOG_WEIGHT;
+    score += (Math.min(need, Math.max(0, stat.available - need)) / need) * CARRY_SURPLUS_WEIGHT;
     if (!stat.creepInRoom) score -= Math.max(1, stat.distance) * CARRY_ROOM_DISTANCE_PENALTY;
     return score;
 };
