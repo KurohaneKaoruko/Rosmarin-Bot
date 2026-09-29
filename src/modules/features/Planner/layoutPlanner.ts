@@ -6,7 +6,7 @@ import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
 import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/modules/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/modules/shared/memory';
-import { isSpecialRushActive } from '@/modules/shared/roomMode';
+import { getRoomMode } from '@/modules/shared/roomMode';
 
 /**
  * 布局计算与可视化/落盘的通用模块
@@ -982,7 +982,9 @@ const SOURCE_EXT_SITE_CAP = 2;
  * @internal
  */
 function createSourceExtSites(room: Room, budget: number): number {
-    if (budget <= 0 || room.level < 2) return 0;
+    // 仅 RCL2：第一批 ext 全部贴 source 建造——采集工挖完就地填充，省掉一整段搬运。
+    // RCL3 起回归自动布局正常逻辑（已落位/建成的 source 旁 ext 保留，不新增）。
+    if (budget <= 0 || room.level !== 2) return 0;
     const buildMax = (CONTROLLER_STRUCTURES as any)?.[STRUCTURE_EXTENSION]?.[room.level] ?? 0;
     if (!buildMax) return 0;
 
@@ -991,23 +993,44 @@ function createSourceExtSites(room: Room, budget: number): number {
     if (built + sites.length >= buildMax) return 0;
 
     // 并发预算只数 source ring-2 的自有工地，其他来源的 ext 工地不占这份名额
-    const ownSites = sites.filter(site => (room.source || []).some(source => site.pos.getRangeTo(source.pos) === 2));
+    const ownSites = sites.filter(site => (room.source || []).some(source => site.pos.getRangeTo(source.pos) === 2)).length;
 
-    let created = 0;
-    for (const source of room.source || []) {
-        for (let dx = -2; dx <= 2 && created < budget && ownSites.length + created < SOURCE_EXT_SITE_CAP; dx++) {
-            for (let dy = -2; dy <= 2 && created < budget && ownSites.length + created < SOURCE_EXT_SITE_CAP; dy++) {
+    // 每个 source 各自生成 ring-2 候选格（过滤墙/边界/既有结构与工地）
+    const candidates = (room.source || []).map((source) => {
+        const cells: { x: number; y: number }[] = [];
+        for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -2; dy <= 2; dy++) {
+                if (Math.max(Math.abs(dx), Math.abs(dy)) !== 2) continue;
                 const x = source.pos.x + dx, y = source.pos.y + dy;
                 if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
-                const pos = new RoomPosition(x, y, room.name);
-                if (pos.getRangeTo(source.pos) !== 2) continue;
                 if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+                const pos = new RoomPosition(x, y, room.name);
                 if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
                 // ext 不能与任何既有结构共格（道路也不行）
                 if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
-                if (room.createConstructionSite(x, y, STRUCTURE_EXTENSION) === OK) created++;
+                cells.push({ x, y });
             }
         }
+        return cells;
+    });
+
+    // 双（多）source 轮转交替落位：round-robin 保证两个矿的 ext 数量均衡
+    let created = 0;
+    let round = 0;
+    while (created < budget && ownSites + created < SOURCE_EXT_SITE_CAP) {
+        let progressed = false;
+        for (const cells of candidates) {
+            if (created >= budget || ownSites + created >= SOURCE_EXT_SITE_CAP) break;
+            const cell = cells[round];
+            if (!cell) continue;
+            cells[round] = undefined as unknown as { x: number; y: number };
+            if (room.createConstructionSite(cell.x, cell.y, STRUCTURE_EXTENSION) === OK) {
+                created += 1;
+                progressed = true;
+            }
+        }
+        if (!progressed) break;
+        round += 1;
     }
     return created;
 }
@@ -1046,9 +1069,9 @@ export const LayoutPlanner = {
             created += handleCoreDepotSite(room, layoutMemory, s);
         }
 
-        // 特殊冲级（rush 子模式 / mini）：source 旁 ring-2 的 ext 优先落位，再走正常布局——
-        // 布局自身的 ext 点位仍可用，但排在这些工地之后（配额/工地预算按剩余量计）
-        if (!only && isSpecialRushActive(room)) {
+        // rush 模式 RCL2：第一批 ext 全部贴 source（多矿轮转均衡），让采集工边采边填；
+        // RCL3 起回归正常布局逻辑（source 旁已落位的 ext 保留，不新增）
+        if (!only && getRoomMode(room) === 'rush' && room.level === 2) {
             const made = createSourceExtSites(room, Math.max(0, budget - created));
             created += made;
             budget -= made;

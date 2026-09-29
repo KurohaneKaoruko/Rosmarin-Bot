@@ -168,9 +168,9 @@ export const isHighLikeMode = (mode: string): boolean => mode === 'high' || mode
  * - mini：机制常驻，但同样依赖 spawn 贴控制器；
  * - 房内有 link 后整体退位（正规供能链接接管）。
  *
- * 命中时两件事生效：
- * 1. ext 建造权按「source 旁 ring-2 优先」处理（见 layoutPlanner.plannerCreateSite）；
- * 2. 自爆拉能快递总闸打开（见 rushSupport.rushBoost）。
+ * 命中时生效的事：自爆拉能快递总闸打开（见 rushSupport.rushBoost）。
+ * （source 旁 ext 的建造已改为 rush 模式 RCL2 常规行为：见 layoutPlanner.createSourceExtSites，
+ *   不再依赖本闸门。）
  */
 export const isSpecialRushActive = (room: Room): boolean => {
     const mode = getRoomMode(room);
