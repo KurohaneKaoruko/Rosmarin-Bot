@@ -298,7 +298,7 @@ rosmarin-bot/
 ## 📝 注意事项
 
 ### 首次使用
-- 建议先在 sim 目标测试：`pnpm push` 里选好服务器和账号（或 `pnpm push:season`）
+- 建议先在本地私服（`xx-local`）测试：`pnpm push` 里选好服务器和账号（或 `pnpm push:season`）
 - `pnpm push` 会从 `.secret.json` 读取服务器和账号并两步交互选择
 
 ### 布局相关
