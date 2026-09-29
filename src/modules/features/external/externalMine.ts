@@ -12,9 +12,18 @@ import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
 import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
+import {
+    CarryRoomCandidateStat,
+    countPendingEconomyMissions,
+    countPendingMissions,
+    OUTMINE_CARRY_ROLE_SET,
+    OUTMINE_HARVEST_ROLE_SET,
+    pickBestCarryRoomName,
+    sortOutMineSpawnTargets,
+} from '@/modules/features/external/externalScheduler';
 
 // 目标房间列表的类型：普通外矿（能量）与中心房（SK/中心区）外矿。
-type OutMineTargetListKey = 'energy' | 'centerRoom';
+export type OutMineTargetListKey = 'energy' | 'centerRoom';
 
 // 单次外矿运行的状态快照，用于控制节奏与副作用（造路/侦查等）。
 type OutMineRunState = {
@@ -148,7 +157,8 @@ class ExternalMineState {
         return room.getEnergyState?.() || room.updateEnergyState?.(false) || room.memory.energyState || 'UNKNOWN';
     }
 
-    private static getTargetPriorityDistance(sourceRoom: Room, targetRoomName: string): number {
+    // 源房到目标房的线性距离（外矿派单用的「先近后远」主键）。
+    static getTargetPriorityDistance(sourceRoom: Room, targetRoomName: string): number {
         if (typeof Game.map?.getRoomLinearDistance === 'function') {
             return Math.max(1, Game.map.getRoomLinearDistance(sourceRoom.name, targetRoomName, true));
         }
@@ -1130,6 +1140,84 @@ export class ExternalMineAnalysis {
         if (!currentSourceKey) return null;
         return stats.find((stat) => stat.sourceKey === currentSourceKey) || null;
     }
+
+    // 每 tick 每源房缓存一次：各托管目标房的「可用积压」（已扣除在场搬运工预定量）。
+    // 单次调度覆盖全部托管房，多个搬运工复用同一份结果，避免逐 creep 重算。
+    private static getManagedRoomBacklogMap(sourceRoom: Room): Record<string, number> {
+        return getRoomTickCacheValue(sourceRoom, 'outmine_room_backlog', () => {
+            const backlog: Record<string, number> = {};
+            const roomNames = [
+                ...ExternalMine.getManagedTargetRooms(sourceRoom, 'energy'),
+                ...ExternalMine.getManagedTargetRooms(sourceRoom, 'centerRoom'),
+            ];
+            for (const roomName of roomNames) {
+                const targetRoom = Game.rooms[roomName];
+                if (!targetRoom) continue;
+                let total = 0;
+                for (const stat of this.getRoomSourceStats(sourceRoom, targetRoom)) {
+                    total += Math.max(0, stat.availableEnergy);
+                }
+                backlog[roomName] = total;
+            }
+            return backlog;
+        });
+    }
+
+    /**
+     * 为一个外矿搬运工挑「更值得跑」的目标房（搬运工动态选房）。
+     *
+     * @remarks
+     * 参考实现里搬运工是母房级共享池（不绑定外矿房），谁积压多就去谁那儿；
+     * 这里在不改孵化结构的前提下补上等价能力：每次出发 / 空等前重新评估各托管房的积压，
+     * 按「这一趟能不能装满」为主要评分，积压过剩给小加成，按线性距离收就近惩罚，
+     * 并给当前房一个滞回余量——只有明显更划算的房才值得改目标房，避免来回横跳。
+     *
+     * @param creep 当前外矿搬运 creep。
+     * @param candidatesOverride 候选目标房（测试/外部注入用；不传则按当前目标房的类别取托管列表）。
+     * @param backlogOverride 候选房可用积压（测试/外部注入用；不传则按 tick 缓存现算）。
+     * @returns 建议的目标房名；维持现状或数据不足时返回 `null`。
+     */
+    static pickBestCarryTargetRoom(
+        creep: Creep,
+        candidatesOverride?: string[],
+        backlogOverride?: Record<string, number>,
+    ): string | null {
+        const sourceRoomName = creep.memory.sourceRoom;
+        const currentTarget = creep.memory.targetRoom;
+        if (!sourceRoomName || !currentTarget) return null;
+
+        const injected = !!(candidatesOverride && backlogOverride);
+        const sourceRoom = Game.rooms[sourceRoomName];
+        if (!sourceRoom && !injected) return null;
+
+        // 只在同类目标房之间重平衡：能量外矿 ↔ 能量外矿、中心房 ↔ 中心房。
+        // 混着换会把搬运工送进 SK 中心房（工位与威胁口径完全不同）。
+        let candidates = candidatesOverride;
+        if (!candidates) {
+            const energyTargets = ExternalMine.getManagedTargetRooms(sourceRoom, 'energy');
+            const centerTargets = ExternalMine.getManagedTargetRooms(sourceRoom, 'centerRoom');
+            candidates = energyTargets.indexOf(currentTarget) !== -1
+                ? energyTargets
+                : (centerTargets.indexOf(currentTarget) !== -1 ? centerTargets : []);
+        }
+        if (candidates.length <= 1) return null;
+
+        const backlog = backlogOverride || this.getManagedRoomBacklogMap(sourceRoom);
+        const carryNeed = Math.max(1, getExternalMineStoreFreeCapacity(creep.store as ExternalMineStoreLike, RESOURCE_ENERGY));
+
+        const stats: CarryRoomCandidateStat[] = [];
+        for (const roomName of candidates) {
+            if (!(roomName in backlog)) continue;
+            stats.push({
+                roomName,
+                available: Math.max(0, backlog[roomName]),
+                distance: Math.max(1, Game.map.getRoomLinearDistance(sourceRoomName, roomName, true)),
+                creepInRoom: creep.room?.name === roomName,
+            });
+        }
+
+        return pickBestCarryRoomName(currentTarget, carryNeed, stats);
+    }
 }
 
 // 外矿的数学/容量估算集中在此处，避免散落的魔数。
@@ -1326,8 +1414,10 @@ class ExternalMineMath {
 }
 
 // 外矿相关的刷怪决策与刷怪队列维护。
-class ExternalMineSpawner {
+export class ExternalMineSpawner {
     // 各角色任务优先级，统一从角色配置读取。
+    // 注意：采集工/搬运工入队统一走 OUTMINE_PIPELINE_LEVEL（见下），
+    // 这里的 harvest/carry 只用于角色对齐与阅读参考，不再直接作为入队等级。
     private static readonly PRIORITY = {
         reserver: RoleData['reserver'].level,
         harvest: RoleData['out-harvest'].level,
@@ -1337,16 +1427,21 @@ class ExternalMineSpawner {
         mineral: RoleData['out-mineral'].level,
     } as const;
 
-    // 用于统一修正 spawn 任务优先级的映射（兼容别名）。
-    private static readonly ROLE_PRIORITY_BY_ROLE: Record<string, number> = {
-        scout: this.PRIORITY.scout,
-        reserver: this.PRIORITY.reserver,
-        'out-harvest': this.PRIORITY.harvest,
-        'out-car': this.PRIORITY.carry,
-        'out-carry': this.PRIORITY.carry,
-        'out-build': this.PRIORITY.build,
-        'out-mineral': this.PRIORITY.mineral,
-    };
+    // 采集与搬运同属一条流水线（先采后运），必须同层排队。
+    // 若各自沿用 RoleData 等级（out-harvest=12 / out-carry=15），spawn 取任务是「取全池最低 level」，
+    // 于是孵化端会先把全帝国排队中的采集工孵完，才轮得到第一个搬运工：
+    // 采集工把容器挖满、搬运工迟迟不到位，两头一起干等，正是「采集与搬运失衡」的根源。
+    // 统一到采集工那一层后，两者按入队先后轮流孵化（同房按 采集→搬运 入队，谁缺谁先补）。
+    private static readonly OUTMINE_PIPELINE_LEVEL = RoleData['out-harvest'].level;
+
+    // 单个目标房在 spawn 池中允许挂的外矿任务上限（按角色分列）。
+    // 外矿体型很大（RCL8 搬运工 48 格 ≈ 144 tick 孵化），单房一次把定编全塞进队列，
+    // 就会独占总 spawn 数百 tick，其它外矿房一个 creep 都排不上；
+    // 等终于轮到它们时又是一次性批量产出。上限 + 每 tick 补员 ⇒ 队列自然轮转。
+    // - 采集工额度 = 单源定编（RCL≥4 每源 1 个，两源房正好 2），刚好排满不浪费；
+    // - 搬运工额度是大头，压到 3 条，把它对 spawn 的占用摊到多个外矿房上。
+    private static readonly OUTMINE_HARVEST_PENDING_CAP = 2;
+    private static readonly OUTMINE_CARRY_PENDING_CAP = 3;
 
     // 触发“双人防御”模式的最低 RCL。
     private static readonly DOUBLE_DEFEND_MIN_LEVEL = 7;
@@ -1359,6 +1454,44 @@ class ExternalMineSpawner {
 
     private static getSpawnTaskMemory(task: Task | null | undefined): CreepMemory | null {
         return this.getSpawnTaskData(task)?.memory || null;
+    }
+
+    // 统计本源房 spawn 池里、发往某目标房、且角色落在给定集合内的任务数。
+    static countPendingMissions(sourceRoom: Room, targetRoomName: string, roleSet: ReadonlySet<string>): number {
+        const memories = (sourceRoom.getAllMissionFromPool?.('spawn') || [])
+            .map((task) => this.getSpawnTaskMemory(task));
+        return countPendingMissions(memories, sourceRoom.name, targetRoomName, roleSet);
+    }
+
+    // 统计本源房 spawn 池里、发往某目标房的外矿经济任务数（采集 + 搬运）。
+    // 这是派单排序用的「挂单量」：挂单少的房先补员，避免单房独占总 spawn。
+    static countPendingEconomyTasks(sourceRoom: Room, targetRoomName: string): number {
+        const memories = (sourceRoom.getAllMissionFromPool?.('spawn') || [])
+            .map((task) => this.getSpawnTaskMemory(task));
+        return countPendingEconomyMissions(memories, sourceRoom.name, targetRoomName);
+    }
+
+    // 外矿补员派单顺序：先近后远 + 负载均衡（排序规则见 externalScheduler）。
+    // 主键线性距离升序，次键该目标房已挂单数升序，末键房名。
+    static orderTargetsForSpawn(sourceRoom: Room, targetRoomNames: string[]): string[] {
+        return sortOutMineSpawnTargets(targetRoomNames.map((roomName) => ({
+            roomName,
+            distance: ExternalMineState.getTargetPriorityDistance(sourceRoom, roomName),
+            pending: this.countPendingEconomyTasks(sourceRoom, roomName),
+        })));
+    }
+
+    // 采集工挂单是否已达上限。采集工定编小、又是搬运的前置，
+    // 所以额度独立：搬运队列排满也不能挡住采集工补员（否则断档后要等一整个搬运周期）。
+    static isHarvestAtPendingCap(sourceRoom: Room, targetRoomName: string): boolean {
+        return this.countPendingMissions(sourceRoom, targetRoomName, OUTMINE_HARVEST_ROLE_SET)
+            >= this.OUTMINE_HARVEST_PENDING_CAP;
+    }
+
+    // 搬运工挂单是否已达上限。搬运工体型最大（RCL8 48 格 ≈144 tick），是最需要限流的一方。
+    static isCarryAtPendingCap(sourceRoom: Room, targetRoomName: string): boolean {
+        return this.countPendingMissions(sourceRoom, targetRoomName, OUTMINE_CARRY_ROLE_SET)
+            >= this.OUTMINE_CARRY_PENDING_CAP;
     }
 
     // 统计某房间针对某目标房间的排队刷怪数量（仅本房间任务池）。
@@ -1667,6 +1800,10 @@ class ExternalMineSpawner {
         const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap ?? undefined);
         if (targetNum <= 0) return false;
 
+        // 采集工挂单上限：本房已排够采集任务就本轮不补，把 spawn 让给其它外矿房，
+        // 否则一房会把定编一次性塞满队列、独占总 spawn。
+        if (this.isHarvestAtPendingCap(sourceRoom, targetRoomName)) return false;
+
         // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
         // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
         // spawnInAdvance：快死的采集者不计入覆盖——接替者提前孵化，外矿不断档
@@ -1682,9 +1819,9 @@ class ExternalMineSpawner {
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoomName);
         if (upbody) {
-            sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], this.PRIORITY.harvest, 'out-harvest', memory);
+            sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], this.OUTMINE_PIPELINE_LEVEL, 'out-harvest', memory);
         } else {
-            sourceRoom.SpawnMissionAdd('OH', [], this.PRIORITY.harvest, 'out-harvest', memory);
+            sourceRoom.SpawnMissionAdd('OH', [], this.OUTMINE_PIPELINE_LEVEL, 'out-harvest', memory);
         }
         return true;
     }
@@ -1713,7 +1850,9 @@ class ExternalMineSpawner {
 
         const totalCarry = outerCarry + spawnCarryNum + outerCar;
         if (totalCarry < num) {
-            sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.PRIORITY.carry, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
+            if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
+            sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.OUTMINE_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
@@ -1896,6 +2035,13 @@ export class ExternalMine {
         return ExternalMineState.getRoomMode(room);
     }
 
+    // 对外暴露：本源房当前托管的目标房列表（供跨房搬运重平衡复用同一份选择结果）。
+    // 背包选择本身不便宜，按 tick 缓存，避免每个搬运工每 tick 重算一次。
+    static getManagedTargetRooms(room: Room, key: OutMineTargetListKey): string[] {
+        return getRoomTickCacheValue(room, `outmine_managed_targets_${key}`, () =>
+            ExternalMineState.getManagedTargets(room, key));
+    }
+
     // 常规外矿：能量采集、运输、防守、预定与建造。
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
@@ -1921,12 +2067,18 @@ export class ExternalMine {
             creep.suicide();
         }
 
-        for (const roomName of targetRooms) {
+        // 补员派单顺序：先近后远 + 挂单少的先派（见 orderTargetsForSpawn）。
+        // 配合每房挂单上限，单房无法占满 spawn，队列在多个外矿房之间轮转。
+        // 注意：外矿侦查/离线补员也走这个顺序，保证近房先建立视野与工位记录。
+        const orderedTargets = ExternalMineSpawner.orderTargetsForSpawn(room, targetRooms);
+
+        for (const roomName of orderedTargets) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
                     ExternalMineSpawner.scout(room, roomName);
                 }
+
                 // 无视野也必须补采集工：否则采集工死光 → 视野丢失 → 永远不再补位，外矿整体停摆。
                 // 用 scout 到访时记下的源数/工位数做离线口径（Memory.rooms 持久，重启不丢）；
                 // 从未被记录过就退回「进程内最后已知源数，缺省 2」，宁可按估算补也不断档。
@@ -2010,7 +2162,10 @@ export class ExternalMine {
         const targetRooms = ExternalMineState.getManagedTargets(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
 
-        for (const roomName of targetRooms) {
+        // 同 runEnergy：先近后远 + 挂单少的先派，避免单房独占总 spawn。
+        const orderedTargets = ExternalMineSpawner.orderTargetsForSpawn(room, targetRooms);
+
+        for (const roomName of orderedTargets) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
