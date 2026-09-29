@@ -105,6 +105,7 @@ function updateRoomStats() {
     stats.energy = {};
     stats.energyRise = {};
     stats.SpawnEnergy = {};
+    stats.energyTrend = stats.energyTrend || {};    // 能量趋势（sparkline 用，保留 24 点）
     for (const roomName in Game.rooms) {
         const room = Game.rooms[roomName];
         if (!room.controller?.my) continue;
@@ -116,13 +117,17 @@ function updateRoomStats() {
         } else {
             stats.rclProgress[roomName] = 0;
         }
-        
+
         // 能量储备
         const storageEnergy = room.storage?.store[RESOURCE_ENERGY] || 0;
         const terminalEnergy = room.terminal?.store[RESOURCE_ENERGY] || 0;
         stats.energy[roomName] = storageEnergy + terminalEnergy;
         stats.energyRise[roomName] = stats.energy[roomName] - stats.energyHistory[roomName] || 0;
         stats.SpawnEnergy[roomName] = room.energyCapacityAvailable;
+
+        const trend = stats.energyTrend[roomName] as number[];
+        trend.push(stats.energy[roomName]);
+        if (trend.length > 24) trend.shift();
     }
 
     // 房间升级时间估计
@@ -265,8 +270,8 @@ function getStatsTargets(): string[] {
 
 const STYLE = {
     font: '0.62 monospace',
-    fontBold: 'bold 0.72 monospace',
-    fontTitle: 'bold 0.85 monospace',
+    fontBig: 'bold 0.9 monospace',
+    fontTitle: 'bold 0.82 monospace',
     fontSmall: '0.55 monospace',
     color: '#e6e6e6',
     colorSub: '#9e9e9e',
@@ -275,25 +280,13 @@ const STYLE = {
     colorGood: '#76e094',
     colorAccent: '#4dd0e1',
     bg: '#0a0a0c',
-    bgOpacity: 0.72,
+    bgOpacity: 0.74,
     barBg: '#3a3a3a',
     barGcl: '#76e094',
     barGpl: '#6b99e6',
     barRcl: '#f0d44e',
     sectionLine: '#3a4a55',
     sectionText: '#7fd4e8',
-};
-
-type StatRow = {
-    kind: 'text' | 'bar' | 'section' | 'gap';
-    text?: string;
-    color?: string;
-    font?: string;
-    align?: 'left' | 'center' | 'right';
-    pct?: number;
-    barColor?: string;
-    barLabel?: string;
-    gap?: number;
 };
 
 function gatherRoomLive(room: Room) {
@@ -377,6 +370,24 @@ function drawStatsHUD(roomNames: string[]) {
     }
 }
 
+type StatRow = {
+    kind: 'text' | 'bar' | 'section' | 'gap' | 'spark' | 'badge' | 'lamp';
+    text?: string;
+    color?: string;
+    font?: string;
+    align?: 'left' | 'center' | 'right';
+    sub?: { text: string; color?: string };
+    pct?: number;
+    barColor?: string;
+    barLabel?: string;
+    gap?: number;
+    values?: number[];
+    sparkColor?: string;
+    badgeColor?: string;
+    lampColor?: string;
+    accent?: string;
+};
+
 function renderStatsHUD(
     visual: RoomVisual,
     roomName: string,
@@ -388,9 +399,7 @@ function renderStatsHUD(
     const x = 0.5;
     const width = 17;
     const lineHeight = 0.72;
-    const rows: StatRow[] = [];
-
-    const cpu = typeof stats.cpu === 'number' ? stats.cpu : 0;
+    const rows: StatRow[] = [];    const cpu = typeof stats.cpu === 'number' ? stats.cpu : 0;
     const avgCpu = typeof stats.AvgCpuUsed === 'number' ? stats.AvgCpuUsed : 0;
     const bucket = typeof stats.bucket === 'number' ? stats.bucket : 0;
     const qosLevel = stats.qos?.level || '-';
@@ -412,16 +421,18 @@ function renderStatsHUD(
     const es = ENERGY_STATE_STYLE[live.energyState] || { text: live.energyState, color: STYLE.colorSub };
     rows.push({
         kind: 'text',
-        text: `${roomName}  RCL${rclLvl ?? '?'}  [${es.text}]`,
+        text: `${roomName}  RCL${rclLvl ?? '?'}`,
         font: STYLE.fontTitle,
         color: rclLvl === 8 ? STYLE.barRcl : STYLE.color,
+        sub: { text: es.text, color: '#000000' },
+        badgeColor: es.color,
     });
 
     // ── 性能区 ──
     const cpuColor = cpu > avgCpu * 1.5 && cpu > 20 ? STYLE.colorWarn : STYLE.color;
     const bucketColor = bucket < 1000 ? STYLE.colorErr : bucket < 5000 ? STYLE.colorWarn : STYLE.colorGood;
-    rows.push({ kind: 'text', text: `CPU ${cpu.toFixed(2)} (μ${avgCpu.toFixed(2)})  Bkt ${bucket}`, color: cpuColor, font: STYLE.font });
-    rows.push({ kind: 'text', text: `QoS ${qosLevel}`, color: qosLevel === 'normal' ? STYLE.colorSub : STYLE.colorWarn, font: STYLE.font });
+    rows.push({ kind: 'text', text: `CPU ${cpu.toFixed(2)} (μ${avgCpu.toFixed(2)})`, color: cpuColor, font: STYLE.font, sub: { text: `Bkt ${bucket}`, color: bucketColor } });
+    rows.push({ kind: 'text', text: `QoS ${qosLevel}`, color: qosLevel === 'normal' ? STYLE.colorSub : STYLE.colorWarn, font: STYLE.font, sub: { text: `Creeps ${live.creepsInRoom}`, color: STYLE.colorSub } });
 
     // ── 全局进度条 ──
     rows.push({ kind: 'bar', pct: gclPct / 100, barColor: STYLE.barGcl, barLabel: `GCL${gclLvl} ${gclEta > 0 ? '· ' + formatSeconds(gclEta) : ''}` });
@@ -437,26 +448,29 @@ function renderStatsHUD(
     }
 
     // ── 经济区 ──
-    rows.push({ kind: 'section', text: 'ECONOMY' });
+    rows.push({ kind: 'section', text: 'ECONOMY', accent: '#f0d44e' });
     const eColor = energyChange >= 0 ? STYLE.colorGood : STYLE.colorErr;
-    rows.push({ kind: 'text', text: `E ${formatK(energy)} (${formatSigned(energyChange)})  Cap ${formatK(live.ecap)}`, color: eColor, font: STYLE.font });
+    rows.push({ kind: 'text', text: `E ${formatK(energy)} (${formatSigned(energyChange)}/cyc)  Cap ${formatK(live.ecap)}`, color: eColor, font: STYLE.font });
+    rows.push({ kind: 'spark', values: stats.energyTrend?.[roomName] || [], sparkColor: '#4dd0e1' });
     rows.push({ kind: 'text', text: `Cr ${formatK(credit)} (${formatSigned(creditChange)})  Mkt ${buy}/${sell}`, color: STYLE.colorSub, font: STYLE.font });
 
     // ── 孵化 / 建造区 ──
-    rows.push({ kind: 'section', text: 'SPAWN & BUILD' });
-    const eaColor = live.ea < live.ecap * 0.2 ? STYLE.colorErr : live.ea < live.ecap * 0.5 ? STYLE.colorWarn : STYLE.colorGood;
-    rows.push({ kind: 'text', text: `Ea ${live.ea}/${live.ecap}  Queue ${live.queue}`, color: eaColor, font: STYLE.font });
-    rows.push({ kind: 'text', text: live.spawning ? `⚙ ${live.spawning}` : `Creeps ${live.creepsInRoom}`, color: STYLE.colorSub, font: STYLE.font });
+    rows.push({ kind: 'section', text: 'SPAWN & BUILD', accent: '#4dd0e1' });
+    const eaPct = live.ecap > 0 ? live.ea / live.ecap : 0;
+    const eaColor = eaPct < 0.2 ? STYLE.colorErr : eaPct < 0.5 ? STYLE.colorWarn : STYLE.colorGood;
+    rows.push({ kind: 'bar', pct: eaPct, barColor: eaColor, barLabel: `Ea ${live.ea}/${live.ecap}` });
+    rows.push({ kind: 'text', text: `Queue ${live.queue}`, color: live.queue >= 6 ? STYLE.colorWarn : STYLE.colorSub, font: STYLE.font, sub: live.spawning ? { text: `⚙ ${live.spawning}`, color: STYLE.colorAccent } : undefined });
     if (live.siteCount > 0) rows.push({ kind: 'text', text: `Sites ${live.siteCount}: ${live.siteSummary}`, color: STYLE.colorSub, font: STYLE.font });
 
     // ── 外矿区 ──
     if (live.outSources > 0) {
-        rows.push({ kind: 'section', text: 'OUTMINE' });
+        rows.push({ kind: 'section', text: 'OUTMINE', accent: '#76e094' });
         rows.push({
             kind: 'text',
-            text: `${live.outSources}源 · 采${live.outHarvest} · 搬${live.outCarry}`,
+            text: `${live.outSources}源 · 采 ${live.outHarvest} · 搬 ${live.outCarry}`,
             color: live.outHarvest === 0 ? STYLE.colorWarn : STYLE.color,
             font: STYLE.font,
+            sub: { text: live.outHarvest === 0 ? '● 断档' : '● 在岗', color: live.outHarvest === 0 ? STYLE.colorErr : STYLE.colorGood },
         });
     }
 
@@ -464,9 +478,9 @@ function renderStatsHUD(
     const ttdColor = live.ttd < 5000 ? STYLE.colorErr : live.ttd < 20000 ? STYLE.colorWarn : STYLE.colorSub;
     const threatBits: string[] = [];
     if (live.hostiles > 0) threatBits.push(`敌 ${live.hostiles}`);
-    if (live.safeMode > 0) threatBits.push(`SafeMode ${live.safeMode}`);
+    if (live.safeMode > 0) threatBits.push(`SM ${live.safeMode}`);
     threatBits.push(`TTD ${formatK(live.ttd)}`);
-    rows.push({ kind: 'section', text: 'STATUS' });
+    rows.push({ kind: 'section', text: 'STATUS', accent: '#e65c5c' });
     rows.push({ kind: 'text', text: threatBits.join('  '), color: live.hostiles > 0 ? STYLE.colorErr : ttdColor, font: STYLE.font });
 
     // ── 角色摘要 ──
@@ -481,8 +495,9 @@ function renderStatsHUD(
     const y0 = 0.6;
     let height = padding * 2;
     for (const row of rows) {
-        if (row.kind === 'section') height += 0.55;
+        if (row.kind === 'section') height += 0.6;
         else if (row.kind === 'bar') height += 0.62;
+        else if (row.kind === 'spark') height += 0.85;
         else if (row.kind === 'gap') height += (row.gap ?? 0.25);
         else height += lineHeight;
     }
@@ -497,17 +512,50 @@ function renderStatsHUD(
     let y = y0;
     for (const row of rows) {
         if (row.kind === 'section') {
-            y += 0.3;
-            visual.text(row.text || '', x, y + 0.2, { align: 'left', font: `bold ${STYLE.fontSmall}`, color: STYLE.sectionText });
-            visual.line(x + 2.6, y + 0.14, x + width - 0.2, y + 0.14, { color: STYLE.sectionLine, width: 0.06, opacity: 0.9 });
-            y += 0.5;
+            y += 0.28;
+            // 分区底板 + 左侧 accent 色条
+            visual.rect(x, y, width, 0.34, { fill: row.accent || STYLE.sectionText, opacity: 0.08 });
+            visual.rect(x, y, 0.12, 0.34, { fill: row.accent || STYLE.sectionText, opacity: 0.95 });
+            visual.text(row.text || '', x + 0.3, y + 0.26, { align: 'left', font: `bold ${STYLE.fontSmall}`, color: STYLE.sectionText });
+            y += 0.48;
         } else if (row.kind === 'bar') {
             drawProgressBar(visual, x, y, width, 0.5, row.pct ?? 0, row.barColor || STYLE.barRcl, row.barLabel);
             y += 0.62;
+        } else if (row.kind === 'spark') {
+            const values = (row.values || []).filter((v) => Number.isFinite(v));
+            if (values.length >= 2) {
+                const max = Math.max(...values, 1);
+                const slot = (width - 0.4) / values.length;
+                const baseY = y + 0.68;
+                for (let i = 0; i < values.length; i += 1) {
+                    const hRatio = Math.min(1, values[i] / max);
+                    const h = 0.1 + hRatio * 0.5;
+                    visual.rect(x + 0.2 + i * slot, baseY - h, Math.max(0.12, slot - 0.08), h, {
+                        fill: row.sparkColor || STYLE.colorAccent,
+                        opacity: 0.75,
+                    });
+                }
+                visual.line(x + 0.1, baseY, x + width - 0.2, baseY, { color: '#333333', width: 0.04 });
+            }
+            y += 0.85;
+        } else if (row.kind === 'badge') {
+            // 保留占位：徽章已在标题行以 sub+badgeColor 渲染
         } else if (row.kind === 'gap') {
             y += row.gap ?? 0.25;
         } else {
             visual.text(row.text || '', x, y + 0.25, { align: row.align || 'left', font: row.font || STYLE.font, color: row.color || STYLE.color });
+            if (row.sub) {
+                // 右侧副文本：徽章型（badgeColor 底色块）或纯文本
+                const isBadge = row.badgeColor !== undefined;
+                const w = Math.max(1.2, row.sub.text.length * 0.5 + 0.5);
+                const bx = x + width - w;
+                if (isBadge) {
+                    visual.rect(bx, y - 0.06, w, 0.52, { fill: row.badgeColor, opacity: 0.92 });
+                    visual.text(row.sub.text, bx + w / 2, y + 0.3, { align: 'center', font: `bold ${STYLE.fontSmall}`, color: '#000000' });
+                } else {
+                    visual.text(row.sub.text, x + width, y + 0.25, { align: 'right', font: STYLE.font, color: row.sub.color || STYLE.colorSub });
+                }
+            }
             y += lineHeight;
         }
     }
