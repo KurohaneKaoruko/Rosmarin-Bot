@@ -201,6 +201,84 @@ const maybeRebalanceCarryTargetRoom = (creep: Creep): boolean => {
     return true;
 };
 
+// 中转候选点：某条路线在某个房间里、按行进方向排好的一个可通行点。
+// `progress` 沿用原口径 `该路线在本房内的点数 - 行进方向下标`，用于跨路线比较「谁更靠近终点」。
+type TransitRoomEntry = { pos: RoomPosition; progress: number };
+
+// 按 tick 缓存的「路线 → 房间 → 可通行点序列」，只取决于
+// (源房, 目标房, 房间名, 行进方向, 路线版本)，与 creep 自身位置无关，
+// 所以同一条路线上的所有中转 creep 直接共享这一份。
+let transitRoomIndexTick = -1;
+const transitRoomIndexForward = new Map<string, TransitRoomEntry[][]>();
+const transitRoomIndexBackward = new Map<string, TransitRoomEntry[][]>();
+
+/**
+ * 取「各条路线在当前房间内的可通行点序列」，数组顺序与 `RoadMemory.getAllPaths` 的迭代顺序一致。
+ *
+ * @remarks
+ * 原实现每个中转 creep 每 tick 都要把**整条路线**（跨多个房、上百格）扫一遍，
+ * 只为了筛出落在当前房的那几十格；筛完还要再 `filter` 一次可通行性，而每格判定
+ * 都要拼一次 `` `${房名}:${x}:${y}` `` 字符串去查记忆化表。
+ * 这些开销全都与 creep 位置无关，因此这里按 tick 只算一次、全路线 creep 共享。
+ *
+ * @param sourceRoom 源头房间名。
+ * @param targetRoom 目标房间名。
+ * @param room 当前 creep 所在的房间（即可通行判定的房间）。
+ * @param towardTaskTarget 是否朝目标房方向行进（false 表示返程）。
+ * @returns 每条路线一份 `TransitRoomEntry[]`；该路线在本房没有可通行点时给空数组。
+ */
+const getTransitRoomEntries = (
+    sourceRoom: string,
+    targetRoom: string,
+    room: Room,
+    towardTaskTarget: boolean
+): TransitRoomEntry[][] => {
+    const version = RoadMemory.getRouteVersion(sourceRoom);
+    if (transitRoomIndexTick !== Game.time) {
+        transitRoomIndexTick = Game.time;
+        transitRoomIndexForward.clear();
+        transitRoomIndexBackward.clear();
+    }
+
+    const cache = towardTaskTarget ? transitRoomIndexForward : transitRoomIndexBackward;
+    const cacheKey = `${sourceRoom}:${targetRoom}:${room.name}:${version}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+
+    const perRoute: TransitRoomEntry[][] = [];
+
+    for (const path of RoadMemory.getAllPaths(sourceRoom, targetRoom).values()) {
+        if (!Array.isArray(path) || path.length === 0) {
+            perRoute.push([]);
+            continue;
+        }
+
+        // progress 的口径依赖「本房内共有多少点」，所以先数一遍长度、再填点。
+        let inRoomCount = 0;
+        for (let idx = 0; idx < path.length; idx++) {
+            const pos = towardTaskTarget ? path[idx] : path[path.length - 1 - idx];
+            if (pos.roomName === room.name) inRoomCount++;
+        }
+        if (inRoomCount === 0) {
+            perRoute.push([]);
+            continue;
+        }
+
+        const entries: TransitRoomEntry[] = [];
+        for (let idx = 0; idx < path.length; idx++) {
+            const pos = towardTaskTarget ? path[idx] : path[path.length - 1 - idx];
+            if (pos.roomName !== room.name) continue;
+            if (!isWalkablePlannedRoadPos(room, pos)) continue;
+            entries.push({ pos, progress: inRoomCount - idx });
+        }
+
+        perRoute.push(entries);
+    }
+
+    cache.set(cacheKey, perRoute);
+    return perRoute;
+};
+
 const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefined): RoomPosition | null => {
     const sourceRoom = creep.memory.sourceRoom;
     const taskTargetRoom = creep.memory.targetRoom;
@@ -210,27 +288,17 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
     if (!(allPaths instanceof Map) || allPaths.size === 0) return null;
 
     const towardTaskTarget = nextRoomName === taskTargetRoom;
+    const perRoute = getTransitRoomEntries(sourceRoom, taskTargetRoom, creep.room, towardTaskTarget);
+
     let best: { pos: RoomPosition; range: number; progress: number } | null = null;
 
-    for (const path of allPaths.values()) {
-        if (!Array.isArray(path) || path.length === 0) continue;
-
-        // 按行进方向单遍挑出「落在本房内」的点，避免先复制整条路径再 map/filter 两轮。
-        // idx 保留的是行进方向上的下标，后面的 progress 计算依赖它。
-        const roomPath: Array<{ pos: RoomPosition; idx: number }> = [];
-        for (let idx = 0; idx < path.length; idx++) {
-            const pos = towardTaskTarget ? path[idx] : path[path.length - 1 - idx];
-            if (pos.roomName === creep.room.name) roomPath.push({ pos, idx });
-        }
-        if (roomPath.length === 0) continue;
-
-        const walkableRoomPath = roomPath.filter((entry) => isWalkablePlannedRoadPos(creep.room, entry.pos));
-        if (walkableRoomPath.length === 0) continue;
+    for (const entries of perRoute) {
+        if (entries.length === 0) continue;
 
         let nearestIndex = -1;
         let nearestRange = Infinity;
-        for (let i = 0; i < walkableRoomPath.length; i++) {
-            const range = creep.pos.getRangeTo(walkableRoomPath[i].pos);
+        for (let i = 0; i < entries.length; i++) {
+            const range = creep.pos.getRangeTo(entries[i].pos);
             if (range < nearestRange || (range === nearestRange && i > nearestIndex)) {
                 nearestRange = range;
                 nearestIndex = i;
@@ -238,19 +306,19 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
         }
         if (nearestIndex < 0) continue;
 
+        // 已经踩在最近点上就再往前一格，避免原地打转。
         let candidateIndex = nearestIndex;
-        if (isSameRoomPosition(creep.pos, walkableRoomPath[nearestIndex].pos) && nearestIndex + 1 < walkableRoomPath.length) {
+        if (isSameRoomPosition(creep.pos, entries[nearestIndex].pos) && nearestIndex + 1 < entries.length) {
             candidateIndex = nearestIndex + 1;
         }
 
-        const candidate = walkableRoomPath[candidateIndex];
-        const progress = roomPath.length - candidate.idx;
+        const candidate = entries[candidateIndex];
         if (
             !best ||
             nearestRange < best.range ||
-            (nearestRange === best.range && progress < best.progress)
+            (nearestRange === best.range && candidate.progress < best.progress)
         ) {
-            best = { pos: candidate.pos, range: nearestRange, progress };
+            best = { pos: candidate.pos, range: nearestRange, progress: candidate.progress };
         }
     }
 
