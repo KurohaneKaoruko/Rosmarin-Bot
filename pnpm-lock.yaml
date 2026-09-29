@@ -30,6 +30,9 @@ importers:
       source-map-js:
         specifier: ^1.0.2
         version: 1.2.1
+      ws:
+        specifier: ^8.13.0
+        version: 8.22.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
     devDependencies:
       '@brisberg/screeps-server-mockup':
         specifier: ^1.6.6
@@ -2242,8 +2245,8 @@ packages:
     resolution: {integrity: sha512-WhB9zCku7EGTj/HQQRz5aUQEUeoQZH2bWcltRErOpymJ4boYE6wL9Tbr23krRPSZ+C5zqNSrSw+Cc7sZZ4b7vg==, tarball: https://registry.npmmirror.com/isobject/-/isobject-3.0.1.tgz}
     engines: {node: '>=0.10.0'}
 
-  isolated-vm@git+https://git@github.com:laverdet/isolated-vm.git#cb93efcc1881c826ee98ad34e66955c08713acb2:
-    resolution: {commit: cb93efcc1881c826ee98ad34e66955c08713acb2, repo: git@github.com:laverdet/isolated-vm.git, type: git}
+  isolated-vm@https://codeload.github.com/laverdet/isolated-vm/tar.gz/cb93efcc1881c826ee98ad34e66955c08713acb2:
+    resolution: {tarball: https://codeload.github.com/laverdet/isolated-vm/tar.gz/cb93efcc1881c826ee98ad34e66955c08713acb2}
     version: 6.1.2
     engines: {node: '>=22.0.0'}
 
@@ -3656,6 +3659,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==, tarball: https://registry.npmmirror.com/ws/-/ws-8.22.0.tgz}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==, tarball: https://registry.npmmirror.com/xtend/-/xtend-4.0.2.tgz}
     engines: {node: '>=0.4'}
@@ -4331,7 +4346,7 @@ snapshots:
     dependencies:
       generic-pool: 3.9.0
       he: 1.2.0
-      isolated-vm: git+https://git@github.com:laverdet/isolated-vm.git#cb93efcc1881c826ee98ad34e66955c08713acb2
+      isolated-vm: https://codeload.github.com/laverdet/isolated-vm/tar.gz/cb93efcc1881c826ee98ad34e66955c08713acb2
       lodash: 3.10.1
       nan: 2.25.0
       node-gyp: 12.2.0
@@ -5174,7 +5189,7 @@ snapshots:
 
   enhanced-resolve@3.4.1:
     dependencies:
-      graceful-fs: 4.1.15
+      graceful-fs: 4.2.11
       memory-fs: 0.4.1
       object-assign: 4.1.1
       tapable: 0.2.9
@@ -5917,7 +5932,7 @@ snapshots:
 
   is-data-descriptor@1.0.1:
     dependencies:
-      hasown: 2.0.2
+      hasown: 2.0.4
     optional: true
 
   is-descriptor@0.1.8:
@@ -6000,7 +6015,7 @@ snapshots:
   isobject@3.0.1:
     optional: true
 
-  isolated-vm@git+https://git@github.com:laverdet/isolated-vm.git#cb93efcc1881c826ee98ad34e66955c08713acb2:
+  isolated-vm@https://codeload.github.com/laverdet/isolated-vm/tar.gz/cb93efcc1881c826ee98ad34e66955c08713acb2:
     dependencies:
       node-gyp-build: 4.8.4
 
@@ -6067,7 +6082,7 @@ snapshots:
 
   load-json-file@2.0.0:
     dependencies:
-      graceful-fs: 4.1.15
+      graceful-fs: 4.2.11
       parse-json: 2.2.0
       pify: 2.3.0
       strip-bom: 3.0.0
@@ -6722,7 +6737,7 @@ snapshots:
 
   readdirp@2.2.1(supports-color@4.5.0):
     dependencies:
-      graceful-fs: 4.1.15
+      graceful-fs: 4.2.11
       micromatch: 3.1.10(supports-color@4.5.0)
       readable-stream: 2.3.8
     transitivePeerDependencies:
@@ -7453,7 +7468,7 @@ snapshots:
 
   watchpack@1.7.5(supports-color@4.5.0):
     dependencies:
-      graceful-fs: 4.1.15
+      graceful-fs: 4.2.11
       neo-async: 2.6.2
     optionalDependencies:
       chokidar: 3.6.0
@@ -7559,6 +7574,11 @@ snapshots:
   wrappy@1.0.2: {}
 
   ws@7.5.10(bufferutil@4.1.0)(utf-8-validate@5.0.10):
+    optionalDependencies:
+      bufferutil: 4.1.0
+      utf-8-validate: 5.0.10
+
+  ws@8.22.0(bufferutil@4.1.0)(utf-8-validate@5.0.10):
     optionalDependencies:
       bufferutil: 4.1.0
       utf-8-validate: 5.0.10

@@ -13,6 +13,7 @@
     "test": "vitest run",
     "commit": "git add . && git-cz",
     "submit": "node ./scripts/submit.js",
+    "console": "node ./scripts/console.js",
     "count": "node ./scripts/countFiles.js",
     "ver": "node ./scripts/updateVersion.js"
   },
@@ -46,7 +47,8 @@
     "inquirer": "^12.2.0",
     "shelljs": ">=0.8.5",
     "source-map": "^0.6.1",
-    "source-map-js": "^1.0.2"
+    "source-map-js": "^1.0.2",
+    "ws": "^8.13.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
