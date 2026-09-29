@@ -1,6 +1,6 @@
 {
   "name": "rosmarin",
-  "version": "1.19.0",
+  "version": "1.19.1",
   "description": "",
   "type": "module",
   "scripts": {
@@ -50,7 +50,10 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild", "@screeps/driver", "screeps", "isolated-vm"
+      "esbuild",
+      "@screeps/driver",
+      "screeps",
+      "isolated-vm"
     ],
     "overrides": {
       "axios": "0.30.3",
