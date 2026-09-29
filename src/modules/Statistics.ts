@@ -498,8 +498,8 @@ function renderStatsHUD(
     }
 
     // ── 两遍法渲染：量高 → 背景板 → 逐行 ──
-    const padding = 0.4;
-    const y0 = 0.6;
+    const padding = 0.32;
+    const y0 = 0.55;
     let height = padding * 2;
     for (const row of rows) {
         if (row.kind === 'section') height += 0.5;
@@ -526,25 +526,27 @@ function renderStatsHUD(
             visual.text(row.text || '', x + 0.3, y + 0.26, { align: 'left', font: `bold ${STYLE.fontSmall}`, color: STYLE.sectionText });
             y += 0.42;
         } else if (row.kind === 'bar') {
-            drawProgressBar(visual, x, y, width, 0.5, row.pct ?? 0, row.barColor || STYLE.barRcl, row.barLabel);
-            y += 0.62;
+            drawProgressBar(visual, x, y, width, 0.48, row.pct ?? 0, row.barColor || STYLE.barRcl, row.barLabel);
+            y += 0.56;
         } else if (row.kind === 'spark') {
             const values = (row.values || []).filter((v) => Number.isFinite(v));
-            if (values.length >= 2) {
-                const max = maxVal;
+            const max = Math.max(...values, 0);
+            if (values.length >= 2 && max > 0) {
                 const slot = (width - 0.4) / values.length;
-                const baseY = y + 0.68;
+                const baseY = y + 0.62;
                 for (let i = 0; i < values.length; i += 1) {
                     const hRatio = Math.min(1, values[i] / max);
-                    const h = 0.1 + hRatio * 0.5;
+                    const h = 0.08 + hRatio * 0.42;
                     visual.rect(x + 0.2 + i * slot, baseY - h, Math.max(0.12, slot - 0.08), h, {
                         fill: row.sparkColor || STYLE.colorAccent,
                         opacity: 0.75,
                     });
                 }
                 visual.line(x + 0.1, baseY, x + width - 0.2, baseY, { color: '#333333', width: 0.04 });
+                y += 0.78;
+            } else {
+                y += 0.3;
             }
-            y += maxVal > 0 ? 0.78 : 0.3;
         } else if (row.kind === 'badge') {
             // 保留占位：徽章已在标题行以 sub+badgeColor 渲染
         } else if (row.kind === 'gap') {
