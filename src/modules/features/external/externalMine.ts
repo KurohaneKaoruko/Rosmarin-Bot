@@ -7,6 +7,7 @@ import { getRoomMode, getRoomModeProfile, isHighLikeMode } from '@/modules/share
 import { getActiveRemoteThreshold } from '@/modules/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
+import { buildHaulerBodyConfig, buildRemoteMinerBody } from '@/modules/shared/remoteBody';
 import { HighwayMineVisual } from '@/modules/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
 import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/modules/shared/memory';
@@ -1951,7 +1952,11 @@ export class ExternalMineSpawner {
         if (upbody) {
             sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, 'out-harvest', memory);
         } else {
-            sourceRoom.SpawnMissionAdd('OH', [], replaceLevel, 'out-harvest', memory);
+            // 体型按当前可用容量最大化（WORK 优先补到 5、move 保持 0.5 机动比、
+            // 自带 1 CARRY 自补）——容量不足自然收敛到小体型，容量回升自动出满配
+            // 5W（单源 10/tick 满速），替代固定分档的小体型
+            const body = buildRemoteMinerBody(sourceRoom.energyCapacityAvailable, 5, true);
+            sourceRoom.SpawnMissionAdd('OH', body, replaceLevel, 'out-harvest', memory);
         }
         return true;
     }
@@ -1976,13 +1981,14 @@ export class ExternalMineSpawner {
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
 
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
-        const modeCarryBody = ExternalMineMath.getModeLimitedBodyConfig(sourceRoom, 'out-carry');
+        // 体型按可用容量最大化 CARRY（走路段 [C,C,M] 整组扩展），替代固定分档
+        const carryBody = buildHaulerBodyConfig(sourceRoom.energyCapacityAvailable, { forRoad: true, maxCarry: 16 });
 
         const totalCarry = outerCarry + spawnCarryNum + outerCar;
         if (totalCarry < num) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
-            sourceRoom.SpawnMissionAdd('OC', modeCarryBody || [], this.OUTMINE_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            sourceRoom.SpawnMissionAdd('OC', carryBody, this.OUTMINE_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
