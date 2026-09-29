@@ -2,13 +2,12 @@
   "compilerOptions": {
     "target": "ES2017", // 指定 ECMAScript 目标版本
     "module": "esnext", // 指定模块系统的类型
-    "moduleResolution": "node", // 模块解析策略
+    "moduleResolution": "bundler", // 模块解析策略（打包器模式，替代已弃用的 node10）
     "lib": ["ES2018"], // 指定要包含的库文件
     "outDir": "./dist", // 输出目录
     "rootDir": "./src", // 根目录
     "types": ["screeps", "node", "lodash"],
-    "baseUrl": ".", // 基础目录，用于解析非相对模块名称
-    "paths": { // 路径映射
+    "paths": { // 路径映射（相对本文件所在目录解析）
       "@/*": ["./src/*"] // 将 @ 符号映射到 src 目录
     },
     "esModuleInterop": true, // 启用 ECMAScript 模块的互操作性
