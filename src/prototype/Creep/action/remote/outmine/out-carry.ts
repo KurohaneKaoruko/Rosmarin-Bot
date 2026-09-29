@@ -85,8 +85,10 @@ const isSameRoomPosition = (left: RoomPosition, right: RoomPosition): boolean =>
     left.roomName === right.roomName
 );
 
-const isWalkablePlannedRoadPos = (room: Room, pos: RoomPosition): boolean => {
-    if (pos.roomName !== room.name) return false;
+/**
+ * 判定单个规划道路格是否可通行（纯函数，供记忆化入口调用）。
+ */
+const computeWalkablePlannedRoadPos = (room: Room, pos: RoomPosition): boolean => {
     const terrain = room.getTerrain();
     if (terrain.get(pos.x, pos.y) === TERRAIN_MASK_WALL) return false;
 
@@ -107,6 +109,34 @@ const isWalkablePlannedRoadPos = (room: Room, pos: RoomPosition): boolean => {
     }
 
     return true;
+};
+
+let walkableRoadPosCacheTick = -1;
+const walkableRoadPosCache = new Map<string, boolean>();
+
+/**
+ * 判定规划道路格是否可通行，按 tick 记忆化。
+ *
+ * @remarks
+ * 同一 tick 内格子上有什么建筑/工地不会变，而中转中的 out-carry 每 tick 都要
+ * 拿整条规划路线逐点判定，单次判定是两次 `lookFor`（各算一次房间查询）。
+ * 不记忆化的话，「路线点数 × 同路线 creep 数」会把房间查询放大到每 tick 数千次。
+ */
+const isWalkablePlannedRoadPos = (room: Room, pos: RoomPosition): boolean => {
+    if (pos.roomName !== room.name) return false;
+
+    if (walkableRoadPosCacheTick !== Game.time) {
+        walkableRoadPosCacheTick = Game.time;
+        walkableRoadPosCache.clear();
+    }
+
+    const key = `${room.name}:${pos.x}:${pos.y}`;
+    const cached = walkableRoadPosCache.get(key);
+    if (cached !== undefined) return cached;
+
+    const result = computeWalkablePlannedRoadPos(room, pos);
+    walkableRoadPosCache.set(key, result);
+    return result;
 };
 
 const clearAssignedSourceCache = (cache: Record<string, any> | undefined) => {
@@ -148,10 +178,13 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
     for (const path of allPaths.values()) {
         if (!Array.isArray(path) || path.length === 0) continue;
 
-        const travelPath = towardTaskTarget ? path : [...path].reverse();
-        const roomPath = travelPath
-            .map((pos, idx) => ({ pos, idx }))
-            .filter((entry) => entry.pos.roomName === creep.room.name);
+        // 按行进方向单遍挑出「落在本房内」的点，避免先复制整条路径再 map/filter 两轮。
+        // idx 保留的是行进方向上的下标，后面的 progress 计算依赖它。
+        const roomPath: Array<{ pos: RoomPosition; idx: number }> = [];
+        for (let idx = 0; idx < path.length; idx++) {
+            const pos = towardTaskTarget ? path[idx] : path[path.length - 1 - idx];
+            if (pos.roomName === creep.room.name) roomPath.push({ pos, idx });
+        }
         if (roomPath.length === 0) continue;
 
         const walkableRoomPath = roomPath.filter((entry) => isWalkablePlannedRoadPos(creep.room, entry.pos));
