@@ -96,7 +96,7 @@ type ManagedSelectionCacheEntry = {
 const managedSelectionCache = new Map<string, ManagedSelectionCacheEntry>();
 
 // 外矿运行的状态工具：QoS、房间模式、节流、以及视觉渲染。
-class ExternalMineState {
+export class ExternalMineState {
     private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
     private static readonly EXACT_CENTER_ROOM_REGEX = /^[EW]\d*[5][NS]\d*[5]$/;
     private static readonly DEFAULT_LOCAL_SOURCE_COUNT = 2;
@@ -115,12 +115,7 @@ class ExternalMineState {
     private static readonly DEFAULT_KEEPER_ATTACK_COST = 4270;
     private static readonly DEFAULT_ENERGY_TARGET_LIMIT = Number.POSITIVE_INFINITY;
     private static readonly LOW_MODE_ENERGY_TARGET_LIMIT = 1;
-    private static readonly LOW_STATE_HIGH_MODE_ENERGY_TARGET_LIMIT = 2;
-    private static readonly LOW_STATE_DEFAULT_ENERGY_TARGET_LIMIT = 1;
-    private static readonly CRITICAL_STATE_ENERGY_TARGET_LIMIT = 1;
     private static readonly LOW_MODE_MAX_REMOTE_BUDGET = 140;
-    private static readonly LOW_STATE_REMOTE_BUDGET_MULTIPLIER = 0.7;
-    private static readonly CRITICAL_STATE_REMOTE_BUDGET_MULTIPLIER = 0.4;
     private static readonly SURPLUS_STATE_REMOTE_BUDGET_MULTIPLIER = 1.1;
     private static readonly REMOTE_QUEUE_ROLE_SET = new Set([
         'scout',
@@ -580,6 +575,10 @@ class ExternalMineState {
         return selection;
     }
 
+    // 外矿预算折扣已移除：外矿是摆脱能量短缺的收入投资，短缺期砍它只会加剧短缺（贫困陷阱）。
+    // 能量平衡由预算公式本身表达——本地编制优先占满 spawn（getLocalSpawnReserve），
+    // 能量紧张时本地队列变长、预算自动收窄；孵化端对 out-* 按当前能量缩水体（spawnControl），
+    // 收入按比例下降但不断档。
     private static getTargetPolicy(sourceRoom: Room): ExternalMineTargetPolicy {
         const mode = this.getRoomMode(sourceRoom);
         const energyState = this.getEnergyState(sourceRoom);
@@ -587,11 +586,7 @@ class ExternalMineState {
         const localSpawnReserve = this.getLocalSpawnReserve(sourceRoom);
         let remoteBudget = Math.max(0, spawnUsageCapacity - localSpawnReserve);
 
-        if (energyState === 'LOW') {
-            remoteBudget = Math.floor(remoteBudget * this.LOW_STATE_REMOTE_BUDGET_MULTIPLIER);
-        } else if (energyState === 'CRITICAL') {
-            remoteBudget = Math.floor(remoteBudget * this.CRITICAL_STATE_REMOTE_BUDGET_MULTIPLIER);
-        } else if (energyState === 'SURPLUS') {
+        if (energyState === 'SURPLUS') {
             remoteBudget = Math.floor(remoteBudget * this.SURPLUS_STATE_REMOTE_BUDGET_MULTIPLIER);
         }
 
@@ -599,23 +594,15 @@ class ExternalMineState {
             remoteBudget = Math.min(remoteBudget, this.LOW_MODE_MAX_REMOTE_BUDGET);
         }
 
+        // 能量目标房数量不随能量状态收缩（否则其他外矿房的 creep 死一只少一只、骤降断档）；
+        // low 模式是用户显式低配，保留单房上限。
         let energyTargetLimit = this.DEFAULT_ENERGY_TARGET_LIMIT;
         if (mode === 'low') {
             energyTargetLimit = this.LOW_MODE_ENERGY_TARGET_LIMIT;
         }
 
-        if (energyState === 'LOW') {
-            const lowStateLimit = this.isHighLikeMode(mode)
-                ? this.LOW_STATE_HIGH_MODE_ENERGY_TARGET_LIMIT
-                : this.LOW_STATE_DEFAULT_ENERGY_TARGET_LIMIT;
-            energyTargetLimit = Math.min(energyTargetLimit, lowStateLimit);
-        }
-
-        if (energyState === 'CRITICAL') {
-            energyTargetLimit = Math.min(energyTargetLimit, this.CRITICAL_STATE_ENERGY_TARGET_LIMIT);
-        }
-
-        // rush：外矿就是主要收入源——预算不打折、能量目标上限放开、不碰危险中心房
+        // rush：外矿就是主要收入源——预算保底、能量目标上限放开、不碰危险中心房
+        // 中心房（SK）高耗高危，能量低/紧急时暂停是合理的省能量位置，保留该闸。
         let allowCenterRoom = energyState !== 'LOW' && energyState !== 'CRITICAL';
         if (mode === 'rush') {
             remoteBudget = Math.max(remoteBudget, spawnUsageCapacity);

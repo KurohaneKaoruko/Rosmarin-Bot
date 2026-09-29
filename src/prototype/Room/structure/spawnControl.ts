@@ -16,7 +16,10 @@ const getEnergyState = (room: Room) =>
 
 // 仅这些角色允许在低能量时按当前可用能量降级体型。
 // worker 的预算体型单独由“存在建造需求”控制。
-const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
+// out-harvest / out-carry 一并纳入：外矿是摆脱能量短缺的收入投资，
+// 短缺期降体型继续跑（收入按比例下降），远好过等满仓能量——
+// 本地角色会把涓流能量优先吃掉，大体型 mission 会长期孵不出来，外矿因此断档。
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager', 'out-harvest', 'out-carry']);
 const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
 const DOWNGRADED_LOGISTICS_ROLE_SET = new Set<RoleId>(['transporter', 'carrier', 'manager']);
 
