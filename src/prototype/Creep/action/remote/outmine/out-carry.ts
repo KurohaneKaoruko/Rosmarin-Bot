@@ -279,10 +279,27 @@ const getTransitRoomEntries = (
     return perRoute;
 };
 
+// 中转目标按 creep 短缓存：跨房途中没必要每 tick 重扫全部路线点
+// （路线数 × 点数 × getRangeTo），沿途 3 tick 内最近点基本不变。
+// 到点 / 换房 / 超时立即失效，不会引入绕路。
+const TRANSIT_REPLAN_INTERVAL_TICKS = 3;
+type TransitPlanCacheEntry = { tick: number; roomName: string; target: RoomPosition };
+const transitPlanCache = new Map<string, TransitPlanCacheEntry>();
+
 const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefined): RoomPosition | null => {
     const sourceRoom = creep.memory.sourceRoom;
     const taskTargetRoom = creep.memory.targetRoom;
     if (!nextRoomName || !sourceRoom || !taskTargetRoom || sourceRoom === taskTargetRoom) return null;
+
+    const cachedPlan = transitPlanCache.get(creep.id);
+    if (
+        cachedPlan &&
+        Game.time - cachedPlan.tick < TRANSIT_REPLAN_INTERVAL_TICKS &&
+        cachedPlan.roomName === creep.room.name &&
+        !isSameRoomPosition(creep.pos, cachedPlan.target)
+    ) {
+        return cachedPlan.target;
+    }
 
     const allPaths = RoadMemory.getAllPaths(sourceRoom, taskTargetRoom);
     if (!(allPaths instanceof Map) || allPaths.size === 0) return null;
@@ -322,7 +339,19 @@ const getPlannedTransitRoadTarget = (creep: Creep, nextRoomName: string | undefi
         }
     }
 
-    return best?.pos || null;
+    const plannedTarget = best?.pos || null;
+    if (plannedTarget) {
+        transitPlanCache.set(creep.id, { tick: Game.time, roomName: creep.room.name, target: plannedTarget });
+    } else {
+        transitPlanCache.delete(creep.id);
+    }
+    // 死亡 creep 的残留条目定期清一把，Map 不会无限长大。
+    if (transitPlanCache.size > 500) {
+        for (const [id, entry] of transitPlanCache) {
+            if (Game.time - entry.tick >= TRANSIT_REPLAN_INTERVAL_TICKS) transitPlanCache.delete(id);
+        }
+    }
+    return plannedTarget;
 };
 
 

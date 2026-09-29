@@ -84,6 +84,16 @@ const EXTERNAL_MINE_CARRY_TARGET_CONFIG = {
     noWorkCarryBaseMultiplier: 2,
 } as const;
 
+// 托管目标选择（背包 DP）的跨 tick 短 TTL 缓存：
+// 输入（目标列表、房间模式、能量状态、spawn 预算）都以 tick 级缓慢变化，
+// 而 DP 本身不便宜；10 tick 的选择滞后完全可接受，QoS 紧张时也不再反复重算。
+const MANAGED_SELECTION_TTL_TICKS = 10;
+type ManagedSelectionCacheEntry = {
+    tick: number;
+    selection: ExternalMineManagedTargetSelection;
+};
+const managedSelectionCache = new Map<string, ManagedSelectionCacheEntry>();
+
 // 外矿运行的状态工具：QoS、房间模式、节流、以及视觉渲染。
 class ExternalMineState {
     private static readonly CENTER_ROOM_REGEX = /^[EW]\d*[456][NS]\d*[456]$/;
@@ -434,16 +444,40 @@ class ExternalMineState {
             return { energy: [], centerRoom: [] };
         }
 
+        // 链式记录选中集合：只在「确定替换」时新建一个节点，不再每步拷贝整个 rooms 数组；
+        // join 仅在罕见的三重平局（价值/重量/数量全相同）时才物化字符串。
+        // 此前 rush 模式 budget 可达 spawn 数 × 500，且每步都拷贝 rooms，
+        // 单次 DP 就是「目标数 × 表宽 × 数组长度」的分配风暴，直接把 tick 烧穿。
         type KnapsackEntry = {
             value: number;
             totalWeight: number;
             energyCount: number;
-            rooms: string[];
+            roomCount: number;
+            prev: KnapsackEntry | null;
+            roomName: string;
         };
 
         const budget = Math.max(0, Math.floor(policy.remoteBudget));
-        const table: Array<KnapsackEntry | null> = Array.from({ length: budget + 1 }, () => null);
-        table[0] = { value: 0, totalWeight: 0, energyCount: 0, rooms: [] };
+        // DP 宽度压到「全部买得起的总重」以内：超出部分永远不可达，结果不变、表长不白算。
+        const requiredWeights = allowedStats.map((stat) => Math.max(1, Math.ceil(stat.weight)));
+        // 注意：什么都不买得起时也不能在这里提前返回——旧实现的空 DP 会落到
+        // 兜底分支补一个目标，语义必须保持一致。
+        let affordableTotal = 0;
+        for (const requiredWeight of requiredWeights) {
+            if (requiredWeight <= budget) affordableTotal += requiredWeight;
+        }
+        const capacity = Math.min(budget, affordableTotal);
+
+        const table: Array<KnapsackEntry | null> = new Array(capacity + 1).fill(null);
+        table[0] = { value: 0, totalWeight: 0, energyCount: 0, roomCount: 0, prev: null, roomName: '' };
+
+        const joinRooms = (entry: KnapsackEntry): string => {
+            const names: string[] = [];
+            for (let node: KnapsackEntry | null = entry; node && node.prev; node = node.prev) {
+                names.push(node.roomName);
+            }
+            return names.reverse().join(',');
+        };
 
         const betterThan = (candidate: KnapsackEntry, current: KnapsackEntry | null): boolean => {
             if (!current) return true;
@@ -451,37 +485,71 @@ class ExternalMineState {
             if (current.value > candidate.value + 0.0001) return false;
             if (candidate.totalWeight < current.totalWeight) return true;
             if (candidate.totalWeight > current.totalWeight) return false;
-            if (candidate.rooms.length > current.rooms.length) return true;
-            if (candidate.rooms.length < current.rooms.length) return false;
-            return candidate.rooms.join(',') < current.rooms.join(',');
+            if (candidate.roomCount > current.roomCount) return true;
+            if (candidate.roomCount < current.roomCount) return false;
+            return joinRooms(candidate) < joinRooms(current);
         };
 
-        for (const stat of allowedStats) {
-            const requiredWeight = Math.max(1, Math.ceil(stat.weight));
-            if (requiredWeight > budget) continue;
-            for (let currentBudget = budget; currentBudget >= requiredWeight; currentBudget -= 1) {
+        const energyLimit = Number.isFinite(policy.energyTargetLimit)
+            ? policy.energyTargetLimit
+            : Number.POSITIVE_INFINITY;
+
+        for (let index = 0; index < allowedStats.length; index += 1) {
+            const stat = allowedStats[index];
+            const requiredWeight = requiredWeights[index];
+            if (requiredWeight > capacity) continue;
+            const isEnergy = stat.kind === 'energy';
+            for (let currentBudget = capacity; currentBudget >= requiredWeight; currentBudget -= 1) {
                 const previous = table[currentBudget - requiredWeight];
                 if (!previous) continue;
-                const nextEnergyCount = previous.energyCount + (stat.kind === 'energy' ? 1 : 0);
-                if (Number.isFinite(policy.energyTargetLimit) && nextEnergyCount > policy.energyTargetLimit) continue;
-                const candidate: KnapsackEntry = {
-                    value: previous.value + stat.value,
-                    totalWeight: previous.totalWeight + requiredWeight,
-                    energyCount: nextEnergyCount,
-                    rooms: [...previous.rooms, stat.roomName],
-                };
-                if (betterThan(candidate, table[currentBudget])) {
-                    table[currentBudget] = candidate;
+                const nextEnergyCount = previous.energyCount + (isEnergy ? 1 : 0);
+                if (nextEnergyCount > energyLimit) continue;
+                const candidateValue = previous.value + stat.value;
+                const candidateWeight = previous.totalWeight + requiredWeight;
+                const candidateRoomCount = previous.roomCount + 1;
+                const incumbent = table[currentBudget];
+                let replace: boolean;
+                if (!incumbent) {
+                    replace = true;
+                } else if (candidateValue > incumbent.value + 0.0001) {
+                    replace = true;
+                } else if (incumbent.value > candidateValue + 0.0001) {
+                    replace = false;
+                } else if (candidateWeight !== incumbent.totalWeight) {
+                    replace = candidateWeight < incumbent.totalWeight;
+                } else if (candidateRoomCount !== incumbent.roomCount) {
+                    replace = candidateRoomCount > incumbent.roomCount;
+                } else {
+                    replace = joinRooms({
+                        value: candidateValue,
+                        totalWeight: candidateWeight,
+                        energyCount: nextEnergyCount,
+                        roomCount: candidateRoomCount,
+                        prev: previous,
+                        roomName: stat.roomName,
+                    }) < joinRooms(incumbent);
                 }
+                if (!replace) continue;
+                table[currentBudget] = {
+                    value: candidateValue,
+                    totalWeight: candidateWeight,
+                    energyCount: nextEnergyCount,
+                    roomCount: candidateRoomCount,
+                    prev: previous,
+                    roomName: stat.roomName,
+                };
             }
         }
 
-        let best = table.find((entry) => !!entry) || null;
+        let best: KnapsackEntry | null = null;
         for (const entry of table) {
             if (entry && betterThan(entry, best)) best = entry;
         }
 
-        const selectedSet = new Set(best?.rooms || []);
+        const selectedSet = new Set<string>();
+        for (let node = best; node && node.prev; node = node.prev) {
+            selectedSet.add(node.roomName);
+        }
         const selection: ExternalMineManagedTargetSelection = { energy: [], centerRoom: [] };
         for (const stat of allowedStats) {
             if (!selectedSet.has(stat.roomName)) continue;
@@ -609,20 +677,31 @@ class ExternalMineState {
 
     // 同一个源房的 energy / centerRoom 旧桶数据可能串味；
     // 这里统一按“房名是否属于 center room”重新分类，避免同一目标被两条分支重复处理。
+    // 选择结果按「源房 → energy+centerRoom 一次算齐」做 TTL 缓存（两个 key 共享同一次 DP），
+    // 返回副本，避免调用方（如 rush 自动扩图）就地 push 污染缓存。
     static getManagedTargets(sourceRoom: Room, key: OutMineTargetListKey): string[] {
+        const cached = managedSelectionCache.get(sourceRoom.name);
+        if (!cached || Game.time - cached.tick >= MANAGED_SELECTION_TTL_TICKS) {
+            const selection = this.computeManagedTargets(sourceRoom);
+            managedSelectionCache.set(sourceRoom.name, { tick: Game.time, selection });
+            return selection[key].slice();
+        }
+        return cached.selection[key].slice();
+    }
+
+    private static computeManagedTargets(sourceRoom: Room): ExternalMineManagedTargetSelection {
         const data = getOutMineData(sourceRoom.name);
         const mergedTargets = [
             ...this.getTargetList(data, 'energy'),
             ...this.getTargetList(data, 'centerRoom'),
         ];
-        if (mergedTargets.length <= 0) return [];
+        if (mergedTargets.length <= 0) return { energy: [], centerRoom: [] };
 
         // 过滤不可达扇区：novice/respawn/closed 房间物理进不去，混进轮换会让 creep 在扇区边界堆死、白占孵化预算
         const uniqueTargets = [...new Set(mergedTargets)].filter(isRoomReachable);
         const policy = this.getTargetPolicy(sourceRoom);
         const stats = uniqueTargets.map((roomName) => this.estimateTargetSelectionStat(sourceRoom, roomName));
-        const selectedTargets = this.selectTargetStats(sourceRoom, stats, policy);
-        return selectedTargets[key];
+        return this.selectTargetStats(sourceRoom, stats, policy);
     }
 
     static createMemory(sourceRoomName: string, targetRoomName: string): CreepMemory {
@@ -2066,7 +2145,7 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        let targetRooms = ExternalMineState.getManagedTargets(room, 'energy');
+        let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
         // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个
         if (ExternalMine.getRoomMode(room) === 'rush' && targetRooms.length < 4
@@ -2182,7 +2261,7 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
-        const targetRooms = ExternalMineState.getManagedTargets(room, 'centerRoom');
+        const targetRooms = ExternalMine.getManagedTargetRooms(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
 
         // 同 runEnergy：先近后远 + 挂单少的先派，避免单房独占总 spawn。
