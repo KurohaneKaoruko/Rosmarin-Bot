@@ -96,11 +96,13 @@ const chooseTransferTarget = (creep: Creep) => {
     const urgent = isUrgentRefill(room);
     const candidates: Array<{ target: AnyStoreStructure; kind: UniversalTargetKind; score: number }> = [];
 
+    // spawn/ext 至少要有 50 空位（一次 CARRY 满载）才值得跑一趟，杜绝「为送几点能量跨半张地图」；
+    // 需能的 spawn/tower 其 free 必然很大，不会被这个门槛挡住
     for (const spawn of room.spawn || []) {
-        pushEnergyTarget(candidates, creep, spawn, 'spawn_ext', 1000, 1);
+        pushEnergyTarget(candidates, creep, spawn, 'spawn_ext', 1000, 50);
     }
     for (const ext of room.extension || []) {
-        pushEnergyTarget(candidates, creep, ext, 'spawn_ext', 980, 1);
+        pushEnergyTarget(candidates, creep, ext, 'spawn_ext', 980, 50);
     }
 
     for (const tower of room.tower || []) {
@@ -221,24 +223,29 @@ const runWorkTasks = (creep: Creep) => {
     creep.runControllerUpgrade({ pickupDropped: false });
 };
 
-// 填充目标（需要能量的 spawn/tower）是否就在身旁一步：
-// 是 → 无需移动即可交付，允许带着部分载荷直接进入工作态（边交边采，互不阻塞）
-const hasAdjacentFillTarget = (creep: Creep): boolean => {
-    return !!creep.pos.findClosestByRange(FIND_MY_STRUCTURES, {
-        filter: (s: AnyStoreStructure) =>
-            (s.structureType === STRUCTURE_SPAWN || s.structureType === STRUCTURE_TOWER) &&
-            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
-    });
-};
+
 
 /**
- * 是否继续采集：**无条件采满才切工作态**——不存在任何「紧急提前切换」的例外。
- * 唯一例外：需能的 spawn/tower 就在身旁（一步不用动），此时带着部分载荷直接交付，
- * 且交付不阻塞采集——身旁有源就原地边采边交。
+ * 状态迟滞（防高频切换 + 防跨房横跳）：
+ * - 采集态：无条件采满（free === 0）才进入工作态；
+ * - 工作态：卸到清空（used === 0）才回采集态。
+ * 关键在「半载不是切换信号」：当交付目标剩余容量小于载荷时只会送出一部分，
+ * 旧实现以 free > 0 判定采集，半载 creep 会被打回采集态再走回源——
+ * 形成「送一半 → 回头采 → 再送一半」的高频状态切换与往返移动。
+ * memory.working 即状态位；进门/出门时清理 source 绑定，避免残留影响下一轮取能决策。
  */
-const shouldGatherBeforeWork = (creep: Creep): boolean => {
-    if (creep.store.getFreeCapacity() <= 0) return false;   // 满载 → 工作
-    return !hasAdjacentFillTarget(creep);                   // 身旁无填充目标 → 继续采满
+const updateUniversalWorkState = (creep: Creep) => {
+    if (creep.memory.working) {
+        if (creep.store.getUsedCapacity() === 0) {
+            creep.memory.working = false;
+            delete creep.memory.targetSourceId;
+        }
+        return;
+    }
+    if (creep.store.getFreeCapacity() === 0) {
+        creep.memory.working = true;
+        delete creep.memory.targetSourceId;
+    }
 };
 
 // 通用机不再走“管道框架”，直接按顺序执行 Screeps 场景所需的判断。
@@ -246,16 +253,13 @@ const runUniversal = (creep: Creep) => {
     if (!creep.moveHomeRoom()) return;
     if (creep.handleRoomEdge()) return;
 
-    delete creep.memory.working;
+    updateUniversalWorkState(creep);
 
-    if (shouldGatherBeforeWork(creep)) {
+    if (!creep.memory.working) {
         getEnergy(creep);
         return;
     }
 
-    if (creep.memory.targetSourceId) {
-        delete creep.memory.targetSourceId;
-    }
     runWorkTasks(creep);
 };
 

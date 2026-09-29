@@ -3,13 +3,13 @@ import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
 // 各外矿房最后已知源数（有视野时刷新）：无视野补采集工时按它补给，防外矿停摆
 const lastKnownSourceNum = new Map<string, number>();
 import { isRoomTickAligned } from '@/shared/roomPhase';
-import { getRoomMode, isHighLikeMode } from '@/shared/roomMode';
+import { getRoomMode, getRoomModeProfile, isHighLikeMode } from '@/shared/roomMode';
 import { getActiveRemoteThreshold } from '@/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/shared/creepTickIndex';
-import { getOutMineData, getRoomData } from '@/shared/memory';
+import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/shared/roomTickCache';
 
@@ -46,6 +46,17 @@ type ExternalMineManagedTargetSelection = Record<OutMineTargetListKey, string[]>
 export type ExternalMineTiming = {
     normalInterval: number;
     constrainedInterval: number;
+};
+
+// 扇区可达性：novice / respawn / closed 扇区的房间物理不可达，
+// 混进外矿目标会让 creep 在扇区边界堆死、白占孵化预算
+const isRoomReachable = (roomName: string): boolean => {
+    try {
+        const status = Game.map.getRoomStatus(roomName);
+        return !status || status.status === 'normal';
+    } catch {
+        return true;
+    }
 };
 
 // 外矿搬运数量估算常量
@@ -560,7 +571,7 @@ class ExternalMineState {
         return { qosLevel, canRunSecondaryAction };
     }
 
-    // rush 自动扩图：把一圈相邻房间自动加入能量外矿列表
+    // rush 自动扩图：把一圈相邻房间自动加入能量外矿列表（跳过 novice/respawn/closed 等不可达扇区）
     static autoAddNearbyEnergyTargets(sourceRoomName: string, known: string[]): string[] {
         const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
         if (!match) return known;
@@ -573,6 +584,7 @@ class ExternalMineState {
                 const x = px + dx;
                 const y = py + dy;
                 const roomName = `${x >= 0 ? 'E' : 'W'}${Math.abs(x)}${y >= 0 ? 'S' : 'N'}${Math.abs(y)}`;
+                if (!isRoomReachable(roomName)) continue;
                 const Mem = getOutMineData(sourceRoomName);
                 Mem.energy ??= [];
                 if (Mem.energy.indexOf(roomName) === -1) {
@@ -594,7 +606,8 @@ class ExternalMineState {
         ];
         if (mergedTargets.length <= 0) return [];
 
-        const uniqueTargets = [...new Set(mergedTargets)];
+        // 过滤不可达扇区：novice/respawn/closed 房间物理进不去，混进轮换会让 creep 在扇区边界堆死、白占孵化预算
+        const uniqueTargets = [...new Set(mergedTargets)].filter(isRoomReachable);
         const policy = this.getTargetPolicy(sourceRoom);
         const stats = uniqueTargets.map((roomName) => this.estimateTargetSelectionStat(sourceRoom, roomName));
         const selectedTargets = this.selectTargetStats(sourceRoom, stats, policy);
@@ -878,7 +891,7 @@ const getExternalMineSourceDistance = (sourceRoom: Room, targetRoom: Room, sourc
         localApproach;
 };
 
-const getExternalMineEffectiveEnergyPerTick = (sourceRoom: Room, targetRoom: Room, source: Source): number => {
+const getExternalMineEffectiveEnergyPerTick = (sourceRoom: Room, targetRoom: Room, source: Source, unreservedIncomeFactor = 0.5): number => {
     const baseCapacity = typeof source.energyCapacity === 'number' && source.energyCapacity > 0
         ? source.energyCapacity
         : EXTERNAL_MINE_ANALYSIS_DEFAULTS.sourceEnergyCapacity;
@@ -891,7 +904,8 @@ const getExternalMineEffectiveEnergyPerTick = (sourceRoom: Room, targetRoom: Roo
     if (!targetController.owner) {
         const reservation = targetController.reservation;
         if (!reservation || reservation.username !== myUserName) {
-            energyPerTick *= 0.5;
+            // 未预定产量口径由模式参数表给出：rush=1 满产规划，main=0.75 温和打折，low=0.5 保守
+            energyPerTick *= unreservedIncomeFactor;
         }
     }
     return energyPerTick;
@@ -993,10 +1007,11 @@ export class ExternalMineAnalysis {
         targetRoom: Room,
         source: Source,
         excludeCreepName?: string,
+        unreservedIncomeFactor = 0.5,
     ): ExternalMineSourceStat {
         const sourceKey = getOutmineSourceKey(source);
         const distance = getExternalMineSourceDistance(sourceRoom, targetRoom, source);
-        const energyPerTick = getExternalMineEffectiveEnergyPerTick(sourceRoom, targetRoom, source);
+        const energyPerTick = getExternalMineEffectiveEnergyPerTick(sourceRoom, targetRoom, source, unreservedIncomeFactor);
         const collectionRange = getExternalMineCollectionRange(targetRoom.name);
         const container = getExternalMineNearbyContainer(targetRoom, source);
         const { power: harvestingPower, count: activeHarvesterCount } = getExternalMineSourceHarvestingStats(targetRoom, source);
@@ -1024,9 +1039,9 @@ export class ExternalMineAnalysis {
         };
     }
 
-    static getRoomSourceStats(sourceRoom: Room, targetRoom: Room, excludeCreepName?: string): ExternalMineSourceStat[] {
+    static getRoomSourceStats(sourceRoom: Room, targetRoom: Room, excludeCreepName?: string, unreservedIncomeFactor = 0.5): ExternalMineSourceStat[] {
         return getExternalMineTargetSources(targetRoom)
-            .map((source) => this.getSourceStats(sourceRoom, targetRoom, source, excludeCreepName))
+            .map((source) => this.getSourceStats(sourceRoom, targetRoom, source, excludeCreepName, unreservedIncomeFactor))
             .filter((stat) => stat.energyPerTick > 0 && stat.distance > 0);
     }
 
@@ -1036,7 +1051,12 @@ export class ExternalMineAnalysis {
         allowWorkCarry: boolean,
         carryCapacity: number,
     ): ExternalMineCarryPlan {
-        const sources = this.getRoomSourceStats(sourceRoom, targetRoom);
+        // 运力口径按房间模式参数表取：
+        // - remoteUnreservedIncomeFactor：未预定房间产量口径（rush=1 满产，main=0.75 温和打折）
+        // - remoteCarryThroughputFactor：吞吐冗余（死亡率/绕路/沼泽损耗）
+        // - remoteCarryBacklogScale：积压加编阈值缩放（越小越早加编）
+        const carryProfile = getRoomModeProfile(sourceRoom);
+        const sources = this.getRoomSourceStats(sourceRoom, targetRoom, undefined, carryProfile.remoteUnreservedIncomeFactor);
         const sourceCount = sources.length;
         const baseTargetNum = allowWorkCarry
             ? sourceCount
@@ -1046,10 +1066,10 @@ export class ExternalMineAnalysis {
         let backlogExtraCount = 0;
         for (const stat of sources) {
             const effectiveEnergyPerTick = Math.max(0, stat.energyPerTick - EXTERNAL_MINE_ANALYSIS.SOURCE_CONTAINER_REPAIR_LOSS);
-            requiredCarryCapacity += 2 * stat.distance * effectiveEnergyPerTick;
+            requiredCarryCapacity += 2 * stat.distance * effectiveEnergyPerTick * carryProfile.remoteCarryThroughputFactor;
 
-            if (stat.availableEnergy >= EXTERNAL_MINE_ANALYSIS.SEVERE_BACKLOG_THRESHOLD) backlogExtraCount += 2;
-            else if (stat.availableEnergy >= EXTERNAL_MINE_ANALYSIS.BACKLOG_THRESHOLD) backlogExtraCount += 1;
+            if (stat.availableEnergy >= EXTERNAL_MINE_ANALYSIS.SEVERE_BACKLOG_THRESHOLD * carryProfile.remoteCarryBacklogScale) backlogExtraCount += 2;
+            else if (stat.availableEnergy >= EXTERNAL_MINE_ANALYSIS.BACKLOG_THRESHOLD * carryProfile.remoteCarryBacklogScale) backlogExtraCount += 1;
         }
 
         const throughputTargetNum = carryCapacity > 0
@@ -1195,6 +1215,20 @@ class ExternalMineMath {
         return totalSlots;
     }
 
+    // 无视野时的离线口径：scout 到访时记录的工位缓存（Memory.rooms[target].sourcePosCount）。
+    // 从未记录过返回 null——此时不做工位上限，由调用方决定是否放弃孵化。
+    static getRecordedOutHarvesterSlotCap(targetRoomName: string): number | null {
+        const recorded = readRecordedSourceSlotCounts(targetRoomName);
+        if (!recorded) return null;
+        return recorded.reduce((a, b) => a + b, 0);
+    }
+
+    // 无视野时的离线口径：scout 记录的 source 数量；从未记录过返回 null。
+    static getRecordedSourceNum(targetRoomName: string): number | null {
+        const recorded = readRecordedSourceSlotCounts(targetRoomName);
+        return recorded ? recorded.length : null;
+    }
+
     // 计算外矿采集者的 WORK 数量，支持 upbody（固定高配）或读取配置。
     static getOutHarvesterWorkParts(sourceRoom: Room, upbody?: boolean): number {
         if (upbody) return 16;
@@ -1278,7 +1312,10 @@ class ExternalMineMath {
         const throughputNeed = Math.ceil((
             estimatedIncomePerTick * roundTripTicks
         ) / Math.max(EXTERNAL_MINE_CARRY_TARGET_CONFIG.minEffectiveCarryCapacity, carryCapacity));
-        const dynamicNum = throughputNeed + EXTERNAL_MINE_CARRY_TARGET_CONFIG.dynamicTargetBuffer;
+        // 离线估算动态缓冲：高强度模式（rush/high/mini）+1（同参数表冗余思路，离线也不至于运力吃紧）
+        const dynamicBuffer = EXTERNAL_MINE_CARRY_TARGET_CONFIG.dynamicTargetBuffer +
+            (isHighLikeMode(ExternalMine.getRoomMode(sourceRoom)) ? 1 : 0);
+        const dynamicNum = throughputNeed + dynamicBuffer;
 
         const cappedMax = Math.max(
             EXTERNAL_MINE_CARRY_TARGET_CONFIG.minTargetNum,
@@ -1427,6 +1464,20 @@ class ExternalMineSpawner {
             if (creep.memory?.targetRoom !== targetRoomName) continue;
             if (!this.isSameSourceRoom(creep.memory?.sourceRoom, sourceRoom.name)) continue;
             if ((creep.ticksToLive ?? 0) <= minUsefulTtl) continue;
+            count++;
+        }
+        return count;
+    }
+
+    // 目标房内「所有存活」采集工数（不限 TTL / 不限源房）。
+    // 工位硬上限必须按在场身体数算：换班期快死的爬仍占着工位，
+    // 若沿用 getEffectiveOutHarvesterNum 的换班排除口径，会把超额新爬顶进满员房间（No source 根源）。
+    private static getAllLiveOutHarvesterNum(targetRoomName: string): number {
+        let count = 0;
+        for (const creepName in Game.creeps) {
+            const creep = Game.creeps[creepName];
+            if (!creep || creep.memory?.role !== 'out-harvest') continue;
+            if (creep.memory?.targetRoom !== targetRoomName) continue;
             count++;
         }
         return count;
@@ -1601,11 +1652,19 @@ class ExternalMineSpawner {
     }
 
     // 外矿采集者：根据源数、站位上限与 body 配置决定目标数量。
-    static harvester(sourceRoom: Room, targetRoomName: string, targetRoom: Room | undefined, sourceNum: number, upbody?: boolean): boolean {
-        // 目标房无视野时站位上限不可测：退回「源数 × 每源编制」补给，
-        // 绝不因视野丢失而停发采集工（否则外矿一次视野间隙就整体停摆）。
-        const slotCap = targetRoom ? ExternalMineMath.getOutHarvesterSlotCap(targetRoom) : undefined;
-        const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap);
+    // targetRoom 可为 null（无视野）：此时优先用 scout 记录的工位数做离线口径；
+    // 拿不到记录就退回「源数 × 每源编制」补给——绝不因视野丢失而停发采集工，
+    // 否则外矿一次视野间隙（采集工死光 → 没视野 → 不再补位）就会整体停摆。
+    static harvester(sourceRoom: Room, targetRoom: Room | null, targetRoomName: string, sourceNum: number, upbody?: boolean, slotCapOverride?: number): boolean {
+        let slotCap: number | null;
+        if (targetRoom) {
+            slotCap = ExternalMineMath.getOutHarvesterSlotCap(targetRoom);
+        } else if (typeof slotCapOverride === 'number') {
+            slotCap = slotCapOverride;
+        } else {
+            slotCap = ExternalMineMath.getRecordedOutHarvesterSlotCap(targetRoomName);
+        }
+        const targetNum = ExternalMineMath.calcOutHarvesterTargetNum(sourceRoom, sourceNum, upbody, slotCap ?? undefined);
         if (targetNum <= 0) return false;
 
         // 多母房共享同一个 targetRoom 时，OH 数量只按 targetRoom 全局控制，
@@ -1615,8 +1674,10 @@ class ExternalMineSpawner {
         const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoomName);
         const globalSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoomName);
         if (globalEffective + globalQueued + globalSpawning >= targetNum) return false;
-        if (slotCap > 0) {
-            if (globalEffective + globalQueued + globalSpawning >= slotCap) return false;
+        // 工位闸用「所有存活 + 排队 + 孵化中」：换班排除只服务于定编覆盖，不作用于工位上限
+        if (slotCap !== null && slotCap > 0) {
+            const globalAllLive = this.getAllLiveOutHarvesterNum(targetRoomName);
+            if (globalAllLive + globalQueued + globalSpawning >= slotCap) return false;
         }
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoomName);
@@ -1631,7 +1692,13 @@ class ExternalMineSpawner {
     // 外矿运输者：现在只孵化 out-carry；旧 out-car 仅作为存量运力统计。
     static carry(sourceRoom: Room, targetRoom: Room, num: number): boolean {
         if (!this.hasActiveOutHarvester(sourceRoom, targetRoom)) {
-            this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom.name);
+            // 采集工断档但已有接替者在队列/孵化中（换班窗口）时不撤运输任务——
+            // 清空运力会造成「容器满 → 采集停 → 换班到场 → 运力重建」的长停摆窗口
+            const ohQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+            const ohSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
+            if (ohQueued + ohSpawning <= 0) {
+                this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom.name);
+            }
             return false;
         }
 
@@ -1844,17 +1911,37 @@ export class ExternalMine {
 
         if (targetRooms.length <= 0) return;
 
+        // 不可达扇区清理：绑定到 novice/respawn/closed 房间的外矿 creep 永远到不了岗，
+        // 会一直堆在扇区边界（表现为「完全不派出」）——直接回收，孵化侧也不再往这些房间派
+        for (const creep of Object.values(Game.creeps)) {
+            if (!creep?.my || !creep.memory?.targetRoom) continue;
+            const role = String(creep.memory.role || '');
+            if (!role.startsWith('out-') && role !== 'reserver') continue;
+            if (isRoomReachable(creep.memory.targetRoom)) continue;
+            creep.suicide();
+        }
+
         for (const roomName of targetRooms) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
                     ExternalMineSpawner.scout(room, roomName);
                 }
-                // 无视野也必须补采集工（按最后已知源数，缺省 2）：否则采集工死光 → 视野丢失 →
-                // 永远不再补位，外矿整体停摆。
-                ExternalMineSpawner.harvester(room, roomName, undefined, lastKnownSourceNum.get(roomName) ?? 2);
+                // 无视野也必须补采集工：否则采集工死光 → 视野丢失 → 永远不再补位，外矿整体停摆。
+                // 用 scout 到访时记下的源数/工位数做离线口径（Memory.rooms 持久，重启不丢）；
+                // 从未被记录过就退回「进程内最后已知源数，缺省 2」，宁可按估算补也不断档。
+                const recordedSlots = readRecordedSourceSlotCounts(roomName);
+                if (recordedSlots && recordedSlots.length > 0) {
+                    const offlineSlotCap = recordedSlots.reduce((a, b) => a + b, 0);
+                    ExternalMineSpawner.harvester(room, null, roomName, recordedSlots.length, undefined, offlineSlotCap);
+                } else {
+                    ExternalMineSpawner.harvester(room, null, roomName, lastKnownSourceNum.get(roomName) ?? 2);
+                }
                 continue;
             }
+
+            // 有视野：顺手刷新工位记录（道路/容器落成会改变可站位数），保持离线口径新鲜
+            if (!targetRoom.memory.sourcePosCount) recordSourceSlotCounts(targetRoom);
 
             ExternalMineState.tryBuildRoad(room, targetRoom, EXTERNAL_ROAD_CONFIG.ENERGY_ROAD_MIN_LEVEL, runState.canRunSecondaryAction);
 
@@ -1905,7 +1992,7 @@ export class ExternalMine {
             if (controller.reservation &&
                 controller.reservation.username !== myUserName) continue;
 
-            ExternalMineSpawner.harvester(room, roomName, targetRoom, sourceNum);
+            ExternalMineSpawner.harvester(room, targetRoom, roomName, sourceNum);
 
             const carryCapacity = ExternalMineMath.getOutCarryCapacity(room);
             const carryNum = ExternalMineMath.calcEnergyOutCarryTarget(room, targetRoom, sourceNum, false, carryCapacity);
@@ -1928,6 +2015,13 @@ export class ExternalMine {
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {
                     ExternalMineSpawner.scout(room, roomName);
+                }
+
+                // 无视野：用 scout 记录的源数/工位数做离线 OH 孵化检查（upbody 固定高配）
+                const recordedSlots = readRecordedSourceSlotCounts(roomName);
+                if (recordedSlots && recordedSlots.length > 0) {
+                    const offlineSlotCap = recordedSlots.reduce((a, b) => a + b, 0);
+                    ExternalMineSpawner.harvester(room, null, roomName, recordedSlots.length, true, offlineSlotCap);
                 }
                 continue;
             }
@@ -1962,7 +2056,7 @@ export class ExternalMine {
                 const stat = ExternalMineState.estimateTargetSelectionStat(room, roomName);
                 if (stat.score < activeThresholdCenter) continue;
             }
-            ExternalMineSpawner.harvester(room, roomName, targetRoom, sourceNum, true);
+            ExternalMineSpawner.harvester(room, targetRoom, roomName, sourceNum, true);
 
             const mineral = targetRoom[FIND_MINERALS] || targetRoom.find(FIND_MINERALS)[0];
             if (mineral && mineral.mineralAmount > 0) {

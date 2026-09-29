@@ -660,7 +660,8 @@ export const getUpgraderTarget = (room: Room): number => {
         return clamp(Math.ceil(workTarget / workPerUpgrader), 1, Math.max(1, rushCap));
     }
 
-    if (mode === 'high') {
+    if (mode === 'high' || mode === 'mini') {
+        // mini 迷你房：常驻升级 farm，同 high 口径配专人升级工
         return clamp(
             Math.ceil(workTarget / workPerUpgrader),
             1,

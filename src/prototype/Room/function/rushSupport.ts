@@ -1,3 +1,4 @@
+import { isSpecialRushActive } from '@/shared/roomMode';
 import { getLayoutData } from '@/shared/memory';
 import { decompressBatch } from '@/shared/compress';
 
@@ -13,84 +14,100 @@ function directionTo(from: RoomPosition, to: RoomPosition): DirectionConstant {
     return TOP_LEFT;
 }
 
+// 快递爬空载且 spawn 断供时的放弃等待
+const COURIER_IDLE_GIVE_UP_TICKS = 60;
+// upgrader「能量不够消耗」的判定线：当前存量按 WORK 吞吐折算 < 150 tick
+const UPGRADER_HUNGRY_TICKS = 150;
+
 /**
- * rush 冲级辅助（spawn 位于控制器 3 格内时）：
- * ① source 附近补 1-2 个 extension 工地——采集工直接填能量，省掉跑 spawn 的往返；
- * ② 自爆拉能快递：spawn 满仓时孵 CARRY 快递员，从 spawn 取能后自爆，
- *    墓碑能量落在控制器旁给 upgrader 就近拾取——把 spawn 的盈余能量转运到升级端。
+ * 自爆拉能快递（rush 特殊子模式 / mini 迷你房，总闸见 shared/roomMode.isSpecialRushActive）。
  *
- * 发车闸门（房间运作是最基本的底线）：
- * ① 防御态/紧急状态不发车；② spawn 忙碌（基础孵化占用中）不发车；
- * ③ 控制器旁无工作 upgrader 不发车；④ spawn 满仓才发车；⑤ 总能量在运作线（60%）之上。
- * 房内有 link 后整个机制自动停止（正规供能链接管）。
+ * spawn 盈余时孵纯 CARRY 快递爬，取满后自爆，墓碑能量落在升级圈里给 upgrader 就近拾取——
+ * 把 spawn 的盈余能量转运到升级端。发车闸门：
+ * ① 防御态不发车；② spawn 忙碌或孵化队列有积压不发车；③ 控制器旁有在工作且快断能的
+ * upgrader 才发车；④ spawn 满仓才发车；⑤ 总能量在运作线（60%）之上。
+ *
+ * 注：source 旁 ring-2 ext 的建造权已移交布局模块——
+ * 见 layoutPlanner.plannerCreateSite 的「特殊冲级优先落位」。
  */
 export function rushBoost(room: Room): void {
-    const spawn = room.find(FIND_MY_SPAWNS)[0];
-    if (!spawn || !room.controller?.my) return;
-    if (spawn.pos.getRangeTo(room.controller.pos) > 3) return;
+    if (!isSpecialRushActive(room)) return;
+    const spawn = room.find(FIND_MY_SPAWNS)[0]!;
+    dispatchRushCourier(room, spawn);
+}
 
-    // ── ② 自爆拉能快递 ──
-    const hasLink = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_LINK }).length > 0;
-    if (!hasLink) {
-        // 闸门①：防御态（紧急状态）不发车
-        if (room.memory.defend) return;
-        // 闸门②：spawn 忙碌（基础孵化占用中）不发车
-        if (spawn.spawning) return;
+/** 发车决策：已有快递爬则驱动其取能/自爆，否则过闸门孵化新的 */
+function dispatchRushCourier(room: Room, spawn: StructureSpawn): void {
+    // 闸门①：防御态（紧急状态）不发车
+    if (room.memory.defend) return;
 
-        const courier = room.find(FIND_MY_CREEPS, { filter: c => c.memory.role === 'rush-courier' })[0];
-        if (courier) {
-            if (courier.spawning) return;
-            // 还有空位：继续从 spawn 取能（出生格就贴着 spawn，无需移动）
-            if (courier.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
-                if (courier.withdraw(spawn, RESOURCE_ENERGY) === OK) return;
-            }
-            // 取满（或 spawn 没能量可给）：就地自爆，墓碑能量给旁的 upgrader
-            courier.suicide();
-            return;
-        }
-
-        // 闸门③：墓碑能量必须有消费者——控制器旁有在工作/待命的 upgrader 才发车
-        const hasConsumer = room.find(FIND_MY_CREEPS, { filter: c =>
-            c.memory.role === 'upgrader' && !c.spawning && c.pos.getRangeTo(room.controller.pos) <= 4
-        }).length > 0;
-        if (!hasConsumer) return;
-
-        // 闸门④：spawn 满仓（真正盈余）才发车，只抽超出 150 底仓的部分
-        if (spawn.store[RESOURCE_ENERGY] < spawn.store.getCapacity(RESOURCE_ENERGY)) return;
-
-        // 闸门⑤：总能量运作线——抽完后房间总能量仍保有容量的 60%，基础孵化永不断档
-        const opFloor = room.energyCapacityAvailable * 0.6;
-        if (room.energyAvailable <= opFloor) return;
-
-        const body: BodyPartConstant[] = [];
-        let cost = 0;
-        const budget = Math.min(spawn.store[RESOURCE_ENERGY] - 150, room.energyAvailable - opFloor);
-        while (cost + BODYPART_COST[CARRY] <= budget) { body.push(CARRY); cost += BODYPART_COST[CARRY]; }
-        if (body.length === 0) return;
-        const dir = directionTo(spawn.pos, room.controller.pos);
-        spawn.spawnCreep(body, 'rc' + Game.time, { memory: { role: 'rush-courier' }, directions: [dir] });
+    const courier = room.find(FIND_MY_CREEPS, { filter: c => c.memory.role === 'rush-courier' })[0];
+    if (courier) {
+        driveRushCourier(courier, spawn);
         return;
     }
 
-    // ── ① source 附近补 extension 工地（全房最多 2 个未完工的）──
-    const extSites = room.find(FIND_MY_CONSTRUCTION_SITES, { filter: s => s.structureType === STRUCTURE_EXTENSION });
-    if (extSites.length >= 2) return;
-    let placed = 0;
-    for (const source of room.find(FIND_SOURCES)) {
-        for (let dx = -2; dx <= 2 && placed < 2 - extSites.length; dx++) {
-            for (let dy = -2; dy <= 2 && placed < 2 - extSites.length; dy++) {
-                const x = source.pos.x + dx, y = source.pos.y + dy;
-                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
-                const pos = new RoomPosition(x, y, room.name);
-                if (pos.getRangeTo(source.pos) < 2) continue;
-                if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
-                if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
-                if (pos.lookFor(LOOK_STRUCTURES).some(s => s.structureType !== STRUCTURE_ROAD)) continue;
-                if (room.createConstructionSite(x, y, STRUCTURE_EXTENSION) === OK) placed++;
-            }
-        }
-    }
+    // 闸门②：spawn 忙碌 / 孵化队列有积压时不发车——快递绝不挤占基础孵化
+    if (spawn.spawning) return;
+    const pendingMissions = Object.values((room as any).getSpawnMissionNum?.() || {}) as number[];
+    if (pendingMissions.reduce((a, b) => a + b, 0) > 0) return;
+
+    // 闸门③：控制器旁有在工作且快断能的 upgrader 才发车（墓碑能量要有紧急消费者）
+    const controller = room.controller!;
+    const hasHungryUpgrader = room.find(FIND_MY_CREEPS, { filter: c => {
+        if (c.memory.role !== 'upgrader' && c.memory.role !== 'up-upgrade') return false;
+        if (c.pos.getRangeTo(controller.pos) > 4) return false;
+        const work = c.getActiveBodyparts(WORK);
+        if (work <= 0) return false;
+        return c.store[RESOURCE_ENERGY] / work < UPGRADER_HUNGRY_TICKS;
+    } }).length > 0;
+    if (!hasHungryUpgrader) return;
+
+    // 闸门④：spawn 满仓（真正盈余）才发车，只抽超出 150 底仓的部分
+    if (spawn.store[RESOURCE_ENERGY] < spawn.store.getCapacity(RESOURCE_ENERGY)) return;
+
+    // 闸门⑤：总能量运作线——抽完后房间总能量仍保有容量的 60%，基础孵化永不断档
+    const opFloor = room.energyCapacityAvailable * 0.6;
+    if (room.energyAvailable <= opFloor) return;
+
+    const body: BodyPartConstant[] = [];
+    let cost = 0;
+    const budget = Math.min(spawn.store[RESOURCE_ENERGY] - 150, room.energyAvailable - opFloor);
+    while (cost + BODYPART_COST[CARRY] <= budget) { body.push(CARRY); cost += BODYPART_COST[CARRY]; }
+    if (body.length === 0) return;
+
+    // 出生后朝控制器旁 container 方向跨出，让墓碑尽量落在 container 上（能量就近可收）
+    const container = room.container?.find(c => c.pos.inRangeTo(controller.pos, 2));
+    const dir = directionTo(spawn.pos, container ? container.pos : controller.pos);
+    spawn.spawnCreep(body, 'rc' + Game.time, {
+        memory: { role: 'rush-courier', home: room.name } as CreepMemory,
+        directions: [dir],
+    });
 }
+
+/** 快递爬的逐 tick 驱动：取满自爆；断供时带货就地交付，空载限时等待 */
+function driveRushCourier(courier: Creep, spawn: StructureSpawn): void {
+    const mem = courier.memory as unknown as Record<string, unknown>;
+
+    if (courier.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+        if (courier.withdraw(spawn, RESOURCE_ENERGY) === OK) {
+            delete mem.waitStart;
+            return;
+        }
+        // spawn 断供：身上有货就地交付（半载也值回票价）；空载免费等一会儿再放弃
+        if (courier.store[RESOURCE_ENERGY] > 0) {
+            courier.suicide();
+            return;
+        }
+        if (!mem.waitStart) mem.waitStart = Game.time;
+        if (Game.time - (mem.waitStart as number) > COURIER_IDLE_GIVE_UP_TICKS) courier.suicide();
+        return;
+    }
+
+    // 满载：就地自爆，墓碑能量留给旁的 upgrader
+    courier.suicide();
+}
+
 /**
  * spawn 错位重建（所有模式）：初始 spawn 不在布局点位时，（所有模式）：初始 spawn 不在布局点位时，
  * 建完第二个 spawn 后自动拆除旧 spawn、在布局位重建新 spawn。

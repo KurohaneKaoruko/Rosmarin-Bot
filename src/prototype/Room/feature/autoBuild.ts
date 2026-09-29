@@ -1,5 +1,6 @@
 import LayoutPlanner from "@/modules/features/Planner/layoutPlanner"
 import { getLayoutData, getRoomData } from "@/shared/memory";
+import { getRoomMode } from "@/shared/roomMode";
 
 
 
@@ -13,6 +14,16 @@ export default class AutoBuild extends Room {
         // 开启了自动建造, 且有布局Memory, 则自动建筑
         const memory = getRoomData()[this.name];
         const layoutMemory = getLayoutData(this.name);
+
+        // mini 迷你房：无布局（或上一版误写的 63auto）时自动生成迷你房布局（buildMini），
+        // 并确保自动建造开启；ext 由 plannerCreateSite 的特殊冲级优先落位负责，不进布局
+        const staleLayout = (memory as any)?.layout === '63auto';
+        if (getRoomMode(this) === 'mini' && (staleLayout || !layoutMemory || Object.keys(layoutMemory).length === 0)) {
+            if (LayoutPlanner.buildMini(this.name, { quiet: true }) === OK) {
+                if (memory) memory.autobuild = true;
+            }
+        }
+
         if (memory && memory.autobuild && layoutMemory &&
             Object.keys(layoutMemory).length) {
             LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });

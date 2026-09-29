@@ -389,6 +389,14 @@ export default class ControllerFunction extends Creep {
                     filter: (resource) => resource.resourceType === RESOURCE_ENERGY && resource.amount > 0
                 })[0];
                 if (dropped) this.pickup(dropped);
+
+                // 顺手抽相邻墓碑能量（自爆拉能快递的交付落点就在升级圈里）
+                const tombstone = this.pos.findInRange(FIND_TOMBSTONES, 1, {
+                    filter: (tomb) => (tomb.store[RESOURCE_ENERGY] || 0) > 0
+                })[0];
+                if (tombstone && this.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+                    this.withdraw(tombstone, RESOURCE_ENERGY);
+                }
             }
 
             this.upgradeController(controller);
