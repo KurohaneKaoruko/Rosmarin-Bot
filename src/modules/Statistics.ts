@@ -125,7 +125,7 @@ function updateRoomStats() {
         stats.energyRise[roomName] = stats.energy[roomName] - stats.energyHistory[roomName] || 0;
         stats.SpawnEnergy[roomName] = room.energyCapacityAvailable;
 
-        const trend = stats.energyTrend[roomName] as number[];
+        const trend = (stats.energyTrend[roomName] = stats.energyTrend[roomName] || []);
         trend.push(stats.energy[roomName]);
         if (trend.length > 24) trend.shift();
     }
