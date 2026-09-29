@@ -238,8 +238,9 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     // 专人升级工（upgrader）：编制完全由房间模式决定，策略与让位闸门都在
     // shared/roomWorkforce.getUpgraderTarget：
     //   low/main → 0（常规升级由 worker 兼任）
-    //   high     → 按升级 work 需求折算，同事把 worker 升级侧扣掉同等份额
-    //   rush     → 布局支持冲级时按升级 work 需求折算；不支持则回退成 2 只普通升级工
+    //   high     → 按升级 work 需求折算（受控制器工位上限约束），同时把 worker 升级侧扣掉同等份额
+    //   rush     → 按升级 work 需求折算（受冲级工位上限约束）；两者都先被按 RCL 的人口上限封顶，
+    //              避免低 RCL 的 1-WORK 体型把一笔 work 预算折成几十只升级工
     // 这里只负责把缺口补齐，不重复任何策略判断。
     'upgrader': (room: Room, current: number) => {
         if (Memory['warmode']) return false;

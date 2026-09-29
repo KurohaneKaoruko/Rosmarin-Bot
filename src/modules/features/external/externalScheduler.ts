@@ -67,6 +67,38 @@ export const countPendingEconomyMissions = (
     targetRoomName: string,
 ): number => countPendingMissions(memories, sourceRoomName, targetRoomName, OUTMINE_PENDING_ECONOMY_ROLE_SET);
 
+// 「每次规划重算」的外矿孵化角色集合：采集 / 搬运 / 建造 / 矿物。
+// 这些任务是按当前需求算出来的，不含一次性任务（防御、侦查、预定）。
+export const OUTMINE_PLANNED_ROLE_SET: ReadonlySet<string> = new Set([
+    ...OUTMINE_PENDING_ECONOMY_ROLE_SET,
+    'out-build',
+    'out-mineral',
+]);
+
+/**
+ * 判断一条孵化任务是否该在下一轮派单前清掉。
+ *
+ * @remarks
+ * 外矿经济任务每轮都按当前需求重算，所以上一轮的残留一律作废。只追加不清空有两个
+ * 致命后果（线上都实际发生过）：
+ * 1. 残留任务永远占着队头 —— 「先近后远」只作用于新任务的追加位置，实际孵化顺序
+ *    仍旧是几天前写下的旧顺序；
+ * 2. 残留任务把「单房挂单额度」占满 —— 新任务永远排不进去，外矿补员被整个冻结。
+ *
+ * @param memory 任务的 creep memory（无效项返回 false，不动非外矿任务）。
+ * @param sourceRoomName 发起孵化的源房名；任务记录的 `sourceRoom` 与之不符时不清理。
+ * @returns 需要删除时返回 true。
+ */
+export const shouldDropPlannedMission = (
+    memory: { role?: string; sourceRoom?: string } | null | undefined,
+    sourceRoomName: string,
+): boolean => {
+    const role = memory?.role;
+    if (!role || !OUTMINE_PLANNED_ROLE_SET.has(role)) return false;
+    const missionSourceRoom = memory?.sourceRoom;
+    return !missionSourceRoom || missionSourceRoom === sourceRoomName;
+};
+
 /**
  * 外矿补员派单顺序：先近后远 + 负载均衡。
  *
