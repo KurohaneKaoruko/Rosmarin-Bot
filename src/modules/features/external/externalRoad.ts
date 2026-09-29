@@ -1112,7 +1112,7 @@ export class RoadBuilder {
         const [, ew, ewNum, ns, nsNum] = match;
         return {
             x: ew === 'W' ? -Number(ewNum) - 1 : Number(ewNum),
-            y: ns === 'N' ? -Number(nsNum) - 1 : Number(nsNum),
+            y: ns === 'N' ? Number(nsNum) : -Number(nsNum) - 1,
         };
     }
 

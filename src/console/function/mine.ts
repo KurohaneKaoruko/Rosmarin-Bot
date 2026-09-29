@@ -54,13 +54,13 @@ function parseRoomCoord(roomName: string): { x: number; y: number } | null {
     const xNum = Number(match[2]);
     const yNum = Number(match[4]);
     const x = match[1] === 'E' ? xNum : -xNum - 1;
-    const y = match[3] === 'S' ? yNum : -yNum - 1;
+    const y = match[3] === 'N' ? yNum : -yNum - 1;
     return { x, y };
 }
 
 function formatRoomCoord(x: number, y: number): string {
     const horizontal = x >= 0 ? `E${x}` : `W${-x - 1}`;
-    const vertical = y >= 0 ? `S${y}` : `N${-y - 1}`;
+    const vertical = y >= 0 ? `N${y}` : `S${-y - 1}`;
     return `${horizontal}${vertical}`;
 }
 

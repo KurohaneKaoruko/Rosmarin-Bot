@@ -15,8 +15,8 @@ const parseRoomCoords = (roomName: string): { x: number; y: number } | null => {
     const match = roomName.match(/^([EW])(\d+)([NS])(\d+)$/);
     if (!match) return null;
     return {
-        x: match[1] === 'E' ? Number(match[2]) : -Number(match[2]),
-        y: match[3] === 'S' ? Number(match[4]) : -Number(match[4]),
+        x: match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1,
+        y: match[3] === 'N' ? Number(match[4]) : -Number(match[4]) - 1,
     };
 };
 

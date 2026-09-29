@@ -92,7 +92,7 @@ function parseRoomName(roomName: string): { x: number, y: number } | null {
 
     const [, we, weNum, ns, nsNum] = match
     const x = we === 'W' ? -parseInt(weNum) - 1 : parseInt(weNum)
-    const y = ns === 'N' ? -parseInt(nsNum) - 1 : parseInt(nsNum)
+    const y = ns === 'N' ? parseInt(nsNum) : -parseInt(nsNum) - 1
     return { x, y }
 }
 

@@ -191,7 +191,7 @@ export default class BaseFunction extends RoomPosition {
         if (offsetX == 0 && offsetY == 0) return new RoomPosition(x, y, this.roomName)
         else {
             function getRoomNameByXY(x: number, y: number) {
-                return `${x >= 0 ? 'E' : 'W'}${x >= 0 ? x : -1 - x}${y >= 0 ? 'S' : 'N'}${y >= 0 ? y : -1 - y}`
+                return `${x >= 0 ? 'E' : 'W'}${x >= 0 ? x : -1 - x}${y >= 0 ? 'N' : 'S'}${y >= 0 ? y : -1 - y}`
             }
             const co = this.getRoomCoordinate()
             return new RoomPosition((x + 50) % 50, (y + 50) % 50, getRoomNameByXY(co.x + offsetX, co.y + offsetY))

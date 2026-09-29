@@ -648,7 +648,7 @@ export class ExternalMineState {
         const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
         if (!match) return known;
         const px = match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1;
-        const py = match[3] === 'S' ? Number(match[4]) : -Number(match[4]) - 1;
+        const py = match[3] === 'N' ? Number(match[4]) : -Number(match[4]) - 1;
 
         const Mem = getOutMineData(sourceRoomName);
         Mem.energy ??= [];
@@ -660,7 +660,7 @@ export class ExternalMineState {
                 if (Mem.energy.length >= 4) break;
                 const x = px + dx;
                 const y = py + dy;
-                const roomName = `${x >= 0 ? 'E' : 'W'}${Math.abs(x)}${y >= 0 ? 'S' : 'N'}${Math.abs(y)}`;
+                const roomName = `${x >= 0 ? 'E' + x : 'W' + (-x - 1)}${y >= 0 ? 'N' + y : 'S' + (-y - 1)}`;
                 if (!isRoomReachable(roomName)) continue;
                 if (Mem.energy.indexOf(roomName) === -1) {
                     Mem.energy.push(roomName);

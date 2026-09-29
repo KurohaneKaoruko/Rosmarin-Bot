@@ -271,7 +271,7 @@ export default class TeamUtils {
         const ns = m[3]
         const ny = Number(m[4])
         const rx = ew === 'E' ? ex : -ex - 1
-        const ry = ns === 'S' ? ny : -ny - 1
+        const ry = ns === 'N' ? ny : -ny - 1
         return { rx, ry }
     }
 
@@ -280,7 +280,7 @@ export default class TeamUtils {
      */
     private static formatRoomCoord(rx: number, ry: number): string {
         const ew = rx >= 0 ? 'E' : 'W'
-        const ns = ry >= 0 ? 'S' : 'N'
+        const ns = ry >= 0 ? 'N' : 'S'
         const ex = rx >= 0 ? rx : -rx - 1
         const ny = ry >= 0 ? ry : -ry - 1
         return `${ew}${ex}${ns}${ny}`
