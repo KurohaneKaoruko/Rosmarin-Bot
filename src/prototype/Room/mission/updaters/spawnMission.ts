@@ -5,6 +5,7 @@ import { getRoomData } from '@/modules/shared/memory';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
     pruneDelayedUpgraderSpawnMissions,
+    pruneCriticalNonRecoveryMissions,
     createSpawnCheckContext,
     getAdjustedSpawnRoleCurrent,
     shouldSpawnRole,
@@ -34,6 +35,9 @@ export default class SpawnMission extends Room {
         void offset;
         if (!this.spawn || this.spawn.length === 0) return false;
         pruneDelayedUpgraderSpawnMissions(this);
+        // CRITICAL 复苏：清掉救援线（harvester/universal）以外的孵化积压，
+        // 防止小爬流水线在能量枯竭期互相抢食（能量回升后此清理自动空转）
+        pruneCriticalNonRecoveryMissions(this);
 
         const creepNum = this.getCreepNum();
         const spawnMissionNum = this.getSpawnMissionNum();

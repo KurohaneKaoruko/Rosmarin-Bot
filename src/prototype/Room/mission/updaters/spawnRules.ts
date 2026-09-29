@@ -29,6 +29,27 @@ export {
     getMyConstructionSites,
 } from '@/modules/shared/roomWorkforce';
 
+// ── CRITICAL 复苏闸门 ──
+// 能量枯竭（CRITICAL）时孵化只保留采集/救援线（harvester/universal），
+// 其余角色一律暂缓提交并清出队列——把稀缺能量集中孵出大体型 harvester 破局。
+// 否则会陷入「小爬流水线」贫困陷阱：低配爬群吃光全部能量，谁也长不大，
+// CRITICAL 永久化（线上实例：95 万 tick 卡在 RCL2，升级速度 0.02/tick）。
+// 能量回到 NORMAL/SURPLUS 后闸门自动解除，恢复正常孵化。
+export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set(['harvester', 'universal']);
+
+export const pruneCriticalNonRecoveryMissions = (room: Room): number => {
+    if (getEnergyState(room) !== 'CRITICAL') return 0;
+    const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
+    let removed = 0;
+    for (const task of tasks) {
+        const role = (task.data as SpawnTask)?.memory?.role;
+        if (!role || CRITICAL_RECOVERY_ROLE_SET.has(role)) continue;
+        room.deleteMissionFromPool?.('spawn', task.id);
+        removed += 1;
+    }
+    return removed;
+};
+
 // 搬运任务生成阈值
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
 const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
@@ -151,7 +172,12 @@ const getHarvesterSuccessionNeeds = (room: Room): number => {
 export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boolean> = {
     'harvester': (room: Room, current: number) => {
         if (room.memory.defend) return false;
-        const baseTarget = getHarvesterTargetBySource(room);
+        let baseTarget = getHarvesterTargetBySource(room);
+        // CRITICAL 复苏：定编压到每 source 1 只——多矿位小爬群只会吃光能量，
+        // 集中孵大体型主力才能爬出贫困陷阱
+        if (getEnergyState(room) === 'CRITICAL') {
+            baseTarget = Math.min(baseTarget, (room.source || []).length || 1);
+        }
         if (baseTarget <= 0) return false;
 
         // 无缝换班：绑定爬 TTL 低于「实测路程 + 孵化期 + 缓冲」时，
@@ -388,6 +414,10 @@ export const shouldSpawnRole = (
     context: SpawnCheckContext,
     current = getAdjustedSpawnRoleCurrent(context, role),
 ): boolean => {
+    // CRITICAL 复苏闸门：能量枯竭时只放行采集/救援线，其余角色一律暂缓
+    // （集中稀缺能量孵大体型 harvester 破局；能量回升后自动恢复）
+    if (getEnergyState(context.room) === 'CRITICAL' && !CRITICAL_RECOVERY_ROLE_SET.has(role)) return false;
+
     if (role === 'universal') {
         return getDowngradeUniversalSpawnMissing(context.room, current) > 0 || RoleSpawnCheck[role]?.(context.room, current) === true;
     }
