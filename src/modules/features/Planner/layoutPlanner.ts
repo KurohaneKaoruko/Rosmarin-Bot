@@ -6,6 +6,7 @@ import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
 import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/shared/memory';
+import { isSpecialRushActive } from '@/shared/roomMode';
 
 /**
  * 布局计算与可视化/落盘的通用模块
@@ -970,6 +971,46 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
     return { key, roomName, layoutType, center, createdAt: Game.time, expiresAt: Game.time + CACHE_TTL, structMap, layoutMemory };
 }
 
+// 特殊冲级 ext 的并发工地上限（只数 source ring-2 的自有工地，建完再补）
+const SOURCE_EXT_SITE_CAP = 2;
+
+/**
+ * 特殊冲级（rush 子模式 / mini）：在 source 的 ring-2（切比雪夫距离恰为 2）放 ext 工地。
+ * - ring-2 与采集工作位（ring-1）相邻不相占，采集工可在工作位上直接把能量填进相邻 ext；
+ * - 遵守 RCL 的 ext 配额（已建成 + 全部在建不超上限）。
+ * @returns 本次创建的工地数量
+ * @internal
+ */
+function createSourceExtSites(room: Room, budget: number): number {
+    if (budget <= 0 || room.level < 2) return 0;
+    const buildMax = (CONTROLLER_STRUCTURES as any)?.[STRUCTURE_EXTENSION]?.[room.level] ?? 0;
+    if (!buildMax) return 0;
+
+    const built = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_EXTENSION }).length;
+    const sites = room.find(FIND_MY_CONSTRUCTION_SITES, { filter: s => s.structureType === STRUCTURE_EXTENSION });
+    if (built + sites.length >= buildMax) return 0;
+
+    // 并发预算只数 source ring-2 的自有工地，其他来源的 ext 工地不占这份名额
+    const ownSites = sites.filter(site => (room.source || []).some(source => site.pos.getRangeTo(source.pos) === 2));
+
+    let created = 0;
+    for (const source of room.source || []) {
+        for (let dx = -2; dx <= 2 && created < budget && ownSites.length + created < SOURCE_EXT_SITE_CAP; dx++) {
+            for (let dy = -2; dy <= 2 && created < budget && ownSites.length + created < SOURCE_EXT_SITE_CAP; dy++) {
+                const x = source.pos.x + dx, y = source.pos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                const pos = new RoomPosition(x, y, room.name);
+                if (pos.getRangeTo(source.pos) !== 2) continue;
+                if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+                if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
+                // ext 不能与任何既有结构共格（道路也不行）
+                if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
+                if (room.createConstructionSite(x, y, STRUCTURE_EXTENSION) === OK) created++;
+            }
+        }
+    }
+    return created;
+}
 /**
  * LayoutPlanner：静态/动态布局的统一入口。
  * - visual*：只在房间内显示点位，不写入 Memory\n
@@ -998,11 +1039,19 @@ export const LayoutPlanner = {
         const keys = only ? [only] : Object.keys(layoutMemory);
         const coreDepotKeys = keys.filter((structureType) => isCoreDepotStructure(structureType));
         const regularKeys = keys.filter((structureType) => !isCoreDepotStructure(structureType));
-        const budget = Math.max(0, cap - allSite.length);
+        let budget = Math.max(0, cap - allSite.length);
 
         let created = 0;
         for (const s of coreDepotKeys) {
             created += handleCoreDepotSite(room, layoutMemory, s);
+        }
+
+        // 特殊冲级（rush 子模式 / mini）：source 旁 ring-2 的 ext 优先落位，再走正常布局——
+        // 布局自身的 ext 点位仍可用，但排在这些工地之后（配额/工地预算按剩余量计）
+        if (!only && isSpecialRushActive(room)) {
+            const made = createSourceExtSites(room, Math.max(0, budget - created));
+            created += made;
+            budget -= made;
         }
 
         let regularCreated = 0;
@@ -1229,6 +1278,61 @@ export const LayoutPlanner = {
         const totalCpu = cpuDelta(totalStart);
         if (!opts?.quiet) {
             log('LayoutPlanner', `动态布局构建成功: ${roomName} layout=63auto center(${computed.center.x},${computed.center.y}) computeCpu=${cpuFmt(computeCpu)} writeCpu=${cpuFmt(writeCpu)} totalCpu=${cpuFmt(totalCpu)}`);
+        }
+        return OK;
+    },
+
+    /**
+     * 迷你房布局构建（mini 模式专用）：
+     * - 以 spawn 为锚点的最小据点：塔围绕 spawn（优先朝控制器一侧），RCL6+ 补 terminal；
+     * - ext 不写入布局——source 旁 ring-2 ext 由 plannerCreateSite 的特殊冲级优先落位负责；
+     * - 同步 RoomData.layout = 'mini' / center = spawn 位置（若存在）。
+     * @returns Screeps 错误码：OK/ERR_NOT_FOUND
+     */
+    buildMini(roomName: string, opts?: { quiet?: boolean }): number {
+        const room = Game.rooms[roomName];
+        if (!room) return ERR_NOT_FOUND;
+        const spawn = (room.spawn || [])[0];
+        if (!spawn) return ERR_NOT_FOUND;
+
+        // spawn 周圈可建格，按到控制器的距离排序（塔/终端优先贴控制器一侧）
+        const candidates: Array<{ x: number; y: number; d: number }> = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = spawn.pos.x + dx, y = spawn.pos.y + dy;
+                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
+                if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
+                if (room.lookForAt(LOOK_STRUCTURES, x, y).some(s => s.structureType !== STRUCTURE_ROAD)) continue;
+                if (room.lookForAt(LOOK_CONSTRUCTION_SITES, x, y).length > 0) continue;
+                const pos = new RoomPosition(x, y, room.name);
+                const d = room.controller ? pos.getRangeTo(room.controller.pos) : 99;
+                candidates.push({ x, y, d });
+            }
+        }
+        candidates.sort((a, b) => a.d - b.d);
+
+        const towerQuota = (CONTROLLER_STRUCTURES as any)?.[STRUCTURE_TOWER]?.[room.level] ?? 0;
+        const towers: XY[] = candidates.slice(0, Math.max(0, towerQuota)).map(c => [c.x, c.y] as XY);
+        const used = new Set(towers.map(t => `${t[0]}:${t[1]}`));
+        const terminal: XY[] = [];
+        if (room.level >= 6) {
+            const spot = candidates.find(c => !used.has(`${c.x}:${c.y}`));
+            if (spot) terminal.push([spot.x, spot.y] as XY);
+        }
+
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        if (towers.length) layoutMemory[STRUCTURE_TOWER] = towers.map(([x, y]) => compress(x, y));
+        if (terminal.length) layoutMemory[STRUCTURE_TERMINAL] = terminal.map(([x, y]) => compress(x, y));
+
+        const rooms = getRoomData();
+        if (rooms?.[roomName]) {
+            rooms[roomName]['layout'] = 'mini';
+            rooms[roomName]['center'] = { x: spawn.pos.x, y: spawn.pos.y };
+        }
+        if (!opts?.quiet) {
+            log('LayoutPlanner', `迷你房布局构建成功: ${roomName} towers=${towers.length}/${towerQuota} terminal=${terminal.length}（ext 由特殊冲级优先落位负责）`);
         }
         return OK;
     },

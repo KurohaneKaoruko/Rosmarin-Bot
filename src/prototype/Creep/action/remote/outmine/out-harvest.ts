@@ -177,9 +177,14 @@ const runSourcePhase = (creep: Creep): boolean => {
         const closestSource = creep.room.closestSource(creep);
         if (!closestSource) {
             creep.say('No source');
+            // 工位全满（孵化超额/换班重叠）：限时等待后自我回收，避免永久站桩占人口
+            const mem = creep.memory as any;
+            if (!mem.noSourceSince) mem.noSourceSince = Game.time;
+            if (Game.time - mem.noSourceSince > 200) creep.suicide();
             return false;
         }
         creep.memory.targetSourceId = closestSource.id;
+        delete (creep.memory as any).noSourceSince;
     }
 
     let targetSource = Game.getObjectById(creep.memory.targetSourceId) as Source | null;

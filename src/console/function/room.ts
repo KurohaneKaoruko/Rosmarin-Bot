@@ -7,7 +7,7 @@ import { ROOM_NAME_SOURCE_TEXT, resolveRoomName } from "@/console/argUtils";
 
 // 动态布局（无需布局中心）
 const DYNAMIC_LAYOUT_SET = new Set(['auto', '63auto', 'scorpior']);
-const ROOM_MODE_SET = ['main', 'stop', 'low', 'high', 'rush'];
+const ROOM_MODE_SET = ['main', 'stop', 'low', 'high', 'rush', 'mini'];
 
 // 房间控制
 export default {
@@ -97,7 +97,7 @@ export default {
     // 开关新占领房间自动接管
     auto(
         enable: boolean = true,
-        mode: 'main' | 'low' | 'high' | 'rush' = 'main',
+        mode: 'main' | 'low' | 'high' | 'rush' | 'mini' = 'main',
         layout: 'auto' | '63auto' | 'scorpior' = 'auto'
     ) {
         const auto = getAutoData() as any;
@@ -106,8 +106,8 @@ export default {
             global.log(`已关闭新占领房间自动托管。`);
             return OK;
         }
-        if (!['main', 'low', 'high', 'rush'].includes(mode)) {
-            return Error('自动托管默认模式仅支持 main、low、high、rush。');
+        if (!['main', 'low', 'high', 'rush', 'mini'].includes(mode)) {
+            return Error('自动托管默认模式仅支持 main、low、high、rush、mini。');
         }
         if (!['auto', '63auto', 'scorpior'].includes(layout)) {
             return Error('自动托管仅支持 auto、63auto、scorpior 三种自动布局。');
@@ -156,7 +156,7 @@ export default {
         return OK;
     },
     // 设置房间模式（roomName 可省略；也支持 room.mode('high') 单参数写法）
-    mode(roomName?: string, mode: 'main' | 'low' | 'high' | 'stop' | 'rush' = 'main') {
+    mode(roomName?: string, mode: 'main' | 'low' | 'high' | 'stop' | 'rush' | 'mini' = 'main') {
         // 单参数写法：room.mode('high') / room.mode('rush')
         if (roomName && ROOM_MODE_SET.includes(roomName)) {
             mode = roomName as any;

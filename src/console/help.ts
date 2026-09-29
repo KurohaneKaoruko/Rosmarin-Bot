@@ -1,4 +1,5 @@
 import { VERSION } from '../constant/config';
+import { log } from '@/utils';
 
 const head = `<span style="color: #D0CAE0;"><b>
 ——————————————————————————— 迷迭香 𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓 ${VERSION} ———————————————————————————
@@ -32,12 +33,21 @@ const helpTexts: Record<string, string> = {
         `- 内部自动完成：加入控制列表 → 构建布局 → 开启自动建筑`,
         `${cmd('room.auto(enable?, mode?, layout?)')}：新占领房间自动托管，之后新占领的房间零操作自动起房`,
         `- enable：默认 true，传 false 关闭`,
-        `- mode：默认运行模式，支持 main / low / high / rush`,
+        `- mode：默认运行模式，支持 main / low / high / rush / mini`,
         `- layout：支持 auto / 63auto / scorpior（自动托管不允许静态布局）`,
         line(),
         title('🧩', '参数约定'),
         `常用指令（layout.build / layout.auto / layout.site / layout.visual / room.add / room.mode / room.setcenter / room.sign / room.setram 等）的 roomName 参数均可省略，省略时按 start 相同的规则自动推断房间；`,
         `模式类指令（room.mode / room.defendmode）支持只传模式值的单参数写法，各参数支持的取值见对应指令说明。`,
+        line(),
+        title('⚙️', '房间运行模式（room.mode）'),
+        `${cmd("room.mode(roomName?, mode?)")}：设置运行模式；也支持只传模式值的单参数写法（例 ${cmd("room.mode('mini')")}）`,
+        `- ${cmd('main')}：主模式（默认）。功能全开，按标准节奏运行`,
+        `- ${cmd('low')}：低功耗。关闭 lab/factory/powerSpawn/市场/外矿/资源排产，防御降频，只留采集、保底升级与基础建造`,
+        `- ${cmd('high')}：全开提频。升级吞吐 ×1.2、任务调度间隔减半、运力与紧急 UNIV 上限用 high 档`,
+        `- ${cmd('rush')}：高速冲级。升级吞吐 ×1.5、调度最高频、外矿预算全开；低等级且 spawn 贴控制器(≤3格)时触发特殊冲级：源旁 ext 直填 + 自爆拉能快递`,
+        `- ${cmd('mini')}：迷你房（常驻冲级 farm）。设施/市场/外矿全关，特殊冲级机制常驻运转（依赖 spawn 贴控制器、有 link 自动停）`,
+        `- ${cmd('stop')}：停止该房间运行`,
         line(),
         title('🔧', '手动分步（与 start 内部步骤一致，一般无需手动执行）'),
         `1) ${cmd('room.add(roomName?, layout?, x?, y?)')}：将房间加入控制列表`,
@@ -75,13 +85,13 @@ const helpTexts: Record<string, string> = {
         `- 手动布局：需保证 storage / terminal / factory / 1 个 link 集中放置，与这四个建筑均相邻的点位为中心（中央搬运工位置）`,
         `${cmd('room.auto(enable?, mode?, layout?)')}：设置新占领房间自动托管`,
         `- enable：默认 true，传 false 关闭`,
-        `- mode：默认运行模式，支持 main / low / high / rush`,
+        `- mode：默认运行模式，支持 main / low / high / rush / mini`,
         `- layout：支持 auto / 63auto / scorpior，自动接管不允许静态布局`,
         `${cmd('room.remove(roomName)')}：从控制列表删除房间`,
         `- RCL6+ 需要放置确认旗 remove-<房间名>，避免误删`,
         `${cmd('room.list()')}：查看控制列表（含模式/布局/中心/自动建筑/RCL 摘要）`,
         `${cmd('room.mode(roomName?, mode?)')}：设置运行模式`,
-        `- mode：支持 main / low / high / rush / stop（默认 main，仅 stop 停止房间运行）`,
+        `- mode：支持 main / low / high / rush / mini / stop（默认 main；各模式差异见 help 首页「房间运行模式」，仅 stop 停止房间运行）`,
         `- roomName 可省略，也支持只传 mode 的单参数写法`,
         `${cmd('room.setcenter(roomName?, x?, y?)')}：设置布局中心`,
         `- x,y：布局中心坐标，可省略；省略时取 centerPos/storagePos 旗帜位置`,
@@ -161,11 +171,27 @@ const helpTexts: Record<string, string> = {
         sub('🚩', '孵化指令旗（TEAM_...）'),
         `- 格式：${cmd('TEAM_<配置>_<孵化房>_N次数_T间隔')}`,
         `- 示例：${cmd('TEAM_A28/4_E12N34_N1_T1000')}`,
-        `- 配置：对应 Team 配置名（例如 A28/4）`,
+        `- 配置：对应 Team 配置名，完整名册见下方「队伍配置名册」`,
         `- 孵化房：必须是己方房间（否则会自动删旗）`,
         `- N：总孵化次数上限；不写视为一次性指令（派发一次后删旗）`,
         `- T：孵化间隔（tick）`,
         `- 常见失败：配置不存在 / boost 资源不足（会自动删旗）`,
+        line(),
+        sub('📋', '队伍配置名册（TEAM_CONFIG）'),
+        `命名规则：${cmd('A/W/R/H')} = 攻击/拆除/远程/奶妈；档位数字见下；${cmd('/4')}${cmd('/2')} = 四人/二人队；${cmd('N')} 结尾 = 无 boost；${cmd('L5')}${cmd('L6')}${cmd('L7')} = 对应 RCL 低配档`,
+        `- 常用 boost 四人队：${cmd('A25/4 W25/4 R25/4')}、${cmd('A28/4 W28/4 R28/4')}、${cmd('A29/4 W29/4 R29/4')}、${cmd('RH/4')}（远程/奶一体化）`,
+        `- 混搭前排：${cmd('AW/4 AR/4 WR/4')}、${cmd('AW28/4 AR28/4 WR28/4')}、${cmd('AW29/4 AR29/4 WR29/4')}`,
+        `- 激进玻璃大炮：${cmd('A35/4 W35/4 R30/4')}`,
+        `- 无奶队：${cmd('R40/4 WR40/4')}`,
+        `- 无 boost：${cmd('AH/4N WH/4N RH/4N')}、${cmd('AH/2N WH/2N RH/2N')}`,
+        `- boost 二人队：${cmd('AH/2 WH/2 RH/2')}、${cmd('AH35/2 WH35/2 RH35/2')}、${cmd('AH40/2 WH40/2 RH40/2 WR40/2')}`,
+        `- RCL7 低配：${cmd('AH/4L7 WH/4L7 RH/4L7 RX/4L7')}、${cmd('AH/2L7 WH/2L7 RH/2L7 RX/2L7')}`,
+        `- RCL6 低配：${cmd('AH/4L6 WH/4L6 RH/4L6')}、${cmd('AH/2L6 WH/2L6 RH/2L6')}`,
+        `- RCL5 低配：${cmd('AH/4L5 WH/4L5 RH/4L5 AR/4L5 WR/4L5 R2/4L5')}、${cmd('AH/2L5 WH/2L5 RH/2L5 AR/2L5 WR/2L5 R2/2L5')}`,
+        `- RCL4 低配：${cmd('AH/4L4 WH/4L4 RH/4L4 AR/4L4 WR/4L4 R2/4L4')}、${cmd('AH/2L4 WH/2L4 RH/2L4 AR/2L4 WR/2L4 R2/2L4')}`,
+        `- 测试：${cmd('TEST')}`,
+        `档位参考（前排/奶）：25 = X10T15X15M10 + T12M10H28；28 = X10T12X18M10；29 = X9T11X20M10 + T10R1H29M10；35 = X5T5X30 + T5M10H35；40 = X40M10（X = 角色部件 A/W/R）`,
+        `- 具体体型与成员顺序（A1/A2/B1/B2）以 ${cmd('src/modules/features/Team/config/TeamConfig.ts')} 为准`,
         line(),
         sub('🏷️', '队伍标记旗（Team-...）'),
         `- ${cmd('Team-<teamID>')}：系统生成的队伍标记旗（队伍数据不存在会自动清理）`,
@@ -408,10 +434,15 @@ const helpTexts: Record<string, string> = {
     ].join(br),
 };
 
-/** 生成帮助命令配置 */
+/**
+ * 生成帮助命令配置
+ *
+ * 输出方式：统一 log() 直打（不 return）——长文本走日志通道，控制台求值结果为 undefined，
+ * 不再把整段 HTML 当返回值回显。log() 内部优先 console.logUnsafe，帮助文本的 span/br 标记可正常渲染。
+ */
 const createHelpCommand = (alias: string, withHead = false) => ({
     alias,
-    exec: () => withHead ? `${head}${br}${helpTexts[alias]}` : helpTexts[alias],
+    exec: () => log(withHead ? `${head}${br}${helpTexts[alias]}` : helpTexts[alias]),
 });
 
 export default [

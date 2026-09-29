@@ -57,6 +57,14 @@ export const RoleData = {
         code: 'UNIV',
         executor: 'universal',
     }, // 采集搬运通用机，处理停摆与新房起步
+    // 自爆拉能快递：由 rushSupport 直接 spawnCreep 驱动（spawn 满仓盈余 → 满载自爆留墓碑给 upgrader），
+    // 无执行器（exec 跳过），也不进 RoleSpawnCheck（永不占用常规孵化队列）
+    'rush-courier': {
+        bodypart: [[CARRY, 1]],
+        level: 11,
+        code: 'RC',
+    },
+
 
     /* 特殊用途 */
     'scout': {

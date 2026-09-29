@@ -32,6 +32,9 @@ const getDefenderCounts = (() => {
     };
 })();
 
+// 防御角色：这类 creep 是盾，掉血由治疗/撤退消化，不算「被袭击升级 safe」的信号
+const DEFENDER_ROLE_SET = new Set(['defend-attack', 'defend-ranged', 'defend-2attack', 'defend-2heal']);
+
 function selectTopByScore<T>(items: T[], limit: number, compare: (a: T, b: T) => number): T[] {
     if (!items || items.length <= 0 || limit <= 0) return [];
     const result: T[] = [];
@@ -327,10 +330,31 @@ export default class RoomDefense extends Room {
         }
     }
 
+    /**
+     * 自动开启 safe 模式（三档触发，命中即开）：
+     * 1. 事后兜底：关键建筑已被打爆（出现自己的 Ruin）——立刻保全核心；
+     * 2. 强威胁：boost 治疗团压进来且已有关键建筑损失；
+     * 3. 事前主动：确认「被袭击且已造成实际损失」——controller 被 attackController、
+     *    我方平民 creep 受损、或我方核心建筑受损（排除自然损耗的 wall/rampart）。
+     * 注意：controller.upgradeBlocked > 0 是被 attackController 的证据，
+     * 旧逻辑反而在这里直接 return，导致「被袭击却不触发 safe」。
+     * 敌方判定走 findEnemyCreeps（Invader / 白名单已排除），纯路过未造成损失的敌人不开 safe。
+     */
     activateSafeMode() {
         if (!this.controller.safeModeAvailable) return;
         if (this.controller.safeModeCooldown) return;
-        if (this.controller.upgradeBlocked) return;
+
+        // 场上的敌方进攻单位（Invader / 白名单已由 findEnemyCreeps 过滤）
+        const hostilePresence = this.findEnemyCreeps({
+            filter: (c: Creep) =>
+                c.owner.username !== 'Invader' &&
+                c.body?.some(b =>
+                    b.hits > 0 &&
+                    (b.type === ATTACK || b.type === RANGED_ATTACK || b.type === WORK ||
+                     b.type === HEAL || b.type === CLAIM)
+                )
+        }) as Creep[];
+        const underAttack = hostilePresence.length > 0;
 
         const myCriticalRuins = getRoomTickCacheValue(this, 'room_defense_my_critical_ruins', () =>
             this.find(FIND_RUINS, {
@@ -346,28 +370,47 @@ export default class RoomDefense extends Room {
             }) as Ruin[]
         );
 
-        // 强威胁优先：高强度 boost 治疗团一旦压进来，若我方已有关键建筑被打爆（出现 Ruin），应立刻保全核心。
-        const hostiles = this.findEnemyCreeps({
-            filter: (c: Creep) =>
-                c.owner.username !== 'Invader' &&
-                c.body?.some(b => b.hits > 0 && b.type === HEAL && !!b.boost)
-        }) as Creep[];
-        if (hostiles.length) {
-            const boostedHealParts = hostiles.reduce((sum, c) => {
+        // 1) 事后兜底：关键建筑已被打爆（Ruin 未消失）→ 立刻保全核心
+        if (myCriticalRuins.some((e: any) => e.structure.ticksToDecay <= 500)) {
+            this.controller.activateSafeMode();
+            return true;
+        }
+
+        // 2) 强威胁优先：高强度 boost 治疗团压进来，且已有关键建筑损失
+        if (underAttack) {
+            const boostedHealParts = hostilePresence.reduce((sum, c) => {
                 return sum + (c.body?.filter(b => b.hits > 0 && b.type === HEAL && !!b.boost).length || 0);
             }, 0);
-            const threshold = this.level >= 8 ? 12 : this.level >= 7 ? 6 : 999;
-            if (boostedHealParts >= threshold) {
-                if (myCriticalRuins.length > 0) {
-                    this.controller.activateSafeMode();
-                    return true;
-                }
+            const boostedThreshold = this.level >= 8 ? 12 : this.level >= 7 ? 6 : 999;
+            if (boostedHealParts >= boostedThreshold && myCriticalRuins.length > 0) {
+                this.controller.activateSafeMode();
+                return true;
+            }
+
+            // 3) 事前主动：确认被袭击（已造成实际损失）→ 开 safe 避免进一步损失
+            // - controller 被 attackController（upgradeBlocked > 0）
+            // - 我方非防御位 creep 受损（防御位是盾，掉血由治疗/撤退消化）
+            // - 我方核心建筑受损（wall/rampart 会自然损耗故排除，road/container 非自有天然排除）
+            if (this.controller.upgradeBlocked) {
+                this.controller.activateSafeMode();
+                return true;
+            }
+            const civilianHurt = this.find(FIND_MY_CREEPS).some((c: Creep) =>
+                c.hits < c.hitsMax && !DEFENDER_ROLE_SET.has(c.memory?.role || '')) as boolean;
+            if (civilianHurt) {
+                this.controller.activateSafeMode();
+                return true;
+            }
+            const coreStructureHurt = this.find(FIND_MY_STRUCTURES).some((s: OwnedStructure) =>
+                s.structureType !== STRUCTURE_WALL &&
+                s.structureType !== STRUCTURE_RAMPART &&
+                s.hits < s.hitsMax) as boolean;
+            if (coreStructureHurt) {
+                this.controller.activateSafeMode();
+                return true;
             }
         }
-        let RuinCount = myCriticalRuins.filter((e: any) => e.structure.ticksToDecay <= 500).length
-        if (!RuinCount)  return;
-        this.controller.activateSafeMode();
-        return true;
+        return;
     }
 
     // 获取防御用CostMatrix

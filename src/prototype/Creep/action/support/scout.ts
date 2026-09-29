@@ -1,4 +1,5 @@
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { recordSourceSlotCounts } from '@/shared/memory';
 
 type ScoutCache = {
     stompSiteId?: Id<ConstructionSite> | null;
@@ -223,6 +224,11 @@ const Scout = {
      */
     run: function (creep: Creep) {
         creep.disableAttackNotificationsOnce?.();
+
+        // 有视野就记录本房 source 可站立采集位（外矿孵化离线口径，见 shared/memory）
+        if (!creep.room.memory.sourcePosCount && typeof creep.room.find === 'function') {
+            recordSourceSlotCounts(creep.room);
+        }
 
         const targetRoom = ensureScoutTargetRoom(creep);
         if (!targetRoom) {

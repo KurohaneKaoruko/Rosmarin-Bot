@@ -56,6 +56,8 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         if (flagName.startsWith('AID-UUP/')) return this.handleAidUupFlag(flagName);
         if (flagName.startsWith('AID-ENERGY/')) return this.handleAidEnergyFlag(flagName);
         if (flagName.startsWith('CLAIM/')) return this.handleClaimFlag(flagName);
+        // 自动占领旗：名为 claim / claim-备注，自动选最近的能孵 claimer 的己方房，占领后自动 start
+        if (flagName === 'claim' || flagName.startsWith('claim-')) return this.handleAutoClaimFlag(flagName);
         if (flagName.startsWith('RESERVE/')) return this.handleReserveFlag(flagName);
 
         return true;

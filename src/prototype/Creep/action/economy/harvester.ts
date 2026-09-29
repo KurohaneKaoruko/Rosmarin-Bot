@@ -18,14 +18,26 @@ const stayAndBuildNearby = (creep: Creep): boolean => {
     return true;
 };
 
+/** 边采边填：相邻 extension 有空位就顺手补能——采集与转移同一 tick 不冲突（模式无关的通用行为） */
+const fillAdjacentExtension = (creep: Creep): void => {
+    if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) return;
+    const ext = creep.pos.findInRange(FIND_MY_STRUCTURES, 1, {
+        filter: (s: AnyOwnedStructure) =>
+            s.structureType === STRUCTURE_EXTENSION &&
+            s.store.getFreeCapacity(RESOURCE_ENERGY) > 0
+    })[0];
+    if (ext) creep.transfer(ext as StructureExtension, RESOURCE_ENERGY);
+};
+
 /**
  * harvester：绑定 source 的专职采集。
  *
  * 默认身体 [[WORK,2],[MOVE,2]] 无 CARRY：站上工作位持续采集，
  * 能量掉落在工作位，由 carrier / transporter 收取。
- * 有 CARRY 的体型满仓后自行交付：link > container > 建容器工地 > 丢弃。
+ * 有 CARRY 的体型走**采/建状态迟滞**：采满（free === 0）才进入建造/交付态，
+ * 卸空（used === 0）才回采集态——采集与建造严格分相，不贴阈值来回抖动。
  *
- * 顺序逻辑，无状态机：采集与交付由仓库余量直接判定，天然免疫状态失联。
+ * 顺序逻辑，无状态机框架：相位由仓库余量直接判定，天然免疫状态失联。
  */
 export default {
     run: function (creep: Creep) {
@@ -41,62 +53,107 @@ export default {
 
         const carryCapacity = creep.store.getCapacity();
         const free = creep.store.getFreeCapacity();
-        const income = creep.calculateHarvestIncomePerTick();
-        // 交付判定：满仓 / 本 tick 再采就满 / 源枯竭但身上有货
-        const shouldDeliver = carryCapacity > 0 && (free === 0 || free <= income || source.energy === 0);
+        const used = creep.store.getUsedCapacity();
 
-        // ── 采集：有空间且源有能量 ──
-        if (source.energy > 0 && !shouldDeliver) {
-            if (!creep.moveToSourceWorkTile(source)) {
-                syncMoveWork(creep, source);
-                return;
-            }
-            // 首次到场：实测「出生 → 工作位」路程，供孵化系统无缝换班
-            if (!creep.memory.calibrated) {
-                const roomMem = creep.room.memory as any;
-                roomMem.sourceTiming ??= {};
-                const timing = roomMem.sourceTiming[source.id] ?? (roomMem.sourceTiming[source.id] = {});
-                timing.pathTime = Math.max(10, Math.min(500, Game.time - (creep.memory.spawnTick ?? Game.time)));
-                creep.memory.calibrated = true;
-            }
-            creep.goHaverst(source);
-            // 快满时同 tick 顺带进入交付，避免“采一跳卡满”原地空转
-            if (carryCapacity === 0 || creep.store.getFreeCapacity() > income) {
-                syncMoveWork(creep, source);
-                return;
+        // ── 采/建状态迟滞：采满再建，建完再采 ──
+        // - 采集态：采满（free === 0）或源枯竭（无可可采）才进入建造/交付态（带多少算多少）；
+        // - 建造/交付态：卸空（used === 0）才回采集态；
+        // 无仓体型（carryCapacity === 0）不适用，始终采集，能量落地由搬运收取。
+        let gathering = carryCapacity === 0 || !creep.memory.working;
+        if (carryCapacity > 0) {
+            if (creep.memory.working) {
+                if (used === 0) {
+                    creep.memory.working = false;
+                    delete creep.memory.targetSourceId;
+                    gathering = true;
+                } else {
+                    gathering = false;
+                }
+            } else if (free === 0 || source.energy === 0) {
+                if (used > 0) {
+                    creep.memory.working = true;
+                    delete creep.memory.targetSourceId;
+                    gathering = false;
+                }
             }
         }
 
-        // 无仓体型：能量已掉落在工作位，到此为止
-        if (carryCapacity === 0) {
+        // ── 采集态 ──
+        if (gathering) {
+            // 源枯竭且空仓：**有地方放才捡**容器余量——
+            // 出口仅限「相邻有空位的 ext（当场填）」与「相邻有空位的源旁 link（下 tick 送走）」；
+            // 容器本身不算出口，否则 withdraw ↔ transfer 原地回灌，捡起又放下循环到 source 再生为止
+            if (source.energy === 0 && used === 0) {
+                const container = creep.getNearbySourceContainer(1);
+                if (container && creep.pos.isNearTo(container) && container.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
+                    const extOutlet = creep.pos.findInRange(FIND_STRUCTURES, 1, {
+                        filter: (s: Structure) =>
+                            s.structureType === STRUCTURE_EXTENSION &&
+                            (s as StructureExtension).store.getFreeCapacity(RESOURCE_ENERGY) > 0
+                    })[0] as StructureExtension | undefined;
+                    const link = creep.getNearbySourceLink(2);
+                    const linkOutlet = !!link && creep.pos.isNearTo(link) &&
+                        link.store.getFreeCapacity(RESOURCE_ENERGY) > 0;
+
+                    if (extOutlet || linkOutlet) {
+                        creep.withdraw(container, RESOURCE_ENERGY);
+                        if (extOutlet) creep.transfer(extOutlet, RESOURCE_ENERGY);
+                    }
+                }
+                syncMoveWork(creep, source);
+                return;
+            }
+
+            if (source.energy > 0) {
+                if (!creep.moveToSourceWorkTile(source)) {
+                    syncMoveWork(creep, source);
+                    return;
+                }
+                // 首次到场：实测「出生 → 工作位」路程，供孵化系统无缝换班
+                if (!creep.memory.calibrated) {
+                    const roomMem = creep.room.memory as any;
+                    roomMem.sourceTiming ??= {};
+                    const timing = roomMem.sourceTiming[source.id] ?? (roomMem.sourceTiming[source.id] = {});
+                    timing.pathTime = Math.max(10, Math.min(500, Game.time - (creep.memory.spawnTick ?? Game.time)));
+                    creep.memory.calibrated = true;
+                }
+                creep.goHaverst(source);
+                // 边采边填：顺手把身上的能量补进相邻 ext（rush 特殊子模式 / mini 迷你房的核心补给链）
+                fillAdjacentExtension(creep);
+                syncMoveWork(creep, source);
+                return;
+            }
+
+            // 无仓体型：源枯竭时原地等待再生（能量已掉落在工作位，由搬运收取）
             syncMoveWork(creep, source);
             return;
         }
 
-        // 源枯竭且空仓：顺手吸干旁边容器的余量，然后等待再生
-        if (creep.store[RESOURCE_ENERGY] === 0 && source.energy === 0) {
-            const container = creep.getNearbySourceContainer(1);
-            if (container && creep.pos.isNearTo(container) && container.store.getUsedCapacity(RESOURCE_ENERGY) > 0) {
-                creep.withdraw(container, RESOURCE_ENERGY);
-            }
+        // ── 建造/交付态（卸空才回采集态）──
+        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
+        if (used === 0) {
             syncMoveWork(creep, source);
             return;
         }
 
-        // ── 交付：相邻 link/container → 原地建造 → 兜底 ──
+        // 1) 相邻 link / container 交付
         if (creep.transferToSourceStructure()) return;
 
+        // 2) 相邻有空位的 ext 直填
+        fillAdjacentExtension(creep);
+        if (creep.store.getUsedCapacity() === 0) return;
+
+        // 3) 源旁有 link/container（交付结构满或不相邻）：先建附近工地，无处可建则掉落保采集位
         const hasDeliveryNearSource =
             !!creep.getNearbySourceLink(NEAR_RANGE) || !!creep.getNearbySourceContainer(NEAR_RANGE);
         if (hasDeliveryNearSource) {
-            // 交付结构满 / 不相邻：先建附近工地；cargo 快满时丢能量保采集
             if (stayAndBuildNearby(creep)) return;
-            if (creep.store.getFreeCapacity() <= income) creep.drop(RESOURCE_ENERGY);
+            creep.drop(RESOURCE_ENERGY);
             syncMoveWork(creep, source);
             return;
         }
 
-        // 无 link 无 container：维护容器工地（修理 / 建造布局给的工地）
+        // 4) 无 link 无 container：维护容器工地（修理 / 建造容器工地）
         const maintain = creep.maintainSourceContainer();
         if (maintain === 'acted') return;
         if (maintain === 'blocked') {
@@ -104,7 +161,9 @@ export default {
             return;
         }
         if (stayAndBuildNearby(creep)) return;
-        if (!creep.pos.inRangeTo(source, 1)) creep.moveTo(source);
+
+        // 5) 无处可放：掉落卸空，回采集态（脚下的 container / carrier 会接住）
+        creep.drop(RESOURCE_ENERGY);
         syncMoveWork(creep, source);
     },
 };

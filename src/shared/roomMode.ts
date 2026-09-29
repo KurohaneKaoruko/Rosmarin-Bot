@@ -9,6 +9,8 @@
  *        运力与紧急 UNIV 上限用 high 档、控制器缓冲拉满。
  * - rush 高速冲级：冲级特化——升级吞吐 ×1.5、外矿预算全开且目标上限放开、
  *        建造/孵化调度最高频率，一切资源为控制器等级让路。
+ * - mini 迷你房：常驻冲级 farm——spawn 贴控制器的小房，
+ *        源旁 ext 直填 + 自爆拉能快递常驻运转（机制见 rushSupport），非必要设施全部关闭。
  *
  * 模式由 room.mode 指令手动设置；所有消费方统一通过 getRoomModeProfile 读参数，
  * 不再各自维护字符串比较与魔数。
@@ -16,7 +18,7 @@
 
 import { getRoomData } from '@/shared/memory';
 
-export type RoomModeName = 'low' | 'main' | 'high' | 'rush';
+export type RoomModeName = 'low' | 'main' | 'high' | 'rush' | 'mini';
 
 export type RoomModeProfile = {
     name: RoomModeName;
@@ -42,6 +44,12 @@ export type RoomModeProfile = {
     highIntensity: boolean;
     /** 升级吞吐倍率（incomeWork × multiplier） */
     upgradeIncomeMultiplier: number;
+    /** 外矿运力吞吐冗余系数（死亡率/绕路/沼泽损耗 */
+    remoteCarryThroughputFactor: number;
+    /** 外矿采集位积压加编阈值缩放（越小越早加编） */
+    remoteCarryBacklogScale: number;
+    /** 外矿未预定房间产量口径（1=按满产规划，<1 打折；rush 的 reserver 优先发车故不打折） */
+    remoteUnreservedIncomeFactor: number;
     /** 参与跨房间资源排产（low 退出） */
     productionScheduling: boolean;
 };
@@ -60,6 +68,9 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 20,
         highIntensity: false,
         upgradeIncomeMultiplier: 1,
+        remoteCarryThroughputFactor: 1.0,
+        remoteCarryBacklogScale: 1.0,
+        remoteUnreservedIncomeFactor: 0.5,
         productionScheduling: false,
     },
     main: {
@@ -75,6 +86,9 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 20,
         highIntensity: false,
         upgradeIncomeMultiplier: 1,
+        remoteCarryThroughputFactor: 1.1,
+        remoteCarryBacklogScale: 0.85,
+        remoteUnreservedIncomeFactor: 0.75,
         productionScheduling: true,
     },
     high: {
@@ -90,6 +104,9 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 10,
         highIntensity: true,
         upgradeIncomeMultiplier: 1.2,
+        remoteCarryThroughputFactor: 1.15,
+        remoteCarryBacklogScale: 0.75,
+        remoteUnreservedIncomeFactor: 0.9,
         productionScheduling: true,
     },
     rush: {
@@ -105,7 +122,29 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 10,
         highIntensity: true,
         upgradeIncomeMultiplier: 1.5,
+        remoteCarryThroughputFactor: 1.3,
+        remoteCarryBacklogScale: 0.5,
+        remoteUnreservedIncomeFactor: 1.0,
         productionScheduling: true,
+    },
+    // mini 迷你房：升级 farm 特化——lab/factory/市场/外矿全关，只留采集、建造与常驻冲级机制
+    mini: {
+        name: 'mini',
+        facilities: false,
+        market: false,
+        remoteMining: false,
+        defenseCostMatrix: false,
+        defenseInterval: 5,
+        remoteEnergyInterval: { normal: 20, constrained: 40 },
+        remoteCenterInterval: { normal: 10, constrained: 20 },
+        spawnMissionInterval: 5,
+        transportMissionInterval: 10,
+        highIntensity: true,
+        upgradeIncomeMultiplier: 1.5,
+        remoteCarryThroughputFactor: 1.3,
+        remoteCarryBacklogScale: 0.5,
+        remoteUnreservedIncomeFactor: 1.0,
+        productionScheduling: false,
     },
 };
 
@@ -120,4 +159,26 @@ export const getRoomModeProfile = (room: Room): RoomModeProfile => {
     return ROOM_MODE_PROFILES[mode as RoomModeName] ?? ROOM_MODE_PROFILES.main;
 };
 
-export const isHighLikeMode = (mode: string): boolean => mode === 'high' || mode === 'rush';
+// high/rush/mini 都吃高强度档（紧急 UNIV 上限、缩水物流、提前换班等）
+export const isHighLikeMode = (mode: string): boolean => mode === 'high' || mode === 'rush' || mode === 'mini';
+
+/**
+ * 特殊冲级机制是否生效（rush 特殊子模式 / mini 迷你房）。
+ * - rush：低等级(RCL≤3) + spawn 距控制器 ≤3 才进入特殊子模式；
+ * - mini：机制常驻，但同样依赖 spawn 贴控制器；
+ * - 房内有 link 后整体退位（正规供能链接接管）。
+ *
+ * 命中时两件事生效：
+ * 1. ext 建造权按「source 旁 ring-2 优先」处理（见 layoutPlanner.plannerCreateSite）；
+ * 2. 自爆拉能快递总闸打开（见 rushSupport.rushBoost）。
+ */
+export const isSpecialRushActive = (room: Room): boolean => {
+    const mode = getRoomMode(room);
+    if (mode !== 'rush' && mode !== 'mini') return false;
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn || !room.controller?.my) return false;
+    if (spawn.pos.getRangeTo(room.controller.pos) > 3) return false;
+    if (mode === 'rush' && room.level > 3) return false;
+    const hasLink = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_LINK }).length > 0;
+    return !hasLink;
+};
