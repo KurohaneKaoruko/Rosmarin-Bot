@@ -29,7 +29,7 @@ export const roomRunner = function (room: Room) {
             const center = roomMem?.center;
             global.log(
                 `[auto] 首个己方房间 ${room.name} 已自动启动：布局 ${roomMem?.layout || 'auto'}` +
-                `${center ? `，中心 (${center.x},${center.y})` : ''}（默认参数运行，可随时调整）。`,
+                `${center ? `，中心 (${center.x},${center.y})` : ''}，模式 ${roomMem?.mode || 'main'}。`,
             );
         } else if (roomAutoStart) {
             roomConsole.room.add(room.name, roomAutoStart.layout);

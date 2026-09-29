@@ -23,3 +23,14 @@ export const shouldAutoStartFirstRoom = (): boolean => {
     }
     return validCount === 0;
 };
+
+/**
+ * 落地首房的默认运行模式：
+ * - 订阅档位（最大可用 CPU ≥ 100，Game.cpu.limit）→ 直接 `rush` 冲级，
+ *   把订阅 CPU 的产能优势立刻兑现成升级速度；
+ * - 免费档（limit 20）→ 维持 `main`。
+ */
+export const resolveFirstRoomMode = (): 'main' | 'rush' => {
+    const limit = typeof Game.cpu?.limit === 'number' ? Game.cpu.limit : 0;
+    return limit >= 100 ? 'rush' : 'main';
+};

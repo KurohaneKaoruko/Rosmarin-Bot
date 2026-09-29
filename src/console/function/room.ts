@@ -1,5 +1,6 @@
 import { signConstant } from "@/constant/NameConstant";
 import { BASE_CONFIG } from "@/constant/config";
+import { resolveFirstRoomMode } from "@/modules/shared/bootstrap";
 import { clearRoomRelatedMemory, ensureRoomData, getAutoData, getRoomData, getStructData } from "@/modules/shared/memory";
 import { parseShardRoomName } from "@/modules/shared/shardRoom";
 import { clearMemoryCache } from "@/prototype/Creep/function/cacheFunction";
@@ -70,7 +71,9 @@ export default {
 
         const roomMem = ensureRoomData(target) as any;
         if (!roomMem['mode']) {
-            roomMem['mode'] = 'main';
+            // 落地首房（己方房间 ≤ 1）按订阅档位自动选模式：CPU ≥ 100 直接 rush 冲级
+            const ownedRooms = Object.values(Game.rooms).filter((r) => r?.controller?.my).length;
+            roomMem['mode'] = ownedRooms <= 1 ? resolveFirstRoomMode() : 'main';
         }
         if (!opts?.quiet) global.log(`已将房间 ${target} 加入控制列表。`);
         if (layout) {
