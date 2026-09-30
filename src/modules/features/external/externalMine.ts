@@ -1651,7 +1651,8 @@ export class ExternalMineSpawner {
         mineral: RoleData['out-mineral'].level,
     } as const;
 
-    // 采集与搬运的孵化层级：采集(12) 严格优先于搬运(13)。
+    // 采集与搬运的孵化层级：采集(12) 严格优先于搬运(13)，两者都直接读角色配置
+    // （CreepConstant 里 out-harvest.level / out-carry.level 是唯一事实源）。
     // 曾经同层排队（先采后运、谁缺谁先补），但搬运定编（3-4/房）远大于采集定编（1-2/房），
     // 同层先到先孵会让存量搬运任务排在采集补位前面——采集工全灭的房补不上人，
     // 而搬运闸又因为「有排队中的采集工」继续派搬运，形成循环饥饿
@@ -1660,7 +1661,7 @@ export class ExternalMineSpawner {
     // 有采集在岗的房不存在竞争中的采集任务，其搬运不会被别房的采集饿死。
     // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
     private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = RoleData['out-harvest'].level;
-    private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-harvest'].level + 1;
+    private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-carry'].level;
 
     // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
     // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线

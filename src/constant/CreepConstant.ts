@@ -241,7 +241,7 @@ export const RoleData = {
     },
     'out-carry': {
         bodypart: [],
-        level: 15,
+        level: 13,
         code: 'OC',
         executor: 'out-carry',
     },
