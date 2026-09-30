@@ -14,7 +14,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     const res = Object.keys(creep.store)[0] as ResourceConstant;
     const carriers = getRoomTickCacheValue(creep.room, 'out_mineral_carriers', () =>
         creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'out-carry' || c.memory.role === 'out-car'
+            filter: (c) => c.memory.role === 'out-carry'
         }) as Creep[]
     );
     const nearbyCarrier = carriers.find((c) =>

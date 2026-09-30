@@ -588,17 +588,6 @@ export default class BaseFunction extends Room {
             if (carry-carryCount*2) body_list = AddList(body_list, carry-carryCount*2, CARRY);
             if (move-carryCount) body_list = AddList(body_list, move-carryCount, MOVE);
             break;
-        case 'out-car':
-            if (tough) body_list = AddList(body_list, tough, TOUGH)
-            if (work) body_list = AddList(body_list, work, WORK);
-            let carCount = Math.min(Math.floor(carry/2), move);
-            for (let i = 0; i < carCount; i++) {
-                body_list = AddList(body_list, 2, CARRY)
-                body_list = AddList(body_list, 1, MOVE)
-            }
-            if (carry-carCount*2>0) body_list = AddList(body_list, carry-carCount*2, CARRY);
-            if (move-carCount>0) body_list = AddList(body_list, move-carCount, MOVE);
-            break;
         case 'out-defend':
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             if (move) body_list = AddList(body_list, move - 2, MOVE)

@@ -233,12 +233,6 @@ export const RoleData = {
         code: 'OH',
         executor: 'out-harvest',
     },
-    'out-car': {
-        bodypart: [],
-        level: 15,
-        code: 'OC',
-        executor: 'out-carry',
-    },
     'out-carry': {
         bodypart: [],
         level: 13,
@@ -499,16 +493,6 @@ export const RoleLevelData = {
         6: { bodypart: [[WORK, 5], [CARRY, 10], [MOVE, 15]], num: 1 },
         7: { bodypart: [[WORK, 10], [CARRY, 10], [MOVE, 20]], num: 1 },
         8: { bodypart: [[WORK, 10], [CARRY, 10], [MOVE, 20]], num: 1 },
-    },
-    "out-car": {
-        1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], minipart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
-        2: { bodypart: [[WORK, 1], [CARRY, 2], [MOVE, 3]], minipart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 0 },
-        3: { bodypart: [[WORK, 1], [CARRY, 3], [MOVE, 4]], minipart: [[WORK, 1], [CARRY, 2], [MOVE, 3]], num: 0 },
-        4: { bodypart: [[WORK, 1], [CARRY, 7], [MOVE, 4]], minipart: [[WORK, 1], [CARRY, 2], [MOVE, 3]], num: 0 },
-        5: { bodypart: [[WORK, 1], [CARRY, 21], [MOVE, 11]], minipart: [[WORK, 1], [CARRY, 5], [MOVE, 3]], num: 0 },
-        6: { bodypart: [[WORK, 2], [CARRY, 20], [MOVE, 11]], minipart: [[WORK, 1], [CARRY, 5], [MOVE, 3]], num: 0 },
-        7: { bodypart: [[WORK, 2], [CARRY, 26], [MOVE, 14]], minipart: [[WORK, 1], [CARRY, 5], [MOVE, 3]], num: 0 },
-        8: { bodypart: [[WORK, 2], [CARRY, 30], [MOVE, 16]], minipart: [[WORK, 1], [CARRY, 5], [MOVE, 3]], num: 0 },
     },
     "out-carry": {
         1: { bodypart: [[CARRY, 2], [MOVE, 2]], minipart: [[CARRY, 2], [MOVE, 2]], num: 0 },

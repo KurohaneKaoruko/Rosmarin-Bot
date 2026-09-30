@@ -562,7 +562,7 @@ const outCarry: OutCarryAction = {
         for (const name in Game.creeps) {
             const other = Game.creeps[name];
             if (!other || other.id === creep.id || other.spawning) continue;
-            if (other.memory.role !== 'out-carry' && other.memory.role !== 'out-car') continue;
+            if (other.memory.role !== 'out-carry') continue;
             if (other.memory.sourceRoom !== sourceRoomName) continue;
             if (other.memory.targetRoom !== creep.memory.targetRoom) continue;
             if (!this.isLikelyCollecting(other)) continue;

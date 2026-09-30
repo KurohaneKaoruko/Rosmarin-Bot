@@ -422,7 +422,7 @@ const deliverAssistHarvest = (creep: Creep, source: Source): boolean => {
     // 2) 相邻且有空位的 out-carry：顺手递（接力链直接消化）
     const carriers = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
         filter: (c: Creep) =>
-            (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+            c.memory.role === 'out-carry' &&
             c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
     }) as Creep[];
     if (carriers.length > 0) {

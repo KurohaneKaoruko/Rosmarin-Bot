@@ -28,7 +28,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
         creep.room.find(FIND_MY_CREEPS, {
             filter: (c) =>
-                (c.memory.role === 'out-carry' || c.memory.role === 'out-car') &&
+                c.memory.role === 'out-carry' &&
                 c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         }) as Creep[]
     );

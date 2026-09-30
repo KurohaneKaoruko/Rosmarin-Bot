@@ -42,7 +42,7 @@ export {
 // 外矿采集工断档会让搬运工集体闲置、外矿收入归零，比省下的孵化能量亏得多。
 export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set([
     'harvester', 'universal',
-    'out-harvest', 'out-carry', 'out-car',
+    'out-harvest', 'out-carry',
 ]);
 
 export const pruneCriticalNonRecoveryMissions = (room: Room): number => {

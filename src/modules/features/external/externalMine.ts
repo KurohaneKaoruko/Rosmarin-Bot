@@ -129,7 +129,6 @@ export class ExternalMineState {
         'reserver',
         'out-harvest',
         'out-carry',
-        'out-car',
         'out-build',
         'out-mineral',
         'out-attack',
@@ -820,7 +819,7 @@ export type ExternalMineCarryPlan = {
 };
 
 const EXTERNAL_MINE_ANALYSIS = {
-    OUT_CARRY_ROLE_SET: new Set(['out-carry', 'out-car']),
+    OUT_CARRY_ROLE_SET: new Set(['out-carry']),
     OUT_HARVEST_ROLE_SET: new Set(['out-harvest']),
     SOURCE_CONTAINER_REPAIR_LOSS:
         (typeof REPAIR_COST === 'number' && typeof CONTAINER_DECAY === 'number' && typeof CONTAINER_DECAY_TIME === 'number')
@@ -1262,7 +1261,7 @@ export class ExternalMineAnalysis {
                 const creep = Game.creeps[name];
                 const memory = creep?.memory as any;
                 if (!memory) continue;
-                if (memory.role !== 'out-carry' && memory.role !== 'out-car') continue;
+                if (memory.role !== 'out-carry') continue;
                 if (memory.sourceRoom !== sourceRoom.name) continue;
                 const targetRoom = memory.targetRoom;
                 if (!targetRoom) continue;
@@ -1371,7 +1370,7 @@ export class ExternalMineAnalysis {
             const creep = Game.creeps[name];
             const memory = creep?.memory as any;
             if (!memory) continue;
-            if (memory.role !== 'out-carry' && memory.role !== 'out-car') continue;
+            if (memory.role !== 'out-carry') continue;
             if (memory.sourceRoom !== sourceRoomName) continue;
             if (memory.targetRoom !== targetRoomName) continue;
             // 濒死返程的搬运工这趟交完就退休，不再计入运力
@@ -2051,7 +2050,7 @@ export class ExternalMineSpawner {
         return true;
     }
 
-    // 外矿运输者：现在只孵化 out-carry；旧 out-car 仅作为存量运力统计。
+    // 外矿运输者：只孵 out-carry（旧 out-car 角色已退役删除）。
     static carry(sourceRoom: Room, targetRoom: Room, num: number): boolean {
         // 在场产出闸：目标房必须有「正在产出」的采集工（在场且有采集能力）才派搬运。
         // 在途/排队的采集工不算——到场前没有产出，先派搬运只会空跑一趟。
@@ -2064,14 +2063,12 @@ export class ExternalMineSpawner {
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
         const outerCarry = (creepByTargetRoom['out-carry'] || [])
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
-        const outerCar = (creepByTargetRoom['out-car'] || [])
-            .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
 
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
         // 体型按可用容量最大化 CARRY（走路段 [C,C,M] 整组扩展），替代固定分档
         const carryBody = buildHaulerBodyConfig(sourceRoom.energyCapacityAvailable, { forRoad: true, maxCarry: 16 });
 
-        const totalCarry = outerCarry + spawnCarryNum + outerCar;
+        const totalCarry = outerCarry + spawnCarryNum;
         if (totalCarry < num) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;

@@ -317,7 +317,7 @@ function gatherRoomLive(room: Room) {
         for (const name in Game.creeps) {
             const c = Game.creeps[name];
             const role = c.memory?.role;
-            if (role !== 'out-harvest' && role !== 'out-carry' && role !== 'out-car') continue;
+            if (role !== 'out-harvest' && role !== 'out-carry') continue;
             if (c.memory?.sourceRoom !== room.name) continue;
             if (!outList.includes(c.memory?.targetRoom || '')) continue;
             if (role === 'out-harvest') outHarvest += 1;
