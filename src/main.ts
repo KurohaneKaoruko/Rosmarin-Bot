@@ -1,3 +1,4 @@
+import '@/compat';               // 环境兼容垫片（必须保持首位：无 Power 玩法的服务器缺 PowerCreep 全局类）
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
