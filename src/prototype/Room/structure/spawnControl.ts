@@ -16,10 +16,13 @@ const getEnergyState = (room: Room) =>
 
 // 仅这些角色允许在低能量时按当前可用能量降级体型。
 // worker 的预算体型单独由“存在建造需求”控制。
-// out-harvest / out-carry 一并纳入：外矿是摆脱能量短缺的收入投资，
-// 短缺期降体型继续跑（收入按比例下降），远好过等满仓能量——
-// 本地角色会把涓流能量优先吃掉，大体型 mission 会长期孵不出来，外矿因此断档。
-const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager', 'out-harvest', 'out-carry']);
+// out-harvest / out-carry **不在其列**：远程体型由 remoteBody 生成器精心设计
+// （采集工自带 CARRY 自补），按旧分档表缩水会产出零 CARRY 的废体型——
+// 采集工 harvest 永远 ERR_FULL、白占编制。孵不起就排队等能量：
+// 它们的队列优先级(level 12)天然让位于本地角色(worker 8)，本地编制吃满后
+// 能量会攒到Extensions，远程 mission 随之孵出；真正的饥荒期远程转暗本身合理
+// （外矿经济的容量门槛另见 externalMine.REMOTE_ECONOMY_MIN_CAPACITY）。
+const EMERGENCY_DOWNSIZE_ROLES = new Set(['harvester', 'transporter', 'carrier', 'manager']);
 const EMERGENCY_RECOVERY_UNIVERSAL_BODY: BodyPartConstant[] = [WORK, CARRY, MOVE];
 const DOWNGRADED_LOGISTICS_ROLE_SET = new Set<RoleId>(['transporter', 'carrier', 'manager']);
 
@@ -244,6 +247,11 @@ export default class SpawnControl extends Room {
         if (!isRoomTickAligned(this.name, 10)) return;
         // 处理停摆
         if (data.cost > this.energyAvailable) {
+            // 远程投资类角色（out-* / reserver）孵不起就静默排队等能量：
+            // 不缩水体（会产出零 CARRY 废体型）、也不代孵 universal（挤占编制）。
+            // 它们的队列优先级天然低于本地角色，本地需求总是先被满足。
+            if (role.startsWith('out-') || role === 'reserver') return;
+
             const allowEmergencyDownsize = EMERGENCY_DOWNSIZE_ROLES.has(role);
             if (!allowEmergencyDownsize) {
                 this.trySpawnEmergencyUniversal(spawn, role, data.cost);

@@ -90,6 +90,12 @@ const EXTERNAL_MINE_CARRY_TARGET_CONFIG = {
 // 输入（目标列表、房间模式、能量状态、spawn 预算）都以 tick 级缓慢变化，
 // 而 DP 本身不便宜；10 tick 的选择滞后完全可接受，QoS 紧张时也不再反复重算。
 const MANAGED_SELECTION_TTL_TICKS = 10;
+
+// 外矿经济启动的最低能量容量：低于该值时房间孵不出「带 CARRY 的合格采集工 +
+// 像样的搬运链」，勉强开矿只会孵化零输出的废体型（线上实例：RCL2 容量 550 时
+// 紧急缩水产出 [W2,M2]，站在矿上 harvest 永远 ERR_FULL），还把 spawn 队列
+// 淹没、饿死本房升级。到门槛前全部产能留给本房基建。
+const REMOTE_ECONOMY_MIN_CAPACITY = 800;
 type ManagedSelectionCacheEntry = {
     tick: number;
     selection: ExternalMineManagedTargetSelection;
@@ -1011,6 +1017,9 @@ const getExternalMineSourceHarvestingStats = (targetRoom: Room, source: Source):
         const isBound = boundSourceId === source.id;
         const isStandingOnSource = creep.pos?.roomName === source.pos.roomName && creep.pos.inRangeTo(source.pos, 1);
         if (!isBound && !isStandingOnSource) continue;
+        // 零 CARRY 的采集工 harvest 永远 ERR_FULL，不产生任何吞吐——
+        // 不计入采集功率（否则收入估算出现「幻影收入」，升级定编被虚高）
+        if (getExternalMineStoreCapacity(creep.store as ExternalMineStoreLike) <= 0) continue;
         power += getExternalMineCreepWorkParts(creep);
         count++;
     }
@@ -2172,6 +2181,10 @@ export class ExternalMine {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
 
+        // 容量门槛：孵不出合格体型之前不开外矿经济（见 REMOTE_ECONOMY_MIN_CAPACITY 注释），
+        // 全部 spawn 产能留给本房基建与升级
+        if ((room.energyCapacityAvailable || 0) < REMOTE_ECONOMY_MIN_CAPACITY) return;
+
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
         // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个
@@ -2287,6 +2300,9 @@ export class ExternalMine {
     static runCenter(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
+
+        // 同 runEnergy：容量不足时不开外矿经济
+        if ((room.energyCapacityAvailable || 0) < REMOTE_ECONOMY_MIN_CAPACITY) return;
 
         const targetRooms = ExternalMine.getManagedTargetRooms(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
