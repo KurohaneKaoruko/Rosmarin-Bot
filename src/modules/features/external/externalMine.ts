@@ -2110,97 +2110,9 @@ export class ExternalMineSpawner {
         return this.getBuilderConstructionTargets(targetRoom).length + this.getBuilderRepairTargets(targetRoom).length;
     }
 
-    private static getBuilderWorkTargets(targetRoom: Room, repairOnly = false): Array<{ pos: RoomPosition; structureType: StructureConstant }> {
-        const repairTargets = this.getBuilderRepairTargets(targetRoom);
-        if (repairOnly) return repairTargets;
-        return [...this.getBuilderConstructionTargets(targetRoom), ...repairTargets];
-    }
-
-    private static getBuilderTargetDistance(source: Source, target: { pos: RoomPosition }): number {
-        if (source.pos && typeof source.pos.getRangeTo === 'function') {
-            return source.pos.getRangeTo(target);
-        }
-        const sourcePos = source.pos;
-        const targetPos = target.pos;
-        return Math.max(
-            Math.abs((sourcePos?.x || 0) - (targetPos?.x || 0)),
-            Math.abs((sourcePos?.y || 0) - (targetPos?.y || 0))
-        );
-    }
-
-    private static getAssignedBuilderCount(sourceRoom: Room, targetRoomName: string, sourceId: Id<Source>): number {
-        let count = 0;
-
-        for (const creep of Object.values(Game.creeps || {})) {
-            if (!creep?.my || creep.spawning) continue;
-            if (creep.memory?.role !== 'out-build') continue;
-            if (creep.memory.sourceRoom !== sourceRoom.name) continue;
-            if (creep.memory.targetRoom !== targetRoomName) continue;
-            if (creep.memory.targetSourceId !== sourceId) continue;
-            count++;
-        }
-
-        const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
-        for (const task of tasks) {
-            const memory = this.getSpawnTaskMemory(task);
-            if (!memory?.role || memory.role !== 'out-build') continue;
-            if (memory.sourceRoom !== sourceRoom.name) continue;
-            if (memory.targetRoom !== targetRoomName) continue;
-            if (memory.targetSourceId !== sourceId) continue;
-            count++;
-        }
-
-        return count;
-    }
-
-    private static getBuilderTargetSourceId(
-        sourceRoom: Room,
-        targetRoom: Room,
-        repairOnly = false,
-    ): Id<Source> | undefined {
-        const sources = getExternalMineTargetSources(targetRoom);
-        if (sources.length <= 0) return undefined;
-
-        const workTargets = this.getBuilderWorkTargets(targetRoom, repairOnly);
-        if (workTargets.length <= 0) return sources[0]?.id;
-
-        let bestSource: Source | null = null;
-        let bestBuilderCount = Infinity;
-        let bestNearbyWorkScore = -1;
-        let bestDistance = Infinity;
-
-        for (const source of sources) {
-            const builderCount = this.getAssignedBuilderCount(sourceRoom, targetRoom.name, source.id);
-            let nearbyWorkScore = 0;
-            let nearestDistance = Infinity;
-
-            for (const target of workTargets) {
-                const distance = this.getBuilderTargetDistance(source, target);
-                nearestDistance = Math.min(nearestDistance, distance);
-                if (distance > 5) continue;
-                nearbyWorkScore += target.structureType === STRUCTURE_CONTAINER ? 2 : 1;
-            }
-
-            const hasBetterLocalCoverage = nearbyWorkScore > bestNearbyWorkScore;
-            const hasSameCoverageButFewerBuilders =
-                nearbyWorkScore === bestNearbyWorkScore && builderCount < bestBuilderCount;
-            const hasSameCoverageAndBuilderCountButCloser =
-                nearbyWorkScore === bestNearbyWorkScore &&
-                builderCount === bestBuilderCount &&
-                nearestDistance < bestDistance;
-
-            if (!bestSource || hasBetterLocalCoverage || hasSameCoverageButFewerBuilders || hasSameCoverageAndBuilderCountButCloser) {
-                bestSource = source;
-                bestBuilderCount = builderCount;
-                bestNearbyWorkScore = nearbyWorkScore;
-                bestDistance = nearestDistance;
-            }
-        }
-
-        return bestSource?.id;
-    }
-
     // 外矿建造者：道路/容器存在施工或维修需求时派遣。
+    // 不分配 targetSourceId——运行时按「离当前工作目标最近的源」动态取能
+    // （见 out-build.ts 的 getAssignedSource），采建同侧、不跨源绑定。
     static builder(sourceRoom: Room, targetRoom: Room): boolean {
         const constructionTargets = this.getBuilderConstructionTargets(targetRoom);
         const repairTargets = this.getBuilderRepairTargets(targetRoom);
@@ -2218,11 +2130,8 @@ export class ExternalMineSpawner {
 
         const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name) as CreepMemory & {
             outBuildMode?: 'repair';
-            targetSourceId?: Id<Source>;
         };
         if (repairOnly) memory.outBuildMode = 'repair';
-        const targetSourceId = this.getBuilderTargetSourceId(sourceRoom, targetRoom, repairOnly);
-        if (targetSourceId) memory.targetSourceId = targetSourceId;
 
         sourceRoom.SpawnMissionAdd('OB', '', this.PRIORITY.build, 'out-build', memory);
         return true;

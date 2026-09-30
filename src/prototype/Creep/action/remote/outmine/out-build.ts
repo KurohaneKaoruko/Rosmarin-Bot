@@ -8,7 +8,6 @@ const ENERGY_DROP_MIN = 20;
 const ENERGY_CONTAINER_MIN = 50;
 const REPAIR_RATIO = 0.8;
 const SOURCE_FETCH_START_RANGE = 3;
-const SOURCE_WORK_PREFER_RANGE = 6;
 const SOURCE_KEEPER_RANGE = 5;
 
 const OUT_BUILD_SWITCH = {
@@ -104,21 +103,26 @@ const pickClosestByRange = <T extends { pos: RoomPosition }>(origin: RoomPositio
     return best;
 };
 
+// 取能源选择——**不绑定**：每相位动态计算，绝不写回 memory。
+// 绑定会让「A 源采满 → 横穿到 B 建房 → 回 A 再采」反复横跨两个 source；
+// 动态口径是：有缓存工作目标就取离工作最近的源（采建同侧小循环），
+// 没有就取离自己最近的源。工作区换到哪，下一轮补给就跟到哪。
 const getAssignedSource = (creep: Creep): Source | null => {
-    const boundSourceId = creep.memory.targetSourceId as Id<Source> | undefined;
-    if (boundSourceId) {
-        const boundSource = Game.getObjectById(boundSourceId) as Source | null;
-        if (boundSource && boundSource.pos?.roomName === creep.memory.targetRoom) return boundSource;
-        if (inTargetRoom(creep)) delete creep.memory.targetSourceId;
-    }
-
     if (!inTargetRoom(creep)) return null;
     const sources = getRoomSources(creep.room);
     if (sources.length <= 0) return null;
 
-    const source = creep.pos.findClosestByRange(sources) || pickClosestByRange(creep.pos, sources);
-    if (source) creep.memory.targetSourceId = source.id;
-    return source || null;
+    const cache = getOutBuildTargetCache(creep);
+    for (const key of ['targetId', 'repairId'] as const) {
+        const id = cache[key] as Id<ConstructionSite | Structure> | undefined;
+        const obj = id ? Game.getObjectById(id) : null;
+        if (obj && (obj as { pos?: RoomPosition }).pos) {
+            const source = pickClosestByRange((obj as { pos: RoomPosition }).pos, sources);
+            if (source) return source;
+        }
+    }
+
+    return pickClosestByRange(creep.pos, sources);
 };
 
 const getBestBy = <T>(items: T[], scorer: (item: T) => number): T | null => {
@@ -232,35 +236,28 @@ const avoidKeeper = (creep: Creep, source: Source | null): boolean => {
     return true;
 };
 
+// 工作目标选择：类型优先（container 先于 road，容器是采集链前置），
+// 其次离自己最近——随着「就近干活 → 就近补给」自然形成局部小循环，
+// 工作区挪到哪个源旁边，补给就跟着挪过去，不再有跨源绑定。
 const pickPreferredTarget = <T extends { pos: RoomPosition; structureType?: StructureConstant }>(
     creep: Creep,
-    source: Source | null,
     targets: T[],
 ): T | null => {
     if (targets.length <= 0) return null;
 
-    const scopedTargets = source
-        ? targets.filter((target) => source.pos.getRangeTo(target) <= SOURCE_WORK_PREFER_RANGE)
-        : [];
-    const candidates = scopedTargets.length > 0 ? scopedTargets : targets;
-
     let best: T | null = null;
     let bestTypePriority = Infinity;
-    let bestSourceRange = Infinity;
     let bestCreepRange = Infinity;
 
-    for (const target of candidates) {
+    for (const target of targets) {
         const typePriority = getBuildTypePriority(target.structureType);
-        const sourceRange = source ? source.pos.getRangeTo(target) : 0;
         const creepRange = creep.pos.getRangeTo(target);
         if (
             typePriority < bestTypePriority ||
-            (typePriority === bestTypePriority && sourceRange < bestSourceRange) ||
-            (typePriority === bestTypePriority && sourceRange === bestSourceRange && creepRange < bestCreepRange)
+            (typePriority === bestTypePriority && creepRange < bestCreepRange)
         ) {
             best = target;
             bestTypePriority = typePriority;
-            bestSourceRange = sourceRange;
             bestCreepRange = creepRange;
         }
     }
@@ -273,7 +270,7 @@ const getOutBuildTargetCache = (creep: Creep): Record<string, any> => {
     return (cache.target && typeof cache.target === 'object' ? cache.target : (cache.target = {})) as Record<string, any>;
 };
 
-const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite | null => {
+const findBuildTarget = (creep: Creep): ConstructionSite | null => {
     const cache = getOutBuildTargetCache(creep);
     if (cache.targetId) {
         const cached = Game.getObjectById(cache.targetId as Id<ConstructionSite>);
@@ -287,12 +284,12 @@ const findBuildTarget = (creep: Creep, source: Source | null): ConstructionSite 
         filter: (site) =>
             site.my && (site.structureType === STRUCTURE_ROAD || site.structureType === STRUCTURE_CONTAINER)
     });
-    const target = pickPreferredTarget(creep, source, sites);
+    const target = pickPreferredTarget(creep, sites);
     if (target) cache.targetId = target.id;
     return target;
 };
 
-const findRepairTarget = (creep: Creep, source: Source | null): Structure | null => {
+const findRepairTarget = (creep: Creep): Structure | null => {
     const cache = getOutBuildTargetCache(creep);
     if (cache.repairId) {
         const cached = Game.getObjectById(cache.repairId as Id<Structure>);
@@ -311,7 +308,7 @@ const findRepairTarget = (creep: Creep, source: Source | null): Structure | null
             (structure.structureType === STRUCTURE_ROAD || structure.structureType === STRUCTURE_CONTAINER) &&
             structure.hits < structure.hitsMax * REPAIR_RATIO
     });
-    const target = pickPreferredTarget(creep, source, targets);
+    const target = pickPreferredTarget(creep, targets);
     if (target) cache.repairId = target.id;
     return target;
 };
@@ -458,7 +455,7 @@ const runBuildPhase = (creep: Creep): boolean => {
         creep.collectDroppedResource(RESOURCE_ENERGY, ENERGY_DROP_MIN, 3);
     }
 
-    const buildTarget = findBuildTarget(creep, source);
+    const buildTarget = findBuildTarget(creep);
     if (buildTarget) {
         syncOutBuildMoveWork(creep);
         const obstacle = findBlockingObstacle(buildTarget);
@@ -475,7 +472,7 @@ const runBuildPhase = (creep: Creep): boolean => {
         return OUT_BUILD_SWITCH.TO_SOURCE(creep);
     }
 
-    const repairTarget = findRepairTarget(creep, source);
+    const repairTarget = findRepairTarget(creep);
     if (repairTarget) {
         syncOutBuildMoveWork(creep);
         const result = creep.repair(repairTarget);
