@@ -142,7 +142,9 @@ function getLayoutPointsForRcl(room: Room, structureType: string, layoutArray: n
         return layoutArray;
     }
     if (structureType === STRUCTURE_RAMPART) {
-        if (room.level < 4) return [];
+        // rush 模式推迟到 RCL5 才开建：冲级期工地与产能优先留给经济建筑，
+        // 城墙晚一档再铺（引擎 RCL2 即允许，节奏由 planner 自主控制）
+        if (room.level < (getRoomMode(room) === 'rush' ? 5 : 4)) return [];
     }
     return layoutArray;
 }
