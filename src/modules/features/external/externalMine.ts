@@ -160,7 +160,7 @@ export class ExternalMineState {
         return isHighLikeMode(mode);
     }
 
-    private static getEnergyState(room: Room): ExternalMineEnergyState {
+    static getEnergyState(room: Room): ExternalMineEnergyState {
         return room.getEnergyState?.() || room.updateEnergyState?.(false) || room.memory.energyState || 'UNKNOWN';
     }
 
@@ -2035,10 +2035,16 @@ export class ExternalMineSpawner {
         if (upbody) {
             sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, 'out-harvest', memory);
         } else {
-            // 体型按当前可用容量最大化（WORK 优先补到 5、move 保持 0.5 机动比、
-            // 自带 1 CARRY 自补）——容量不足自然收敛到小体型，容量回升自动出满配
-            // 5W（单源 10/tick 满速），替代固定分档的小体型
-            const body = buildRemoteMinerBody(sourceRoom.energyCapacityAvailable, 5, true);
+            // 体型按当前预算最大化（WORK 优先补到 5、move 保持 0.5 机动比、
+            // 自带 1 CARRY 自补）——LOW/CRITICAL 时预算取当前可用能量（
+            // 饥荒期也要出得起小体型，[W2,M1,C1] 仍有 4/tick 产出），否则全款体型
+            // 在贫困房永远攒不齐，外矿会集体老死断供（死亡螺旋）；
+            // 每轮派单都按当时预算重新生成，能量回升自动出满配 5W
+            const energyState = ExternalMineState.getEnergyState(sourceRoom);
+            const energyBudget = (energyState === 'LOW' || energyState === 'CRITICAL')
+                ? Math.max(300, sourceRoom.energyAvailable)
+                : sourceRoom.energyCapacityAvailable;
+            const body = buildRemoteMinerBody(energyBudget, 5, true);
             sourceRoom.SpawnMissionAdd('OH', body, replaceLevel, 'out-harvest', memory);
         }
         return true;
@@ -2059,8 +2065,14 @@ export class ExternalMineSpawner {
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
 
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
-        // 体型按可用容量最大化 CARRY（走路段 [C,C,M] 整组扩展），替代固定分档
-        const carryBody = buildHaulerBodyConfig(sourceRoom.energyCapacityAvailable, { forRoad: true, maxCarry: 16 });
+        // 体型按当前预算最大化 CARRY（走路段 [C,C,M] 整组扩展）——LOW/CRITICAL 时
+        // 预算取当前可用能量（同采集工口径：贫困房也要出得起小搬运，能量回升
+        // 每轮派单自动升回满配）
+        const energyState = ExternalMineState.getEnergyState(sourceRoom);
+        const energyBudget = (energyState === 'LOW' || energyState === 'CRITICAL')
+            ? Math.max(150, sourceRoom.energyAvailable)
+            : sourceRoom.energyCapacityAvailable;
+        const carryBody = buildHaulerBodyConfig(energyBudget, { forRoad: true, maxCarry: 16 });
 
         const totalCarry = outerCarry + spawnCarryNum;
         if (totalCarry < num) {
@@ -2169,9 +2181,13 @@ export class ExternalMine {
     // 采集/搬运不设容量门槛（小体型自带 CARRY 也能有效产出，
     // 废体型与队列淹没已由「不缩水 + 采集优先级 12>13 + 在场产出闸」根治）；
     // 建造侧的门槛由 EXTERNAL_ROAD_CONFIG 的 RCL 限制承担。
+    // CRITICAL（真实饥荒）时整体停摆：复苏期每一分
+    // 能量都要留给本地采集线，远程扩张只会把涓流吃干、把 CRITICAL 固化成
+    // 贫困循环；LOW 仍以预算小体型保持运转，状态回升后自动恢复派送。
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
+        if (ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
@@ -2288,6 +2304,7 @@ export class ExternalMine {
     static runCenter(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
+        if (ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         const targetRooms = ExternalMine.getManagedTargetRooms(room, 'centerRoom');
         if (targetRooms.length <= 0) return;

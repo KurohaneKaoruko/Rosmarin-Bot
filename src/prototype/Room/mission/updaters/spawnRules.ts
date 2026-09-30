@@ -36,13 +36,12 @@ export {
 // CRITICAL 永久化（线上实例：95 万 tick 卡在 RCL2，升级速度 0.02/tick）。
 // 能量回到 NORMAL/SURPLUS 后闸门自动解除，恢复正常孵化。
 //
-// 豁免集（换班线）：harvester/universal 是内部采集救援；
-// out-harvest/out-carry 是外矿采集/搬运——外矿收入正是复苏的粮仓，
-// 它们的「存量换班补员」不受闸门限制（数量由各自定编闸管住，只接力不扩编）：
-// 外矿采集工断档会让搬运工集体闲置、外矿收入归零，比省下的孵化能量亏得多。
+// out-* 不在豁免集：CRITICAL 时外矿派送已由 runEnergy/runCenter 整体停摆
+// 残留的远程挂单也一并清出——留着只会把
+// 复苏期的涓流能量吃干，把 CRITICAL 固化成贫困循环（race 实测：RCL2 时
+// 12 只 out-carry + 4 只 out-build 吃光能量，worker 因 250 门槛永不解锁）。
 export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set([
     'harvester', 'universal',
-    'out-harvest', 'out-carry',
 ]);
 
 export const pruneCriticalNonRecoveryMissions = (room: Room): number => {
