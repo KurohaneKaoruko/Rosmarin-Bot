@@ -1,4 +1,4 @@
-import { getCoreDepotContainer, isCoreDepotContainer } from '@/modules/shared/coreDepot';
+import { getCoreDepotContainer, isCoreDepotContainer, isCoreDepotContainerDraining } from '@/modules/shared/coreDepot';
 
 /**
  * 搬运通用功能
@@ -27,7 +27,11 @@ export default class HaulFunction extends Creep {
             return resource === RESOURCE_ENERGY;
         }
         if (type === STRUCTURE_CONTAINER) {
-            if (this.isCoreDepotContainer(target)) return true;
+            if (this.isCoreDepotContainer(target)) {
+                // 排空换位期：占位 container 停止一切存入（只出不进），
+                // 让存量被自然取用耗尽后 planner 再拆除换真建筑
+                return !isCoreDepotContainerDraining(this.room, target);
+            }
             if (this.isControllerContainer(target)) return resource === RESOURCE_ENERGY;
             return !this.isSourceContainer(target) && !this.isMineralContainer(target);
         }
@@ -86,8 +90,15 @@ export default class HaulFunction extends Creep {
      */
     findBestStoreTarget(resource: ResourceConstant, excludeId?: Id<AnyStoreStructure>): AnyStoreStructure | null {
         const roomAny = this.room as any;
-        const placeholderStorage = this.room.storage ? null : getCoreDepotContainer(this.room, 'storage');
-        const placeholderTerminal = this.room.terminal ? null : getCoreDepotContainer(this.room, 'terminal');
+        const rawPlaceholderStorage = this.room.storage ? null : getCoreDepotContainer(this.room, 'storage');
+        const rawPlaceholderTerminal = this.room.terminal ? null : getCoreDepotContainer(this.room, 'terminal');
+        // 排空换位期的占位 container 不再作为存放候选（存量交给自然取用耗尽）
+        const placeholderStorage = rawPlaceholderStorage && !isCoreDepotContainerDraining(this.room, rawPlaceholderStorage)
+            ? rawPlaceholderStorage
+            : null;
+        const placeholderTerminal = rawPlaceholderTerminal && !isCoreDepotContainerDraining(this.room, rawPlaceholderTerminal)
+            ? rawPlaceholderTerminal
+            : null;
         const candidates: AnyStoreStructure[] = [
             this.room.storage,
             this.room.terminal,

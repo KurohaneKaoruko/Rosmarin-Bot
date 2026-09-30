@@ -70,6 +70,28 @@ export function getCoreDepotTarget(room: Room, kind: CoreDepotKind): AnyStoreStr
     return room.terminal || getCoreDepotContainer(room, kind);
 }
 
+/**
+ * 该核心库种类的真建筑在当前 RCL 已可建但尚未建成。
+ *
+ * 此时占位 container 处于「排空换位」阶段：存入侧停止投料（见
+ * haulFunction 的 canAutoStore / findBestStoreTarget），存量交给
+ * spawn/塔填充等自然取用耗尽，随后 planner 拆除占位、落真建筑工地——
+ * 避免整箱能量砸在地上腐烂，也避免「先拆后建」期间的枢纽缓冲断档。
+ */
+export function isCoreDepotSwapPending(room: Room, kind: CoreDepotKind): boolean {
+    if (kind === 'storage' ? !!room.storage : !!room.terminal) return false;
+    const buildMax = (CONTROLLER_STRUCTURES as any)?.[kind]?.[room.level] ?? 0;
+    return buildMax > 0;
+}
+
+/** 该 container 是否为「排空中」的核心库占位（真建筑可建未建）。 */
+export function isCoreDepotContainerDraining(room: Room, target: AnyStoreStructure | null | undefined): boolean {
+    if (!target || target.structureType !== STRUCTURE_CONTAINER) return false;
+    const kind = getCoreDepotKindAtPos(room.name, target.pos);
+    if (!kind) return false;
+    return isCoreDepotSwapPending(room, kind);
+}
+
 export function hasCoreDepotTarget(room: Room): boolean {
     return !!getCoreDepotTarget(room, 'storage') || !!getCoreDepotTarget(room, 'terminal');
 }

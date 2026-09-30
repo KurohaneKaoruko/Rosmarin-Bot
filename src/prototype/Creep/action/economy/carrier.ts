@@ -6,7 +6,8 @@ import {
     getCoreDepotKindAtPos,
     getCoreDepotTarget,
     hasCoreDepotTarget,
-    isCoreDepotContainer
+    isCoreDepotContainer,
+    isCoreDepotContainerDraining
 } from '@/modules/shared/coreDepot';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
@@ -363,6 +364,15 @@ const getStorageOrTerminal = (
         target?.structureType === STRUCTURE_CONTAINER ? THRESHOLDS.ENERGY.CONTAINER_MIN : THRESHOLDS.ENERGY.STORAGE_MIN;
     
     if (needEnergy) {
+        // 优先从「排空换位中」的占位容器取：存入侧已停，取一点少一点，
+        // 加速占位排空让真建筑尽快落位（阈值豁免——排空目标就是要清零）
+        if (storageFallback && isCoreDepotContainerDraining(creep.room, storageFallback) && storageEnergy > 0) {
+            return storageFallback;
+        }
+        if (terminalFallback && isCoreDepotContainerDraining(creep.room, terminalFallback) && terminalEnergy > 0) {
+            return terminalFallback;
+        }
+
         // 优先从能量更多的结构取
         if (storageEnergy > getMinEnergy(storageFallback) && terminalEnergy > getMinEnergy(terminalFallback)) {
             return storageEnergy < terminalEnergy ? terminalFallback : storageFallback;

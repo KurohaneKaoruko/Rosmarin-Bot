@@ -199,6 +199,12 @@ function isCoreDepotStructure(structureType: string): structureType is 'storage'
     return structureType === STRUCTURE_STORAGE || structureType === STRUCTURE_TERMINAL;
 }
 
+// —— 占位 container 排空换位参数 ——
+/** 残余能量不超过该值即视为「已排空」，可拆除（残余随拆掉落，carrier 会优先捡起） */
+const CORE_DEPOT_SWAP_DRAIN_LIMIT = 200;
+/** 排空等待上限：超过该 tick 数强制拆除（饱和房可能长期无人取用，真建筑不能无限延期） */
+const CORE_DEPOT_SWAP_FORCE_TICKS = 3000;
+
 function handleCoreDepotSite(
     room: Room,
     layoutMemory: LayoutMemoryMap,
@@ -211,7 +217,11 @@ function handleCoreDepotSite(
     const existingStructure = structureType === 'storage' ? room.storage : room.terminal;
     const allSites = room.find(FIND_CONSTRUCTION_SITES);
     const hasRealSite = allSites.some((site) => site && site.structureType === structureType);
-    if (existingStructure || hasRealSite) return 0;
+    if (existingStructure || hasRealSite) {
+        // 真建筑已建成/在建——占位必然已拆除，清掉排空计时残留
+        delete (room.memory as any).coreDepotSwapSince?.[structureType];
+        return 0;
+    }
 
     const pos = new RoomPosition(point.x, point.y, room.name);
     const sites = pos.lookFor(LOOK_CONSTRUCTION_SITES) as ConstructionSite[];
@@ -222,7 +232,25 @@ function handleCoreDepotSite(
         if (containerSite) containerSite.remove();
 
         const placeholder = structures.find((structure) => structure.structureType === STRUCTURE_CONTAINER) as StructureContainer | undefined;
-        if (placeholder) placeholder.destroy();
+        if (placeholder) {
+            // 排空后再拆：存入侧已停（isCoreDepotSwapPending），存量被 spawn/塔填充等
+            // 自然取用耗尽；残余 ≤ 阈值才拆，避免整箱能量砸地上腐烂、
+            // 以及「先拆后建」期间枢纽缓冲断档（容器活到最后一刻）。
+            const energy = placeholder.store[RESOURCE_ENERGY] || 0;
+            const mem = room.memory as any;
+            mem.coreDepotSwapSince ??= {};
+            if (typeof mem.coreDepotSwapSince[structureType] !== 'number') {
+                mem.coreDepotSwapSince[structureType] = Game.time;
+            }
+            const waited = Game.time - mem.coreDepotSwapSince[structureType];
+            if (energy > CORE_DEPOT_SWAP_DRAIN_LIMIT && waited < CORE_DEPOT_SWAP_FORCE_TICKS) {
+                return 0;
+            }
+            placeholder.destroy();
+            delete mem.coreDepotSwapSince[structureType];
+        } else {
+            delete (room.memory as any).coreDepotSwapSince?.[structureType];
+        }
 
         const nextSites = pos.lookFor(LOOK_CONSTRUCTION_SITES) as ConstructionSite[];
         const nextStructures = pos.lookFor(LOOK_STRUCTURES) as Structure<StructureConstant>[];
