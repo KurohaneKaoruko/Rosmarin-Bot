@@ -360,8 +360,24 @@ const getSourceEnergyPerTick = () =>
 /**
  * 估算房间每 tick 的能量收入（升级侧要吃掉的流入量）：
  * - 本矿：按绑定 harvester 的 WORK 产能折算，单矿封顶 10/tick（再生上限）；
- * - 外矿：在编 out-harvest 每个 按 5/tick 折算路损，封顶 20。
+ * - 外矿：优先用 externalMine 注册的富口径——「净收入 × min(采集比, 搬运比)」，
+ *   瓶颈侧（采集断档/运力不足）决定真实到账；未注册（单测最小桩环境）时
+ *   退化为按在册采集工人数估算（每工 5/tick，封顶 20）。
  */
+
+// ==================== 外矿收入提供器 ====================
+// 富口径计算依赖 externalMine 的重依赖链（CreepConstant/调度器等），
+// 本模块刻意保持零游戏依赖（单测最小桩环境可直接加载），
+// 因此由 externalMine 侧在运行时注册计算函数，这里只持有引用。
+
+export type RemoteIncomeProvider = (sourceRoom: Room) => number | null;
+let remoteIncomeProvider: RemoteIncomeProvider | null = null;
+
+/** 注册外矿收入富口径计算器（由 externalMine 的运行时入口调用一次）。 */
+export const registerRemoteIncomeProvider = (provider: RemoteIncomeProvider): void => {
+    remoteIncomeProvider = provider;
+};
+
 export const estimateRoomEnergyIncome = (room: Room): number => {
     return getRoomTickCacheValue(room, 'workforce_income_estimate', () => {
         let income = 0;
@@ -383,8 +399,13 @@ export const estimateRoomEnergyIncome = (room: Room): number => {
                 income += Math.min(perSourceCap, work * 2);
             }
         }
-        const creepNum = (room as any).getCreepNum?.() || {};
-        income += Math.min(20, (creepNum['out-harvest'] || 0) * 5);
+        const remoteIncome = remoteIncomeProvider?.(room);
+        if (typeof remoteIncome === 'number') {
+            income += Math.max(0, remoteIncome);
+        } else {
+            const creepNum = (room as any).getCreepNum?.() || {};
+            income += Math.min(20, (creepNum['out-harvest'] || 0) * 5);
+        }
         return income;
     });
 };
@@ -511,6 +532,52 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 
     // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩 ——
     return Math.max(lowerLimit, Math.min(capacity, shrinkByStarved(room, Math.max(incomeWork, surplusWork, pileWork))));
+};
+
+// ==================== 升级孵化加急（富余能量快速消化） ====================
+//
+// 升级吞吐目标按收入给了编制，但孵化端若一直排在队列尾（外矿搬运工体型大、
+// 孵化久），升级工补员会滞后于能量流入——水位越堆越高。加急成立时升级任务
+// 插到外矿流水线之前，让能量尽快转化为升级吞吐：
+// - 有稳定物流（storage/terminal）：能量水位 > workerFirst（110 = 标准线 + 15k 盈余）；
+// - 无仓期：实际收入 > 在役升级功率（钱比花得快，立即加码消耗端）。
+// level 链：加急层(10) 优先于 外矿流水线(12)、低于 worker(8)——
+// 建造仍优先于加急升级，与「BUILD > UPGRADE_PRIORITY > REMOTE_SOURCE > UPGRADE」对齐。
+export const UPGRADE_URGENT_SPAWN_LEVEL = 10;
+const LEVEL_WORKER_FIRST = 110;
+
+/**
+ * 当前在役升级功率（WORK 总和）。
+ * TTL 已覆盖不住自身孵化期的垂死个体不计（它撑不满一个孵化周期）；
+ * 非 rush 模式下 worker 可切升级职责，其 WORK 一并计入消耗侧。
+ */
+export const getActiveUpgradeWorkCount = (room: Room): number => {
+    if (typeof room.find !== 'function') return 0;
+    const family = getRoomMode(room) === 'rush'
+        ? ['upgrader']
+        : ['upgrader', 'worker'];
+    const familySet = new Set(family);
+    const creeps = room.find(FIND_MY_CREEPS, {
+        filter: (c: Creep) => !!(c && c.memory && familySet.has(c.memory.role || '')),
+    }) as Creep[];
+    let work = 0;
+    for (const creep of creeps) {
+        if (creep.spawning) continue;
+        const ttl = creep.ticksToLive ?? 1500;
+        const spawnTicks = creep.body ? creep.body.length * 3 : 3;
+        if (ttl <= spawnTicks) continue;
+        work += typeof creep.getActiveBodyparts === 'function' ? creep.getActiveBodyparts(WORK) : 0;
+    }
+    return work;
+};
+
+/** 升级孵化是否加急：先确认确有升级需求（吞吐目标 > 0），再按两种口径判定。 */
+export const isUpgraderSpawnUrgent = (room: Room): boolean => {
+    if (getUpgradeWorkTarget(room) <= 0) return false;
+    if (room.storage || room.terminal) {
+        return getEnergyLevel(room) > LEVEL_WORKER_FIRST;
+    }
+    return estimateRoomEnergyIncome(room) > getActiveUpgradeWorkCount(room);
 };
 
 // ==================== worker 体型折算 ====================
@@ -922,6 +989,12 @@ export const getWorkerUpgradeTarget = (room: Room): number => {
  * 配额内的个体承担 build/repair/wall，配额外（且存在升级需求）的个体专职升级。
  */
 export const getWorkerConstructionQuota = (room: Room): number => {
+    // 降级风险区（ttd < UPGRADE_NEEDED_TTD）：建造/刷墙让位，全员转升级——
+    // 该档位下 getUpgradeWorkTarget 有 lowerLimit=5 保底，hasWorkerUpgradeDemand 必为真，
+    // 职责切分（isWorkerConstructionSlot）会把全部 worker 推向控制器。
+    // 更深一档（ttd < 5000）由 universal 降级救援接管，维持原分层。
+    const downgradeTtd = room.controller?.ticksToDowngrade || 0;
+    if (downgradeTtd > 0 && downgradeTtd < UPGRADE_NEEDED_TTD) return 0;
     const buildTarget = getWorkerBuildTarget(room);
     if (buildTarget > 0) return buildTarget;
     return getWorkerWallTarget(room);

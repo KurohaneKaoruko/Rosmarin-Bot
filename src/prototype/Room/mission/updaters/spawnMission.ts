@@ -2,7 +2,7 @@ import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/Creep
 import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
-import { getUpgradeWorkTarget } from '@/modules/shared/roomWorkforce';
+import { getUpgradeWorkTarget, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL } from '@/modules/shared/roomWorkforce';
 import { buildUpgraderBodyConfig } from '@/modules/shared/upgradeBody';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
@@ -68,10 +68,15 @@ export default class SpawnMission extends Room {
                 const body = role === 'upgrader'
                     ? buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this))
                     : '';
+                // 升级加急：水位/收入满足加急口径时，升级任务插到外矿流水线之前
+                // （level 10 < outmine 12，但 > worker 8——建造仍优先于加急升级）
+                const level = role === 'upgrader' && isUpgraderSpawnUrgent(this)
+                    ? UPGRADE_URGENT_SPAWN_LEVEL
+                    : RoleData[role].level;
                 this.SpawnMissionAdd(
                     RoleData[role].code,
                     body,
-                    RoleData[role].level,
+                    level,
                     role,
                     { home: this.name } as CreepMemory
                 );

@@ -1321,6 +1321,86 @@ export class ExternalMineAnalysis {
 
         return pickBestCarryRoomName(currentTarget, carryNeed, stats);
     }
+
+    // 每 tick 每源房缓存：发往某目标房的在册搬运总载量（含孵化中，不含濒死返程）。
+    // 供收入瓶颈口径计算「搬运比」使用。
+    private static getAssignedCarryCapacityByTarget(sourceRoomName: string, targetRoomName: string): number {
+        let capacity = 0;
+        for (const name in Game.creeps) {
+            const creep = Game.creeps[name];
+            const memory = creep?.memory as any;
+            if (!memory) continue;
+            if (memory.role !== 'out-carry' && memory.role !== 'out-car') continue;
+            if (memory.sourceRoom !== sourceRoomName) continue;
+            if (memory.targetRoom !== targetRoomName) continue;
+            // 濒死返程的搬运工这趟交完就退休，不再计入运力
+            if (typeof creep.ticksToLive === 'number' && creep.ticksToLive <= OUT_CARRY_DYING_TTL) continue;
+            capacity += getExternalMineStoreCapacity(creep.store as ExternalMineStoreLike);
+        }
+        return capacity;
+    }
+
+    /**
+     * 本源房外矿的真实有效收入（每 tick 能量口径）。
+     *
+     * @remarks
+     * 有效收入 = Σ 净收入 × min(采集比, 搬运比)——**瓶颈侧决定真实到账**：
+     * 采集断档（minerRatio 低）或运力不足（carryRatio 低）时收入按短板折算，
+     * 升级定编（income 驱动）随之收缩，不再孵出「喂不饱的升级工」去抢外矿能量。
+     *
+     * - 采集比 = 在场采集功率 ÷ 净收入功率（到场 WORK × 2 / Σept，clamp 0-1）；
+     * - 搬运比 = 在册搬运总载量 ÷ 需求运力（2 × 距离 × 净收入 × 模式冗余系数）；
+     * - 无视野的目标房退化为「在册采集工 × 5」估算（宁估不缺，不断档口径）。
+     */
+    static getRoomRemoteIncome(sourceRoom: Room): number {
+        return getRoomTickCacheValue(sourceRoom, 'outmine_remote_income', () => {
+            const profile = getRoomModeProfile(sourceRoom);
+            let income = 0;
+            const roomNames = [
+                ...ExternalMine.getManagedTargetRooms(sourceRoom, 'energy'),
+                ...ExternalMine.getManagedTargetRooms(sourceRoom, 'centerRoom'),
+            ];
+            for (const roomName of roomNames) {
+                const targetRoom = Game.rooms[roomName];
+                if (!targetRoom) {
+                    // 无视野：按在册采集工估算（每工 5/tick），封顶按 scout 记录的源数
+                    const recorded = ExternalMineMath.getRecordedSourceNum(roomName) ?? 2;
+                    let harvesters = 0;
+                    for (const creep of Object.values(Game.creeps || {})) {
+                        if (!creep?.my) continue;
+                        if (creep.memory?.role !== 'out-harvest') continue;
+                        if (creep.memory.sourceRoom !== sourceRoom.name) continue;
+                        if (creep.memory.targetRoom !== roomName) continue;
+                        harvesters++;
+                    }
+                    income += Math.min(10 * recorded, harvesters * 5);
+                    continue;
+                }
+
+                const stats = this.getRoomSourceStats(sourceRoom, targetRoom, undefined, profile.remoteUnreservedIncomeFactor);
+                if (stats.length <= 0) continue;
+
+                let netPerTickTotal = 0;
+                let harvestPowerTotal = 0;
+                let requiredCarryCapacity = 0;
+                for (const stat of stats) {
+                    const netPerTick = Math.max(0, stat.energyPerTick - EXTERNAL_MINE_ANALYSIS.SOURCE_CONTAINER_REPAIR_LOSS);
+                    netPerTickTotal += netPerTick;
+                    harvestPowerTotal += stat.harvestingPower;
+                    requiredCarryCapacity += 2 * stat.distance * netPerTick * profile.remoteCarryThroughputFactor;
+                }
+                if (netPerTickTotal <= 0) continue;
+
+                const clamp01 = (value: number) => Math.max(0, Math.min(1, value));
+                const minerRatio = clamp01(harvestPowerTotal / netPerTickTotal);
+                const carryRatio = requiredCarryCapacity > 0
+                    ? clamp01(this.getAssignedCarryCapacityByTarget(sourceRoom.name, roomName) / requiredCarryCapacity)
+                    : 1;
+                income += netPerTickTotal * Math.min(minerRatio, carryRatio);
+            }
+            return income;
+        });
+    }
 }
 
 // 外矿的数学/容量估算集中在此处，避免散落的魔数。

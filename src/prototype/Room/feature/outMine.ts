@@ -1,5 +1,13 @@
-import { ExternalMine, ExternalMineTiming } from '@/modules/features/external/externalMine';
+import { ExternalMine, ExternalMineAnalysis, ExternalMineTiming } from '@/modules/features/external/externalMine';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
+import { registerRemoteIncomeProvider } from '@/modules/shared/roomWorkforce';
+
+// 外矿真实收入富口径注册：升级定编（estimateRoomEnergyIncome）由此读到
+// 「净收入 × min(采集比, 搬运比)」的瓶颈口径——采集断档/运力不足时，
+// 升级吞吐目标随真实到账收缩，不再孵出喂不饱的升级工。
+// 本文件只在游戏运行时加载，单测的最小桩环境不 import 这里，
+// roomWorkforce 保持零游戏依赖（未注册时回退人数估算口径）。
+registerRemoteIncomeProvider((room) => ExternalMineAnalysis.getRoomRemoteIncome(room));
 
 /** 外矿采集模块 */
 export default class OutMine extends Room {
