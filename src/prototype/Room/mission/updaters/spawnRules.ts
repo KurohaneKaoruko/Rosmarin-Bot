@@ -19,6 +19,7 @@ import {
     getUpgraderSuccessionNeeds,
     getDroppedPileEnergy,
     getDroppedPileWorkerBoost,
+    getMyConstructionSites,
 } from '@/modules/shared/roomWorkforce';
 
 // 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
@@ -46,11 +47,17 @@ export const CRITICAL_RECOVERY_ROLE_SET: ReadonlySet<string> = new Set([
 
 export const pruneCriticalNonRecoveryMissions = (room: Room): number => {
     if (getEnergyState(room) !== 'CRITICAL') return 0;
+    // 有工地等着建时豁免 worker：复苏不仅要采集，还要把基建建起来才能
+    // 摆脱结构性贫困（扩展/容器建不成 → 经济上不去 → CRITICAAL 永续）。
+    // worker 走预算体型（energyAvailable 出小体型），level 8 也排在
+    // harvester(3)/universal(0) 之后，不抢保命线的能量。
+    const exemptWorker = getMyConstructionSites(room).length > 0;
     const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
     let removed = 0;
     for (const task of tasks) {
         const role = (task.data as SpawnTask)?.memory?.role;
         if (!role || CRITICAL_RECOVERY_ROLE_SET.has(role)) continue;
+        if (role === 'worker' && exemptWorker) continue;
         room.deleteMissionFromPool?.('spawn', task.id);
         removed += 1;
     }

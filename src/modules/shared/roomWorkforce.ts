@@ -768,8 +768,14 @@ export const getWorkerBuildTarget = (room: Room): number => {
     const needBuilder = hasBuildMission || siteCount > 0;
     if (!needBuilder) return 0;
 
-    // 能量不足以孵化 worker 时，建造侧不产生需求
-    const canAffordWorker = room.energyAvailable >= workerSpawnEnergyMin || totalEnergy >= cap;
+    // 能量不足以孵化 worker 时的让位闸——但「有工地等着建」时放行：
+    // 预算体型路径（GetSpawnTaskData 对 worker+工地 用 energyAvailable 出小体型）
+    // 就是为此设计的，闸死它会让房间陷入「没工地建不成基建 → 没基建能量上不去 →
+    // 永远孵不出 worker」的自锁（race 实测：CRITICAL 时 250 门槛锁死 bootstrap，
+    // 扩展装不上、控制器容器不存在、升级工全程跑腿）。
+    const canAffordWorker = room.energyAvailable >= workerSpawnEnergyMin
+        || totalEnergy >= cap
+        || siteCount > 0;
     if (!canAffordWorker) return 0;
 
     const minWorkerTarget = scaleWorkerConstructionTarget(room, 1, room.level <= 2 ? 3 : 2);
