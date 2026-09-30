@@ -168,34 +168,43 @@ export const scoreCarryRoomCandidate = (stat: CarryRoomCandidateStat, carryNeed:
 /**
  * 从候选房里挑一个更值得跑的（搬运工动态选房）。
  *
+ * @remarks
+ * 候选集由调用方过滤为「有产出」的房（有积压或有在场采集工）。
+ * - 当前目标房在候选集里：做边际比较（`CARRY_ROOM_SWITCH_MARGIN` 滞回），抑制来回横跳；
+ * - 当前目标房**不在**候选集里（死房：无产出/采集工全灭）：直接逃往最优候选，
+ *   不做边际比较——留在死房是纯粹的空转。
+ *
  * @param currentTarget 当前目标房名。
  * @param carryNeed 搬运 creep 这一趟最多能装多少。
- * @param stats 候选房参考量（调用方已按同类目标房过滤）。
- * @returns 建议的目标房名；维持现状、数据不足或收益不足时返回 `null`。
+ * @param stats 候选房参考量（调用方已按「有产出 + 同类目标房」过滤）。
+ * @returns 建议的目标房名；维持现状、无有效候选或收益不足时返回 `null`。
  */
 export const pickBestCarryRoomName = (
     currentTarget: string,
     carryNeed: number,
     stats: readonly CarryRoomCandidateStat[],
 ): string | null => {
-    if (stats.length <= 1) return null;
-
     let bestRoom: string | null = null;
     let bestScore = -Infinity;
     let currentScore = -Infinity;
+    let hasCurrent = false;
 
     for (const stat of stats) {
         const score = scoreCarryRoomCandidate(stat, carryNeed);
-        if (stat.roomName === currentTarget) currentScore = score;
+        if (stat.roomName === currentTarget) {
+            currentScore = score;
+            hasCurrent = true;
+        }
         if (score > bestScore) {
             bestScore = score;
             bestRoom = stat.roomName;
         }
     }
 
-    if (!bestRoom || bestRoom === currentTarget) return null;
-    // 当前房没被算到分（例如目标房无视野）时不换，避免无谓抖动。
-    if (!Number.isFinite(currentScore)) return null;
+    if (!bestRoom) return null;
+    // 当前房不在有效候选里（死房）：直接逃往最优候选
+    if (!hasCurrent) return bestRoom;
+    if (bestRoom === currentTarget) return null;
     if (bestScore < currentScore + CARRY_ROOM_SWITCH_MARGIN) return null;
     return bestRoom;
 };

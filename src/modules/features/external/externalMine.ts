@@ -1274,6 +1274,31 @@ export class ExternalMineAnalysis {
         });
     }
 
+    // 每 tick 每源房缓存一次：有「在场产出采集工」的目标房集合。
+    // 在场产出 = 本源房的 out-harvest 物理位于其目标房 + 有 WORK（能采）
+    // + 有 CARRY（能装；零 CARRY 的废体型 harvest 永远 ERR_FULL，不算产出）。
+    // 在途/孵化中的采集工不算——到场前没有产出。
+    // 供搬运派送的「在场产出闸」与重平衡的候选过滤共用。
+    static getOnSiteHarvesterRoomSet(sourceRoom: Room): Set<string> {
+        return getRoomTickCacheValue(sourceRoom, 'outmine_onsite_harvester_rooms', () => {
+            const rooms = new Set<string>();
+            for (const name in Game.creeps) {
+                const creep = Game.creeps[name];
+                const memory = creep?.memory as any;
+                if (!memory || memory.role !== 'out-harvest') continue;
+                if (memory.sourceRoom !== sourceRoom.name) continue;
+                if (creep.spawning) continue;
+                const targetRoomName = memory.targetRoom;
+                if (!targetRoomName || !creep.pos || creep.pos.roomName !== targetRoomName) continue;
+                const hasWork = typeof creep.getActiveBodyparts === 'function' && creep.getActiveBodyparts(WORK) > 0;
+                if (!hasWork) continue;
+                if (getExternalMineStoreCapacity(creep.store as ExternalMineStoreLike) <= 0) continue;
+                rooms.add(targetRoomName);
+            }
+            return rooms;
+        });
+    }
+
     /**
      * 为一个外矿搬运工挑「更值得跑」的目标房（搬运工动态选房）。
      *
@@ -1310,18 +1335,25 @@ export class ExternalMineAnalysis {
                 ? energyTargets
                 : (centerTargets.indexOf(currentTarget) !== -1 ? centerTargets : []);
         }
-        if (candidates.length <= 1) return null;
+        // 注意：这里不再因「候选只有 1 个」提前返回——当前房若是死房（被产出闸过滤），
+        // 唯一的有效候选就是逃逸目标。
 
         const backlog = backlogOverride || this.getManagedRoomBacklogMap(sourceRoom);
         const carryCount = sourceRoom ? this.getCarryCountByTargetRoom(sourceRoom) : {};
+        const onSiteRooms = sourceRoom ? this.getOnSiteHarvesterRoomSet(sourceRoom) : new Set<string>();
         const carryNeed = Math.max(1, getExternalMineStoreFreeCapacity(creep.store as ExternalMineStoreLike, RESOURCE_ENERGY));
 
         const stats: CarryRoomCandidateStat[] = [];
         for (const roomName of candidates) {
-            if (!(roomName in backlog)) continue;
+            const hasBacklogEntry = roomName in backlog;
+            const available = hasBacklogEntry ? Math.max(0, backlog[roomName]) : 0;
+            // 有产出闸：有积压（能量在等着搬）或有在场采集工（正在产出），二者居一才进候选。
+            // 无视野又无在场采集工、或有视野但零积压且无采集工的死房一律排除——
+            // 负载均衡主项是人数趋平，死房 0 人反而最「吸引」，不排除会把搬运工均衡进空房空跑。
+            if (available <= 0 && !onSiteRooms.has(roomName)) continue;
             stats.push({
                 roomName,
-                available: Math.max(0, backlog[roomName]),
+                available,
                 distance: Math.max(1, Game.map.getRoomLinearDistance(sourceRoomName, roomName, true)),
                 creepInRoom: creep.room?.name === roomName,
                 assigned: carryCount[roomName] || 0,
@@ -1608,7 +1640,7 @@ class ExternalMineMath {
 // 外矿相关的刷怪决策与刷怪队列维护。
 export class ExternalMineSpawner {
     // 各角色任务优先级，统一从角色配置读取。
-    // 注意：采集工/搬运工入队统一走 OUTMINE_PIPELINE_LEVEL（见下），
+    // 注意：采集工/搬运工入队走专属流水线层级（采集 12 严格优先于搬运 13，见下），
     // 这里的 harvest/carry 只用于角色对齐与阅读参考，不再直接作为入队等级。
     private static readonly PRIORITY = {
         reserver: RoleData['reserver'].level,
@@ -1619,12 +1651,16 @@ export class ExternalMineSpawner {
         mineral: RoleData['out-mineral'].level,
     } as const;
 
-    // 采集与搬运同属一条流水线（先采后运），必须同层排队。
-    // 若各自沿用 RoleData 等级（out-harvest=12 / out-carry=15），spawn 取任务是「取全池最低 level」，
-    // 于是孵化端会先把全帝国排队中的采集工孵完，才轮得到第一个搬运工：
-    // 采集工把容器挖满、搬运工迟迟不到位，两头一起干等，正是「采集与搬运失衡」的根源。
-    // 统一到采集工那一层后，两者按入队先后轮流孵化（同房按 采集→搬运 入队，谁缺谁先补）。
-    private static readonly OUTMINE_PIPELINE_LEVEL = RoleData['out-harvest'].level;
+    // 采集与搬运的孵化层级：采集(12) 严格优先于搬运(13)。
+    // 曾经同层排队（先采后运、谁缺谁先补），但搬运定编（3-4/房）远大于采集定编（1-2/房），
+    // 同层先到先孵会让存量搬运任务排在采集补位前面——采集工全灭的房补不上人，
+    // 而搬运闸又因为「有排队中的采集工」继续派搬运，形成循环饥饿
+    // （线上实例：外矿房长期零采集工在岗、容器空转）。
+    // 分层语义：任何缺采集的房先把采集补上（12 压过所有搬运）；
+    // 有采集在岗的房不存在竞争中的采集任务，其搬运不会被别房的采集饿死。
+    // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
+    private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = RoleData['out-harvest'].level;
+    private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-harvest'].level + 1;
 
     // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
     // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线
@@ -1836,42 +1872,6 @@ export class ExternalMineSpawner {
         return creepSourceRoom === sourceRoomName;
     }
 
-    // 目标房中是否已有“来自本源房”的外矿采集者（用于运输前置）。
-    private static hasActiveOutHarvesterByTargetName(sourceRoom: Room, targetRoomName: string): boolean {
-        const creepByTargetRoom = getCreepByTargetRoom(targetRoomName);
-        const activeHarvesters = (creepByTargetRoom['out-harvest'] || [])
-            .filter((c: any) =>
-                c &&
-                this.isSameSourceRoom(c.sourceRoom, sourceRoom.name) &&
-                !c.spawning &&
-                (c.ticksToLive == null || c.ticksToLive > 0)
-            ).length;
-        return activeHarvesters > 0;
-    }
-
-    // 清理指定目标房的 out-carry/out-car 刷怪任务，返回移除数量。
-    private static clearTargetOutCarrySpawnMissions(sourceRoom: Room, targetRoomName: string): number {
-        const tasks = sourceRoom.getAllMissionFromPool('spawn') || [];
-        let removed = 0;
-        for (const task of tasks) {
-            const memory = this.getSpawnTaskMemory(task);
-            const role = memory?.role;
-            if (role !== 'out-carry' && role !== 'out-car') continue;
-            if (memory?.targetRoom !== targetRoomName) continue;
-            const taskSourceRoom = memory.sourceRoom;
-            if (taskSourceRoom && taskSourceRoom !== sourceRoom.name) continue;
-            sourceRoom.deleteMissionFromPool?.('spawn', task.id);
-            removed++;
-        }
-        return removed;
-    }
-
-    // 目标房是否已有采集者（本源房视角）。
-    private static hasActiveOutHarvester(sourceRoom: Room, targetRoom: Room): boolean {
-        return this.hasActiveOutHarvesterByTargetName(sourceRoom, targetRoom.name);
-    }
-
-
     // 侦查：全局与本房均只允许 1 个 scout，以避免重复探路。
     static scout(sourceRoom: Room, targetRoomName: string): boolean {
         const globalActive = this.getActiveRoleNumByTarget('scout', targetRoomName);
@@ -2037,7 +2037,7 @@ export class ExternalMineSpawner {
         // 接替孵化必须抢在本地 worker 之前，否则排队时间让老爬先死，采集断档、
         // 搬运工集体闲置（无缝接力的核心）。
         const isReplacement = this.getAllLiveOutHarvesterNum(targetRoomName) > 0;
-        const replaceLevel = isReplacement ? this.OUTMINE_REPLACEMENT_LEVEL : this.OUTMINE_PIPELINE_LEVEL;
+        const replaceLevel = isReplacement ? this.OUTMINE_REPLACEMENT_LEVEL : this.OUTMINE_HARVEST_PIPELINE_LEVEL;
         if (upbody) {
             sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, 'out-harvest', memory);
         } else {
@@ -2052,14 +2052,11 @@ export class ExternalMineSpawner {
 
     // 外矿运输者：现在只孵化 out-carry；旧 out-car 仅作为存量运力统计。
     static carry(sourceRoom: Room, targetRoom: Room, num: number): boolean {
-        if (!this.hasActiveOutHarvester(sourceRoom, targetRoom)) {
-            // 采集工断档但已有接替者在队列/孵化中（换班窗口）时不撤运输任务——
-            // 清空运力会造成「容器满 → 采集停 → 换班到场 → 运力重建」的长停摆窗口
-            const ohQueued = this.getQueuedSpawnRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-            const ohSpawning = this.getSpawningRoleNumByTargetGlobal('out-harvest', targetRoom.name);
-            if (ohQueued + ohSpawning <= 0) {
-                this.clearTargetOutCarrySpawnMissions(sourceRoom, targetRoom.name);
-            }
+        // 在场产出闸：目标房必须有「正在产出」的采集工（在场且有采集能力）才派搬运。
+        // 在途/排队的采集工不算——到场前没有产出，先派搬运只会空跑一趟。
+        // 采集工断档期：排队中的搬运任务由每轮重铺自然清空（clearPlannedEconomyMissions），
+        // 在场存量搬运工照常把容器余量搬完，采集工到场后下一轮即恢复派送。
+        if (!ExternalMineAnalysis.getOnSiteHarvesterRoomSet(sourceRoom).has(targetRoom.name)) {
             return false;
         }
 
@@ -2077,7 +2074,7 @@ export class ExternalMineSpawner {
         if (totalCarry < num) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
-            sourceRoom.SpawnMissionAdd('OC', carryBody, this.OUTMINE_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            sourceRoom.SpawnMissionAdd('OC', carryBody, this.OUTMINE_CARRY_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
