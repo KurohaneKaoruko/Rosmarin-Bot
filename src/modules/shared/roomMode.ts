@@ -104,7 +104,6 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 10,
         highIntensity: true,
         upgradeIncomeMultiplier: 1.2,
-        remoteCarryThroughputFactor: 1.15,
         remoteCarryBacklogScale: 0.75,
         remoteUnreservedIncomeFactor: 0.9,
         productionScheduling: true,
@@ -121,7 +120,10 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         spawnMissionInterval: 5,
         transportMissionInterval: 10,
         highIntensity: true,
-        upgradeIncomeMultiplier: 1.5,
+        // rush 升级定编 = 实测收入（不超额）：×1.5 之类会让升级任务永久欠账、
+        // 持续抢占 spawn，把外矿搬运舰队饿垮再重建——外矿不稳的直接根源。
+        // 定编对齐收入后，升级池满足即停发，spawn 自然轮到外矿补员与物流。
+        upgradeIncomeMultiplier: 1.0,
         remoteCarryThroughputFactor: 1.3,
         remoteCarryBacklogScale: 0.5,
         remoteUnreservedIncomeFactor: 1.0,
