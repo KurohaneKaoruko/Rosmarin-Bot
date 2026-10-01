@@ -1,43 +1,52 @@
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
-import { canRushUpgrade, getRoomMode, getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/roomWorkforce';
-import upUpgradeFunction from '@/prototype/Creep/action/support/up-upgrade';
+import { getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/roomWorkforce';
 
 /**
- * 专人升级工（`upgrader`）。
+ * 专人升级工：**静态高效升级**——固定在控制器旁的工位，能量由搬运送进控制器缓冲
+ * （link/container/terminal/storage），本角色绝不离开控制器区域自行找能量。
  *
- * @remarks
- * 分工由**房间模式**决定，编制在 `shared/roomWorkforce.getUpgraderTarget`：
- * - `low` / `main`：0 —— 常规升级由 `worker` 兼任（worker 的升级侧定编 + 运行时职责切分）；
- * - `high`：单独配人，并把 `worker` 升级侧的 work 扣掉，让 worker 把人口留给建造/刷墙；
- * - `rush`：走**冲级策略**——boost 前置（XGH2O）、控制器缓冲取能（link/container/terminal/storage）、
- *   满级或寿命将尽时退役并先卸 boost 回收矿物。
+ * 职责边界：
+ * - 本角色：高效升级 + 特殊冲级（boost）；仓库断供时原地待命，能量由搬运送上容器；
+ * - worker：建造 + 常规升级（worker 的升级侧定编见 getWorkerUpgradeTarget）；
+ * - up-upgrade：已弃用（代码暂留），仅 UP-UPGRADE / AID-UUP 旗帜与跨房增援入口仍用。
  *
- * 「冲级条件是否成立」是**自动判定**的：见 `roomWorkforce.canRushUpgrade`——
- * 需要控制器旁有 storage/terminal，且它们旁边有可站格位（同时满足「贴着仓库」和「在控制器 3 格内」）。
- * 条件不成立时本角色**不冲级**，退回普通升级行为，编制侧同时把数量缩小
- * （`rush` → 2、`high` → 1、`low`/`main` → 0）。
- *
- * 冲级分支**直接复用** `action/support/up-upgrade` 那份实现，不另写一套：
- * 那条路径（连同 `UP-UPGRADE` / `AID-UUP` 旗帜入口）保持原样可用，
- * 既是「手动开冲级」的开关，也是这边出问题时的参照与回退手段。
+ * 仓库断供期：原地待命 + 记 starved 负反馈（缩编信号）；spawn 侧由
+ * spawnMission.pauseRushUpgraderIfDepotStarved 同步暂停升级孵化、让位物流层。
  */
 
-const isRushing = (creep: Creep): boolean => {
-    if (!creep.room.controller?.my) return false;
-    return getRoomMode(creep.room) === 'rush' && canRushUpgrade(creep.room);
+const RETIRE_UNBOOST_TIMEOUT = 100;
+
+const isBodyBoosted = (creep: Creep) => creep.body.some((part) => !!part.boost);
+
+// 冲级催化：WORK 用升级催化（XGH2O 系），MOVE 用加速（XZHO2 系）——非强制，缺资源自动跳过
+const BOOST_MAP = {
+    [typeof WORK === 'undefined' ? 'work' : WORK]: ['XGH2O', 'GH2O', 'GH'],
+    [typeof MOVE === 'undefined' ? 'move' : MOVE]: ['XZHO2', 'ZHO2', 'ZO'],
+} as { [part: string]: any };
+
+// 冲级爬只在两种情况下退役：房间升满 8 级，或寿命将尽。
+// 退役优先尝试卸载 boost 回收矿物，超时后直接自杀。
+const shouldRetire = (creep: Creep): boolean => {
+    if (creep.room.controller?.my && creep.room.level >= 8) return true;
+    return (creep.ticksToLive ?? 1500) < 50;
 };
 
-/**
- * 升级期间的移动工位候选。
- *
- * @remarks
- * 优先用专属工位（`range 0`）——和 worker 的专职升级走同一张名册，
- * 由堵车解算器把每人保护在自己的格子里；抢不到格位时退回控制器 3 格内。
- * 冲级模式下这张名册的格位池就是冲级工位（控制器旁仓库旁边），
- * 所以冲级工也自动站在取能点旁边。
- */
+const retire = (creep: Creep): void => {
+    const memory = creep.memory as any;
+    if (memory.retireStartTick == null) memory.retireStartTick = Game.time;
+    const timedOut = Game.time - memory.retireStartTick > RETIRE_UNBOOST_TIMEOUT;
+
+    if (!timedOut && isBodyBoosted(creep)) {
+        // unBoost 自带移动逻辑：走向紧邻 lab 的容器并触发卸载
+        creep.unBoost();
+        return;
+    }
+    creep.suicide();
+};
+
+/** 升级期间的移动工位：专属工位（range 0），无工位退回控制器 3 格 */
 export const syncUpgraderMoveWork = (creep: Creep) => {
     if (
         creep.room.controller?.my &&
@@ -55,56 +64,54 @@ export const syncUpgraderMoveWork = (creep: Creep) => {
 
 const onTarget = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
-    if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-    if (creep.store.getUsedCapacity() === 0) {
-        creep.say('🔄');
-        return WORK_EVENTS.TO_SOURCE;
+    if (shouldRetire(creep)) {
+        retire(creep);
+        return WORK_EVENTS.STAY;
     }
+    // 站桩升级期间禁止被拉扯；寿命末期解除锁定，允许回收物流接管
+    creep.memory.dontPullMe = (creep.ticksToLive ?? 1500) >= 100;
 
-    creep.runControllerUpgrade();
-    if (creep.store.getUsedCapacity() === 0) {
-        creep.say('🔄');
-        return WORK_EVENTS.TO_SOURCE;
-    }
+    // 统一走 runControllerUpgrade：寻路、控制器工位前压、捡能量、升级、签名
+    creep.runControllerUpgrade({ sign: true, pickupDropped: true });
     syncUpgraderMoveWork(creep);
+    if (creep.store.getUsedCapacity() === 0) return WORK_EVENTS.TO_SOURCE;
     return WORK_EVENTS.STAY;
 };
 
 const onSource = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
-    if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-    if (creep.store.getFreeCapacity() === 0) {
-        creep.say('⚡');
-        creep.runControllerUpgrade();
-        return WORK_EVENTS.TO_TARGET;
+
+    // boost 前置：未完成前不取能不升级（无 lab 环境自动跳过）
+    if (!creep.ensureBoosted(BOOST_MAP)) return WORK_EVENTS.STAY;
+    if (shouldRetire(creep)) {
+        retire(creep);
+        return WORK_EVENTS.STAY;
     }
 
-    const fullAfterTake = creep.acquireEnergy({ pickup: false });
-    if (fullAfterTake) {
-        if (creep.memory.targetSourceId) delete creep.memory.targetSourceId;
-        creep.say('⚡');
-        creep.runControllerUpgrade();
+    // 控制器周边缓冲取能：link > container > terminal > storage。
+    // 严禁回退通用取能（fallbackToTakeEnergy: false）——静态升级工绝不离开
+    // 控制器区域自己找能量：仓库空了就原地待命，能量由搬运送上容器；
+    // 乱走会丢站位、拖垮吞吐，还和搬运/孵化抢散能。断供期照记 starved 账。
+    const filled = creep.withdrawControllerEnergy({
+        linkRange: 2,
+        containerRange: 2,
+        terminalRange: 3,
+        storageRange: 4,
+        fallbackToTakeEnergy: false,
+    });
+    if (filled && creep.store.getFreeCapacity() === 0) {
         return WORK_EVENTS.TO_TARGET;
     }
-    // 取能落空且仍是空载：供能断流信号，进 starved 负反馈记账
+    // 仓库断供且已卸空：原地待命等补给（不移动、不找能量），仅记 starved 账
     if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
         registerUpgraderStarve(creep.room);
+        syncUpgraderMoveWork(creep);
     }
     return WORK_EVENTS.STAY;
 };
 
 const UpgraderFunction = {
     run(creep: Creep) {
-        // 跨房增援（AID-UUP）：目标房不在当前所在时先赶路；到位后按目标房状态干活
-        if ((creep.memory as any).targetRoom && creep.memory.targetRoom !== creep.room.name) {
-            if (!creep.moveToTargetRoom()) return;
-        }
-        // 冲级模式下先把上一位留下的移动工位清掉，再交给冲级实现自己登记
-        if (isRushing(creep)) {
-            writeMoveWorkTileCandidates(creep, []);
-            upUpgradeFunction.run(creep);
-            return;
-        }
         runWorkLayer(creep, { onSource, onTarget });
     },
 };
