@@ -272,7 +272,7 @@ export default class BaseFunction extends Room {
         const terminalEnergy = this.terminal?.store[RESOURCE_ENERGY] || 0;
         const containerEnergy = (this.container || []).reduce((sum, c) => sum + (c?.store[RESOURCE_ENERGY] || 0), 0);
         const linkEnergy = (this.link || []).reduce((sum, l) => sum + (l?.store[RESOURCE_ENERGY] || 0), 0);
-        const totalEnergy = ((this as any)[RESOURCE_ENERGY] || 0) + linkEnergy;
+        const totalEnergy = avail + storageEnergy + terminalEnergy + containerEnergy + linkEnergy;
         return { cap, avail, storageEnergy, terminalEnergy, containerEnergy, linkEnergy, totalEnergy };
     }
 
@@ -296,7 +296,9 @@ export default class BaseFunction extends Room {
 
         type EnergyState = NonNullable<RoomMemory['energyState']>;
         let state: EnergyState;
-        if (avail < Math.min(300, capRef)) {
+        if (avail < Math.min(300, capRef) && totalEnergy < capRef) {
+            // spawn/extension 空且**储能也见底**才是真饥荒；
+            // 储能还在就只是补能延迟（快递在途），判荒会让外矿停摆、升级归零，越闸越穷
             state = 'CRITICAL';
         } else if (logisticNum === 0 && spawnNeedsEnergy && hasStoredEnergy) {
             state = 'CRITICAL';

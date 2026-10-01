@@ -881,6 +881,40 @@ export class RoadBuilder {
     }
 
     /**
+     * 控制器容器保活：容器会 decay，烂掉后静态升级工失去补给点、out-carry 失去直供目标
+     * （race 实测：容器消失 → extension 被建造消耗压在升级成本线下 → 升级归零）。
+     * 检测「控制器 3 格内既无容器也无工地」时，在最近可行邻格补一个 container 工地
+     * （主房 workers 会接手建造）。
+     */
+    static ensureControllerContainer(sourceRoom: Room): void {
+        const controller = sourceRoom.controller;
+        if (!controller?.my) return;
+        if ((sourceRoom.container || []).some(c => c.pos.inRangeTo(controller.pos, 3))) return;
+        const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
+            filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
+        }).length > 0;
+        if (existingSite) return;
+
+        const terrain = sourceRoom.getTerrain();
+        let best: { x: number; y: number; dist: number } | null = null;
+        for (let dx = -2; dx <= 2; dx++) {
+            for (let dy = -2; dy <= 2; dy++) {
+                const x = controller.pos.x + dx;
+                const y = controller.pos.y + dy;
+                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                const structs = sourceRoom.lookForAt(LOOK_STRUCTURES, x, y);
+                if (structs.some(s => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART)) continue;
+                const dist = Math.abs(dx) + Math.abs(dy);
+                if (!best || dist < best.dist) best = { x, y, dist };
+            }
+        }
+        if (best) {
+            sourceRoom.createConstructionSite(best.x, best.y, STRUCTURE_CONTAINER);
+        }
+    }
+
+    /**
      * 为目标房间创建道路建造工地
      * @param sourceRoom 源头房间
      * @param targetRoom 目标房间

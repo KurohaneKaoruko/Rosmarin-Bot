@@ -965,6 +965,45 @@ const outCarry: OutCarryAction = {
             return;
         }
 
+        // 无仓期（terminal/storage 缺席）直进消耗链：控制器容器（喂静态升级工）→
+        // extension/spawn（喂孵化）→ 家容器缓冲。原逻辑直接走到「控制器旁 drop」，
+        // 能量落地被 decay 成吨蒸发（race 实测单点堆 2.3 万）。
+        if (!creep.room.terminal && !creep.room.storage) {
+            const deliverTo = (target: AnyStoreStructure): boolean => {
+                if (creep.pos.inRangeTo(target, 1)) {
+                    if (target.store.getFreeCapacity(RESOURCE_ENERGY) <= 100) {
+                        delete cache.targetId;
+                        return false;
+                    }
+                    if (creep.store.getUsedCapacity() > 0) {
+                        creep.transfer(target, RESOURCE_ENERGY);
+                    }
+                    if (creep.store.getUsedCapacity() === 0) delete cache.targetId;
+                    return true;
+                }
+                cache.targetId = target.id;
+                moveOutCarryTo(creep, target, { maxRooms: 1, range: 1, plainCost: 2, swampCost: 10 });
+                return true;
+            };
+
+            // ① 控制器容器：静态升级工的取能点，直供零搬运
+            const controllerContainer = (creep.room.container || []).find(c =>
+                creep.room.controller && c.pos.inRangeTo(creep.room.controller.pos, 3) &&
+                c.store.getFreeCapacity(RESOURCE_ENERGY) > 100);
+            if (controllerContainer && deliverTo(controllerContainer)) return;
+
+            // ② extension / spawn：孵化线
+            const freeSpawnExt = [...(creep.room.extension || []), ...(creep.room.spawn || [])]
+                .filter(e => e.store.getFreeCapacity(RESOURCE_ENERGY) > 100);
+            const extTarget = creep.pos.findClosestByRange(freeSpawnExt);
+            if (extTarget && deliverTo(extTarget)) return;
+
+            // ③ 家容器缓冲（家里 carrier 之后接力分发）
+            const homeContainer = (creep.room.container || []).find(c =>
+                c.store.getFreeCapacity(RESOURCE_ENERGY) > 100);
+            if (homeContainer && deliverTo(homeContainer)) return;
+        }
+
         const storage = creep.room.storage;
         const controller = creep.room.controller;
         if (storage) {

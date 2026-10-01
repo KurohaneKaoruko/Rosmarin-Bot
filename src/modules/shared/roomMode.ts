@@ -150,8 +150,18 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
 
 /** 兼容多处存储路径的房间模式读取（更高优先级的配置优先） */
 export const getRoomMode = (room: Room): RoomModeName | 'stop' => {
-    const data = getRoomData(room.name) as any;
-    return data?.mode || (room.memory as any).mode || 'main';
+    const data = getRoomData(room.name);
+    if (data?.mode) return data.mode;
+    if ((room.memory as any).mode) return (room.memory as any).mode;
+    // 兜底：完全没有托管配置（RoomData 为空——落地自启失效/内存重置）时，
+    // 首个己方房按订阅档位取默认模式。cpu.limit ≥ 100 直接 rush 冲级，
+    // 否则整间房会以 main 跑（无专人升级工、外矿管线 L12/13 排不上队），
+    // race 实测：托管配置缺失导致整局 1.1 万 tick 零升级。
+    if (Object.keys(getRoomData()).length === 0 && room.controller?.my) {
+        const limit = typeof Game.cpu?.limit === 'number' ? Game.cpu.limit : 0;
+        return limit >= 100 ? 'rush' : 'main';
+    }
+    return 'main';
 };
 
 export const getRoomModeProfile = (room: Room): RoomModeProfile => {

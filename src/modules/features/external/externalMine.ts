@@ -7,7 +7,7 @@ import { getRoomMode, getRoomModeProfile, isHighLikeMode } from '@/modules/share
 import { getActiveRemoteThreshold } from '@/modules/infra/bucketGovernor';
 import { RoleData } from '@/constant/CreepConstant';
 import { RoadBuilder, RoadMemory, RoadVisual } from '@/modules/features/external/externalRoad';
-import { buildHaulerBodyConfig, buildRemoteMinerBody } from '@/modules/shared/remoteBody';
+import { buildHaulerBodyConfig, buildOutBuildBody, buildRemoteMinerBody } from '@/modules/shared/remoteBody';
 import { HighwayMineVisual } from '@/modules/shared/highwayMineVisual';
 import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
 import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/modules/shared/memory';
@@ -652,12 +652,16 @@ export class ExternalMineState {
 
         const Mem = getOutMineData(sourceRoomName);
         Mem.energy ??= [];
+        // rush：3×3/九宫格内对角房与正交房同距（相邻直接连通），8 向全开 =
+        // 收入翻倍（每房 2 源 × 10/tick）。生产大地图保留「只扩正交」的老约束。
+        const rush = Game.rooms[sourceRoomName] && getRoomMode(Game.rooms[sourceRoomName]) === 'rush';
+        const maxRemote = rush ? 8 : 4;
         const addedRooms: string[] = [];
         for (let dx = -1; dx <= 1; dx++) {
             for (let dy = -1; dy <= 1; dy++) {
                 if (dx === 0 && dy === 0) continue;
-                if (dx !== 0 && dy !== 0) continue; // 只允许上下左右四个正交方向，斜角太远不扩
-                if (Mem.energy.length >= 4) break;
+                if (!rush && dx !== 0 && dy !== 0) continue; // 只允许上下左右四个正交方向，斜角太远不扩
+                if (Mem.energy.length >= maxRemote) break;
                 const x = px + dx;
                 const y = py + dy;
                 const roomName = `${x >= 0 ? 'E' + x : 'W' + (-x - 1)}${y >= 0 ? 'N' + y : 'S' + (-y - 1)}`;
@@ -750,16 +754,20 @@ export class ExternalMineState {
     // 外矿基础设施建造入口。
     // container 只要目标房有视野就优先尝试落地，不再受 secondary action 节流影响；
     // road 仍按 secondary action、等级与 BUILD_INTERVAL 节流，避免把高成本寻路/铺路放大到每 tick。
+    // rush 例外：道路是采集/搬运的 2 倍速引擎（平地 1 tick/格 → 路面 0.5），落地即铺、
+    // 100 tick 一轮——等 RCL4 才铺路，整个前期远程运力都在平地上爬（race 实测 4 万 tick 零路网）。
     static tryBuildRoad(
         sourceRoom: Room,
         targetRoom: Room,
         minLevel: number,
         canRunSecondaryAction: boolean
     ): void {
+        RoadBuilder.ensureControllerContainer(sourceRoom);
         RoadBuilder.ensureContainerSites(sourceRoom, targetRoom);
         if (!canRunSecondaryAction) return;
-        if (sourceRoom.level < minLevel) return;
-        if (Game.time % EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL !== 0) return;
+        const rush = getRoomMode(sourceRoom) === 'rush';
+        if (sourceRoom.level < (rush ? 2 : minLevel)) return;
+        if (Game.time % (rush ? 100 : EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL) !== 0) return;
         RoadBuilder.createRoadSites(sourceRoom, targetRoom);
     }
 
@@ -1655,6 +1663,12 @@ export class ExternalMineSpawner {
     // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
     private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = RoleData['out-harvest'].level;
     private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-carry'].level;
+    // rush 管线等级：rush 的升级池常驻占住 L10 层（目标 18~30 work 永远缺编），
+    // 等待能量的 spawn 语义下 L12/13 任务永远等不到上路——外矿是 rush 的收入引擎，
+    // 必须能进插队层（<10）：空房首采 6（低于换班 5、高于采集 3），搬运 9
+    //（有在场产出闸 + 挂单上限，不会回到旧版 24 只搬运的膨胀）
+    private static readonly OUTMINE_RUSH_HARVEST_LEVEL = 6;
+    private static readonly OUTMINE_RUSH_CARRY_LEVEL = 9;
 
     // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
     // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线
@@ -2031,7 +2045,15 @@ export class ExternalMineSpawner {
         // 接替孵化必须抢在本地 worker 之前，否则排队时间让老爬先死，采集断档、
         // 搬运工集体闲置（无缝接力的核心）。
         const isReplacement = this.getAllLiveOutHarvesterNum(targetRoomName) > 0;
-        const replaceLevel = isReplacement ? this.OUTMINE_REPLACEMENT_LEVEL : this.OUTMINE_HARVEST_PIPELINE_LEVEL;
+        const rushPipelineLevel = getRoomMode(sourceRoom) === 'rush'
+            ? this.OUTMINE_RUSH_HARVEST_LEVEL
+            : this.OUTMINE_HARVEST_PIPELINE_LEVEL;
+        // rush 换班也让位升级（L9）：换班单 E700 比升级体型 E750 便宜，若留在 L5
+        // 会把 extension 永远压在 700 以下，升级工饿死（单 spawn 优先级霸权）。
+        // 代价：换班延迟到升级池清空的窗口，采集短暂断档后恢复。
+        const replaceLevel = isReplacement
+            ? (getRoomMode(sourceRoom) === 'rush' ? this.OUTMINE_RUSH_CARRY_LEVEL : this.OUTMINE_REPLACEMENT_LEVEL)
+            : rushPipelineLevel;
         if (upbody) {
             sourceRoom.SpawnMissionAdd('OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, 'out-harvest', memory);
         } else {
@@ -2039,9 +2061,12 @@ export class ExternalMineSpawner {
             // 自带 1 CARRY 自补）——LOW/CRITICAL 时预算取当前可用能量（
             // 饥荒期也要出得起小体型，[W2,M1,C1] 仍有 4/tick 产出），否则全款体型
             // 在贫困房永远攒不齐，外矿会集体老死断供（死亡螺旋）；
-            // 每轮派单都按当时预算重新生成，能量回升自动出满配 5W
+            // 每轮派单都按当时预算重新生成，能量回升自动出满配 5W。
+            // rush 例外：缩水体是「低效循环」——小体型运/采同一吞吐要更多只、
+            // 孵化排队更久、房间更穷；rush 的升级抽水不该让收入引擎降级。
             const energyState = ExternalMineState.getEnergyState(sourceRoom);
-            const energyBudget = (energyState === 'LOW' || energyState === 'CRITICAL')
+            const rushMode = getRoomMode(sourceRoom) === 'rush';
+            const energyBudget = (!rushMode && (energyState === 'LOW' || energyState === 'CRITICAL'))
                 ? Math.max(300, sourceRoom.energyAvailable)
                 : sourceRoom.energyCapacityAvailable;
             const body = buildRemoteMinerBody(energyBudget, 5, true);
@@ -2067,9 +2092,11 @@ export class ExternalMineSpawner {
         const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, 'out-carry', targetRoom.name);
         // 体型按当前预算最大化 CARRY（走路段 [C,C,M] 整组扩展）——LOW/CRITICAL 时
         // 预算取当前可用能量（同采集工口径：贫困房也要出得起小搬运，能量回升
-        // 每轮派单自动升回满配）
+        // 每轮派单自动升回满配）。rush 例外：抽水造成的 LOW 不降级收入引擎，
+        // 否则小体型搬运 → 同吞吐要更多只 → 队列更堵 → 更穷的螺旋。
         const energyState = ExternalMineState.getEnergyState(sourceRoom);
-        const energyBudget = (energyState === 'LOW' || energyState === 'CRITICAL')
+        const carryRush = getRoomMode(sourceRoom) === 'rush';
+        const energyBudget = (!carryRush && (energyState === 'LOW' || energyState === 'CRITICAL'))
             ? Math.max(150, sourceRoom.energyAvailable)
             : sourceRoom.energyCapacityAvailable;
         const carryBody = buildHaulerBodyConfig(energyBudget, { forRoad: true, maxCarry: 16 });
@@ -2078,7 +2105,10 @@ export class ExternalMineSpawner {
         if (totalCarry < num) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
-            sourceRoom.SpawnMissionAdd('OC', carryBody, this.OUTMINE_CARRY_PIPELINE_LEVEL, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            const carryLevel = getRoomMode(sourceRoom) === 'rush'
+            ? this.OUTMINE_RUSH_CARRY_LEVEL
+            : this.OUTMINE_CARRY_PIPELINE_LEVEL;
+        sourceRoom.SpawnMissionAdd('OC', carryBody, carryLevel, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
         }
 
@@ -2143,7 +2173,18 @@ export class ExternalMineSpawner {
         };
         if (repairOnly) memory.outBuildMode = 'repair';
 
-        sourceRoom.SpawnMissionAdd('OB', '', this.PRIORITY.build, 'out-build', memory);
+        // rush 下 out-build 提到 9（与搬运同层、插队层内）：远程道路/容器是运力引擎，
+        // L12 在「等待高优先级能量」语义下永远轮不到（升级池常驻有任务）。
+        // 任务本身按工地存在性自限（没工地不下单），提级不会造成空转孵化。
+        const buildLevel = getRoomMode(sourceRoom) === 'rush' ? 9 : this.PRIORITY.build;
+        // 显式体型：out-build 无 RoleLevelData 分级表，空 body 会被孵化端按 Infinity
+        // 成本跳过（结构性无法孵化）。rush 不缩水——建造力就是运力引擎本身。
+        const energyState = ExternalMineState.getEnergyState(sourceRoom);
+        const buildRush = getRoomMode(sourceRoom) === 'rush';
+        const buildBudget = (!buildRush && (energyState === 'LOW' || energyState === 'CRITICAL'))
+            ? Math.max(300, sourceRoom.energyAvailable)
+            : sourceRoom.energyCapacityAvailable;
+        sourceRoom.SpawnMissionAdd('OB', buildOutBuildBody(buildBudget), buildLevel, 'out-build', memory);
         return true;
     }
 }
@@ -2214,11 +2255,21 @@ export class ExternalMine {
         // 注意：外矿侦查/离线补员也走这个顺序，保证近房先建立视野与工位记录。
         const orderedTargets = ExternalMineSpawner.orderTargetsForSpawn(room, targetRooms);
 
+        // rush 渐进扩图（外矿建设并发受限、先近后远）：活跃外矿数随 RCL 增长
+        // （RCL3→4 房、RCL4→5……上限 8）。
+        // 一次全开 8 房时，道路工地 + 16 只编制的补员需求（全是 L9）会形成永久任务流，
+        // 把主房采集/升级挤死（race 实测：人口崩到 20、控制器容器断粮）。
+        // 未激活房间保留在注册表里，RCL 提升后自动扩容。
+        const maxActiveTargets = ExternalMine.getRoomMode(room) === 'rush'
+            ? Math.min(orderedTargets.length, Math.max(4, room.level + 1))
+            : orderedTargets.length;
+        const activeTargets = orderedTargets.slice(0, maxActiveTargets);
+
         // 队列 = 本轮需求：先作废上一轮的外矿经济挂单，再按上面的顺序重新铺。
         // 不做这一步，「先近后远」只会作用于队尾，队头永远是历史遗留顺序（线上即如此）。
         ExternalMineSpawner.clearPlannedEconomyMissions(room);
 
-        for (const roomName of orderedTargets) {
+        for (const roomName of activeTargets) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) {
                 if (runState.canRunSecondaryAction) {

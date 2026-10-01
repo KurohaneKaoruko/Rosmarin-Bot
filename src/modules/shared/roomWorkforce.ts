@@ -349,7 +349,8 @@ export const getRushUpgradeSlotCap = (room: Room): number =>
     getRoomTickCacheValue(room, 'rush_upgrade_slot_cap', () => getRushUpgradeSlotList(room).length);
 
 /** 房间布局是否支持冲级（控制器旁有 storage/terminal，且它们旁边有可站格位） */
-export const canRushUpgrade = (room: Room): boolean => getRushUpgradeSlotCap(room) > 0;
+export const canRushUpgrade = (room: Room): boolean =>
+    getRushUpgradeSlotCap(room) > 0 || hasControllerEnergyBuffer(room);
 
 // ==================== 升级吞吐 ====================
 
@@ -543,7 +544,11 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 // - 无仓期：实际收入 > 在役升级功率（钱比花得快，立即加码消耗端）。
 // level 链：加急层(10) 优先于 外矿流水线(12)、低于 worker(8)——
 // 建造仍优先于加急升级，与「BUILD > UPGRADE_PRIORITY > REMOTE_SOURCE > UPGRADE」对齐。
-export const UPGRADE_URGENT_SPAWN_LEVEL = 10;
+// 升级孵化加急（富余能量快速消化）。
+// level 7：必须压过外矿管线（out-harvest 换班 5 除外——那是真实维护）才能兑现「加急」。
+// 曾经设为 10，语义是压过旧外矿层（12/13）；外矿管线提到 6/9 后，10 反而垫底，
+// 升级任务被 L5/L9 维护单永久堵死（race 实测：容器满 1 万、地上 2.3 万腐烂、uWork=0）。
+export const UPGRADE_URGENT_SPAWN_LEVEL = 7;
 const LEVEL_WORKER_FIRST = 110;
 
 /**
@@ -645,9 +650,9 @@ export const getWorkerPopulationCap = (room: Room): number =>
 // 压到 3~4 只又会让冲级明显变慢。取 5~6 是折中——既不吃穿收入，也不独占 spawn。
 const UPGRADER_POP_CAP_BY_LEVEL: Record<number, number> = {
     1: 3,
-    2: 4,
-    3: 6,
-    4: 6,
+    2: 6,
+    3: 8,
+    4: 8,
     5: 7,
     6: 8,
     7: 8,
@@ -717,7 +722,12 @@ export const getControllerUpgradeSlotCap = (room: Room) => {
  */
 const getUpgradeSlotPool = (room: Room): RoomPosition[] => {
     if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
-    if (getRoomMode(room) === 'rush' && canRushUpgrade(room)) return getRushUpgradeSlotList(room);
+    if (getRoomMode(room) === 'rush' && canRushUpgrade(room)) {
+        // 仓库冲级工位（storage/terminal 旁）为空时（RCL2-4 只有控制器容器的阶段）
+        // 回退控制器通用工位——容器就在控制器 3 格内，站这里照样贴着取能点
+        const rushSlots = getRushUpgradeSlotList(room);
+        return rushSlots.length > 0 ? rushSlots : getControllerUpgradeSlotList(room);
+    }
     return getControllerUpgradeSlotList(room);
 };
 
@@ -939,6 +949,40 @@ export const getUpgraderPathTime = (room: Room): number | undefined => {
     if (!path || path.length === 0) return timing?.pathTime;
     mem.upgradeTiming = { pathTime: path.length, measuredAt: Game.time };
     return path.length;
+};
+
+/**
+ * 控制器容器专职搬运缺口。
+ *
+ * @remarks
+ * 口径：`缺口 = floor(2 × maxWork × distance / 50)`——
+ * 升级端每 tick 从控制器容器抽走 maxWork 点能量，搬运往返 2×distance tick，
+ * 在途总量 = 2 × maxWork × distance 能量，折 CARRY 部件（50/件）即需专职搬运力。
+ * 我们没有独立 hauler 角色，折算成 carrier 只数，缺口每轮最多补 1 只（涓流进场）。
+ *
+ * 容器水位高于 maxWork×8（短时间吃不完）时返回 0，避免无谓占用 spawn。
+ */
+export const getControllerCarryDeficit = (room: Room): number => {
+    if (getRoomMode(room) !== 'rush') return 0;
+    const maxWork = getUpgradeWorkTarget(room);
+    if (maxWork <= 0) return 0;
+    const controller = room.controller;
+    const container = (room.container || []).find(
+        c => controller && c.pos.inRangeTo(controller.pos, 3),
+    );
+    if (!container) return 0;
+    if ((container.store[RESOURCE_ENERGY] || 0) > maxWork * 8) return 0;
+    const distance = Math.max(10, getUpgraderPathTime(room) ?? 20);
+    const carryParts = Math.ceil(2 * maxWork * distance / 50);
+    // 按 carrier 实际体型（分级表 RCL3-5 约 C8）保守折算，而非理想 C16
+    const carryPerCreep = 8;
+    const needed = Math.max(1, Math.ceil(carryParts / carryPerCreep));
+    const upgraders = typeof room.find === 'function'
+        ? (room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'carrier' && (c.memory as any).controllerCarry),
+        }) as Creep[]) : [];
+    const alive = upgraders.filter(c => (c.ticksToLive ?? 1500) > c.body.length * 3 + 10).length;
+    return needed > alive ? 1 : 0;
 };
 
 /**

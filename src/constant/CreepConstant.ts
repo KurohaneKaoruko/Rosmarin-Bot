@@ -35,7 +35,7 @@ export const RoleData = {
     }, // 中央搬运
     'upgrader': {
         bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]],
-        level: 8,
+        level: 7,
         code: 'U',
         executor: 'upgrader',
     }, // 专人升级：high 单独配人减 worker 负担，rush 走冲级策略（定编见 shared/roomWorkforce.getUpgraderTarget）
@@ -404,13 +404,13 @@ export const RoleLevelData = {
     // 等级制体型表，由 getUpgraderTarget 决定每个模式下孵几只：
     // low/main 为 0（worker 兼任升级），high/rush 才有独立升级工。
     'upgrader': {
-        1: { bodypart: [[WORK, 1], [CARRY, 1], [MOVE, 2]], num: 3 },
-        2: { bodypart: [[WORK, 2], [CARRY, 2], [MOVE, 4]], num: 3 },
-        3: { bodypart: [[WORK, 3], [CARRY, 3], [MOVE, 6]], num: 3 },
-        4: { bodypart: [[WORK, 4], [CARRY, 4], [MOVE, 8]], num: 2 },
-        5: { bodypart: [[WORK, 6], [CARRY, 6], [MOVE, 6]], num: 2 },
-        6: { bodypart: [[WORK, 15], [CARRY, 5], [MOVE, 10]], num: 2 },
-        7: { bodypart: [[WORK, 30], [CARRY, 5], [MOVE, 15]], num: 2 },
+        1: { bodypart: [[WORK, 2], [CARRY, 1], [MOVE, 1]], num: 3 },
+        2: { bodypart: [[WORK, 4], [CARRY, 1], [MOVE, 2]], num: 3 },
+        3: { bodypart: [[WORK, 6], [CARRY, 1], [MOVE, 2]], num: 3 },
+        4: { bodypart: [[WORK, 11], [CARRY, 1], [MOVE, 3]], num: 5 },
+        5: { bodypart: [[WORK, 15], [CARRY, 1], [MOVE, 4]], num: 5 },
+        6: { bodypart: [[WORK, 20], [CARRY, 1], [MOVE, 5]], num: 5 },
+        7: { bodypart: [[WORK, 28], [CARRY, 1], [MOVE, 7]], num: 5 },
         8: { bodypart: [[WORK, 15], [CARRY, 5], [MOVE, 10]], num: 1 },
     },
     'universal': {

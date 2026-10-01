@@ -83,3 +83,22 @@ export function buildHaulerBodyConfig(
     }
     return body;
 }
+
+/**
+ * 外矿建造工体型：[W2, C1, M1] 整组扩展（300/组）。
+ *
+ * - WORK 占半：建造/维修的主力；CARRY 自取能量（容器/掉落/工地旁）；M 半数保证
+ *   无路平原的远程机动；
+ * - RoleData['out-build'].bodypart 是空数组且 RoleLevelData 无分级表——不传显式
+ *   体型时 GetRoleBodys 解析出空 body，孵化端按「无法孵化」永久跳过
+ *   （race 实测：外矿路网工地铺满却没有一只建造工）。
+ */
+export function buildOutBuildBody(energyCapacity: number): BodyConfig {
+    const groupCost = WORK_COST * 2 + CARRY_COST + MOVE_COST;
+    const maxGroups = Math.min(
+        Math.floor(MAX_CREEP_SIZE / 4),
+        Math.floor(energyCapacity / groupCost),
+    );
+    if (maxGroups <= 0) return [];
+    return [[WORK, maxGroups * 2], [CARRY, maxGroups], [MOVE, maxGroups]];
+}

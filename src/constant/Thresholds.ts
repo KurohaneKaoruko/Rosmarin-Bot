@@ -27,11 +27,16 @@ export const THRESHOLDS = {
         EMERGENCY_ENERGY_THRESHOLD: 1000,
         BODY_REDUCTION_THRESHOLD: 1000,
         // 是否允许 spawn 因等待更高优先级任务的能量而空转。
-        ALLOW_WAIT_FOR_PRIORITY_ENERGY: false,
+        // 关掉时执行器会兜底选「任意可负担任务」——廉价任务（reserver/out-carry 缩水体）
+        // 会持续把能量压在昂贵任务的成本线下，最高优先级被无限饿死（race 实测：6 只
+        // upgrader 任务在池、extension 永远到不了 800，升级吞吐归零）。
+        ALLOW_WAIT_FOR_PRIORITY_ENERGY: true,
         // 当开启“等待高优先级能量”时，仅允许 level 小于该值的任务插队。
         // 例如该值为 10，则 5 可以在 2 孵不起时先孵，而 10/11/12 不行。
         // 注意：任务 level 数值越小，优先级越高。
-        WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL: 10,
+        // 11 而非 10：加急升级任务本身就是 10——若阈值卡在 10，它会被
+        // 更高层（外矿采集 L6）的固定大体型永久堵死，升级端颗粒无收。
+        WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL: 11,
         UNIV_EMERGENCY_CAP: {
             RCL1_2: 3,
             RCL1_2_HIGH: 4,
