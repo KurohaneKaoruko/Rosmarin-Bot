@@ -115,7 +115,7 @@ export const getLinkThroughputWorkCap = (room: Room): number => {
 // - ttd 已进降级风险区（< UPGRADE_NEEDED_TTD）不缩编——此时升级是保命项，降级保底优先；
 // - RCL≥8 不计数：满级房是固定小编制 + link 常供，缩编无意义。
 const STARVED_MAX = 200;
-/** starved 超过该值追加第二轮缩编（ 原值） */
+/** starved 超过该值追加第二轮缩编 */
 const STARVED_SECOND_STAGE = 100;
 
 // 控制器缓冲（link/container）是否彻底断流——starved 记账的前提
