@@ -752,6 +752,25 @@ const selectWithdrawPlan = (
         });
     }
 
+    // 控制器专职搬运（controllerCarry）：extension 盈余（spawn 底仓 300 之外）纳入补给源——
+    // extension 满仓而控制器容器空置的能量死锁，由专职搬运解开（extension → depot → 升级工）
+    if (creep.memory?.controllerCarry) {
+        const exts = (roomAny.extension || []).filter((e: StructureExtension) =>
+            e && (e.store[RESOURCE_ENERGY] || 0) > 300 && !isNoPath(room.name, e.id));
+        for (const e of exts) {
+            if (excludeId && e.id === excludeId) continue;
+            const amount = (e.store[RESOURCE_ENERGY] || 0) - 300;
+            const effectiveAmount = getCarrierEffectiveAvailableAmount(reservedCapacityById, e.id, RESOURCE_ENERGY, amount);
+            if (effectiveAmount <= 0) continue;
+            candidates.push({
+                priority: 40,
+                range: pos.getRangeTo(e),
+                amount: effectiveAmount,
+                plan: { id: e.id, kind: 'container', resourceType: RESOURCE_ENERGY, lockTtl: 3 }
+            });
+        }
+    }
+
     // 优先级4：从 storage/terminal 取能量（仅用于补能模式的兜底）
     if (urgentEnergy && freeCap > 0) {
         const source = getStorageOrTerminal(creep, urgentEnergy) as AnyStoreStructure | null;

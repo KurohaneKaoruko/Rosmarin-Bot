@@ -29,8 +29,9 @@ export {
 
 export default class SpawnMission extends Room {
     /**
-     * rush spawn 平衡：控制器容器水位低于升级身位成本时，
-     * 暂停升级孵化并清掉升级挂单，把 spawn 让给物流/建造层；容器续上后自动恢复。
+     * rush spawn 平衡（水位门）：控制器容器水位低于升级抽水速率 × 10-tick
+     * 缓冲时，暂停升级孵化并清掉升级挂单，把 spawn 让给物流/建造层；
+     * 仓库续上后自动恢复。分级下探后的升级单随时能孵，不受此门影响。
      *
      * @returns true 表示本 tick 升级孵化被暂停。
      */
@@ -43,13 +44,11 @@ export default class SpawnMission extends Room {
         // 没有控制器容器：早期阶段无静态冲级路线，不干预（走 extension 口径）
         if (!container) return false;
 
-        const bodyConfig = this.GetRoleBodys('upgrader');
-        const bodypart = this.GenerateBodys(bodyConfig, 'upgrader');
-        const bodyCost = bodypart.length > 0 ? this.CalculateEnergy(bodypart) : 0;
-        if (bodyCost <= 0) return false;
-
         const depot = container.store[RESOURCE_ENERGY] || 0;
-        if (depot >= bodyCost) return false;
+        const drainRate = getUpgradeWorkTarget(this);
+        if (drainRate <= 0) return false;
+        // 水位低于抽水速率 × 10 tick 的缓冲：暂停升级孵化（物流优先补给）
+        if (depot >= drainRate * 10) return false;
 
         // 仓库见底：清掉升级挂单（它们以固定成本占池，会让 L9 物流永远等不到窗口）
         const tasks = (this.getAllMissionFromPool('spawn') || []) as Task[];
@@ -119,14 +118,14 @@ export default class SpawnMission extends Room {
             if (shouldSpawnRole(role, context, adjusted)) {
                 // rush 升级在仓库断粮期被暂停（见 pauseRushUpgraderIfDepotStarved）
                 if (role === 'upgrader' && rushUpgraderPaused) continue;
-                // 升级工体型：RCL 分级表固定体型——升级任务只在「能量攒到
-                // 满容量体型」时孵化，不做预算缩水。
-                // 曾经改成「动态预算体型」（能量到哪孵到哪）：小体型爬让 WORK 缺口永远
-                // 补不满、任务永久挂池，把 L9 搬运/建造彻底饿死（外矿断流、能量落地腐烂）
-                // ——正解是缺口门（缺口×2 < 体型 WORK 数就不孵）+ 严格优先级。
-                const body = role === 'upgrader'
-                    ? this.GetRoleBodys('upgrader')
-                    : '';
+                // 升级工体型：rush 按当前可用能量走 RCL 分级表（分级下探，保证随时能孵
+                // ——满档体型会被建造/搬运的常态抽取压在成本线以下，零余量死锁）；
+                // 非 rush 维持「按定编缺口 + 满容量」一次孵最大。
+                const body = role === 'upgrader' && getRoomMode(this) === 'rush'
+                    ? this.GetRoleBodys('upgrader', false, this.energyAvailable)
+                    : role === 'upgrader'
+                        ? buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this))
+                        : '';
                 // 缺口门：WORK 缺口×2 都填不满一个身位时不发单（防小缺口反复孵化空转）
                 if (role === 'upgrader') {
                     const bodyWork = (body as ((BodyPartConstant | number)[])[])
@@ -285,6 +284,11 @@ export class SpawnTaskGetter extends Room {
         if (!role) return null;
 
         let body = data.body as ((BodyPartConstant | number)[])[] | string;
+        // rush 升级：按当前可用能量走分级表下探——固定满档体型（RCL4 = 1300 = 满容量）
+        // 会被建造/搬运的常态抽取压死，extension 攒到成本线以下就永远孵不出
+        if (role === 'upgrader' && getRoomMode(this) === 'rush') {
+            body = this.GetRoleBodys('upgrader', false, energyAvailable);
+        }
         const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
         let requiredEnergy = Number(data.energy || 0);
 
@@ -363,3 +367,4 @@ export class SpawnTaskGetter extends Room {
         return num;
     }
 }
+

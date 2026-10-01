@@ -1665,10 +1665,11 @@ export class ExternalMineSpawner {
     private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-carry'].level;
     // rush 管线等级：rush 的升级池常驻占住 L10 层（目标 18~30 work 永远缺编），
     // 等待能量的 spawn 语义下 L12/13 任务永远等不到上路——外矿是 rush 的收入引擎，
-    // 必须能进插队层（<10）：空房首采 6（低于换班 5、高于采集 3），搬运 9
-    //（有在场产出闸 + 挂单上限，不会回到旧版 24 只搬运的膨胀）
+    // 必须能进插队层（<10）：空房首采 6（低于换班 5、高于采集 3），搬运 8
+    //（参考实现 层序：紧急升级 > 远程搬运 > 普通升级——搬运排正常升级前，
+    // 有在场产出闸 + 挂单上限，不会回到旧版 24 只搬运的膨胀）
     private static readonly OUTMINE_RUSH_HARVEST_LEVEL = 6;
-    private static readonly OUTMINE_RUSH_CARRY_LEVEL = 9;
+    private static readonly OUTMINE_RUSH_CARRY_LEVEL = 8;
 
     // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
     // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线

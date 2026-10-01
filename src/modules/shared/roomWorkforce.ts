@@ -705,6 +705,45 @@ export const getControllerUpgradeSlotList = (room: Room): RoomPosition[] => {
     });
 };
 
+/**
+ * 控制器容器相邻格（同时距控制器 ≤3）：静态升级工的**稳定取能站位**——
+ * 站在这里 withdraw（容器相邻）与 upgradeController（控制器 ≤3）原地完成，
+ * 零移动、零断供窗口。容器不存在时返回空。
+ */
+export const getControllerContainerSlotList = (room: Room): RoomPosition[] => {
+    return getRoomTickCacheValue(room, 'controller_container_slot_list', () => {
+        const controller = room.controller;
+        const container = (room.container || []).find(
+            c => controller && c.pos.inRangeTo(controller.pos, 3),
+        );
+        if (!container) return [];
+        if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
+
+        const terrain = room.getTerrain();
+        const slots: RoomPosition[] = [];
+        for (let dx = -1; dx <= 1; dx++) {
+            for (let dy = -1; dy <= 1; dy++) {
+                if (dx === 0 && dy === 0) continue;
+                const x = container.pos.x + dx;
+                const y = container.pos.y + dy;
+                if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                const pos = new RoomPosition(x, y, room.name);
+                if (pos.getRangeTo(controller) > 3) continue;
+                const structures = room.lookForAt(LOOK_STRUCTURES, x, y) as Structure[];
+                const blocked = structures.some((s: any) =>
+                    s.structureType !== STRUCTURE_ROAD &&
+                    s.structureType !== STRUCTURE_CONTAINER &&
+                    !(s.structureType === STRUCTURE_RAMPART && s.my)
+                );
+                if (blocked) continue;
+                slots.push(pos);
+            }
+        }
+        return slots;
+    });
+};
+
 // 估算 controller 周围可站位，作为 upgrader 数量上限
 export const getControllerUpgradeSlotCap = (room: Room) => {
     return getRoomTickCacheValue(room, 'controller_upgrade_slots', () => getControllerUpgradeSlotList(room).length);
@@ -724,9 +763,12 @@ const getUpgradeSlotPool = (room: Room): RoomPosition[] => {
     if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
     if (getRoomMode(room) === 'rush' && canRushUpgrade(room)) {
         // 仓库冲级工位（storage/terminal 旁）为空时（RCL2-4 只有控制器容器的阶段）
-        // 回退控制器通用工位——容器就在控制器 3 格内，站这里照样贴着取能点
+        // 回退控制器容器相邻格——站这里 withdraw（容器相邻）与 upgrade（控制器 ≤3）
+        // 原地完成，零移动；容器不存在再退控制器 3 格通用位
         const rushSlots = getRushUpgradeSlotList(room);
-        return rushSlots.length > 0 ? rushSlots : getControllerUpgradeSlotList(room);
+        if (rushSlots.length > 0) return rushSlots;
+        const ccSlots = getControllerContainerSlotList(room);
+        if (ccSlots.length > 0) return ccSlots;
     }
     return getControllerUpgradeSlotList(room);
 };

@@ -177,6 +177,10 @@ export default class SpawnControl extends Room {
         const state = getEnergyState(this);
         let usedBudget = false;
         let body: ((BodyPartConstant | number)[])[] | string = data.body;
+        // rush 升级：按当前可用能量走分级表（与孵化端同口径，防零余量死锁）
+        if (role === 'upgrader' && getRoomMode(this) === 'rush') {
+            body = this.GetRoleBodys('upgrader', false, this.energyAvailable);
+        }
         if (typeof body === 'string' && body) {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length === 0) {
@@ -217,7 +221,8 @@ export default class SpawnControl extends Room {
     }
 
     SpawnCreep() {
-        if (!isRoomTickAligned(this.name, 5)) return;
+        // 每 tick 处理孵化：5-tick 对齐门在能量充足期造成孵化空闲窗口
+        //（爬虫孵化 12-45t + 门 5t = 20-40% 空转），rush 下 CPU 充裕不需要省
         if (this.energyAvailable < 200) return;
 
         const spawn = getAvailableSpawn(this);
