@@ -64,9 +64,6 @@ const onTarget = (creep: Creep): WorkEvent => {
         return WORK_EVENTS.TO_SOURCE;
     }
 
-    // 站桩升级期间禁止被拉扯；寿命末期解除锁定，允许回收物流接管
-    creep.memory.dontPullMe = (creep.ticksToLive ?? 1500) >= 100;
-
     // 统一走 runControllerUpgrade：寻路、控制器工位前压、捡能量、升级、签名
     creep.runControllerUpgrade({ sign: true, pickupDropped: true });
     syncUpUpgradeMoveWork(creep);
@@ -91,7 +88,7 @@ const onSource = (creep: Creep): WorkEvent => {
 
     // 控制器周边缓冲取能：link > container > terminal > storage。
     // 严禁回退通用取能（fallbackToTakeEnergy: false）——静态升级工绝不离开控制器区域
-    // 自己找能量：仓库空了就原地待命，能量由搬运送上容器；乱走会丢站位、拖垮吞吐，
+    // 自己找能量：仓库空了就原地待命，能量由搬运送上容器；乱走会拖垮吞吐，
     // 还会和搬运/孵化抢散能。断供期照记 starved 负反馈（缩编信号）。
     const filled = creep.withdrawControllerEnergy({
         linkRange: 2,

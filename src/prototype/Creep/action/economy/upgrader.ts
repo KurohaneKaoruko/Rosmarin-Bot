@@ -68,8 +68,6 @@ const onTarget = (creep: Creep): WorkEvent => {
         retire(creep);
         return WORK_EVENTS.STAY;
     }
-    // 站桩升级期间禁止被拉扯；寿命末期解除锁定，允许回收物流接管
-    creep.memory.dontPullMe = (creep.ticksToLive ?? 1500) >= 100;
 
     // 统一走 runControllerUpgrade：寻路、控制器工位前压、捡能量、升级、签名
     creep.runControllerUpgrade({ sign: true, pickupDropped: true });
