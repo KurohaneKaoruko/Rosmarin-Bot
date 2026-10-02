@@ -47,9 +47,9 @@ export default class RoomExecute extends Room {
         }
         if (profile.remoteMining) this.outMine();          // 外矿采集（low 关闭）
 
-        // rush 冲级特殊机制（低等级 + spawn 贴控制器时触发）与 mini 迷你房常驻机制：
-        // source 旁补 ext + 自爆拉能快递（有 link 自动停）
-        if (getRoomMode(this) === 'rush' || getRoomMode(this) === 'mini') rushBoost(this);
+        // 自爆拉能快递仅 mini 使用（rush 的升级供能走能量中枢与控制器专线，
+        // 不再依赖自爆墓碑——rush 在 spawn 旁堆快递会挤占孵化与交通）
+        if (getRoomMode(this) === 'mini') rushBoost(this);
         // spawn 错位重建：建完第二个 spawn 后，把不在布局位的旧 spawn 拆到布局位（所有模式）
         if (isRoomTickAligned(this.name, 60)) relocateOldSpawn(this);
 

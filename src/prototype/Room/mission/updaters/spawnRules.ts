@@ -2,6 +2,7 @@ import { RoleLevelData } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { getControllerCarryQuota } from '@/prototype/Creep/function/energyLogistics';
 import {
     getRoomEnergyState,
     getRoomMode,
@@ -243,7 +244,13 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         // 地面堆积 = 取力吞吐不足的真实信号：允许在编数之上小幅加编（上限 num+2）。
         // 「身上有货」不算忙碌——载货是搬运工的常态而非短缺证据，按负载率补员只会超编。
         const pile = getDroppedPileEnergy(room);
-        const demand = num + (pile > 1000 ? 1 : 0) + (pile > 3000 ? 1 : 0);
+        let demand = num + (pile > 1000 ? 1 : 0) + (pile > 3000 ? 1 : 0);
+        // rush：控制器专线配额并入定编——升级火力对口搬运数随火力自适应
+        // （缺了它 RCL4+ 的 carrier 定编掉回个位数，cc 喂养断顿、升级段速腰斩）
+        if (getRoomMode(room) === 'rush') {
+            const quota = getControllerCarryQuota(room);
+            if (quota > 0) demand = Math.max(demand, quota + 2);
+        }
         if (current < demand) return true;
 
         if (demand > 0) return false;
@@ -322,68 +329,23 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         return current < 1 && lv >= 6;
     },
     'universal': (room: Room, current: number) => {
-        const lv = room.level;
-        const state = getEnergyState(room);
-        const isLowEnergy = state === 'LOW' || state === 'CRITICAL';
+        // UNIV 仅在「真停摆」时孵化：采集端（矿工+搬运）场上活体归零，
+        // 或控制器临近降级。判定只看活体——池内挂单可能永远付不起，
+        // 把挂单算成补给会让停摆检测被幻影订单致盲（死锁实录）。
+        // bootstrap LOW 态、外矿爬坡期、spawn 繁忙都是常态——不是停摆。
         const creepNum = room.getCreepNum() || {};
-        const transporterNum =
-            (creepNum['carrier'] || 0) +
-            (creepNum['transporter'] || 0) +
-            (creepNum['manager'] || 0) +
-            (creepNum['logistic'] || 0);
-        const harvestNum =
-            (creepNum['harvester'] || 0) +
-            (creepNum['out-harvest'] || 0);
+        const incomeAlive =
+            (creepNum['harvester'] || 0) + (creepNum['carrier'] || 0);
+        const downgradeUrgent = !!room.controller?.my
+            && (room.controller.ticksToDowngrade || 1e9) < 3000
+            && room.level < 8;
 
-        const getRoleMinEnergy = (role: string) => {
-            const config = (RoleLevelData as any)[role]?.[lv]?.bodypart;
-            if (!config) return Infinity;
-            const body = room.GenerateBodys(config, role);
-            return room.CalculateEnergy(body);
-        };
-        const minHarvesterEnergy = getRoleMinEnergy('harvester');
-        const minCarrierEnergy = getRoleMinEnergy('carrier');
-        const minTransportEnergy = getRoleMinEnergy('transporter');
-        const minManagerEnergy = getRoleMinEnergy('manager');
-        const hasStorageLike = !!room.storage || !!room.terminal;
-        const minLogisticEnergy = hasStorageLike
-            ? Math.min(minTransportEnergy, minManagerEnergy)
-            : minCarrierEnergy;
-        const energyAvailable = room.energyAvailable || 0;
-        const needHarvestRescue = harvestNum === 0 && energyAvailable < minHarvesterEnergy;
-        const needTransportRescue = transporterNum === 0 && energyAvailable < minLogisticEnergy;
-
-        // 0) 低级房常备（防停机核心）：NORMAL 态且物流基建（container/link/storage）
-        //    未成型时，保持少量 UNIV 常驻。harvester（无仓掉落）+ carrier 的分工一旦断环，
-        //    UNIV 立即无缝顶上，而不是等能量跌进 LOW 才触发救援——消除“停机→救援”振荡。
-        const hasLogisticsInfra =
-            (room.container?.length || 0) > 0 || hasStorageLike || (room.link?.length || 0) > 0;
-
-        // 1) 控制器降级兜底：仅在低等级且低能量时用 UNIV，常态升级由 worker 兼任
-        let target = 0;
-        if (lv <= 2 && !isLowEnergy && !hasLogisticsInfra) {
-            target = Math.max(target, 2);
-        }
-        if (lv <= 4 && isLowEnergy) {
-            target = getDowngradeUniversalTarget(room);
-        }
-
-        // 2) 低能量救援：采集/搬运其中一方为 0 且当前能量不足以孵化该角色时补 UNIV
-        if (isLowEnergy && room.CheckSpawnAndTower() && (needHarvestRescue || needTransportRescue)) {
-            let emergencyTarget = lv <= 2 ? 3 : lv <= 4 ? 2 : 1;
-            if (state === 'CRITICAL') emergencyTarget += 1;
-            if (transporterNum === 0) emergencyTarget += 1;
-            target = Math.max(target, emergencyTarget);
-        }
-
-        // 3) 仅在 high/rush 模式下，早期或无物流基建时补 UNIV
-        const hasContainer = !!room.container && room.container.length > 0;
-        const mode = getRoomMode(room);
-        if (isHighLikeMode(mode) && (lv < 3 || (!hasContainer && !hasStorageLike))) {
-            target = Math.max(target, 2);
-            if (mode === 'rush') target = Math.max(target, 5);
-        }
-        return current < target;
+        // rush 开局经济只有定点矿工/搬运/升级：停摆由应急孵化补最小经济体，
+        // UNIV 永不参与
+        if (getRoomMode(room) === 'rush') return false;
+        if (incomeAlive > 0) return false;   // 采集端在跑：永不孵 UNIV
+        if (!downgradeUrgent && room.level > 1) return false;   // 无降级风险：不孵
+        return current < 2;
     },
 };
 

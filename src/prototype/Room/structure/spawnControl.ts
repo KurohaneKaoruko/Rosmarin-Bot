@@ -5,8 +5,6 @@ import { decompressBodyConfig } from '@/modules/shared/compress';
 import { getRoomData } from '@/modules/shared/memory';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
-import { getMyConstructionSites } from '../mission/updaters/spawnRules';
-
 const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 };
@@ -15,7 +13,8 @@ const getEnergyState = (room: Room) =>
     room.memory.energyState || room.updateEnergyState?.(false);
 
 // 仅这些角色允许在低能量时按当前可用能量降级体型。
-// worker 的预算体型单独由“存在建造需求”控制。
+// worker 不降级：W1 建造力（5 hits/t）只有满编的一半，
+// 订单等满编身体即可。
 // out-harvest / out-carry **不在其列**：远程体型由 remoteBody 生成器精心设计
 // （采集工自带 CARRY 自补），按旧分档表缩水会产出零 CARRY 的废体型——
 // 采集工 harvest 永远 ERR_FULL、白占编制。孵不起就排队等能量：
@@ -91,24 +90,55 @@ export default class SpawnControl extends Room {
     }
 
     private trySpawnEmergencyUniversal(spawn: StructureSpawn, blockedRole = 'recovery', referenceCost = 300) {
-        // 冷启动（lv1 零进度且全场无 creep）：首孵 = 小型 harvester（收入优先，
-        // 参考实现开局先出采集者）——而不是应急 UNIV；UNIV 由池内定编随后按档产出。
-        const coldStart = this.controller?.level === 1
-            && (this.controller?.progress || 0) === 0
-            && Object.keys(Game.creeps).length === 0;
-        const universalBody = this.getEmergencyRecoveryUniversalBody();
-        if (!universalBody || universalBody.length <= 0) return false;
-
-        const bodyCost = this.CalculateEnergy(universalBody);
-        if (bodyCost <= 0 || bodyCost > this.energyAvailable) return false;
-
         const creepNum = this.getCreepNum();
         const spawnMissionNum = this.getSpawnMissionNum() || {};
         const transporterNum = (creepNum['transporter'] || 0) + (spawnMissionNum['transporter'] || 0);
         const carrierNum = (creepNum['carrier'] || 0) + (spawnMissionNum['carrier'] || 0);
         const harvesterNum = (creepNum['harvester'] || 0) + (spawnMissionNum['harvester'] || 0);
-        const universalNum = creepNum['universal'] || 0;
-        if (universalNum >= this.getEmergencyUniversalCap()) return false;
+
+        const spawnBootstrap = (role: 'harvester' | 'carrier', body: BodyPartConstant[]) => {
+            const result = spawn.spawnCreep(
+                body,
+                GenCreepName(RoleData[role].code),
+                { memory: { role, home: this.name, cache: {} } as CreepMemory }
+            );
+            if (result !== OK) return false;
+            creepNum[role] = (creepNum[role] || 0) + 1;
+            global.log(`房间 ${this.name} 应急孵化 ${role}（能量 ${this.energyAvailable}）。`);
+            return true;
+        };
+
+        // rush 开局经济 = 定点矿工/搬运/升级三种 creep：
+        // 判定只看场上活体（池内挂单可能永远付不起，不算补给）——
+        // 无活体矿工先补矿工重启收入，有活体矿工才补搬运收掉落
+        if (getRoomMode(this) === 'rush') {
+            const aliveHarvesters = creepNum['harvester'] || 0;
+            if (aliveHarvesters > 0 && (creepNum['carrier'] || 0) < 4) {
+                return spawnBootstrap('carrier', [CARRY, CARRY, MOVE, MOVE]);
+            }
+            if (aliveHarvesters === 0) {
+                return this.energyAvailable >= 200
+                    ? spawnBootstrap('harvester', [WORK, WORK, MOVE, MOVE])
+                    : spawnBootstrap('harvester', [WORK, MOVE]);
+            }
+            return false;
+        }
+
+        // 冷启动（lv1 零进度且全场无 creep）：首孵 [W2,M2] 静态矿工（收入优先），不用 UNIV
+        const coldStart = this.controller?.level === 1
+            && (this.controller?.progress || 0) === 0
+            && Object.keys(Game.creeps).length === 0;
+        if (coldStart) {
+            if (harvesterNum === 0) return spawnBootstrap('harvester', [WORK, WORK, MOVE, MOVE]);
+            return false;
+        }
+
+        // 停场恢复：采集/搬运断档时补 UNIV
+        const universalBody = this.getEmergencyRecoveryUniversalBody();
+        if (!universalBody || universalBody.length <= 0) return false;
+        const bodyCost = this.CalculateEnergy(universalBody);
+        if (bodyCost <= 0 || bodyCost > this.energyAvailable) return false;
+        if ((creepNum['universal'] || 0) >= this.getEmergencyUniversalCap()) return false;
 
         const compareCost = Math.max(referenceCost, bodyCost);
         const storedEnergy =
@@ -120,22 +150,6 @@ export default class SpawnControl extends Room {
             if (carrierNum !== 0) return false;
         } else {
             if (harvesterNum !== 0 && carrierNum !== 0) return false;
-        }
-
-        // 冷启动收入优先：200 能量 [W2,M2] 无 CARRY 静态连挖（4e/t 不断流，
-        // 掉落在工作位由 rush 常备的 carrier 收取）——UNIV 交由定编流程
-        if (coldStart && this.energyAvailable >= 200 && harvesterNum === 0) {
-            const harvesterBody: BodyPartConstant[] = [WORK, WORK, MOVE, MOVE];
-            const result = spawn.spawnCreep(
-                harvesterBody,
-                GenCreepName(RoleData['harvester'].code),
-                { memory: { role: 'harvester', home: this.name, cache: {} } as CreepMemory }
-            );
-            if (result === OK) {
-                creepNum['harvester'] = (creepNum['harvester'] || 0) + 1;
-                global.log(`房间 ${this.name} 冷启动：首孵小型 harvester（收入优先），UNIV 交由定编流程。`);
-                return true;
-            }
         }
 
         const result2 = spawn.spawnCreep(
@@ -205,10 +219,11 @@ export default class SpawnControl extends Room {
         if (typeof body === 'string' && body) {
             body = decompressBodyConfig(body);
         } else if (!body || !Array.isArray(body) || body.length === 0) {
+            // worker 不参与预算缩水：LOW 窗口缩出的 W1 建造力低会拖慢
+            // 工期——等满编身体，不要小件
             const allowBudgetSpawn =
-                ((state === 'LOW' || state === 'CRITICAL') &&
-                EMERGENCY_DOWNSIZE_ROLES.has(role)) ||
-                (role === 'worker' && getMyConstructionSites(this).length > 0);
+                (state === 'LOW' || state === 'CRITICAL') &&
+                EMERGENCY_DOWNSIZE_ROLES.has(role);
             const budget = allowBudgetSpawn ? this.energyAvailable : undefined;
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);

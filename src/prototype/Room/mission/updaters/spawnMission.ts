@@ -2,7 +2,7 @@ import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/Creep
 import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
-import { getUpgradeWorkTarget, isControllerContainerThirsty, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL } from '@/modules/shared/roomWorkforce';
+import { estimateRoomEnergyIncome, getUpgradeWorkTarget, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL, UPGRADE_NEEDED_TTD } from '@/modules/shared/roomWorkforce';
 import { buildUpgraderBodyConfig } from '@/modules/shared/upgradeBody';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
@@ -35,31 +35,6 @@ export default class SpawnMission extends Room {
      *
      * @returns true 表示本 tick 升级孵化被暂停。
      */
-    pauseRushUpgraderIfDepotStarved(): boolean {
-        if (getRoomMode(this) !== 'rush') return false;
-        const controller = this.controller;
-        const container = (this.container || []).find(
-            c => controller && c.pos.inRangeTo(controller.pos, 3),
-        );
-        // 没有控制器容器：早期阶段无静态冲级路线，不干预（走 extension 口径）
-        if (!container) return false;
-
-        const depot = container.store[RESOURCE_ENERGY] || 0;
-        const drainRate = getUpgradeWorkTarget(this);
-        if (drainRate <= 0) return false;
-        // 水位低于抽水速率 × 10 tick 的缓冲：暂停升级孵化（物流优先补给）
-        if (depot >= drainRate * 10) return false;
-
-        // 仓库见底：清掉升级挂单（它们以固定成本占池，会让 L9 物流永远等不到窗口）
-        const tasks = (this.getAllMissionFromPool('spawn') || []) as Task[];
-        for (const task of tasks) {
-            const taskData = task.data as SpawnTask;
-            if (taskData?.memory?.role !== 'upgrader') continue;
-            this.deleteMissionFromPool?.('spawn', task.id);
-        }
-        return true;
-    }
-
     /**
      * spawn 更新入口
      * @description 按角色规则检查缺口并生成对应孵化任务
@@ -73,12 +48,10 @@ export default class SpawnMission extends Room {
         // 防止小爬流水线在能量枯竭期互相抢食（能量回升后此清理自动空转）
         pruneCriticalNonRecoveryMissions(this);
 
-        // rush spawn 平衡：升级任务的成本线（分级体型 E{tier}）若高于
-        // extension 常态水位，会与 L9 物流单互相卡位——升级单永远挂池、搬运/建造永久
-        // 饿死、外矿断流、最后升级工灭绝（race 实测三连）。仓库（控制器容器）水位
-        // 低于身位成本时暂停升级孵化并清掉挂单，把 spawn 让给物流层；容器续上后
-        // 升级任务自动恢复——形成「仓库满 → 升级消耗 → 仓库空 → 物流补给」的自然轮转。
-        const rushUpgraderPaused = this.pauseRushUpgraderIfDepotStarved();
+        // 控制器容器水位的硬门/删单已移除：升级火力改由 roomWorkforce 的
+        // 水位比例节流连续缩放（cc 低水位时火力平滑收缩至 25%，从不清零不删单——
+        // 硬门+删单曾让升级单被反复删除、车队整装却无单可孵，RCL2 冻结 2k+ tick）。
+        // cc 缺位的 boot 阶段由手填闭环（能量中枢 priority 5）接管供能。
 
         const creepNum = this.getCreepNum();
         const spawnMissionNum = this.getSpawnMissionNum();
@@ -90,7 +63,29 @@ export default class SpawnMission extends Room {
         // 历史教训：deficit 涓流不感知在途挂单，cc 长期空置 + 孵化忙碌时
         // 每轮 +1 永不封口，曾单局灌出 172 条 carrier 挂单。
 
-        for (const role in RoleSpawnCheck) {
+        // 升级紧迫插队（对齐参考实现 UPGRADE_PRIORITY 语义）：
+        // 实测收入超过在场升级火力（濒死个体不计）时，升级单插队到采集/搬运之前——
+        // 收入涨火力涨的自适应闭环；控制器临近降级时无条件最优先（PREVENT_DOWNGRADE）。
+        const roleOrder = Object.keys(RoleSpawnCheck);
+        {
+            const income = estimateRoomEnergyIncome(this);
+            let upgradeFire = 0;
+            for (const c of this.find(FIND_MY_CREEPS) as Creep[]) {
+                if (c.memory.role !== 'upgrader' || c.spawning) continue;
+                if ((c.ticksToLive || 1500) <= c.body.length * 3) continue;
+                upgradeFire += c.getActiveBodyparts(WORK);
+            }
+            const preventDowngrade = (this.controller?.ticksToDowngrade ?? 1e9) < UPGRADE_NEEDED_TTD;
+            if (preventDowngrade || income > upgradeFire) {
+                const i = roleOrder.indexOf('upgrader');
+                if (i > 0) {
+                    roleOrder.splice(i, 1);
+                    roleOrder.unshift('upgrader');
+                }
+            }
+        }
+
+        for (const role of roleOrder) {
             const adjusted = getAdjustedSpawnRoleCurrent(context, role);
             if (role === 'universal') {
                 const rescueMissing = getDowngradeUniversalSpawnMissing(this, adjusted);
@@ -108,8 +103,6 @@ export default class SpawnMission extends Room {
                 }
             }
             if (shouldSpawnRole(role, context, adjusted)) {
-                // rush 升级在仓库断粮期被暂停（见 pauseRushUpgraderIfDepotStarved）
-                if (role === 'upgrader' && rushUpgraderPaused) continue;
                 // 升级工体型：rush 按当前可用能量走 RCL 分级表（分级下探，保证随时能孵
                 // ——满档体型会被建造/搬运的常态抽取压在成本线以下，零余量死锁）；
                 // 非 rush 维持「按定编缺口 + 满容量」一次孵最大。
@@ -118,6 +111,15 @@ export default class SpawnMission extends Room {
                     : role === 'upgrader'
                         ? buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this))
                         : '';
+                // rush 升级体 = WORK 优先的静态堆：[W×N, C×Cn, M1]——站位由 carrier 手填，
+                // C 缓冲让每次手填撑更久（削平等待空窗）；N/Cn 按预算自适应分配
+                // （低级预算 WORK 优先，高预算 C 缓冲拉到 4）。分级表在低能量段只给 W2：
+                // 6 只 W2 = 12W = 24e/t 封顶，卡死 RCL4→5。
+                if (role === 'upgrader' && getRoomMode(this) === 'rush') {
+                    const carryN = Math.min(4, Math.max(1, Math.floor(this.energyAvailable / 300)));
+                    const workN = Math.max(1, Math.floor((this.energyAvailable - 50 - 50 * carryN) / 100));
+                    body = [[WORK, workN], [CARRY, carryN], [MOVE, 1]] as ((BodyPartConstant | number)[])[];
+                }
                 // rush 开局（lv≤3）harvester 定点矿工化：无 CARRY 纯 [W×N, M1] 站桩连挖，
                 // 掉落在工作位由 rush 常备 carrier 收取——mobile 自采自搬的运程空转
                 // 会吃掉一半产出（attempt 23 实测 lv2→3 仅 5.5e/t，同预算定点翻倍）
