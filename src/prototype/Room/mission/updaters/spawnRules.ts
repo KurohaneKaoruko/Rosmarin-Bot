@@ -56,9 +56,13 @@ export const pruneCriticalNonRecoveryMissions = (room: Room): number => {
     const tasks = (room.getAllMissionFromPool('spawn') || []) as Task[];
     let removed = 0;
     for (const task of tasks) {
-        const role = (task.data as SpawnTask)?.memory?.role;
+        const memory = (task.data as SpawnTask)?.memory;
+        const role = memory?.role;
         if (!role || CRITICAL_RECOVERY_ROLE_SET.has(role)) continue;
         if (role === 'worker' && exemptWorker) continue;
+        // 旗帜下达的任务（战争/支援）是玩家明确指令，不在经济复苏清理范围——
+        // 0收入特殊服 energyState 常驻 CRITICAL，不豁免会无限吞战争单
+        if (memory?.spawnFlag) continue;
         room.deleteMissionFromPool?.('spawn', task.id);
         removed += 1;
     }
