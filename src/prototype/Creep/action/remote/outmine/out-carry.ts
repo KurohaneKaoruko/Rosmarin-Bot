@@ -2,6 +2,7 @@ import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features
 import { OUT_CARRY_DYING_TTL } from '@/modules/features/external/externalScheduler';
 import { RoadMemory } from '@/modules/features/external/externalRoad';
 import { OUT_CARRY_HALF_LOAD_RATIO, readRelayDirection, tryOutCarryRelayHandoff } from '@/prototype/Creep/function/relayHandoff';
+import { getAssignedEnergyTarget } from '@/prototype/Creep/function/energyLogistics';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
@@ -394,7 +395,8 @@ const moveOutCarryTo = (
     allowRelay = false
 ) => {
     const result = creep.moveTo(target, opts);
-    if (allowRelay && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
+    // 错峰：接力检测按名字哈希隔 tick 轮转，车队满载时砍一半 CPU（成交延迟最多 1t）
+    if (allowRelay && relayStagger(creep) && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
         return OK;
     }
     return result;
@@ -407,7 +409,7 @@ const moveOutCarryToRoom = (
     allowRelay = false
 ) => {
     const result = creep.moveToRoom(roomName, opts);
-    if (allowRelay && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
+    if (allowRelay && relayStagger(creep) && shouldUseOutCarryRelay(creep) && tryOutCarryRelayHandoff(creep)) {
         return OK;
     }
     return result;
@@ -708,6 +710,22 @@ const outCarry: OutCarryAction = {
                 return;
             }
             // 空等填装期间不换房：目标房在一趟起点已经锁定，反复横跳只会把一整趟路白走。
+            // 接力泊位：等填装不扎堆——沿铺好的路径排成一条链（锚点间距 2 格），
+            // 来货即成链逐格接力；无路网数据时退回拥挤疏散。
+            // 泊位 5t 缓存：锚点计算含 findInRange，逐 tick 全量算太贵
+            let chainSlot = cache.chainSlot as { x: number; y: number; room: string } | undefined;
+            if (!chainSlot || chainSlot.room !== creep.room.name || Game.time - (cache.chainSlotTick || 0) >= 5) {
+                const found = getChainSlot(creep);
+                chainSlot = found ? { x: found.x, y: found.y, room: found.roomName } : undefined;
+                cache.chainSlot = chainSlot;
+                cache.chainSlotTick = Game.time;
+            }
+            if (chainSlot) {
+                if (creep.pos.x !== chainSlot.x || creep.pos.y !== chainSlot.y) {
+                    moveOutCarryTo(creep, new RoomPosition(chainSlot.x, chainSlot.y, chainSlot.room), { range: 0, plainCost: 2, swampCost: 10 });
+                }
+                return;
+            }
             // 拥挤疏散：容器口附近同路线同伴过多时向空旷处让位，
             // 防止等填装的搬运工把唯一通道和 out-harvest 的工作位全部堵死。
             const crowd = creep.pos.findInRange(FIND_MY_CREEPS, 2, {
@@ -986,6 +1004,16 @@ const outCarry: OutCarryAction = {
                 return true;
             };
 
+            // 回程顺路灌注（参考实现 hauler 的途经填充模式）：身边 ext/spawn/tower 一并补满——
+            // extension 水位随搬运节拍回满，孵化线不再等能量（OH 满档单及时出货的关键）
+            if (fillAdjacentSpawnStructures(creep)) {
+                if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) return;
+            }
+
+            // ⓪ 能量中枢认领：集中分配的投递目标（cc/ext/spawn 优先级 1-2、断供升级工手填 5）
+            const assigned = getAssignedEnergyTarget(creep) as AnyStoreStructure | null;
+            if (assigned && deliverTo(assigned)) return;
+
             // ① 控制器容器：静态升级工的取能点，直供零搬运
             const controllerContainer = (creep.room.container || []).find(c =>
                 creep.room.controller && c.pos.inRangeTo(creep.room.controller.pos, 3) &&
@@ -1048,10 +1076,82 @@ const outCarry: OutCarryAction = {
     },
 };
 
+// 回程顺路灌注（参考实现 hauler 的途经填充模式）：把身边（range 1）的 ext/spawn/tower 顺手补满。
+// 每次 transfer 只倒一格容量，不阻塞本 tick 的投递主流程。
+const fillAdjacentSpawnStructures = (creep: Creep): boolean => {
+    if (!creep.room.controller?.my) return false;
+    if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) return false;
+    const area = creep.room.lookForAtArea(
+        LOOK_STRUCTURES,
+        Math.max(0, creep.pos.y - 1),
+        Math.max(0, creep.pos.x - 1),
+        Math.min(49, creep.pos.y + 1),
+        Math.min(49, creep.pos.x + 1),
+        true,
+    );
+    for (const item of area) {
+        const structure = item.structure as AnyStoreStructure;
+        if (!structure || !structure.store) continue;
+        if (structure.structureType !== STRUCTURE_EXTENSION &&
+            structure.structureType !== STRUCTURE_SPAWN &&
+            structure.structureType !== STRUCTURE_TOWER) continue;
+        if ((structure.store.getFreeCapacity(RESOURCE_ENERGY) || 0) <= 0) continue;
+        return creep.transfer(structure, RESOURCE_ENERGY) === OK;
+    }
+    return false;
+};
+
+// 接力泊位：沿「母房→矿源」铺好的路径每 2 格取一个锚点，
+// 等填装的搬运工各占一个锚点排成一条链（间距 1-2 格）。
+// 选位 = 距离最近 + 名字哈希微扰（确定性防振荡），1 格内有同线同伴的锚点视为被占。
+// 无路网数据（路未铺/路径过短）返回 null，调用方退回原拥挤疏散逻辑。
+const CHAIN_SLOT_SPACING = 2;
+
+// 接力检测错峰：按名字哈希隔 tick 轮转（车队大时砍半 CPU，成交延迟 ≤1t）
+const relayStagger = (creep: Creep): boolean =>
+    ((Game.time + creep.name.charCodeAt(0) + creep.name.length) & 1) === 0;
+
+const getChainSlot = (creep: Creep): RoomPosition | null => {
+    const memAny = creep.memory as any;
+    if (!memAny.sourceRoom || !memAny.targetRoom) return null;
+    let bestPath: RoomPosition[] | null = null;
+    try {
+        const paths = RoadMemory.getAllPaths(memAny.sourceRoom, memAny.targetRoom);
+        for (const positions of paths.values()) {
+            if (positions.length >= 8 && (!bestPath || positions.length > bestPath.length)) bestPath = positions;
+        }
+    } catch {
+        return null;
+    }
+    if (!bestPath) return null;
+
+    const anchors: RoomPosition[] = [];
+    for (let i = 0; i < bestPath.length; i += CHAIN_SLOT_SPACING) anchors.push(bestPath[i]);
+
+    const laneMates = creep.pos.findInRange(FIND_MY_CREEPS, 8, {
+        filter: (c: Creep) => c.id !== creep.id && c.memory.role === creep.memory.role
+            && (c.memory as any).targetRoom === memAny.targetRoom,
+    }) as Creep[];
+
+    let best: RoomPosition | null = null;
+    let bestScore = Infinity;
+    for (const anchor of anchors) {
+        if (anchor.roomName !== creep.pos.roomName) continue;
+        const taken = laneMates.some(mate => mate.pos.isEqualTo(anchor) || mate.pos.isNearTo(anchor));
+        if (taken) continue;
+        const jitter = (creep.name.charCodeAt(0) + anchor.x * 7 + anchor.y * 13) % 3;
+        const score = creep.pos.getRangeTo(anchor) + jitter * 0.1;
+        if (score < bestScore) {
+            bestScore = score;
+            best = anchor;
+        }
+    }
+    return best;
+};
+
 // 出口格（x/y = 0/49）是跨界交通唯一的必经之路，
 // 没有搬运目标而原地滞留的搬运工必须让位，否则对向 creep 全部被堵在门外。
-const clearDoorZoneIfIdle = (creep: Creep): void => {
-    const pos = creep.pos;
+const clearDoorZoneIfIdle = (creep: Creep): void => {    const pos = creep.pos;
     if (pos.x > 0 && pos.x < 49 && pos.y > 0 && pos.y < 49) return;
     const betterMove = (global as any).BetterMove;
     if (betterMove && typeof betterMove.hasMoveIntent === 'function' && betterMove.hasMoveIntent(creep)) return;

@@ -10,6 +10,7 @@ import {
     isCoreDepotContainerDraining
 } from '@/modules/shared/coreDepot';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getAssignedEnergyTarget } from '@/prototype/Creep/function/energyLogistics';
 
 type CarrierWithdrawTarget = Resource | Tombstone | Ruin | AnyStoreStructure;
 
@@ -752,9 +753,13 @@ const selectWithdrawPlan = (
         });
     }
 
-    // 控制器专职搬运（controllerCarry）：extension 盈余（spawn 底仓 300 之外）纳入补给源——
-    // extension 满仓而控制器容器空置的能量死锁，由专职搬运解开（extension → depot → 升级工）
-    if (creep.memory?.controllerCarry) {
+    // 控制器容器补给（carrier 默认职责）：被能量中枢认领去喂 cc/升级工时，
+    // extension 盈余（spawn 底仓 300 之外）作为优先货源——
+    // extension 满仓而控制器容器空置的能量死锁，由常规搬运解开（extension → cc → 升级工）
+    const assignedTarget = getAssignedEnergyTarget(creep) as any;
+    const feedingController = !!assignedTarget &&
+        ((assignedTarget.structureType === STRUCTURE_CONTAINER) || assignedTarget.memory?.role === 'upgrader');
+    if (feedingController) {
         const exts = (roomAny.extension || []).filter((e: StructureExtension) =>
             e && (e.store[RESOURCE_ENERGY] || 0) > 300 && !isNoPath(room.name, e.id));
         for (const e of exts) {
@@ -900,8 +905,10 @@ const resolveCarryTarget = (
                     if (!target && roomAny.powerSpawn?.store.getFreeCapacity(RESOURCE_ENERGY) > 100) {
                         target = roomAny.powerSpawn;
                     }
-                } else if (!controllerLink && controllerContainer && controllerContainer.store.getFreeCapacity() > 0) {
-                    target = controllerContainer;
+                } else {
+                    // 集中分配优先：能量中枢的认领目标（cc/ext/spawn/断供升级工手填）
+                    const assigned = getAssignedEnergyTarget(creep) as AnyStoreStructure | null;
+                    if (assigned) target = assigned;
                 }
 
                 if (!target) {
