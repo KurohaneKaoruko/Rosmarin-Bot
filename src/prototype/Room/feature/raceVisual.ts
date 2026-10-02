@@ -196,10 +196,15 @@ export default class RaceVisual extends Room {
         const rows: Line[][] = [];
         const push = (text: string, color: string) => rows.push([{ text, color, x: 0.5 }]);
 
-        push(`冲级 lv${level} → lv${level + 1}`, C.header);
-        push(`${bar(progress / barPts)} ${(progress / barPts * 100).toFixed(0)}% ${fmtTick(progress)}/${fmtTick(barPts)}`, C.info);
-        push(`速率 ${winRate.toFixed(1)}/t (全程均 ${totalRate.toFixed(1)})`, rateColor(winRate));
-        push(`预计 lv${level + 1} 还需 ${isFinite(etaTicks) ? fmtTick(etaTicks) + 't' : '?'}`, C.warn);
+        const maxed = level >= 8;
+        push(maxed ? `冲级 lv8 满级` : `冲级 lv${level} → lv${level + 1}`, C.header);
+        if (maxed) {
+            push(`${bar(1)} 满级`, C.good);
+        } else {
+            push(`${bar(progress / barPts)} ${(progress / barPts * 100).toFixed(0)}% ${fmtTick(progress)}/${fmtTick(barPts)}`, C.info);
+            push(`速率 ${winRate.toFixed(1)}/t (全程均 ${totalRate.toFixed(1)})`, rateColor(winRate));
+            push(`预计 lv${level + 1} 还需 ${isFinite(etaTicks) ? fmtTick(etaTicks) + 't' : '?'}`, C.warn);
+        }
         push(`── 能量管线 ─────────`, C.section);
         push(`孵化能量 ${bar(this.energyAvailable / Math.max(1, this.energyCapacityAvailable), 6)} ${this.energyAvailable}/${this.energyCapacityAvailable}`, C.text);
         push(
@@ -228,7 +233,9 @@ export default class RaceVisual extends Room {
             if (!mem.levels[l]) continue;
             const at = Math.max(0, mem.levels[l] - mem.baseline);
             // 段耗时(累计总耗时)：该级升级所花时间(达到该级总用时)
-            const seg = l > 1 ? mem.levels[l] - mem.levels[l - 1] : 0;
+            // 上一级缺失（跳级/记录丢失）时段耗时记 0，避免 undefined 相减出 NaN
+            const prev = mem.levels[l - 1];
+            const seg = l > 1 && prev ? mem.levels[l] - prev : 0;
             milestones.push({
                 text: `lv${l} ${fmtTick(Math.max(0, seg))}(${fmtTick(at)})`,
                 color: l === level ? C.good : C.muted,
