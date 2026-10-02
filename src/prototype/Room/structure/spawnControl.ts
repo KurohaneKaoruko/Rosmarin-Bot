@@ -31,6 +31,54 @@ const getFullRoleBodyCost = (room: Room, role: RoleId, upbody?: boolean) => {
     return fullBody?.length ? room.CalculateEnergy(fullBody) : null;
 };
 
+// 容量装不下的体型等比缩容：各部件按 容量/总价 取整（保底 1 MOVE），
+// 取整后仍超时从数量最多的非 MOVE 部件逐个裁。常规服体型生成 ≤ 容量，不触发。
+const scaleBodyToCapacity = (bodypart: BodyPartConstant[], capacity: number): BodyPartConstant[] => {
+    const partCost = (p: BodyPartConstant) => (BODYPART_COST as any)[p] || 0;
+    let total = 0;
+    const counts = new Map<BodyPartConstant, number>();
+    for (const p of bodypart) {
+        total += partCost(p);
+        counts.set(p, (counts.get(p) || 0) + 1);
+    }
+    if (total <= capacity || bodypart.length === 0) return bodypart;
+
+    const factor = capacity / total;
+    for (const [p, n] of counts) {
+        counts.set(p, Math.max(p === MOVE ? 1 : 0, Math.floor(n * factor)));
+    }
+    const rebuild = (): BodyPartConstant[] => {
+        const out: BodyPartConstant[] = [];
+        for (const p of bodypart) {
+            const left = counts.get(p) || 0;
+            if (left > 0) {
+                out.push(p);
+                counts.set(p, left - 1);
+            }
+        }
+        return out;
+    };
+    let out = rebuild();
+    let cost = out.reduce((sum, p) => sum + partCost(p), 0);
+    while (cost > capacity && out.length > 1) {
+        // 裁掉数量最多且裁后不归零的非 MOVE 部件
+        let dropPart: BodyPartConstant | null = null;
+        let dropCount = 0;
+        for (const [p, n] of counts) {
+            if (p === MOVE && n <= 1) continue;
+            if (n > dropCount) {
+                dropCount = n;
+                dropPart = p;
+            }
+        }
+        if (!dropPart) break;
+        counts.set(dropPart, dropCount - 1);
+        out = rebuild();
+        cost = out.reduce((sum, p) => sum + partCost(p), 0);
+    }
+    return out;
+};
+
 const updateDowngradedFlag = (
     room: Room,
     role: RoleId,
@@ -235,10 +283,20 @@ export default class SpawnControl extends Room {
             return null;
         }
 
-        const cost = this.CalculateEnergy(bodypart);
+        let cost = this.CalculateEnergy(bodypart);
         if (cost > this.energyCapacityAvailable) {
-            this.deleteMissionFromPool('spawn', task.id);
-            return null;
+            // 容量装不下的体型等比缩容到可孵（各部件按比例取整、保底 1 MOVE），
+            // 而不是删单：常规服体型生成已保证 ≤ 容量，此分支不触发；
+            // 特殊规则服（孵化容量受限）让固定体型任务（战争旗等）缩容出爬
+            const scaled = scaleBodyToCapacity(bodypart, this.energyCapacityAvailable);
+            const scaledCost = scaled.length ? this.CalculateEnergy(scaled) : 0;
+            if (!scaled.length || scaledCost > this.energyCapacityAvailable) {
+                this.deleteMissionFromPool('spawn', task.id);
+                return null;
+            }
+            bodypart.length = 0;
+            bodypart.push(...scaled);
+            cost = scaledCost;
         }
 
         if (!data.memory.cache) data.memory.cache = {};
