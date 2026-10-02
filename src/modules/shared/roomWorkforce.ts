@@ -267,7 +267,9 @@ export const shouldDelayUpgraderForPrimaryBuild = (room: Room) => {
 // ==================== 降级兜底 / 冲级编队 ====================
 
 // 控制器降级风险时，强制补 UNIV 作为兜底维修/升级
+// rush 开局恒 0：rush 的停摆兜底 = 看门狗重开 attempt，UNIV 永不参与开局起步
 export const getDowngradeUniversalTarget = (room: Room) => {
+    if (getRoomMode(room) === 'rush') return 0;
     const controller = room.controller;
     if (!controller?.my) return 0;
     const ttd = controller.ticksToDowngrade || 0;
@@ -471,6 +473,19 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     const controller = room.controller;
     if (!controller?.my) return 0;
 
+    // —— 建造期让位（对齐参考实现 building 口径）：存在基础结构工地
+    // （spawn/extension/tower/容器）且无降级风险时，升级定编归零——
+    // 建造能量全额让给 builder，工期压缩到最短；道路工地不触发（量大会永久暂停）
+    const prioritySites = (room.find(FIND_MY_CONSTRUCTION_SITES) || []).filter((s: ConstructionSite) =>
+        s.structureType === STRUCTURE_SPAWN ||
+        s.structureType === STRUCTURE_EXTENSION ||
+        s.structureType === STRUCTURE_TOWER ||
+        s.structureType === STRUCTURE_CONTAINER,
+    );
+    const buildingPhase = prioritySites.length > 0        && Game.time - ((room.memory as any).buildingTick || 0) < 30        && (controller.ticksToDowngrade || 0) >= UPGRADE_NEEDED_TTD;
+    (room.memory as any).building = buildingPhase;
+    if (buildingPhase) return 0;
+
     // —— 让位闸门 ——
     if ((room.memory as any).defend) return 0;
     if (getDowngradeUniversalTarget(room) > 0) return 0;
@@ -522,25 +537,23 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     // —— 地面堆积项：每 2000 点掉落能量折算 1 个升级 work，直接消化地上存货 ——
     const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
 
-    // —— rush 冲级：不节流——收入 + 地面堆积（本房 + 外矿房）全额折算，
-    //    容量放宽到控制器周边站位；能量堆积就是「消耗端不足」的直接信号 ——
-    //    火力 = clamp(净收入 × 乘数, 底火, 容量)：乘数随孵化占用率反向浮动
-    //    （spawn 越空闲越加码 1.0→1.2，孵化繁忙时回落 1.0，不与孵化抢产能）；
-    //    底火常明（参考实现的下限语义：升级期恒备 5W 底火 ≈ 10e/t 试验火力）：
-    //    升级火力随收入波动但永不归零，杜绝「uWork=0 → 收入估计归零 → 不孵升级工」的断档
+    // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随孵化占用率反向浮动
+    //    （spawn 越空闲越加码 1.0→1.2，孵化繁忙时回落 1.0，不与孵化抢产能）。
+    //    不做 cc 单点水位节流：cc 干涸时收缩升级工是反向反馈（升级工变少 → 抽水更少
+    //    → cc 更空的死锁）；cc 供能不足由专线配额与手填闭环解决。
     if (getRoomMode(room) === 'rush') {
         const pileAll = getDroppedPileEnergy(room) + getRemotePileEnergy(room);
         const memAny = room.memory as any;
         memAny.spawnUsageEma ??= 1;
-        const busy = room.spawning ? 1 : 0;
+        const busy = (room.spawn || []).some(s => s.spawning) ? 1 : 0;
         const alpha = 2 / 1501;
         memAny.spawnUsageEma = memAny.spawnUsageEma * (1 - alpha) + busy * alpha;
         const multiplier = Math.min(1.2, Math.max(1, memAny.spawnUsageEma / 2 + 0.8));
         const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
+
         const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
         return Math.max(Math.max(lowerLimit, 5), Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
     }
-
     // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩 ——
     return Math.max(lowerLimit, Math.min(capacity, shrinkByStarved(room, Math.max(incomeWork, surplusWork, pileWork))));
 };
@@ -771,16 +784,37 @@ export const getControllerUpgradeSlotCap = (room: Room) => {
  */
 const getUpgradeSlotPool = (room: Room): RoomPosition[] => {
     if (typeof room.getTerrain !== 'function' || typeof room.lookForAt !== 'function') return [];
+    // 工位必须在控制器 upgrade 射程（3 格）内：cc 旁的格位可能落在射程外，
+    // 站上去满仓也升不了级（满仓罚站、火力归零的死锁）
+    const controller = room.controller;
+    const inUpgradeRange = (pos: RoomPosition): boolean =>
+        !controller || pos.inRangeTo(controller.pos, 3);
+    // 工位不挡搬运道（对齐参考实现洪泛口径的等价过滤）：
+    // 与 spawn 锚点的距离小于「锚点→cc 距离」的格位一律剔除——
+    // cc 靠 spawn 一侧留给补给通道，升级工全部站在容器外侧
+    const anchor = (room.spawn || [])[0]?.pos;
+    const ccForLane = controller
+        ? (room.container || []).find((c) => c.pos.inRangeTo(controller.pos, 3))
+        : undefined;
+    const notBlockingApproach = (pos: RoomPosition): boolean => {
+        if (!anchor || !ccForLane) return true;
+        return pos.getRangeTo(anchor) >= ccForLane.pos.getRangeTo(anchor);
+    };
+    const prune = (list: RoomPosition[]): RoomPosition[] => {
+        const filtered = list.filter(inUpgradeRange).filter(notBlockingApproach);
+        return filtered.length > 0 ? filtered : list.filter(inUpgradeRange);
+    };
+
     if (getRoomMode(room) === 'rush' && canRushUpgrade(room)) {
         // 仓库冲级工位（storage/terminal 旁）为空时（RCL2-4 只有控制器容器的阶段）
         // 回退控制器容器相邻格——站这里 withdraw（容器相邻）与 upgrade（控制器 ≤3）
         // 原地完成，零移动；容器不存在再退控制器 3 格通用位
-        const rushSlots = getRushUpgradeSlotList(room);
+        const rushSlots = prune(getRushUpgradeSlotList(room));
         if (rushSlots.length > 0) return rushSlots;
-        const ccSlots = getControllerContainerSlotList(room);
+        const ccSlots = prune(getControllerContainerSlotList(room));
         if (ccSlots.length > 0) return ccSlots;
     }
-    return getControllerUpgradeSlotList(room);
+    return prune(getControllerUpgradeSlotList(room));
 };
 
 /**

@@ -126,7 +126,35 @@ export default class WorkFunction extends Creep {
             candidates.push(...dropped);
         }
 
-        return getClosestByRange(this, candidates);
+        if (candidates.length > 0) return getClosestByRange(this, candidates);
+
+        // 二级回退：无满额来源时取「存量最大的容器/掉落（≥30）」——
+        // 1 tick 提取半仓 → 立即开工，远胜趴在源上以 harvest 速率龟速自填
+        //（W2 自采填满 100 需 25 tick，纯移动浪费）。
+        const partialCandidates: EnergySourceTarget[] = [];
+        const partialMin = Math.min(30, minAmount);
+        for (const container of getCachedContainers(this.room)) {
+            if (container && getStoreValue(container, RESOURCE_ENERGY) >= partialMin) {
+                partialCandidates.push(container);
+            }
+        }
+        if (includeDropped) {
+            const dropped = getDroppedResources(this.room).filter(
+                (resource) =>
+                    resource.resourceType === RESOURCE_ENERGY &&
+                    resource.amount >= partialMin
+            ) as Resource<RESOURCE_ENERGY>[];
+            partialCandidates.push(...dropped);
+        }
+        if (partialCandidates.length === 0) return null;
+        // 取存量最大者（一口吃干，避免多趟）
+        let best = partialCandidates[0];
+        let bestAmount = 0;
+        for (const c of partialCandidates) {
+            const amount = 'store' in c ? getStoreValue(c, RESOURCE_ENERGY) : (c as Resource<RESOURCE_ENERGY>).amount;
+            if (amount > bestAmount) { bestAmount = amount; best = c; }
+        }
+        return best;
     }
 
     /**

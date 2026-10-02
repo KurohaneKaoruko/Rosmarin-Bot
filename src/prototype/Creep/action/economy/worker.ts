@@ -73,7 +73,12 @@ const getBuildSitePriority = (room: Room, site: ConstructionSite) => {
         let base = 6;
         if (site.structureType === STRUCTURE_SPAWN) base = 0;
         else if (site.structureType === STRUCTURE_EXTENSION || site.structureType === STRUCTURE_TOWER) base = 1;
-        else if (site.structureType === STRUCTURE_CONTAINER) base = 2;
+        else if (site.structureType === STRUCTURE_CONTAINER) {
+    // 控制器容器与扩展/塔同级（升级链唯一补给点，晚建 = 全程裸供不足）；
+    // 其余容器（源容器等）保持 2，按剩余量桶自然排队
+    const controller = room.controller;
+    base = controller && site.pos.inRangeTo(controller.pos, 3) ? 1 : 2;
+}
         else if (site.structureType === STRUCTURE_ROAD) base = 4;
         else if (site.structureType === STRUCTURE_LINK) base = 5;
         return base * 100 + remainingBucket;
@@ -250,6 +255,10 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
             if (best.structureType == 'rampart') {
                 cache.buildRampart = true;
                 cache.posInfo = roomCache.buildPos;
+            }
+            if (best.structureType === STRUCTURE_SPAWN || best.structureType === STRUCTURE_EXTENSION ||
+                best.structureType === STRUCTURE_TOWER || best.structureType === STRUCTURE_CONTAINER) {
+                (creep.room.memory as any).buildingTick = Game.time;
             }
             cache.task = { target: best.id, pos: roomCache.buildPos } as any;
             cache.taskid = task.id;

@@ -12,8 +12,8 @@ import { getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/r
  * - worker：建造 + 常规升级（worker 的升级侧定编见 getWorkerUpgradeTarget）；
  * - up-upgrade：已弃用（代码暂留），仅 UP-UPGRADE / AID-UUP 旗帜与跨房增援入口仍用。
  *
- * 仓库断供期：原地待命 + 记 starved 负反馈（缩编信号）；spawn 侧由
- * spawnMission.pauseRushUpgraderIfDepotStarved 同步暂停升级孵化、让位物流层。
+ * 仓库断供期：升级火力由 roomWorkforce 水位比例节流平滑收缩（从不清零不删单），
+ * 待命点固定在控制器旁由搬运手填闭环供能。
  */
 
 const RETIRE_UNBOOST_TIMEOUT = 100;
@@ -60,10 +60,46 @@ export const syncUpgraderMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
+/** 邻位借能（对齐参考实现口径）：cc 空了才借、只向「比自己更贴 cc」的有货邻居借、
+ *  借出方打 tick 标记防同 tick 多头索取——能量沿内圈→外圈单向流动，不回弹不多跳 */
+const borrowFromAdjacentUpgrader = (creep: Creep): boolean => {
+    if ((creep.store[RESOURCE_ENERGY] || 0) > 0) return false;
+    const room = creep.room;
+    const controller = room.controller;
+    if (!controller?.my) return false;
+    const cc = (room.container || []).find(c => c.pos.inRangeTo(controller.pos, 3));
+    if (!cc || (cc.store[RESOURCE_ENERGY] || 0) > 0) return false;
+    const selfDist = creep.pos.getRangeTo(cc.pos);
+    const mate = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
+        filter: (c: Creep) => {
+            if (c.id === creep.id || c.memory.role !== 'upgrader') return false;
+            if ((c.store[RESOURCE_ENERGY] || 0) === 0) return false;
+            if ((c as any)._transfered === Game.time) return false;
+            return c.pos.getRangeTo(cc.pos) < selfDist;
+        },
+    })[0];
+    if (!mate) return false;
+    if (mate.transfer(creep, RESOURCE_ENERGY) !== OK) return false;
+    (mate as any)._transfered = Game.time;
+    return true;
+};
+
 const onTarget = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (shouldRetire(creep)) {
         retire(creep);
+        return WORK_EVENTS.STAY;
+    }
+
+    // 建造期让位：基础结构工地存在时暂停开火（能量让给 builder，旗清后恢复）
+    if (Game.time - ((creep.room.memory as any).buildingTick || 0) < 30) {
+        syncUpgraderMoveWork(creep);
+        return WORK_EVENTS.STAY;
+    }
+
+    // cc 断供时向内圈邻居借能，借到即本 tick 收工
+    if (borrowFromAdjacentUpgrader(creep)) {
+        syncUpgraderMoveWork(creep);
         return WORK_EVENTS.STAY;
     }
 
