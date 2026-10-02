@@ -896,7 +896,7 @@ export class RoadBuilder {
         if (existingSite) return;
 
         const terrain = sourceRoom.getTerrain();
-        let best: { x: number; y: number; dist: number } | null = null;
+        let best: { x: number; y: number; open: number; score: number } | null = null;
         for (let dx = -2; dx <= 2; dx++) {
             for (let dy = -2; dy <= 2; dy++) {
                 const x = controller.pos.x + dx;
@@ -905,8 +905,18 @@ export class RoadBuilder {
                 if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
                 const structs = sourceRoom.lookForAt(LOOK_STRUCTURES, x, y);
                 if (structs.some(s => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART)) continue;
-                const dist = Math.abs(dx) + Math.abs(dy);
-                if (!best || dist < best.dist) best = { x, y, dist };
+                // 选址口径（对齐参考实现的靠外布局）：
+                // - 开阔邻格数优先（carrier 从任意方向可达，不被升级工圈围死）
+                // - 次选朝房间中心外侧（远离 spawn 交通走廊）
+                let open = 0;
+                for (let ox = -1; ox <= 1; ox++) {
+                    for (let oy = -1; oy <= 1; oy++) {
+                        if (terrain.get(x + ox, y + oy) !== TERRAIN_MASK_WALL) open++;
+                    }
+                }
+                const roomCenterBias = (Math.abs(x - 25) + Math.abs(y - 25)) / 50;
+                const score = open * 3 + roomCenterBias * 10;
+                if (!best || score > best.score) best = { x, y, open, score };
             }
         }
         if (best) {
