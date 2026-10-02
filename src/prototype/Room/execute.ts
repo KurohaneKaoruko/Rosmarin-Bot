@@ -12,6 +12,8 @@ export default class RoomExecute extends Room {
         if (mode === 'stop') return;
         const profile = getRoomModeProfile(this);
         this.updateEnergyState(false);
+        // 冲级面板（仅 rush）：逐 tick 渲染，放 QoS 节流之前——面板不能有缺帧
+        this.raceVisual();
         // 更新任务池
         this.MissionUpdate();
 

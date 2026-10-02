@@ -18,6 +18,7 @@ import AutoBuild from "./feature/autoBuild"
 import AutoLab from "./feature/autoLab"
 import AutoFactory from "./feature/autoFactory"
 import AutoPowerSpawn from "./feature/autoPowerSpawn"
+import RaceVisual from "./feature/raceVisual"
 
 import Mission from "./mission"
 import MissionPools from "./mission/pool/MissionPools"
@@ -52,7 +53,8 @@ const plugins = [
     AutoLab,        // 自动Lab合成
     AutoFactory,    // 自动Factory生产
     AutoPowerSpawn, // 自动PowerSpawn
-    
+    RaceVisual,     // 冲级可视化
+
     Mission,        // 任务模块
     MissionPools,   // 任务池
     TransportTaskGetter, // 获取 transport 任务
