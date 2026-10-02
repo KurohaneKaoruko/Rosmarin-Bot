@@ -89,26 +89,7 @@ const decodeMemory = (payload) => {
     try { return decodeJsonDeep(data); } catch { return null; }
 };
 
-const readProbe = async (nonce, retries = 10) => {
-    for (let i = 0; i < retries; i++) {
-        await sleep(3000);
-        try {
-            const res = await api(`/api/user/memory?path=${encodeURIComponent('__wd')}`);
-            const raw = await res.text();
-            if (process.env.WD_DEBUG) log(`[debug read ${i}] http=${res.status}`, raw.slice(0, 200));
-            const value = decodeMemoryBody(raw);
-            if (value && typeof value === 'object' && 'spawns' in value) {
-                // nonce 不匹配＝runner 还没执行本次写入，读回的是上一轮旧值
-                //（账号刚被清时 eval 不再执行，旧值会永久滞留——必须视为探针不可用）
-                if (value.nonce !== nonce) continue;
-                return value;
-            }
-        } catch (e) {
-            if (process.env.WD_DEBUG) log(`[debug read ${i}] 异常:`, e.message);
-        }
-    }
-    return null;
-};
+
 
 const fmtTick = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}m` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n)}`);
 
@@ -118,15 +99,24 @@ const decodeMemoryBody = (raw) => {
     return decodeMemory(body);
 };
 
-const getAccountStatus = async (nonce) => {
-    await api('/api/user/console', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            expression: `Memory.__wd = JSON.stringify((function(){ const out = { spawns: _.size(Game.spawns), spawnRooms: Object.keys(Game.spawns).map(n => Game.spawns[n].pos.roomName), creeps: _.size(Game.creeps), time: Game.time, nonce: '${nonce}' }; const r = Game.rooms['${ROOM}']; if (r && r.controller && r.controller.my) { out.level = r.controller.level; out.progress = r.controller.progress; const BARS = [0, 0, 200, 45000, 135000, 405000, 1215000, 3645000, 10935000]; out.progressMax = r.controller.progressMax || BARS[r.controller.level + 1] || 0; const race = Memory.rooms && Memory.rooms['${ROOM}'] ? Memory.rooms['${ROOM}'].race : null; if (race && race.levels) out.race = { baseline: race.baseline, levels: race.levels }; } return out; })())`,
-        }),
-    });
-    return readProbe(nonce);
+const getAccountStatus = async () => {
+// 纯 GET 读取（bot 每 30t 自采样落盘 __wd，含壁钟戳 wc）：
+// console eval 每次编译在引擎侧留残留（线性吃外部内存至 worker OOM），只读不改
+try {
+    const res = await api(`/api/user/memory?path=${encodeURIComponent('__wd')}`);
+    const raw = await res.text();
+    let body;
+    try { body = JSON.parse(raw); } catch { return null; }
+    let data = body && typeof body === 'object' && 'data' in body ? body.data : null;
+    if (typeof data !== 'string' || data.includes('Incorrect memory path')) return null;
+    if (data.startsWith('gz:')) {
+        data = zlib.gunzipSync(Buffer.from(data.slice(3), 'base64')).toString();
+    }
+    const status = JSON.parse(data);
+    // 新鲜度：壁钟戳超过 3 分钟 = bot 已死（账号清空/崩溃），按无账号处理触发重落地
+    if (status.wc && Date.now() - status.wc > 180000) return null;
+    return status;
+} catch { return null; }
 };
 
 // 冲级记录行：只显示 ≤当前等级 的里程碑（更高项来自被清号前的上一轮，混着看会误导）
@@ -186,8 +176,7 @@ const placeSpawn = async (x, y) => {
 let lastPoll = null; // { tick, progress }：两次轮询间差分出升级速率
 
 const runCycle = async () => {
-    const nonce = `${Date.now()}`;
-    const status = await getAccountStatus(nonce).catch(() => null);
+    const status = await getAccountStatus().catch(() => null);
     if (status) {
         if (status.spawns > 0) {
             let line = `运行中: lv${status.level} ${status.progressMax ? `${Math.round(status.progress / status.progressMax * 100)}% (${fmtTick(status.progress)}/${fmtTick(status.progressMax)})` : ''}`;
@@ -222,7 +211,7 @@ const runCycle = async () => {
         log(`落地成功 ✓`);
         // runner 处理新房间要几个 tick，等久一点让首次确认带上完整进度
         await sleep(15000);
-        const after = await getAccountStatus(`${Date.now()}`).catch(() => null);
+        const after = await getAccountStatus().catch(() => null);
         if (after && after.spawns > 0) {
             let line = `确认: lv${after.level ?? '?'} creeps=${after.creeps}`;
             if (after.progressMax) line += ` · ${Math.round(after.progress / after.progressMax * 100)}% (${fmtTick(after.progress)}/${fmtTick(after.progressMax)})`;

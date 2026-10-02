@@ -43,4 +43,31 @@ export const loop = () => {
     // CPU 桶闭环：先更新外矿活跃阈值，再跑主循环（Tier 1-3）
     updateBucketGovernor();
     App.run();
+    // 诊断自采样：外部工具只读（GET memory），不再经 console eval 写入
+    //（每次 eval 编译在引擎侧留残留，线性吃外部内存直至 worker OOM）
+    if (Game.time % 30 === 0) {
+        const memAny = Memory as any;
+        for (const room of Object.values(Game.rooms)) {
+            const race = (Memory.rooms as any)?.[room.name]?.race;
+            if (!race) continue;
+            memAny.__raceDump = JSON.stringify(race);
+            const controller = room.controller;
+            if (controller?.my) {
+                const spawns = Object.values(Game.spawns).filter((s) => s.pos.roomName === room.name);
+                const BARS = [0, 0, 200, 45000, 135000, 405000, 1215000, 3645000, 10935000];
+                memAny.__wd = JSON.stringify({
+                    spawns: spawns.length,
+                    spawnRooms: spawns.map((s) => s.pos.roomName),
+                    creeps: Object.keys(Game.creeps).length,
+                    time: Game.time,
+                    wc: Date.now(),
+                    level: controller.level,
+                    progress: controller.progress,
+                    progressMax: (controller as any).progressMax || BARS[controller.level + 1] || 0,
+                    race: { baseline: race.baseline, levels: race.levels },
+                });
+            }
+            break;
+        }
+    }
 };
