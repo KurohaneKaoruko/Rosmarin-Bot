@@ -2,11 +2,12 @@
 // 格式: 服务器在下、账号挂在各自服务器下面, 避免搞混账号属于哪台服务器
 // {
 //   "servers": {
-//     "screeps.com": { "protocol": "...", "hostname": "...", "port": 443, "path": "/", "branch": "main",
-//       "accounts": { "账号名": { "token": "..." } } },
+//     "screeps.com": { "protocol": "...", "hostname": "...", "port": 443, "path": "/",
+//       "accounts": { "账号名": { "token": "...", "branch": "..." } } },
 //     "local": { "copyPath": "..." }   // 纯本地复制目标, 无连接信息也无账号
 //   }
 // }
+// branch 是代码分支, 属于账号级配置 (各账号可不同); 缺省时上传插件兜底为 main
 // 上传目标 = 服务器连接信息 + 账号凭据 合并; 命令行参数用 server@account 指定
 import fs from 'fs';
 import path from 'path';
