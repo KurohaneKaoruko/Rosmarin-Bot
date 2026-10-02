@@ -100,9 +100,17 @@ type MatchResult = {
 // 按 C4 微型件折算：每车 4 C）。
 // 保证升级端供能不被「离 spawn 更近的 ext 请求」吸干——对应参考实现的
 // 控制器专职搬运数口径（controllerNumCarry）。
-const controllerDedicatedCarry = (room: Room): number => {
+
+/**
+ * 控制器专线搬运配额：升级火力对口搬运数（2 × 升级W × 路程 / 50 = 所需 C 部件数，
+ * 按 C4 微型件折算：每车 4 C）。cc 缺位返回 0（手填闭环接管，无需专车）。
+ */
+export const getControllerCarryQuota = (room: Room): number => {
     const maxWork = getUpgradeWorkTarget(room);
     if (maxWork <= 0) return 0;
+    const controller = room.controller;
+    const cc = controller ? (room.container || []).find(c => c.pos.inRangeTo(controller.pos, 3)) : undefined;
+    if (!cc) return 0;
     const distance = Math.max(10, getUpgraderPathTime(room) ?? 20);
     const carryParts = Math.ceil(2 * maxWork * distance / 50);
     return Math.max(1, Math.ceil(carryParts / 4));
@@ -125,7 +133,7 @@ const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
         : [];
     const generalRequests = allRequests.filter(r => !dedicatedRequests.some(d => d.id === r.id));
 
-    const byDistance = (target: AnyStoreStructure | Creep) =>
+    const byDistance = (target: AnyStoreStructure | Creep | RoomPosition) =>
         [...suppliers].sort((a, b) => a.pos.getRangeTo(target) - b.pos.getRangeTo(target));
 
     const runMatch = (phaseRequests: FillRequest[], phaseSuppliers: Creep[]) => {
@@ -180,7 +188,7 @@ const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
     };
 
     if (controller && dedicatedRequests.length > 0) {
-        const quota = controllerDedicatedCarry(room) + dedicatedRequests.filter(isUpgraderFillRequest).length;
+        const quota = getControllerCarryQuota(room) + dedicatedRequests.filter(isUpgraderFillRequest).length;
         const sorted = byDistance(controller.pos);
         runMatch(dedicatedRequests, sorted.slice(0, quota));
         runMatch(generalRequests, sorted.slice(quota));

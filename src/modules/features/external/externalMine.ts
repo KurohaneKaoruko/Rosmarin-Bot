@@ -652,8 +652,8 @@ export class ExternalMineState {
 
         const Mem = getOutMineData(sourceRoomName);
         Mem.energy ??= [];
-        // rush：3×3/九宫格内对角房与正交房同距（相邻直接连通），8 向全开 =
-        // 收入翻倍（每房 2 源 × 10/tick）。生产大地图保留「只扩正交」的老约束。
+        // rush：八向候选全量注册——实际取舍交给选房 DP（value/weight 背包，
+        // 预算内自动偏好近房），候选列表不做人工截断
         const rush = Game.rooms[sourceRoomName] && getRoomMode(Game.rooms[sourceRoomName]) === 'rush';
         const maxRemote = rush ? 8 : 4;
         const addedRooms: string[] = [];
@@ -2099,7 +2099,10 @@ export class ExternalMineSpawner {
             const energyBudget = (!rushMode && (energyState === 'LOW' || energyState === 'CRITICAL'))
                 ? Math.max(300, sourceRoom.energyAvailable)
                 : sourceRoom.energyCapacityAvailable;
-            const body = buildRemoteMinerBody(energyBudget, 5, true);
+            // rush 不带自携 CARRY（[W5,M1,C1]=600 > 550，装箱成 [W4,C1,M2] →
+            // perSource=ceil(5/4)=2 超编挖）：掉落由外矿车队收取，
+            // 550 恰好 [W5,M1] 满效 10e/t，每源 1 只定编
+            const body = buildRemoteMinerBody(energyBudget, 5, !rushMode);
             sourceRoom.SpawnMissionAdd('OH', body, replaceLevel, 'out-harvest', memory);
         }
         return true;
@@ -2124,13 +2127,13 @@ export class ExternalMineSpawner {
         // 预算取当前可用能量（同采集工口径：贫困房也要出得起小搬运，能量回升
         // 每轮派单自动升回满配）。rush 例外：抽水造成的 LOW 不降级收入引擎，
         // 否则小体型搬运 → 同吞吐要更多只 → 队列更堵 → 更穷的螺旋。
+        // 接力定尺（对齐参考实现 RELAY_HAULER_CARRY_SIZE=4）：rush（lv<7 恒接力）
+        // 用微型件 [C4,M2]=200 容量——接力链靠相向交接让货物单 tick 前进两格，
+        // 单位密度 > 单件容量；lv≥7 直运大件（maxCarry 16，来回整坑）。
+        // 体型按当前可用能量出（参考实现 haulerEnergyCapacity=room.energyAvailable），
+        // LOW/CRITICAL 时小件保底、能量回升自动升回满配（rush 抽水造成的 LOW 不降级）。
         const energyState = ExternalMineState.getEnergyState(sourceRoom);
         const carryRush = getRoomMode(sourceRoom) === 'rush';
-        // 接力车道用微型搬运（参考实现同款定尺）：C4M2=300 能量/200 容量
-        // ——死亡损失小、孵化快（15-20t）、车道密度高，接力高频触发（单 tick 前进两格）。
-        // 体型按当前可用能量出（参考实现 haulerEnergyCapacity=room.energyAvailable），
-        // 绝不攒大件：车道上永远有车比单件更大更重要。
-        // 非接力（非 rush）保持大件口径：来回整坑运输，单件容量优先。
         const energyBudget = carryRush
             ? Math.max(150, sourceRoom.energyAvailable)
             : (energyState === 'LOW' || energyState === 'CRITICAL')
@@ -2139,9 +2142,8 @@ export class ExternalMineSpawner {
         const carryBody = buildHaulerBodyConfig(energyBudget, { forRoad: true, maxCarry: carryRush ? 4 : 16 });
 
         const totalCarry = outerCarry + spawnCarryNum;
-        // 车队上限：C4 接力运力本来就密（60 只时 CPU 与控制器周边全被挤爆），
-        // 单房编队封顶 5 只——产能不足时先加 OH（矿工），不是无限加搬运
-        const fleetCap = 5;
+        // 车队上限：接力链按吞吐定编（num 自适应），绝对上限只防病态堆积
+        const fleetCap = 24;
         if (totalCarry < Math.min(num, fleetCap)) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
@@ -2167,8 +2169,6 @@ export class ExternalMineSpawner {
 
     // 外矿预定：仅在目标未被占领、且自家预定不足时派遣。
     static reserver(sourceRoom: Room, targetRoom: Room): boolean {
-        // rush 空世界砍预定：无敌对/无争抢，reservation 零收益（650/只 + 孵化周期），纯税
-        if (getRoomMode(sourceRoom) === 'rush') return false;
         if (!targetRoom.controller || targetRoom.controller.my) return false;
         if (sourceRoom.controller.level < 3) return false;
 
@@ -2180,7 +2180,10 @@ export class ExternalMineSpawner {
         const spawnNum = this.getQueuedSpawnRoleNumByTargetGlobal('reserver', targetRoom.name);
         if (outerReservers + spawnNum >= 1) return false;
 
-        sourceRoom.SpawnMissionAdd('', '', this.PRIORITY.reserver, 'reserver', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+        // rush 预定提级（L6，升级之前）：reservation 决定 source 容量（有预定 3000/无 1500，
+        // 砍半），是外矿收入的倍增器——垫底 L11 会在孵化繁忙期永久饿死
+        const reserveLevel = getRoomMode(sourceRoom) === 'rush' ? 6 : this.PRIORITY.reserver;
+        sourceRoom.SpawnMissionAdd('', '', reserveLevel, 'reserver', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
         return true;
     }
 
