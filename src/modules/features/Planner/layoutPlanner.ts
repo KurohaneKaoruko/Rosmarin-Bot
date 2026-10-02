@@ -1011,58 +1011,6 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
  * @returns 本次创建的工地数量
  * @internal
  */
-function createSourceExtSites(room: Room, budget: number): number {
-    // 仅 RCL2：第一批 ext 全部贴 source 建造——采集工挖完就地填充，省掉一整段搬运。
-    // RCL3 起回归自动布局正常逻辑（已落位/建成的 source 旁 ext 保留，不新增）。
-    if (budget <= 0 || room.level !== 2) return 0;
-    const buildMax = (CONTROLLER_STRUCTURES as any)?.[STRUCTURE_EXTENSION]?.[room.level] ?? 0;
-    if (!buildMax) return 0;
-
-    const built = room.find(FIND_MY_STRUCTURES, { filter: s => s.structureType === STRUCTURE_EXTENSION }).length;
-    const sites = room.find(FIND_MY_CONSTRUCTION_SITES, { filter: s => s.structureType === STRUCTURE_EXTENSION });
-    if (built + sites.length >= buildMax) return 0;
-
-    // 并发预算只数 source ring-2 的自有工地，其他来源的 ext 工地不占这份名额
-    const ownSites = sites.filter(site => (room.source || []).some(source => site.pos.getRangeTo(source.pos) === 2)).length;
-    // 每个 source 各自生成 ring-2 候选格（过滤墙/边界/既有结构与工地）
-    const candidates = (room.source || []).map((source) => {
-        const cells: { x: number; y: number }[] = [];
-        for (let dx = -2; dx <= 2; dx++) {
-            for (let dy = -2; dy <= 2; dy++) {
-                if (Math.max(Math.abs(dx), Math.abs(dy)) !== 2) continue;
-                const x = source.pos.x + dx, y = source.pos.y + dy;
-                if (x <= 0 || x >= 49 || y <= 0 || y >= 49) continue;
-                if (room.getTerrain().get(x, y) === TERRAIN_MASK_WALL) continue;
-                const pos = new RoomPosition(x, y, room.name);
-                if (pos.lookFor(LOOK_CONSTRUCTION_SITES).length > 0) continue;
-                // ext 不能与任何既有结构共格（道路也不行）
-                if (pos.lookFor(LOOK_STRUCTURES).length > 0) continue;
-                cells.push({ x, y });
-            }
-        }
-        return cells;
-    });
-
-    // 双（多）source 轮转交替落位：round-robin 保证两个矿的 ext 数量均衡
-    let created = 0;
-    let round = 0;
-    while (created < budget && ownSites + created < buildMax) {
-        let progressed = false;
-        for (const cells of candidates) {
-            if (created >= budget || ownSites + created >= buildMax) break;
-            const cell = cells[round];
-            if (!cell) continue;
-            cells[round] = undefined as unknown as { x: number; y: number };
-            if (room.createConstructionSite(cell.x, cell.y, STRUCTURE_EXTENSION) === OK) {
-                created += 1;
-                progressed = true;
-            }
-        }
-        if (!progressed) break;
-        round += 1;
-    }
-    return created;
-}
 /**
  * LayoutPlanner：静态/动态布局的统一入口。
  * - visual*：只在房间内显示点位，不写入 Memory\n
@@ -1096,14 +1044,6 @@ export const LayoutPlanner = {
         let created = 0;
         for (const s of coreDepotKeys) {
             created += handleCoreDepotSite(room, layoutMemory, s);
-        }
-
-        // rush 模式 RCL2：第一批 ext 全部贴 source（多矿轮转均衡），让采集工边采边填；
-        // RCL3 起回归正常布局逻辑（source 旁已落位的 ext 保留，不新增）
-        if (!only && getRoomMode(room) === 'rush' && room.level === 2) {
-            const made = createSourceExtSites(room, Math.max(0, budget - created));
-            created += made;
-            budget -= made;
         }
 
         let regularCreated = 0;
@@ -1337,7 +1277,7 @@ export const LayoutPlanner = {
     /**
      * 迷你房布局构建（mini 模式专用）：
      * - 以 spawn 为锚点的最小据点：塔围绕 spawn（优先朝控制器一侧），RCL6+ 补 terminal；
-     * - ext 不写入布局——source 旁 ring-2 ext 由 plannerCreateSite 的特殊冲级优先落位负责；
+     * - ext 由常规布局与自动建造按 RCL 上限落位；
      * - 同步 RoomData.layout = 'mini' / center = spawn 位置（若存在）。
      * @returns Screeps 错误码：OK/ERR_NOT_FOUND
      */

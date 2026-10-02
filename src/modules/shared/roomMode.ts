@@ -183,8 +183,7 @@ export const isHighLikeMode = (mode: string): boolean => mode === 'high' || mode
  * - 房内有 link 后整体退位（正规供能链接接管）。
  *
  * 命中时生效的事：自爆拉能快递总闸打开（见 rushSupport.rushBoost）。
- * （source 旁 ext 的建造已改为 rush 模式 RCL2 常规行为：见 layoutPlanner.createSourceExtSites，
- *   不再依赖本闸门。）
+ * （source 旁 ext 特例已移除，建造走常规自动布局。）
  */
 export const isSpecialRushActive = (room: Room): boolean => {
     const mode = getRoomMode(room);
