@@ -766,7 +766,18 @@ export class ExternalMineState {
         RoadBuilder.ensureContainerSites(sourceRoom, targetRoom);
         if (!canRunSecondaryAction) return;
         const rush = getRoomMode(sourceRoom) === 'rush';
-        if (sourceRoom.level < (rush ? 2 : minLevel)) return;
+        // rush 也从 RCL3 起铺：RCL2 阶段收入未起量，8 房路网（~9k 能量/房）会把
+        // 升级/孵化抽干；源容器与控制器容器在上方两行先建，不受此门限制
+        if (sourceRoom.level < (rush ? 3 : minLevel)) return;
+        // cc 是升级链唯一补给点：缺位/在建/残血期间路面一律让位（worker 建造力集中保 cc）
+        const ctrl = sourceRoom.controller;
+        if (ctrl) {
+            const cc = (sourceRoom.container || []).find(c => c.pos.inRangeTo(ctrl.pos, 3));
+            const ccSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
+                filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(ctrl.pos, 3),
+            }).length > 0;
+            if (!cc || ccSite || cc.hits < cc.hitsMax * 0.4) return;
+        }
         if (Game.time % (rush ? 100 : EXTERNAL_ROAD_CONFIG.BUILD_INTERVAL) !== 0) return;
         RoadBuilder.createRoadSites(sourceRoom, targetRoom);
     }
@@ -1234,7 +1245,7 @@ export class ExternalMineAnalysis {
 
     // 每 tick 每源房缓存一次：各托管目标房的「可用积压」（已扣除在场搬运工预定量）。
     // 单次调度覆盖全部托管房，多个搬运工复用同一份结果，避免逐 creep 重算。
-    private static getManagedRoomBacklogMap(sourceRoom: Room): Record<string, number> {
+    static getManagedRoomBacklogMap(sourceRoom: Room): Record<string, number> {
         return getRoomTickCacheValue(sourceRoom, 'outmine_room_backlog', () => {
             const backlog: Record<string, number> = {};
             const roomNames = [
@@ -1560,6 +1571,9 @@ class ExternalMineMath {
 
     // 根据体型配置估算 out-carry 的单体承载能力。
     static getOutCarryCapacity(sourceRoom: Room): number {
+        // 接力车道（rush）：C4 微型件口径，定编按 200 容量/件折算——
+        // 定编必须与实际孵出的体型一致，否则车队目标会被低估 4-6 倍
+        if (getRoomMode(sourceRoom) === 'rush') return 200;
         const modeBody = this.getModeLimitedBodyConfig(sourceRoom, 'out-carry');
         const body = modeBody || sourceRoom.GetRoleBodys('out-carry');
         if (Array.isArray(body) && body.length > 0) {
@@ -1663,13 +1677,16 @@ export class ExternalMineSpawner {
     // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
     private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = RoleData['out-harvest'].level;
     private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData['out-carry'].level;
-    // rush 管线等级：rush 的升级池常驻占住 L10 层（目标 18~30 work 永远缺编），
-    // 等待能量的 spawn 语义下 L12/13 任务永远等不到上路——外矿是 rush 的收入引擎，
-    // 必须能进插队层（<10）：空房首采 6（低于换班 5、高于采集 3），搬运 8
-    //（参考实现 层序：紧急升级 > 远程搬运 > 普通升级——搬运排正常升级前，
-    // 有在场产出闸 + 挂单上限，不会回到旧版 24 只搬运的膨胀）
-    private static readonly OUTMINE_RUSH_HARVEST_LEVEL = 6;
-    private static readonly OUTMINE_RUSH_CARRY_LEVEL = 8;
+    // rush 管线等级（对齐参考实现的孵化层序：分发/采集搬运 > 升级 > 建造）：
+    // 收入链（矿工 OH + 搬运 OC）整体压在升级前面，升级压在建造前面。
+    // 升级不饿死的保障不是层级，而是升级定编有界（=实测收入 + 底火）——
+    // 收入链先满、升级池封顶，谁也饿不死谁（参考实现同款自洽）。
+    // 旧口径（升级 7 > 搬运 8）的震荡根源：升级单常态缺编 → 永远插队搬运 →
+    // 搬运饿死 → 收入掉 → 升级定编跟着掉 → 同步崩（attempt 19/20 实测 RCL4@25k）。
+    private static readonly OUTMINE_RUSH_HARVEST_LEVEL = 4;
+    private static readonly OUTMINE_RUSH_CARRY_LEVEL = 5;
+    // 积压饥荒层：常态 L5 已在升级(7)/建造(9) 之上，饥荒不再额外升层（留位未来调）
+    private static readonly OUTMINE_RUSH_CARRY_FAMINE_LEVEL = 5;
 
     // 换班接力优先级：目标房仍有在岗采集工、但 TTL 覆盖不足时的接替孵化等级。
     // 高于本地 worker(8)（换班爬绝不被建造/升级无限插队），低于内部保命线
@@ -1683,7 +1700,11 @@ export class ExternalMineSpawner {
     // - 采集工额度 = 单源定编（RCL≥4 每源 1 个，两源房正好 2），刚好排满不浪费；
     // - 搬运工额度是大头，压到 3 条，把它对 spawn 的占用摊到多个外矿房上。
     private static readonly OUTMINE_HARVEST_PENDING_CAP = 2;
+    // rush 接力口径：OH 是收入源头，挂单额度大于搬运（先矿后车，同参考实现的矿车顺序）
+    private static readonly OUTMINE_HARVEST_PENDING_CAP_RUSH = 2;
     private static readonly OUTMINE_CARRY_PENDING_CAP = 3;
+    // rush 接力车道（C4 微型件）的搬运挂单额度
+    private static readonly OUTMINE_CARRY_PENDING_CAP_RELAY = 3;
 
     // 触发“双人防御”模式的最低 RCL。
     private static readonly DOUBLE_DEFEND_MIN_LEVEL = 7;
@@ -1744,14 +1765,22 @@ export class ExternalMineSpawner {
     // 采集工挂单是否已达上限。采集工定编小、又是搬运的前置，
     // 所以额度独立：搬运队列排满也不能挡住采集工补员（否则断档后要等一整个搬运周期）。
     static isHarvestAtPendingCap(sourceRoom: Room, targetRoomName: string): boolean {
+        const cap = getRoomMode(sourceRoom) === 'rush'
+            ? this.OUTMINE_HARVEST_PENDING_CAP_RUSH
+            : this.OUTMINE_HARVEST_PENDING_CAP;
         return this.countPendingMissions(sourceRoom, targetRoomName, OUTMINE_HARVEST_ROLE_SET)
-            >= this.OUTMINE_HARVEST_PENDING_CAP;
+            >= cap;
     }
 
     // 搬运工挂单是否已达上限。搬运工体型最大（RCL8 48 格 ≈144 tick），是最需要限流的一方。
     static isCarryAtPendingCap(sourceRoom: Room, targetRoomName: string): boolean {
+        // rush 接力车道用 C4 微型件（300 能量 15-20t 孵化），单房占 spawn 风险低，
+        // 挂单额度放大让车道密度快速到位
+        const cap = getRoomMode(sourceRoom) === 'rush'
+            ? this.OUTMINE_CARRY_PENDING_CAP_RELAY
+            : this.OUTMINE_CARRY_PENDING_CAP;
         return this.countPendingMissions(sourceRoom, targetRoomName, OUTMINE_CARRY_ROLE_SET)
-            >= this.OUTMINE_CARRY_PENDING_CAP;
+            >= cap;
     }
 
     // 统计某房间针对某目标房间的排队刷怪数量（仅本房间任务池）。
@@ -2097,17 +2126,29 @@ export class ExternalMineSpawner {
         // 否则小体型搬运 → 同吞吐要更多只 → 队列更堵 → 更穷的螺旋。
         const energyState = ExternalMineState.getEnergyState(sourceRoom);
         const carryRush = getRoomMode(sourceRoom) === 'rush';
-        const energyBudget = (!carryRush && (energyState === 'LOW' || energyState === 'CRITICAL'))
+        // 接力车道用微型搬运（参考实现同款定尺）：C4M2=300 能量/200 容量
+        // ——死亡损失小、孵化快（15-20t）、车道密度高，接力高频触发（单 tick 前进两格）。
+        // 体型按当前可用能量出（参考实现 haulerEnergyCapacity=room.energyAvailable），
+        // 绝不攒大件：车道上永远有车比单件更大更重要。
+        // 非接力（非 rush）保持大件口径：来回整坑运输，单件容量优先。
+        const energyBudget = carryRush
             ? Math.max(150, sourceRoom.energyAvailable)
-            : sourceRoom.energyCapacityAvailable;
-        const carryBody = buildHaulerBodyConfig(energyBudget, { forRoad: true, maxCarry: 16 });
+            : (energyState === 'LOW' || energyState === 'CRITICAL')
+                ? Math.max(150, sourceRoom.energyAvailable)
+                : sourceRoom.energyCapacityAvailable;
+        const carryBody = buildHaulerBodyConfig(energyBudget, { forRoad: true, maxCarry: carryRush ? 4 : 16 });
 
         const totalCarry = outerCarry + spawnCarryNum;
-        if (totalCarry < num) {
+        // 车队上限：C4 接力运力本来就密（60 只时 CPU 与控制器周边全被挤爆），
+        // 单房编队封顶 5 只——产能不足时先加 OH（矿工），不是无限加搬运
+        const fleetCap = 5;
+        if (totalCarry < Math.min(num, fleetCap)) {
             // 搬运工挂单上限：体型最大（RCL8 48 格 ≈144 tick），不设限就会一房独占 spawn。
             if (this.isCarryAtPendingCap(sourceRoom, targetRoom.name)) return false;
             const carryLevel = getRoomMode(sourceRoom) === 'rush'
-            ? this.OUTMINE_RUSH_CARRY_LEVEL
+            ? (this.isCarryFamine(sourceRoom, targetRoom.name)
+                ? this.OUTMINE_RUSH_CARRY_FAMINE_LEVEL
+                : this.OUTMINE_RUSH_CARRY_LEVEL)
             : this.OUTMINE_CARRY_PIPELINE_LEVEL;
         sourceRoom.SpawnMissionAdd('OC', carryBody, carryLevel, 'out-carry', ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return true;
@@ -2116,8 +2157,18 @@ export class ExternalMineSpawner {
         return false;
     }
 
+    // 外矿积压是否处于严重饥荒：可用积压（扣除在场搬运预定）过严重线。
+    // 饥荒期 OC 升层重建、建造派单让位——能量优先回流收入管线。
+    private static isCarryFamine(sourceRoom: Room, targetRoomName: string): boolean {
+        const backlog = ExternalMineAnalysis.getManagedRoomBacklogMap(sourceRoom)[targetRoomName] ?? 0;
+        return backlog >= EXTERNAL_MINE_ANALYSIS.SEVERE_BACKLOG_THRESHOLD
+            * getRoomModeProfile(sourceRoom).remoteCarryBacklogScale;
+    }
+
     // 外矿预定：仅在目标未被占领、且自家预定不足时派遣。
     static reserver(sourceRoom: Room, targetRoom: Room): boolean {
+        // rush 空世界砍预定：无敌对/无争抢，reservation 零收益（650/只 + 孵化周期），纯税
+        if (getRoomMode(sourceRoom) === 'rush') return false;
         if (!targetRoom.controller || targetRoom.controller.my) return false;
         if (sourceRoom.controller.level < 3) return false;
 
@@ -2155,6 +2206,9 @@ export class ExternalMineSpawner {
     // 不分配 targetSourceId——运行时按「离当前工作目标最近的源」动态取能
     // （见 out-build.ts 的 getAssignedSource），采建同侧、不跨源绑定。
     static builder(sourceRoom: Room, targetRoom: Room): boolean {
+        // 运力饥荒让位：外矿积压过严重线时暂停建造派单，spawn 周期让给 OC 重建
+        //（路网/容器再投资在积压消化后自然恢复——builder 按工地存在性自限）
+        if (this.isCarryFamine(sourceRoom, targetRoom.name)) return false;
         const constructionTargets = this.getBuilderConstructionTargets(targetRoom);
         const repairTargets = this.getBuilderRepairTargets(targetRoom);
         const workCount = constructionTargets.length + repairTargets.length;

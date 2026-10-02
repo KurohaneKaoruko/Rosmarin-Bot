@@ -2,7 +2,7 @@ import { isRoleId, RoleData, RoleLevelData, type RoleId } from '@/constant/Creep
 import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
-import { getUpgradeWorkTarget, getControllerCarryDeficit, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL } from '@/modules/shared/roomWorkforce';
+import { getUpgradeWorkTarget, isControllerContainerThirsty, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL } from '@/modules/shared/roomWorkforce';
 import { buildUpgraderBodyConfig } from '@/modules/shared/upgradeBody';
 import { getDowngradedLogisticsCountByAssignedRoom, hasSoonDeadCreepByAssignedRoomRole } from '@/modules/shared/creepTickIndex';
 import {
@@ -84,19 +84,11 @@ export default class SpawnMission extends Room {
         const spawnMissionNum = this.getSpawnMissionNum();
         const context = createSpawnCheckContext(this, creepNum, spawnMissionNum);
 
-        // rush：控制器容器专职搬运（升级端 maxWork
-        // 每 tick 抽干容器，通用 carrier 的「非紧急才喂容器」口径喂不满）。
-        // 每轮最多补 1 只涓流进场；level 9 = 插队层，让位升级工(7)/建造(8)。
-        const controllerCarryMissing = getControllerCarryDeficit(this);
-        if (controllerCarryMissing > 0) {
-            this.SpawnMissionAdd(
-                RoleData['carrier'].code,
-                '',
-                9,
-                'carrier',
-                { home: this.name, controllerCarry: true } as CreepMemory
-            );
-        }
+        // 控制器容器的补给已并入 carrier 默认行为（cc 存量低于升级消耗节奏时，
+        // carrier 自动把 extension 盈余搬去 cc——见 roomWorkforce.isControllerContainerThirsty
+        // 与 carrier.ts 的取货分支），不再有专职涓流岗。
+        // 历史教训：deficit 涓流不感知在途挂单，cc 长期空置 + 孵化忙碌时
+        // 每轮 +1 永不封口，曾单局灌出 172 条 carrier 挂单。
 
         for (const role in RoleSpawnCheck) {
             const adjusted = getAdjustedSpawnRoleCurrent(context, role);
@@ -121,11 +113,18 @@ export default class SpawnMission extends Room {
                 // 升级工体型：rush 按当前可用能量走 RCL 分级表（分级下探，保证随时能孵
                 // ——满档体型会被建造/搬运的常态抽取压在成本线以下，零余量死锁）；
                 // 非 rush 维持「按定编缺口 + 满容量」一次孵最大。
-                const body = role === 'upgrader' && getRoomMode(this) === 'rush'
+                let body = role === 'upgrader' && getRoomMode(this) === 'rush'
                     ? this.GetRoleBodys('upgrader', false, this.energyAvailable)
                     : role === 'upgrader'
                         ? buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this))
                         : '';
+                // rush 开局（lv≤3）harvester 定点矿工化：无 CARRY 纯 [W×N, M1] 站桩连挖，
+                // 掉落在工作位由 rush 常备 carrier 收取——mobile 自采自搬的运程空转
+                // 会吃掉一半产出（attempt 23 实测 lv2→3 仅 5.5e/t，同预算定点翻倍）
+                if (role === 'harvester' && getRoomMode(this) === 'rush' && this.level <= 3) {
+                    const workN = Math.max(1, Math.floor((this.energyCapacityAvailable - 50) / 100));
+                    body = [[WORK, workN], [MOVE, 1]] as ((BodyPartConstant | number)[])[];
+                }
                 // 缺口门：WORK 缺口×2 都填不满一个身位时不发单（防小缺口反复孵化空转）
                 if (role === 'upgrader') {
                     const bodyWork = (body as ((BodyPartConstant | number)[])[])
@@ -332,7 +331,32 @@ export class SpawnTaskGetter extends Room {
 
         // 严格尊重优先级：只有最高优先级层没有能孵化的任务时，才等待该层；
         // 少数例外（例如停摆恢复 universal）仍由 SpawnControl 层处理。
-        return pickSpawnMission(selection, allowWaitForPriorityEnergy, queueJumpAllowBelowLevel);
+        const picked = pickSpawnMission(selection, allowWaitForPriorityEnergy, queueJumpAllowBelowLevel);
+        if (!picked) return null;
+
+        // 收入链连跑保险：外矿 8 房的 OH/OC 挂单每轮重铺（L4/L5 常驻海），
+        // 升级单（L7）在严格优先级下永远轮不到——attempt 22 实测 RCL2 冻结 2k+ tick。
+        // 连续 2 只收入链孵化后，升级单强制插队一次：收入链占 2/3 节拍，升级保 1/3，
+        // 有界让位、双向不饿死（升级单不存在/孵不起时收入链照常连跑）。
+        const memAny = this.memory as any;
+        const pickedRole = (picked.data as any)?.memory?.role;
+        if (picked.level >= 4 && picked.level <= 6 && (pickedRole === 'out-harvest' || pickedRole === 'out-carry')) {
+            memAny.incomeChainRun = (memAny.incomeChainRun || 0) + 1;
+        } else {
+            memAny.incomeChainRun = 0;
+            return picked;
+        }
+        if (memAny.incomeChainRun < 2) return picked;
+
+        for (const task of tasks) {
+            if ((task.data as any)?.memory?.role !== 'upgrader') continue;
+            const required = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
+            if (required != null && required <= availableEnergy) {
+                memAny.incomeChainRun = 0;
+                return task;
+            }
+        }
+        return picked;
     }
 
     getSpawnMissionNum() {
