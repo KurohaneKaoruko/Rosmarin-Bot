@@ -2283,10 +2283,16 @@ export class ExternalMine {
     // CRITICAL（真实饥荒）时整体停摆：复苏期每一分
     // 能量都要留给本地采集线，远程扩张只会把涓流吃干、把 CRITICAL 固化成
     // 贫困循环；LOW 仍以预算小体型保持运转，状态回升后自动恢复派送。
+    // rush 豁免仅限有仓成熟经济体（外矿链已铺开、能量真在回流）；
+    // 无仓早期房外矿管线是净抽水（29 只外务 creep 挤占 spawn + 能量在途），
+    // 豁免会把 1-3 级段速拖垮，CRITICAL 照旧停摆。
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
-        if (!(getRoomMode(room) === 'rush') && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
+        // 控制器容器保活不受 CRITICAL 闸门限制：饥荒期恰恰是升级链最依赖容器的时刻
+        //（参考实现每 tick 无条件放工地，不吃能量状态门）
+        RoadBuilder.ensureControllerContainer(room);
+        if (!(getRoomMode(room) === 'rush' && (room.storage || room.terminal)) && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
@@ -2413,7 +2419,7 @@ export class ExternalMine {
     static runCenter(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
-        if (!(getRoomMode(room) === 'rush') && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
+        if (!(getRoomMode(room) === 'rush' && (room.storage || room.terminal)) && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         const targetRooms = ExternalMine.getManagedTargetRooms(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
