@@ -46,13 +46,11 @@ const retire = (creep: Creep): void => {
     creep.suicide();
 };
 
-/** 升级期间的移动工位：专属工位（range 0），无工位退回控制器 3 格 */
+/** 升级期间的移动工位：专属工位（range 0），无工位退回控制器 3 格。
+ *  空仓待命时**同样**就位——升级工的待命点必须是控制器旁，
+ *  站在 spawn 旁等手填 = 永远走不进 range 3（能量堆在身上升不了级的死锁）。 */
 export const syncUpgraderMoveWork = (creep: Creep) => {
-    if (
-        creep.room.controller?.my &&
-        creep.memory.working &&
-        creep.store.getUsedCapacity(RESOURCE_ENERGY) > 0
-    ) {
+    if (creep.room.controller?.my) {
         const slot = getWorkerUpgradeSlot(creep.room, creep.name);
         writeMoveWorkTileCandidates(creep, [
             slot ? { pos: slot, range: 0 } : { pos: creep.room.controller.pos, range: 3 },
@@ -88,8 +86,8 @@ const onSource = (creep: Creep): WorkEvent => {
 
     // 控制器周边缓冲取能：link > container > terminal > storage。
     // 严禁回退通用取能（fallbackToTakeEnergy: false）——静态升级工绝不离开
-    // 控制器区域自己找能量：仓库空了就原地待命，能量由搬运送上容器；
-    // 乱走会丢站位、拖垮吞吐，还和搬运/孵化抢散能。断供期照记 starved 账。
+    // 控制器区域自己找能量：仓库空了就**回控制器旁待命**（syncUpgraderMoveWork
+    // 会写入就位候选），能量由搬运送上容器/手填；断供期照记 starved 账。
     const filled = creep.withdrawControllerEnergy({
         linkRange: 2,
         containerRange: 2,
@@ -100,10 +98,17 @@ const onSource = (creep: Creep): WorkEvent => {
     if (filled && creep.store.getFreeCapacity() === 0) {
         return WORK_EVENTS.TO_TARGET;
     }
-    // 仓库断供且已卸空：原地待命等补给（不移动、不找能量），仅记 starved 账
+    // 手填/部分到货（carrier 的 transfer 不走 withdraw 返回值）：身上有货就去升级——
+    // 停在 onSource 会原地站死（本分支无移动逻辑），boot 阶段升级工孵在 spawn 旁
+    // 被 carrier 喂满后永远走不进控制器 3 格（实测 0 升级冻结的根因）
+    if ((creep.store[RESOURCE_ENERGY] || 0) > 0) return WORK_EVENTS.TO_TARGET;
+    // 仓库断供且已卸空：回控制器旁待命等补给（不找能量），仅记 starved 账
     if (creep.store.getUsedCapacity(RESOURCE_ENERGY) === 0) {
         registerUpgraderStarve(creep.room);
         syncUpgraderMoveWork(creep);
+        if (creep.pos.getRangeTo(creep.room.controller!.pos) > 3) {
+            creep.moveTo(creep.room.controller!.pos, { range: 3 });
+        }
     }
     return WORK_EVENTS.STAY;
 };

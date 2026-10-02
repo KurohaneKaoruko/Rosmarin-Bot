@@ -91,6 +91,11 @@ export default class SpawnControl extends Room {
     }
 
     private trySpawnEmergencyUniversal(spawn: StructureSpawn, blockedRole = 'recovery', referenceCost = 300) {
+        // 冷启动（lv1 零进度且全场无 creep）：首孵 = 小型 harvester（收入优先，
+        // 参考实现开局先出采集者）——而不是应急 UNIV；UNIV 由池内定编随后按档产出。
+        const coldStart = this.controller?.level === 1
+            && (this.controller?.progress || 0) === 0
+            && Object.keys(Game.creeps).length === 0;
         const universalBody = this.getEmergencyRecoveryUniversalBody();
         if (!universalBody || universalBody.length <= 0) return false;
 
@@ -117,12 +122,28 @@ export default class SpawnControl extends Room {
             if (harvesterNum !== 0 && carrierNum !== 0) return false;
         }
 
-        const result = spawn.spawnCreep(
+        // 冷启动收入优先：200 能量 [W2,M2] 无 CARRY 静态连挖（4e/t 不断流，
+        // 掉落在工作位由 rush 常备的 carrier 收取）——UNIV 交由定编流程
+        if (coldStart && this.energyAvailable >= 200 && harvesterNum === 0) {
+            const harvesterBody: BodyPartConstant[] = [WORK, WORK, MOVE, MOVE];
+            const result = spawn.spawnCreep(
+                harvesterBody,
+                GenCreepName(RoleData['harvester'].code),
+                { memory: { role: 'harvester', home: this.name, cache: {} } as CreepMemory }
+            );
+            if (result === OK) {
+                creepNum['harvester'] = (creepNum['harvester'] || 0) + 1;
+                global.log(`房间 ${this.name} 冷启动：首孵小型 harvester（收入优先），UNIV 交由定编流程。`);
+                return true;
+            }
+        }
+
+        const result2 = spawn.spawnCreep(
             universalBody,
             GenCreepName(RoleData['universal'].code),
             { memory: { role: 'universal', home: this.name, cache: {} } as CreepMemory }
         );
-        if (result !== OK) return false;
+        if (result2 !== OK) return false;
 
         creepNum['universal'] = (creepNum['universal'] || 0) + 1;
         global.log(`房间 ${this.name} 因 ${blockedRole} 卡住或断档，已紧急孵化 universal 进行恢复。`);
