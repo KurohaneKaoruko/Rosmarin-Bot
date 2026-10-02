@@ -498,8 +498,10 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     const lv = room.level;
     const ttd = controller.ticksToDowngrade || 0;
     const upgradeNeeded = ttd < UPGRADE_NEEDED_TTD;
-    // spawn/塔都喂不饱且无降级风险时，升级是奢侈品，让位
-    if (getRoomEnergyState(room) === 'CRITICAL' && ttd > UPGRADE_NEEDED_TTD) return 0;
+    // spawn/塔都喂不饱且无降级风险时，升级是奢侈品，让位。
+    // rush/high 不让位：饥荒应对走孵化优先级插队，编队归零会造成恢复真空
+    //（CRITICAL→归零→升级工死光→能量恢复后无工可恢复，段速崩塌）
+    if (getRoomEnergyState(room) === 'CRITICAL' && ttd > UPGRADE_NEEDED_TTD && !isHighLikeMode(getRoomMode(room))) return 0;
 
     const energyLevel = getEnergyLevel(room);
     const income = estimateRoomEnergyIncome(room);
@@ -537,25 +539,23 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     // —— 地面堆积项：每 2000 点掉落能量折算 1 个升级 work，直接消化地上存货 ——
     const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
 
-    // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随孵化占用率反向浮动
-    //    （spawn 越空闲越加码 1.0→1.2，孵化繁忙时回落 1.0，不与孵化抢产能）。
-    //    不做 cc 单点水位节流：cc 干涸时收缩升级工是反向反馈（升级工变少 → 抽水更少
-    //    → cc 更空的死锁）；cc 供能不足由专线配额与手填闭环解决。
+    // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随饥荒状态浮动
+    //    （升级工近期取能落空 starved>0 → 1.0 让孵化，供能流畅 → 1.2 加码；
+    //    每tick衰减1，自然回扩）。不做 cc 单点水位节流：cc 干涸时收缩升级工是
+    //    反向反馈（升级工变少 → 抽水更少 → cc 更空的死锁）；cc 供能不足由
+    //    专线配额与手填闭环解决。
     if (getRoomMode(room) === 'rush') {
         const pileAll = getDroppedPileEnergy(room) + getRemotePileEnergy(room);
-        const memAny = room.memory as any;
-        memAny.spawnUsageEma ??= 1;
-        const busy = (room.spawn || []).some(s => s.spawning) ? 1 : 0;
-        const alpha = 1 - Math.pow(2, -1 / 50); // 50t 时间常数（参考口径）
-        memAny.spawnUsageEma = memAny.spawnUsageEma * (1 - alpha) + busy * alpha;
-        const multiplier = Math.min(1.2, Math.max(1, memAny.spawnUsageEma / 2 + 0.8));
+        const multiplier = getUpgradersStarved(room) > 0 ? 1 : 1.2;
         const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
 
         const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
         return Math.max(Math.max(lowerLimit, 5), Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
     }
-    // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩 ——
-    return Math.max(lowerLimit, Math.min(capacity, shrinkByStarved(room, Math.max(incomeWork, surplusWork, pileWork))));
+    // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩。
+    //    rush/high 不缩：孵化优先级已护住 spawn，缩编只会拉长饥荒（饿→缩→更饿）——
+    const demand = Math.max(incomeWork, surplusWork, pileWork);
+    return Math.max(lowerLimit, Math.min(capacity, isHighLikeMode(getRoomMode(room)) ? demand : shrinkByStarved(room, demand)));
 };
 
 // ==================== 升级孵化加急（富余能量快速消化） ====================
