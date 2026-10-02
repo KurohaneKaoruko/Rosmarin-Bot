@@ -881,14 +881,21 @@ export class RoadBuilder {
     }
 
     /**
-     * 控制器容器保活：容器会 decay，烂掉后静态升级工失去补给点、out-carry 失去直供目标
-     * （race 实测：容器消失 → extension 被建造消耗压在升级成本线下 → 升级归零）。
-     * 检测「控制器 3 格内既无容器也无工地」时，在最近可行邻格补一个 container 工地
-     * （主房 workers 会接手建造）。
+     * 控制器容器保活（选址口径对齐参考实现）：
+     * - RCL2-4 专用窗口：该阶段升级链完全依赖容器补给；RCL5 起 controller link
+     *   接管供能，仅在控制器 3 格内无 link 时兜底保活（容器烂掉 → 静态升级工
+     *   失去补给点、out-carry 失去直供目标）。
+     * - 选址评分 = 相邻可升级站位数×4 − 距 spawn 距离（参考口径）：
+     *   站位 = 邻格内非墙、无结构/工地（road 不可站）、仍在控制器 range 3 的格子，
+     *   保证静态升级工有驻位；次选靠近 spawn 缩短搬运。
+     * - 幂等：控制器 3 格内已有容器或同类型工地则跳过。
      */
     static ensureControllerContainer(sourceRoom: Room): void {
         const controller = sourceRoom.controller;
         if (!controller?.my) return;
+        const rcl = controller.level;
+        if (rcl < 2) return;
+        if (rcl >= 5 && (sourceRoom.link || []).some(l => l.pos.inRangeTo(controller.pos, 3))) return;
         if ((sourceRoom.container || []).some(c => c.pos.inRangeTo(controller.pos, 3))) return;
         const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
@@ -896,27 +903,36 @@ export class RoadBuilder {
         if (existingSite) return;
 
         const terrain = sourceRoom.getTerrain();
-        let best: { x: number; y: number; open: number; score: number } | null = null;
-        for (let dx = -2; dx <= 2; dx++) {
-            for (let dy = -2; dy <= 2; dy++) {
+        const spawn = (sourceRoom.spawn || [])[0];
+        const occupied = new Set<string>();
+        for (const s of sourceRoom.find(FIND_STRUCTURES)) occupied.add(s.pos.x + ',' + s.pos.y);
+        for (const s of sourceRoom.find(FIND_CONSTRUCTION_SITES)) occupied.add(s.pos.x + ',' + s.pos.y);
+        const inCtrl3 = (x: number, y: number): boolean =>
+            Math.max(Math.abs(x - controller.pos.x), Math.abs(y - controller.pos.y)) <= 3;
+        const standable = (x: number, y: number): boolean =>
+            x >= 1 && x <= 48 && y >= 1 && y <= 48
+            && !occupied.has(x + ',' + y)
+            && terrain.get(x, y) !== TERRAIN_MASK_WALL
+            && inCtrl3(x, y);
+
+        let best: { x: number; y: number; score: number } | null = null;
+        for (let dx = -3; dx <= 3; dx++) {
+            for (let dy = -3; dy <= 3; dy++) {
                 const x = controller.pos.x + dx;
                 const y = controller.pos.y + dy;
                 if (x < 1 || x > 48 || y < 1 || y > 48) continue;
                 if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
-                const structs = sourceRoom.lookForAt(LOOK_STRUCTURES, x, y);
-                if (structs.some(s => s.structureType !== STRUCTURE_ROAD && s.structureType !== STRUCTURE_RAMPART)) continue;
-                // 选址口径（对齐参考实现的靠外布局）：
-                // - 开阔邻格数优先（carrier 从任意方向可达，不被升级工圈围死）
-                // - 次选朝房间中心外侧（远离 spawn 交通走廊）
+                if (occupied.has(x + ',' + y)) continue;
                 let open = 0;
                 for (let ox = -1; ox <= 1; ox++) {
                     for (let oy = -1; oy <= 1; oy++) {
-                        if (terrain.get(x + ox, y + oy) !== TERRAIN_MASK_WALL) open++;
+                        if (ox === 0 && oy === 0) continue;
+                        if (standable(x + ox, y + oy)) open++;
                     }
                 }
-                const roomCenterBias = (Math.abs(x - 25) + Math.abs(y - 25)) / 50;
-                const score = open * 3 + roomCenterBias * 10;
-                if (!best || score > best.score) best = { x, y, open, score };
+                const baseDist = spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0;
+                const score = open * 4 - baseDist;
+                if (!best || score > best.score) best = { x, y, score };
             }
         }
         if (best) {
