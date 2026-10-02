@@ -2286,7 +2286,7 @@ export class ExternalMine {
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
-        if (ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
+        if (!(getRoomMode(room) === 'rush') && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
@@ -2413,7 +2413,7 @@ export class ExternalMine {
     static runCenter(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
-        if (ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
+        if (!(getRoomMode(room) === 'rush') && ExternalMineState.getEnergyState(room) === 'CRITICAL') return;
 
         const targetRooms = ExternalMine.getManagedTargetRooms(room, 'centerRoom');
         if (targetRooms.length <= 0) return;
