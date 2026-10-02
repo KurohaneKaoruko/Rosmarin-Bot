@@ -110,6 +110,8 @@ const readProbe = async (nonce, retries = 10) => {
     return null;
 };
 
+const fmtTick = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}m` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n)}`);
+
 const decodeMemoryBody = (raw) => {
     let body;
     try { body = JSON.parse(raw); } catch { return null; }
@@ -121,10 +123,25 @@ const getAccountStatus = async (nonce) => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            expression: `Memory.__wd = JSON.stringify({ spawns: _.size(Game.spawns), spawnRooms: Object.keys(Game.spawns).map(n => Game.spawns[n].pos.roomName), creeps: _.size(Game.creeps), time: Game.time, nonce: '${nonce}' })`,
+            expression: `Memory.__wd = JSON.stringify((function(){ const out = { spawns: _.size(Game.spawns), spawnRooms: Object.keys(Game.spawns).map(n => Game.spawns[n].pos.roomName), creeps: _.size(Game.creeps), time: Game.time, nonce: '${nonce}' }; const r = Game.rooms['${ROOM}']; if (r && r.controller && r.controller.my) { out.level = r.controller.level; out.progress = r.controller.progress; const BARS = [0, 0, 200, 45000, 135000, 405000, 1215000, 3645000, 10935000]; out.progressMax = r.controller.progressMax || BARS[r.controller.level + 1] || 0; const race = Memory.rooms && Memory.rooms['${ROOM}'] ? Memory.rooms['${ROOM}'].race : null; if (race && race.levels) out.race = { baseline: race.baseline, levels: race.levels }; } return out; })())`,
         }),
     });
     return readProbe(nonce);
+};
+
+// 冲级记录行：只显示 ≤当前等级 的里程碑（更高项来自被清号前的上一轮，混着看会误导）
+const formatRaceLine = (status) => {
+    const race = status.race;
+    if (!race || !race.levels) return null;
+    const baseline = race.baseline ?? 0;
+    const keys = Object.keys(race.levels).map(Number).filter(l => l <= (status.level || 0)).sort((a, b) => a - b);
+    const parts = [];
+    for (const l of keys) {
+        const total = Math.max(0, race.levels[l] - baseline);
+        const seg = l > 1 && race.levels[l - 1] !== undefined ? race.levels[l] - race.levels[l - 1] : total;
+        parts.push(`lv${l} ${fmtTick(Math.max(0, seg))}(${fmtTick(total)})`);
+    }
+    return parts.length ? parts.join(' · ') : null;
 };
 
 // ---- 落脚点：地形上选开阔可建格（确定性），或用 --x/--y 覆盖 ----
@@ -166,12 +183,21 @@ const placeSpawn = async (x, y) => {
 };
 
 // ---- 主循环 ----
+let lastPoll = null; // { tick, progress }：两次轮询间差分出升级速率
+
 const runCycle = async () => {
     const nonce = `${Date.now()}`;
     const status = await getAccountStatus(nonce).catch(() => null);
     if (status) {
         if (status.spawns > 0) {
-            log(`存活中: spawns=${status.spawns} @ ${JSON.stringify(status.spawnRooms)} creeps=${status.creeps} tick=${status.time}`);
+            let line = `运行中: lv${status.level} ${status.progressMax ? `${Math.round(status.progress / status.progressMax * 100)}% (${fmtTick(status.progress)}/${fmtTick(status.progressMax)})` : ''}`;
+            if (lastPoll && status.time > lastPoll.tick && status.progress >= lastPoll.progress) {
+                line += ` · ${(status.progress - lastPoll.progress) / (status.time - lastPoll.tick)} e/t`;
+            }
+            const raceLine = formatRaceLine(status);
+            if (raceLine) line += ` | ${raceLine}`;
+            log(line);
+            lastPoll = { tick: status.time, progress: status.progress };
             return;
         }
         log(`账号已清空（spawns=0, tick=${status.time}）→ 重新落地 ${ROOM}`);
@@ -194,9 +220,18 @@ const runCycle = async () => {
     const { status: http, body } = await placeSpawn(pos.x, pos.y);
     if (http === 200 && body.includes('"ok"')) {
         log(`落地成功 ✓`);
-        await sleep(5000);
+        // runner 处理新房间要几个 tick，等久一点让首次确认带上完整进度
+        await sleep(15000);
         const after = await getAccountStatus(`${Date.now()}`).catch(() => null);
-        if (after) log(`确认: spawns=${after.spawns} @ ${JSON.stringify(after.spawnRooms)}`);
+        if (after && after.spawns > 0) {
+            let line = `确认: lv${after.level ?? '?'} creeps=${after.creeps}`;
+            if (after.progressMax) line += ` · ${Math.round(after.progress / after.progressMax * 100)}% (${fmtTick(after.progress)}/${fmtTick(after.progressMax)})`;
+            const raceLine = formatRaceLine(after);
+            if (raceLine) line += ` | ${raceLine}`;
+            log(line);
+        } else {
+            log(`确认: spawns 已放置（runner 尚未上报详情，下轮轮询出进度）`);
+        }
     } else {
         // 非 200 常见语义是「已有 spawn 被拒」＝账号存活（幂等拒绝，非错误）
         log(`放置被拒 http=${http}（通常=已有 spawn，账号存活）: ${body}`);
