@@ -86,15 +86,16 @@ export default class WarSpawnFunction extends Flag {
         }
 
         const boostBody = bodys.length == 0 ? RoleData['aio'].bodypart : bodys
-        if (boostmap && !room.CheckBoostRes(boostBody, boostmap)) {
-            console.log(flagName, '没有足够的boost资源')
-            this.remove()
-            return true
-        }
+        // boost 资源不足：不删旗弃单——跳过 boost 任务按原体型孵化，
+        // creep 端 ensureBoosted 等 80t 后自动退化无 boost 出击（与 aidSpawn 同口径）。
+        // 无限能量等特殊规则服没有 boost 产能，删旗会导致战争旗永久不可用
+        const boostable = !boostmap || room.CheckBoostRes(boostBody, boostmap)
+        if (!boostable) console.log(flagName, 'boost 资源不足，降级为无 boost 孵化')
 
         const flagMemory = this.memory as any
-        const spawnLimit = parseFlagNumber(flagName, 'N', 0)
-        const maxSpawnCount = spawnLimit > 0 ? spawnLimit : 1
+        // N-0 = 无限孵化（数量上限正常使用不可能为 0）；N 缺省 = 单次
+        const spawnLimit = parseFlagNumber(flagName, 'N', -1)
+        const maxSpawnCount = spawnLimit === 0 ? Infinity : Math.max(1, spawnLimit)
         if ((flagMemory['spawnCount'] || 0) >= maxSpawnCount) {
             console.log(flagName, '孵化数量已满')
             this.remove()
@@ -105,12 +106,12 @@ export default class WarSpawnFunction extends Flag {
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'aio', {
             homeRoom: room.name,
             targetRoom: targetRoom,
-            boostmap: boostmap,
+            boostmap: boostable ? boostmap : {},
             boostOwnerId,
             spawnFlag: flagName,
         } as any)
         if (spawnRet !== OK) return true
-        room.AssignBoostTaskByBody(boostBody, boostmap, boostOwnerId)
+        if (boostable) room.AssignBoostTaskByBody(boostBody, boostmap, boostOwnerId)
 
         flagMemory['spawnCount'] = (flagMemory['spawnCount'] || 0) + 1
         console.log(flagName, '已添加孵化任务.')
@@ -150,7 +151,9 @@ export default class WarSpawnFunction extends Flag {
         if (!room) return true
 
         const targetRoom = this.pos.roomName
-        const num = parseFlagNumber(flagName, 'N', 1)
+        // N-0 = 无限补员（数量参数正常使用不可能为 0）；每轮最多补 2 单防无限循环
+        const rawNum = parseFlagNumber(flagName, 'N', -1)
+        const num = rawNum === 0 ? Infinity : Math.max(1, rawNum)
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
@@ -158,8 +161,11 @@ export default class WarSpawnFunction extends Flag {
             (memory) => memory.targetRoom === targetRoom
         )
         const missing = Math.max(0, num - spawnLoad.total)
-        for (let i = 0; i < missing; i++) {
-            room.SpawnMissionAdd('', '', num, 'attack-claimer', { homeRoom: room.name, targetRoom, num, spawnFlag: flagName })
+        const batch = Number.isFinite(num) ? missing : Math.min(missing, 2)
+        // memory.num 需 JSON 安全（Infinity 序列化为 null），无限用 999 哨兵
+        const memNum = Number.isFinite(num) ? num : 999
+        for (let i = 0; i < batch; i++) {
+            room.SpawnMissionAdd('', '', memNum, 'attack-claimer', { homeRoom: room.name, targetRoom, num: memNum, spawnFlag: flagName })
         }
         if (missing > 0) {
             log('CLAIM', `${room.name} 补充了 ${missing} 个 attack-claimer 来攻击 ${targetRoom}`)
@@ -185,15 +191,14 @@ export default class WarSpawnFunction extends Flag {
         const bodys = RoleData['dismantle'].bodypart as any
         const boostmap = (RoleData['dismantle'].boostmap || {}) as BoostMap
 
-        if (boostmap && !room.CheckBoostRes(bodys, boostmap)) {
-            console.log(flagName, '没有足够的boost资源')
-            this.remove()
-            return true
-        }
+        // boost 资源不足降级无 boost 孵化（与 AIO 同口径，见 handleAioFlag）
+        const boostable = !boostmap || room.CheckBoostRes(bodys, boostmap)
+        if (!boostable) console.log(flagName, 'boost 资源不足，降级为无 boost 孵化')
 
         const flagMemory = this.memory as any
-        const spawnCount = parseFlagNumber(flagName, 'N', 0)
-        const maxSpawnCount = spawnCount > 0 ? spawnCount : 1
+        // N-0 = 无限孵化（数量上限正常使用不可能为 0）；N 缺省 = 单次
+        const spawnCount = parseFlagNumber(flagName, 'N', -1)
+        const maxSpawnCount = spawnCount === 0 ? Infinity : Math.max(1, spawnCount)
         if ((flagMemory['spawnCount'] || 0) >= maxSpawnCount) {
             console.log(flagName, '孵化数量已满')
             this.remove()
@@ -205,13 +210,13 @@ export default class WarSpawnFunction extends Flag {
         const spawnRet = room.SpawnMissionAdd('', bodys, -1, 'dismantle', {
             homeRoom: room.name,
             targetRoom,
-            boostmap,
+            boostmap: boostable ? boostmap : {},
             boostOwnerId,
             dismantleMode: 'route',
             spawnFlag: flagName,
         } as any)
         if (spawnRet !== OK) return true
-        room.AssignBoostTaskByBody(bodys, boostmap, boostOwnerId)
+        if (boostable) room.AssignBoostTaskByBody(bodys, boostmap, boostOwnerId)
 
         flagMemory['spawnCount'] = (flagMemory['spawnCount'] || 0) + 1
         console.log(flagName, '已添加孵化任务.')

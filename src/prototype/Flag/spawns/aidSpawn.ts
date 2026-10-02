@@ -281,8 +281,11 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             this.cleanupJumpCarryTasks(room, flagName, targetRoom);
         }
 
-        const preBuilder = Math.max(1, parseFlagNumber(flagName, 'B', 4));
-        const postBuilder = Math.max(preBuilder, parseFlagNumber(flagName, 'PB', preBuilder));
+        // B/PB 是数量参数，正常使用不可能为 0：B-0/PB-0 = 无限建造工；缺省 B=4、PB=B
+        const rawBuilder = parseFlagNumber(flagName, 'B', 4);
+        const preBuilder = rawBuilder === 0 ? Infinity : Math.max(1, rawBuilder);
+        const rawPostBuilder = parseFlagNumber(flagName, 'PB', -1);
+        const postBuilder = rawPostBuilder === 0 ? Infinity : Math.max(preBuilder, rawPostBuilder);
         const minEnergy = Math.max(500, parseFlagNumber(flagName, 'E', 3000));
         const linearDistance = Game.map.getRoomLinearDistance(room.name, targetRoom, true);
 
