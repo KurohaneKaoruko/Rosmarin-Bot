@@ -546,7 +546,7 @@ export const getUpgradeWorkTarget = (room: Room): number => {
         const memAny = room.memory as any;
         memAny.spawnUsageEma ??= 1;
         const busy = (room.spawn || []).some(s => s.spawning) ? 1 : 0;
-        const alpha = 2 / 1501;
+        const alpha = 1 - Math.pow(2, -1 / 50); // 50t 时间常数（参考口径）
         memAny.spawnUsageEma = memAny.spawnUsageEma * (1 - alpha) + busy * alpha;
         const multiplier = Math.min(1.2, Math.max(1, memAny.spawnUsageEma / 2 + 0.8));
         const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
