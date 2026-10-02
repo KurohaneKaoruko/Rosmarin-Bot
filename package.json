@@ -4,7 +4,8 @@
   "description": "",
   "type": "module",
   "scripts": {
-    "build": "rolldown -c",
+    "build": "tsc --noEmit && rolldown -c",
+    "typecheck": "tsc --noEmit",
     "push": "node ./scripts/submit.js",
     "push:official": "cross-env DEST=screeps.com@Kaoruko rolldown -c",
     "push:season": "cross-env DEST=screeps.com/season@Kaoruko rolldown -c",

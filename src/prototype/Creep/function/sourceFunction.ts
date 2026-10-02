@@ -102,7 +102,7 @@ export default class SourceFunction extends Creep {
                 const blocked = structures.some(s =>
                     s.structureType !== STRUCTURE_ROAD &&
                     s.structureType !== STRUCTURE_CONTAINER &&
-                    !(s.structureType === STRUCTURE_RAMPART && s.my));
+                    !(s.structureType === STRUCTURE_RAMPART && (s as StructureRampart).my));
                 if (blocked) continue;
                 slots++;
             }

@@ -1,4 +1,5 @@
 import { getRoomMode } from "@/modules/shared/roomMode";
+import { getOutMineData } from "@/modules/shared/memory";
 import { RoleData } from "@/constant/CreepConstant";
 
 /** 各等级 → 下一级所需进度点兜底表（实测条优先，缺采样时使用） */
@@ -95,10 +96,12 @@ export default class RaceVisual extends Room {
             mem.baseline ??= now;
         }
         mem.baseline ??= now;
-        if (controller.progressMax) mem.bars[level] = controller.progressMax;
+        // xxscreeps 未实现 progressMax：运行时缺失时走静态条表兜底
+        const progressMax = (controller as any).progressMax as number | undefined;
+        if (progressMax) mem.bars[level] = progressMax;
 
         const progress = controller.progress || 0;
-        const barPts = mem.bars[level] || RCL_BAR_FALLBACK[level] || controller.progressMax || 1;
+        const barPts = mem.bars[level] || RCL_BAR_FALLBACK[level] || progressMax || 1;
 
         // ── 升级速率采样 ──
         let cumulative = 0;
@@ -164,7 +167,7 @@ export default class RaceVisual extends Room {
 
         // 远矿积压（有视野的托管房容器存量）
         let backlog = 0;
-        const targets = Memory.OutMineData?.[this.name]?.energy || [];
+        const targets = getOutMineData()[this.name]?.energy || [];
         for (const roomName of targets) {
             const targetRoom = Game.rooms[roomName];
             if (!targetRoom) continue;

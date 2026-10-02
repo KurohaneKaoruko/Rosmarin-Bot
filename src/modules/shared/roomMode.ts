@@ -104,6 +104,7 @@ export const ROOM_MODE_PROFILES: Record<RoomModeName, RoomModeProfile> = {
         transportMissionInterval: 10,
         highIntensity: true,
         upgradeIncomeMultiplier: 1.2,
+        remoteCarryThroughputFactor: 1.1,
         remoteCarryBacklogScale: 0.75,
         remoteUnreservedIncomeFactor: 0.9,
         productionScheduling: true,
