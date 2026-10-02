@@ -912,12 +912,14 @@ export default class BaseFunction extends Room {
 
     /**
      * 确保控制器旁有能量缓冲工地（冲级/常驻升级的「围在周边秒取能」配套）。
-     * RCL4+ 且控制器 3 格内无 storage/terminal 建筑与同类工地时，
+     * RCL4-7 且控制器 3 格内无 storage/terminal 建筑与同类工地时，
      * 在控制器 2 格内找一个可建位放置 terminal（RCL6+）或 storage 工地。
+     * RCL8 不放：升级吞吐已封顶（15e/t）、link 体系接管供能，
+     * 且会挤占 layout 正位的 storage/terminal 名额（每类全房只有 1 个）。
      * 建造由 worker 自然完成，本方法只负责放工地（低频调用）。
      */
     ensureControllerBufferSite() {
-        if (this.level < 4) return;
+        if (this.level < 4 || this.level >= 8) return;
         const controller = this.controller;
         if (!controller?.my) return;
 
