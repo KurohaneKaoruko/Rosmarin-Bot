@@ -524,11 +524,21 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 
     // —— rush 冲级：不节流——收入 + 地面堆积（本房 + 外矿房）全额折算，
     //    容量放宽到控制器周边站位；能量堆积就是「消耗端不足」的直接信号 ——
+    //    火力 = clamp(净收入 × 乘数, 底火, 容量)：乘数随孵化占用率反向浮动
+    //    （spawn 越空闲越加码 1.0→1.2，孵化繁忙时回落 1.0，不与孵化抢产能）；
+    //    底火常明（参考实现的下限语义：升级期恒备 5W 底火 ≈ 10e/t 试验火力）：
+    //    升级火力随收入波动但永不归零，杜绝「uWork=0 → 收入估计归零 → 不孵升级工」的断档
     if (getRoomMode(room) === 'rush') {
         const pileAll = getDroppedPileEnergy(room) + getRemotePileEnergy(room);
-        const rushWork = Math.ceil(scaledIncome + pileAll / 2000);
+        const memAny = room.memory as any;
+        memAny.spawnUsageEma ??= 1;
+        const busy = room.spawning ? 1 : 0;
+        const alpha = 2 / 1501;
+        memAny.spawnUsageEma = memAny.spawnUsageEma * (1 - alpha) + busy * alpha;
+        const multiplier = Math.min(1.2, Math.max(1, memAny.spawnUsageEma / 2 + 0.8));
+        const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
         const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
-        return Math.max(lowerLimit, Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
+        return Math.max(Math.max(lowerLimit, 5), Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
     }
 
     // —— starved 负反馈：供能断流时缩需求，恢复后自动回扩 ——
@@ -1000,32 +1010,10 @@ export const getUpgraderPathTime = (room: Room): number | undefined => {
  * 口径：`缺口 = floor(2 × maxWork × distance / 50)`——
  * 升级端每 tick 从控制器容器抽走 maxWork 点能量，搬运往返 2×distance tick，
  * 在途总量 = 2 × maxWork × distance 能量，折 CARRY 部件（50/件）即需专职搬运力。
- * 我们没有独立 hauler 角色，折算成 carrier 只数，缺口每轮最多补 1 只（涓流进场）。
  *
- * 容器水位高于 maxWork×8（短时间吃不完）时返回 0，避免无谓占用 spawn。
+ * 容器补给已并入能量分配中枢（energyLogistics：控制容器是 priority 5 的常规请求），
+ * 不再需要独立的「缺水」判断。
  */
-export const getControllerCarryDeficit = (room: Room): number => {
-    if (getRoomMode(room) !== 'rush') return 0;
-    const maxWork = getUpgradeWorkTarget(room);
-    if (maxWork <= 0) return 0;
-    const controller = room.controller;
-    const container = (room.container || []).find(
-        c => controller && c.pos.inRangeTo(controller.pos, 3),
-    );
-    if (!container) return 0;
-    if ((container.store[RESOURCE_ENERGY] || 0) > maxWork * 8) return 0;
-    const distance = Math.max(10, getUpgraderPathTime(room) ?? 20);
-    const carryParts = Math.ceil(2 * maxWork * distance / 50);
-    // 按 carrier 实际体型（分级表 RCL3-5 约 C8）保守折算，而非理想 C16
-    const carryPerCreep = 8;
-    const needed = Math.max(1, Math.ceil(carryParts / carryPerCreep));
-    const upgraders = typeof room.find === 'function'
-        ? (room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'carrier' && (c.memory as any).controllerCarry),
-        }) as Creep[]) : [];
-    const alive = upgraders.filter(c => (c.ticksToLive ?? 1500) > c.body.length * 3 + 10).length;
-    return needed > alive ? 1 : 0;
-};
 
 /**
  * upgrader 的接班缺口数（0/1）：没有任何在编 upgrader 的 TTL 覆盖得住

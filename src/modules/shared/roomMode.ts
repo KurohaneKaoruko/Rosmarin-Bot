@@ -155,11 +155,12 @@ export const getRoomMode = (room: Room): RoomModeName | 'stop' => {
     const data = getRoomData(room.name);
     if (data?.mode) return data.mode;
     if ((room.memory as any).mode) return (room.memory as any).mode;
-    // 兜底：完全没有托管配置（RoomData 为空——落地自启失效/内存重置）时，
-    // 首个己方房按订阅档位取默认模式。cpu.limit ≥ 100 直接 rush 冲级，
+    // 兜底：托管配置缺 mode（RoomData 为空，或重启恢复后条目存在但没有 mode——
+    // 后者曾让模式静默翻成 main：自动扩图/接力车道/冲级孵化全部失效，外矿整链死）
+    // 时按订阅档位取默认模式：cpu.limit ≥ 100 直接 rush 冲级，
     // 否则整间房会以 main 跑（无专人升级工、外矿管线 L12/13 排不上队），
     // race 实测：托管配置缺失导致整局 1.1 万 tick 零升级。
-    if (Object.keys(getRoomData()).length === 0 && room.controller?.my) {
+    if (room.controller?.my) {
         const limit = typeof Game.cpu?.limit === 'number' ? Game.cpu.limit : 0;
         return limit >= 100 ? 'rush' : 'main';
     }
