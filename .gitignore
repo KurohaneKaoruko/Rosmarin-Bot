@@ -4,3 +4,5 @@ node_modules/
 dist/
 target/
 test/
+attempt/
+AGENTS.md
