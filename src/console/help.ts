@@ -1,4 +1,4 @@
-import { VERSION } from '../constant/config';
+import { VERSION } from '../constant/BaseConstant';
 import { log } from '@/modules/utils';
 
 const head = `<span style="color: #D0CAE0;"><b>
@@ -356,6 +356,10 @@ const helpTexts: Record<string, string> = {
         line(),
         sub('⚔️', '战争孵化（warSpawn）'),
         `- ${cmd('AIO/<配置>/<孵化房>/T-间隔/N-数量')}：孵化 aio（配置支持 1T/2T/3T/6T；N 缺省=一次性，N-0=无限）；boost 不足自动降级无 boost 出击`,
+        `- ${cmd('ATK[/_孵化房][/_配置][/_N次数][/_T间隔]')}：旗所在房间即攻击目标（默认 R25/4 双远程+双治疗、无限次）`,
+        `- ATK 派兵节奏：孵化队列空闲即派下一队（默认无定时；T-间隔可改定时模式）；场上队伍上限 10 队`,
+        `- ATK 示例：ATK（全自动）/ ATK/W8N7（指定孵化房）/ ATK/W8N7/R28/4 / ATK/W8N7/RH/4/N5/T800`,
+        `- ATK boost 缺货时等待补给不拆旗；派满 N 次自动删旗，拔旗即停止后续派兵`,
         `- ${cmd('CLEAN/<孵化房>/T-间隔')}：孵化 cleaner（持续触发，不自动删旗）`,
         `- ${cmd('ACLAIM/<孵化房>/T-间隔/N-数量')}：孵化 attack-claimer（持续触发，不自动删旗）`,
         `- ${cmd('DIS/<孵化房>/T-间隔/N-数量')}：孵化 dismantle（N 缺省=一次性，N-0=无限）`,

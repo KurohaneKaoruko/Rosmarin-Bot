@@ -1,4 +1,4 @@
-import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { EXTERNAL_ROAD_CONFIG } from '@/constant/BaseConstant';
 
 // 各外矿房最后已知源数（有视野时刷新）：无视野补采集工时按它补给，防外矿停摆
 const lastKnownSourceNum = new Map<string, number>();

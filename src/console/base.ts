@@ -1,4 +1,4 @@
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 import { log } from '@/modules/utils';
 import { getMissionPools, getStructData } from "@/modules/shared/memory";
 import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';

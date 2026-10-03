@@ -119,8 +119,6 @@ export default {
                 return LayoutPlanner.buildDynamic(roomName, opts);
             } else if (currentLayout == '63auto') {
                 return LayoutPlanner.buildDynamic63(roomName, opts);
-            } else if (currentLayout == 'rushauto') {
-                return LayoutPlanner.buildRush(roomName, opts);
             } else {
                 return LayoutPlanner.buildStatic(roomName, currentLayout, opts);
             }
@@ -144,8 +142,6 @@ export default {
                     result = LayoutPlanner.visualDynamic(roomName);
                 } else if (layout == '63auto') {
                     result = LayoutPlanner.visualDynamic63(roomName);
-                } else if (layout == 'rushauto') {
-                    result = LayoutPlanner.visualRush(roomName);
                 } else {
                     result = LayoutPlanner.visualStatic(roomName, layout);
                 }
@@ -155,7 +151,6 @@ export default {
                     console.log(`房间 ${roomName} 的布局memory不存在，将根据自动布局可视化...`)
                     const layoutType = getRoomData()?.[roomName]?.layout;
                     if (layoutType == '63auto') result = LayoutPlanner.visualDynamic63(roomName);
-                    else if (layoutType == 'rushauto') result = LayoutPlanner.visualRush(roomName);
                     else result = LayoutPlanner.visualDynamic(roomName);
                 } else {
                     console.log(`将根据房间${roomName}的布局memory进行可视化...`)

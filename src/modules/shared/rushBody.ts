@@ -72,12 +72,9 @@ export const RUSH_UPGRADER_MIN_BUDGET = partCost('work') + partCost('carry') + p
 
 export const buildRushUpgraderBody = (budget: number): RushBody | null => {
     if (budget < RUSH_UPGRADER_MIN_BUDGET) return null;
-    const carryN = Math.min(4, Math.max(1, Math.floor(budget / 300)));
-    const work = Math.max(1, Math.floor((budget - partCost('move') - partCost('carry') * carryN) / partCost('work')));
-    if (budget - bodyCost([[WORK, work], [CARRY, carryN], [MOVE, 1]]) >= 0) {
-        return [[WORK, work], [CARRY, carryN], [MOVE, 1]];
-    }
-    return [[WORK, 1], [CARRY, 1], [MOVE, 1]];
+    // C:W = 1:1（冲级期手填口径）：单次手填的能量缓冲与 WORK 数对齐，拉长手填间隔
+    const work = Math.max(1, Math.floor((budget - partCost('move')) / (partCost('work') + partCost('carry'))));
+    return [[WORK, work], [CARRY, work], [MOVE, 1]];
 };
 
 /** worker 路面组：[W,C,M] = 200 */

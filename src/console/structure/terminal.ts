@@ -1,5 +1,5 @@
 import { log } from "@/modules/utils";
-import { BASE_CONFIG } from "@/constant/config";
+import { BASE_CONFIG } from "@/constant/BaseConstant";
 
 
 export default {

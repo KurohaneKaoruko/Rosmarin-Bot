@@ -4,7 +4,7 @@
  * @module outMineRoad
  */
 
-import { EXTERNAL_ROAD_CONFIG } from '@/constant/config';
+import { EXTERNAL_ROAD_CONFIG } from '@/constant/BaseConstant';
 import { RoomArray } from '@/modules/features/Planner/utils/roomArray';
 import { compress, decompress } from '@/modules/shared/compress';
 import { getLayoutData, getOutMineData } from '@/modules/shared/memory';
@@ -903,39 +903,11 @@ export class RoadBuilder {
         const existingContainers = sourceRoom.find(FIND_STRUCTURES, {
             filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
         }) as StructureContainer[];
-        const weakContainer = existingContainers.find(c => c.hits / c.hitsMax < 0.3);
-        // 历史重复放置的清理：link 接管前控制器旁只保留一个容器——
-        // 站位评分最高者留下，其余拆除（自己的建筑，参考实现同款唯一 cc 口径）；
-        // 有低耐久容器时走备胎路径，不在此拆
-        if (existingContainers.length > 1 && !weakContainer) {
-            const terrain = sourceRoom.getTerrain();
-            const spawn = (sourceRoom.spawn || [])[0];
-            const inCtrl3 = (x: number, y: number): boolean =>
-                Math.max(Math.abs(x - controller.pos.x), Math.abs(y - controller.pos.y)) <= 3;
-            const standable = (x: number, y: number): boolean =>
-                x >= 1 && x <= 48 && y >= 1 && y <= 48
-                && terrain.get(x, y) !== TERRAIN_MASK_WALL
-                && inCtrl3(x, y);
-            const spotScore = (x: number, y: number): number => {
-                let open = 0;
-                for (let ox = -1; ox <= 1; ox++) {
-                    for (let oy = -1; oy <= 1; oy++) {
-                        if (ox === 0 && oy === 0) continue;
-                        if (standable(x + ox, y + oy)) open++;
-                    }
-                }
-                return open * 4 - (spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0);
-            };
-            const sorted = [...existingContainers].sort((a, b) => spotScore(b.pos.x, b.pos.y) - spotScore(a.pos.x, a.pos.y));
-            for (const extra of sorted.slice(1)) extra.destroy();
-            return;
-        }
-        if (existingContainers.length > 0 && !weakContainer) return;
+        // 唯一 cc 口径：控制器旁最多一个容器；低耐久走维修（tower/worker 既有链路），不再放备胎
+        if (existingContainers.length > 0) return;
         const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
         }).length > 0;
-        // 低耐久容器：旧容器死前先放备胎工地（worker 建成即无缝接管升级链补给点）
-        if (weakContainer && (existingContainers.length > 1 || existingSite)) return;
 
         const terrain = sourceRoom.getTerrain();
         const spawn = (sourceRoom.spawn || [])[0];

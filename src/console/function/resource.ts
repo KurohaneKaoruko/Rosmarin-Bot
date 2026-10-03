@@ -1,5 +1,5 @@
 import { getResourceManage } from '@/modules/shared/memory';
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 
 /**
  * 资源控制台命令：

@@ -1,7 +1,7 @@
 import {LabMap} from '@/constant/ResourceConstant'
 import { compress } from '@/modules/shared/compress';
 import { ensureBoostLabs } from '@/modules/shared/labReservations';
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 import { getAutoLabData, getRoomData, getStructData } from '@/modules/shared/memory';
 
 export default {

@@ -1,4 +1,4 @@
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 import { getRoomData } from '@/modules/shared/memory';
 
 // 控制器工作位周边允许站人的结构。

@@ -1,7 +1,7 @@
 import { log } from '@/modules/utils.js';
 import { errorMapper, sourceMappedStackTrace } from './errorMapper.js'
 import { isProfilingEnabled, profileStage, recordObjectCost } from '@/modules/infra/cpuProfiler';
-import { BASE_CONFIG } from '@/constant/config.js'
+import { BASE_CONFIG } from '@/constant/BaseConstant.js'
 import { roomRunner } from './runner/RoomRunner';
 import { creepRunner } from './runner/CreepRunner';
 import { powerCreepRunner } from './runner/PowerCreepRunner';

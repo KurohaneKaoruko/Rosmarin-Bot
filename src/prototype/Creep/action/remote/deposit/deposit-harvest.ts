@@ -1,4 +1,4 @@
-import { OUTMINE_CONFIG } from '@/constant/config';
+import { OUTMINE_CONFIG } from '@/constant/BaseConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';

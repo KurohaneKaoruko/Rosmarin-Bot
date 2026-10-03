@@ -1,4 +1,4 @@
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 import { getAutoFactoryData, getRoomData, getStructData } from '@/modules/shared/memory';
 
 export default {

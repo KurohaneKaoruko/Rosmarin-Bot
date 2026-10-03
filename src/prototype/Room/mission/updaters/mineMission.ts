@@ -1,4 +1,4 @@
-import { OUTMINE_CONFIG } from '@/constant/config';
+import { OUTMINE_CONFIG } from '@/constant/BaseConstant';
 import { getOutMineData, getRoomData } from '@/modules/shared/memory';
 import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';

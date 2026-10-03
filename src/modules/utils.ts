@@ -1,4 +1,4 @@
-import { BASE_CONFIG } from '@/constant/config';
+import { BASE_CONFIG } from '@/constant/BaseConstant';
 
 /** 签入原型
  * 为obj1添加obj2的原型方法

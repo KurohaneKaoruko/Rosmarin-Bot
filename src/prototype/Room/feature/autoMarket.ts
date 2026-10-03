@@ -1,5 +1,5 @@
 import { log } from "@/modules/utils"
-import { BASE_CONFIG } from "@/constant/config";
+import { BASE_CONFIG } from "@/constant/BaseConstant";
 import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/shared/memory";
 import { isRoomTickAligned } from "@/modules/shared/roomPhase";
