@@ -26,6 +26,11 @@ export const writeDiagDumps = (): void => {
             memAny.__wd = JSON.stringify({
                 spawns: spawns.length,
                 spawnRooms: spawns.map((s) => s.pos.roomName),
+                // 孵化诊断：各 spawn 能量/孵化状态（定位「返回 OK 但没孵出」类引擎分歧）
+                spawnEnergy: spawns.map((s) => s.store.getUsedCapacity(RESOURCE_ENERGY)),
+                spawning: spawns.map((s) => (s.spawning ? `${s.spawning.name}/${s.spawning.remainingTime}` : null)),
+                energyAvail: room.energyAvailable,
+                energyCap: room.energyCapacityAvailable,
                 creeps: Object.keys(Game.creeps).length,
                 time: Game.time,
                 wc: Date.now(),
@@ -62,11 +67,8 @@ export const writeDiagDumps = (): void => {
                         n: c.name.slice(-6),
                         x: c.pos.x,
                         y: c.pos.y,
-                        flow: mem.fsm?.['carrier:flow'] ?? '-',
-                        work: mem.working ?? '-',
                         load: c.store.getUsedCapacity(RESOURCE_ENERGY) || 0,
                         src: cache.carrierSourceKind ?? '-',
-                        park: mem._parkPos ? 1 : 0,
                     };
                 });
             memAny.__carrierDump = JSON.stringify({ time: Game.time, carriers });

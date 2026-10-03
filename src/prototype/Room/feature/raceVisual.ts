@@ -1,5 +1,6 @@
 import { getRoomMode } from "@/modules/shared/roomMode";
 import { getOutMineData } from "@/modules/shared/memory";
+import { isRacePanelEnabled } from "@/modules/shared/gameCapabilities";
 import { RoleData } from "@/constant/CreepConstant";
 import {
     RUSH_SEGMENT_LEVELS,
@@ -82,6 +83,7 @@ const rateColor = (rate: number): string => (rate >= 10 ? C.good : rate >= 5 ? C
 export default class RaceVisual extends Room {
     /** 冲级面板：左下角逐 tick 渲染（仅 rush）。管线各环节数据 + 分段达成速率，用于段速排查 */
     raceVisual() {
+        if (!isRacePanelEnabled()) return;
         if (getRoomMode(this) !== 'rush') return;
         const controller = this.controller;
         if (!controller?.my) return;
