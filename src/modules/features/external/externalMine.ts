@@ -14,6 +14,8 @@ import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
 import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/modules/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { isRoomProductionSecured } from '@/prototype/Room/mission/updaters/spawnRules';
+import { isRaceCompat } from '@/modules/shared/gameCapabilities';
 import {
     CarryRoomCandidateStat,
     countPendingEconomyMissions,
@@ -2368,6 +2370,18 @@ export class ExternalMine {
         // 控制器容器保活不受任何闸门限制：饥荒期恰恰是升级链最依赖容器的时刻
         //（参考实现每 tick 无条件放工地，不吃能量状态门）
         RoadBuilder.ensureControllerContainer(room);
+        // 开局序列（参考实现观察口径）：先矿工满编、产出稳住，之后才解锁外矿扩张。
+        // 硬闸清池：光挡新单不够——池内残留的 out-*/reserver 挂单仍会抢占 spawn 槽
+        if (isRaceCompat() && !isRoomProductionSecured(room)) {
+            const pool = (room.getAllMissionFromPool?.('spawn') || []) as any[];
+            for (const task of pool) {
+                const role = task?.data?.memory?.role as string | undefined;
+                if (role && (role.startsWith('out-') || role === 'reserver')) {
+                    room.deleteMissionFromPool?.('spawn', task.id);
+                }
+            }
+            return;
+        }
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 

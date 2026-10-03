@@ -6,7 +6,7 @@ import { defineConfig } from 'rolldown';
 import { minify as terserMinify } from 'terser';
 
 const filePath = {
-	wasmDir: 'src/wasm'
+	wasmDir: 'src/modules/wasm'
 };
 
 const formatDisplayPath = (targetPath) => {
@@ -207,6 +207,11 @@ export default defineConfig(() => {
 	if (!dest) console.log('未指定目标, 代码将被编译但不会上传');
 	else if (!config) throw new Error('无效目标，请检查 .secret.json 中的 servers 配置');
 
+	// 入口按服务器规则档解析（.secret.json 服务器条目的 entry 字段，缺省 main = 官服）
+	const variant = config?.entry ?? 'main';
+	const input = variant === 'main' ? 'src/main.ts' : `src/branch/${variant}/main.ts`;
+	console.log(`[build] 入口: ${input} (规则档: ${variant})`);
+
 	const outputFile = 'dist/main.js';
 	const distDir = path.dirname(path.resolve(process.cwd(), outputFile));
 	const enableSourceMap = process.env.SOURCE_MAP !== '0';
@@ -228,7 +233,7 @@ export default defineConfig(() => {
 			: undefined;
 
 	return {
-		input: 'src/main.ts',
+		input,
 		tsconfig: './tsconfig.json',
 		checks: {
 			pluginTimings: false
