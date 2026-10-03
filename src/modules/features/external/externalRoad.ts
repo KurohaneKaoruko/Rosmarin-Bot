@@ -896,11 +896,14 @@ export class RoadBuilder {
         const rcl = controller.level;
         if (rcl < 2) return;
         if (rcl >= 5 && (sourceRoom.link || []).some(l => l.pos.inRangeTo(controller.pos, 3))) return;
-        if ((sourceRoom.container || []).some(c => c.pos.inRangeTo(controller.pos, 3))) return;
+        const existingContainers = (sourceRoom.container || []).filter(c => c.pos.inRangeTo(controller.pos, 3));
+        const weakContainer = existingContainers.find(c => c.hits / c.hitsMax < 0.3);
+        if (existingContainers.length > 0 && !weakContainer) return;
         const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
         }).length > 0;
-        if (existingSite) return;
+        // 低耐久容器：旧容器死前先放备胎工地（worker 建成即无缝接管升级链补给点）
+        if (weakContainer && (existingContainers.length > 1 || existingSite)) return;
 
         const terrain = sourceRoom.getTerrain();
         const spawn = (sourceRoom.spawn || [])[0];
