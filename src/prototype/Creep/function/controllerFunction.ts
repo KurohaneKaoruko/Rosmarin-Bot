@@ -14,7 +14,7 @@ const CONTROLLER_LANE_PASSABLE_STRUCTURES = new Set<StructureConstant>([
 // 这里仅纳入会长期围绕 controller 工作的 creep。
 const CONTROLLER_FRONT_FOLLOWER_ROLES = new Set(['upgrader', 'worker', 'aid-upgrade']);
 
-type ControllerEnergyKind = 'link' | 'container' | 'terminal' | 'storage';
+type ControllerEnergyKind = 'link' | 'dropped' | 'container' | 'terminal' | 'storage';
 
 /**
  * 控制器缓冲能源候选项。
@@ -26,14 +26,14 @@ type ControllerEnergyCandidate = {
 };
 
 type ControllerEnergyTarget = ControllerEnergyCandidate & {
-    target: StructureLink | StructureContainer | StructureTerminal | StructureStorage;
+    target: StructureLink | StructureContainer | StructureTerminal | StructureStorage | Resource<RESOURCE_ENERGY>;
 };
 
 // 控制器取能优先级：
 // 1. link: 最贴近 upgrader 工作流，吞吐高且不干扰主仓
 // 2. container: 常规控制器缓冲
 // 3. terminal/storage: 仅作兜底来源
-const CONTROLLER_ENERGY_PRIORITY: ControllerEnergyKind[] = ['link', 'container', 'terminal', 'storage'];
+const CONTROLLER_ENERGY_PRIORITY: ControllerEnergyKind[] = ['link', 'dropped', 'container', 'terminal', 'storage'];
 
 /**
  * 解析房间应该使用的签名文本。
@@ -301,6 +301,18 @@ export default class ControllerFunction extends Creep {
         const link = this.getControllerLink(linkRange);
         if (link) candidates.push({ kind: 'link', target: link, energy: link.store[RESOURCE_ENERGY] || 0 });
 
+        // 掉落堆（参考实现 energyDepot #2 口径）：搬运工无投放目标时卸在控制器旁的
+        // 能量堆是升级线的缓冲区，升级工走到堆边自取——吞吐与手填解耦
+        const droppedAtController = this.pos.findInRange(FIND_DROPPED_RESOURCES, 2, {
+            filter: (resource: Resource) =>
+                resource.resourceType === RESOURCE_ENERGY &&
+                resource.amount >= Math.min(50, minEnergy) &&
+                controller.pos.inRangeTo(resource.pos, 3),
+        })[0] as Resource<RESOURCE_ENERGY> | undefined;
+        if (droppedAtController) {
+            candidates.push({ kind: 'dropped', target: droppedAtController, energy: droppedAtController.amount });
+        }
+
         const container = this.getControllerContainer(containerRange);
         if (container) candidates.push({ kind: 'container', target: container, energy: container.store[RESOURCE_ENERGY] || 0 });
 
@@ -328,7 +340,9 @@ export default class ControllerFunction extends Creep {
 
         const freeCapacity = this.store.getFreeCapacity(RESOURCE_ENERGY);
         const availableEnergy = primary.energy;
-        const result = this.withdraw(primary.target, RESOURCE_ENERGY);
+        const result = primary.target instanceof Resource
+            ? this.pickup(primary.target)
+            : this.withdraw(primary.target, RESOURCE_ENERGY);
         if (result === ERR_NOT_IN_RANGE) {
             moveToEnergyTarget(this, primary.target);
             return false;

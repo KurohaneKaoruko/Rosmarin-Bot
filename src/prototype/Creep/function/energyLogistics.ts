@@ -17,12 +17,16 @@ import { getUpgradeWorkTarget, getUpgraderPathTime } from '@/modules/shared/room
 const FILL_PRIORITY: Record<string, number> = {
     extension: 1,
     spawn: 1,
-    tower: 2,
+    tower: 1,
     container: 5,
     upgrader: 5,
 };
 
 const TOWER_FILL_THRESHOLD = 400;
+/** 升级缓冲专线档位：控制器容器/断供升级工——仅次于孵化扩容与受威胁塔 */
+export const UPGRADE_LINE_PRIORITY = 3;
+/** 常态（无敌情）塔的补给档位：让位升级专线，仍高于仓储回流 */
+const TOWER_IDLE_PRIORITY = 6;
 
 type FillRequest = {
     id: string;
@@ -34,8 +38,7 @@ type FillRequest = {
 const barOf = (level: number): number => ({ 1: 200, 2: 45000, 3: 135000, 4: 405000 })[level] ?? 0;
 void barOf;
 
-const buildFillRequests = (room: Room): FillRequest[] => {
-    const requests: FillRequest[] = [];
+export const buildFillRequests = (room: Room): FillRequest[] => {    const requests: FillRequest[] = [];
 
     // 孵化线：房间未满员时全收（priority 1）
     if (room.energyAvailable < room.energyCapacityAvailable) {
@@ -48,32 +51,38 @@ const buildFillRequests = (room: Room): FillRequest[] => {
         }
     }
 
-    // 塔：低于阈值即请求（参考实现同款阈值）
+    // 塔：低于阈值即请求；受威胁（defend 态）与孵化扩容同档最高，常态让位升级专线
+    const threatened = (room.memory as any).defend === true;
     for (const tower of room.tower || []) {
         const current = tower.store[RESOURCE_ENERGY] || 0;
         if (current < TOWER_FILL_THRESHOLD) {
-            requests.push({ id: tower.id, target: tower, priority: FILL_PRIORITY.tower, amount: TOWER_FILL_THRESHOLD - current });
+            requests.push({
+                id: tower.id,
+                target: tower,
+                priority: threatened ? FILL_PRIORITY.tower : TOWER_IDLE_PRIORITY,
+                amount: TOWER_FILL_THRESHOLD - current,
+            });
         }
     }
 
-    // 控制器容器（priority 5）
+    // 控制器容器（升级缓冲专线）
     const controller = room.controller;
     const cc = controller ? (room.container || []).find(c => c.pos.inRangeTo(controller.pos, 3)) : undefined;
     if (cc) {
         const amount = cc.store.getFreeCapacity(RESOURCE_ENERGY);
         if (amount > 0) {
-            requests.push({ id: cc.id, target: cc, priority: FILL_PRIORITY.container, amount });
+            requests.push({ id: cc.id, target: cc, priority: UPGRADE_LINE_PRIORITY, amount });
         }
     }
 
-    // 断供的静态升级工（priority 5）：空仓即请求，由搬运工手填
+    // 断供的静态升级工（升级缓冲专线）：空仓即请求，由搬运工手填
     for (const creep of Object.values(Game.creeps)) {
         if (creep.room.name !== room.name || creep.spawning) continue;
         if (creep.memory?.role !== 'upgrader') continue;
         if ((creep.store[RESOURCE_ENERGY] || 0) > 0) continue;
         const amount = creep.store.getFreeCapacity(RESOURCE_ENERGY);
         if (amount <= 0) continue;
-        requests.push({ id: creep.id, target: creep, priority: FILL_PRIORITY.upgrader, amount });
+        requests.push({ id: creep.id, target: creep, priority: UPGRADE_LINE_PRIORITY, amount });
     }
 
     return requests.filter(r => r.amount > 0);
@@ -191,7 +200,10 @@ const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
         const quota = getControllerCarryQuota(room) + dedicatedRequests.filter(isUpgraderFillRequest).length;
         const sorted = byDistance(controller.pos);
         runMatch(dedicatedRequests, sorted.slice(0, quota));
-        runMatch(generalRequests, sorted.slice(quota));
+        // 专线没用掉的搬运工回流通用分配（此前硬切 slice(quota)：
+        // 配额虚高时全部载能车被「专线预留」却无人使用，spawn/ext/升级线集体断粮）
+        const dedicated = new Set<string>([...assigned.keys()]);
+        runMatch(generalRequests, suppliers.filter(s => !dedicated.has(s.id)));
     } else {
         runMatch(generalRequests.length ? generalRequests : allRequests, suppliers);
     }
