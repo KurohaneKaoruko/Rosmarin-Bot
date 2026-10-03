@@ -54,8 +54,6 @@ const fillAdjacentSpawnStructures = (creep: Creep, urgentEnergy: boolean): boole
     return false;
 };
 
-const checkAndFillNearbyExtensions = (creep: Creep, urgentEnergy: boolean): boolean => fillAdjacentSpawnStructures(creep, urgentEnergy);
-
 // ── 取货（空载）：回源线取满。返回 true = 已满，转送货 ──
 // ── 送货（载能）：按能量中枢匹配的请求配送。返回 true = 已送空，转取货 ──
 // 时限沉积物（墓碑/废墟）：能量会随 tick 蒸发，无容器可用时作为取货兜底

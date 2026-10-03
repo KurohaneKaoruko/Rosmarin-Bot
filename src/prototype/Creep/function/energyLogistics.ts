@@ -38,7 +38,8 @@ type FillRequest = {
 const barOf = (level: number): number => ({ 1: 200, 2: 45000, 3: 135000, 4: 405000 })[level] ?? 0;
 void barOf;
 
-export const buildFillRequests = (room: Room): FillRequest[] => {    const requests: FillRequest[] = [];
+export const buildFillRequests = (room: Room): FillRequest[] => {
+    const requests: FillRequest[] = [];
 
     // 孵化线：房间未满员时全收（priority 1）
     if (room.energyAvailable < room.energyCapacityAvailable) {
@@ -128,6 +129,65 @@ export const getControllerCarryQuota = (room: Room): number => {
 const isUpgraderFillRequest = (request: FillRequest): boolean =>
     request.target instanceof Creep;
 
+// 单阶段贪心匹配：每个有余量的请求弹出最近候选；
+// 候选已被分配时按「优先级高者/同级更近者」抢夺，被抢请求容量回滚。
+// assigned/remaining 由调用方在多阶段间共享（专线→通用的容量记账连续）
+const matchRequestsToSuppliers = (
+    phaseRequests: FillRequest[],
+    phaseSuppliers: Creep[],
+    assigned: Map<string, FillRequest>,
+    remaining: Map<string, number>,
+): void => {
+    const candidateLists = new Map<string, Creep[]>();
+    for (const request of phaseRequests) {
+        candidateLists.set(
+            request.id,
+            phaseSuppliers
+                .filter(s => (s.store[RESOURCE_ENERGY] || 0) > 0)
+                .sort((a, b) => a.pos.getRangeTo(request.target) - b.pos.getRangeTo(request.target)),
+        );
+    }
+    const pointers = new Map<string, number>(phaseRequests.map(r => [r.id, 0]));
+
+    // 参考实现同款主循环：每个有余量的请求弹出最近候选；
+    // 候选已被分配时按「优先级高者/同级更近者」抢夺，被抢请求容量回滚
+    for (;;) {
+        const free = phaseRequests.filter(r => (remaining.get(r.id) || 0) > 0);
+        if (free.length === 0) break;
+
+        let progressed = false;
+        for (const request of free) {
+            const candidates = candidateLists.get(request.id) || [];
+            let pointer = pointers.get(request.id) || 0;
+
+            while (pointer < candidates.length) {
+                const hauler = candidates[pointer];
+                pointer++;
+                pointers.set(request.id, pointer);
+
+                const before = assigned.get(hauler.id);
+                if (!before) {
+                    assigned.set(hauler.id, request);
+                    remaining.set(request.id, Math.max(0, (remaining.get(request.id) ?? request.amount) - (hauler.store[RESOURCE_ENERGY] || 0)));
+                    progressed = true;
+                    break;
+                }
+
+                // 已有分配：高优先级/同级更近者抢夺
+                if (before.priority < request.priority) continue;
+                if (before.priority === request.priority && hauler.pos.getRangeTo(before.target) <= hauler.pos.getRangeTo(request.target)) continue;
+
+                remaining.set(before.id, (remaining.get(before.id) || 0) + (hauler.store[RESOURCE_ENERGY] || 0));
+                assigned.set(hauler.id, request);
+                remaining.set(request.id, Math.max(0, (remaining.get(request.id) ?? request.amount) - (hauler.store[RESOURCE_ENERGY] || 0)));
+                progressed = true;
+                break;
+            }
+        }
+        if (!progressed) break;
+    }
+};
+
 const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
     const allRequests = buildFillRequests(room);
     const remaining = new Map<string, number>(allRequests.map(r => [r.id, r.amount]));
@@ -145,67 +205,16 @@ const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
     const byDistance = (target: AnyStoreStructure | Creep | RoomPosition) =>
         [...suppliers].sort((a, b) => a.pos.getRangeTo(target) - b.pos.getRangeTo(target));
 
-    const runMatch = (phaseRequests: FillRequest[], phaseSuppliers: Creep[]) => {
-        const candidateLists = new Map<string, Creep[]>();
-        for (const request of phaseRequests) {
-            candidateLists.set(
-                request.id,
-                phaseSuppliers
-                    .filter(s => (s.store[RESOURCE_ENERGY] || 0) > 0)
-                    .sort((a, b) => a.pos.getRangeTo(request.target) - b.pos.getRangeTo(request.target)),
-            );
-        }
-        const pointers = new Map<string, number>(phaseRequests.map(r => [r.id, 0]));
-
-        // 参考实现同款主循环：每个有余量的请求弹出最近候选；
-        // 候选已被分配时按「优先级高者/同级更近者」抢夺，被抢请求容量回滚
-        for (;;) {
-            const free = phaseRequests.filter(r => (remaining.get(r.id) || 0) > 0);
-            if (free.length === 0) break;
-
-            let progressed = false;
-            for (const request of free) {
-                const candidates = candidateLists.get(request.id) || [];
-                let pointer = pointers.get(request.id) || 0;
-
-                while (pointer < candidates.length) {
-                    const hauler = candidates[pointer];
-                    pointer++;
-                    pointers.set(request.id, pointer);
-
-                    const before = assigned.get(hauler.id);
-                    if (!before) {
-                        assigned.set(hauler.id, request);
-                        remaining.set(request.id, Math.max(0, (remaining.get(request.id) ?? request.amount) - (hauler.store[RESOURCE_ENERGY] || 0)));
-                        progressed = true;
-                        break;
-                    }
-
-                    // 已有分配：高优先级/同级更近者抢夺
-                    if (before.priority < request.priority) continue;
-                    if (before.priority === request.priority && hauler.pos.getRangeTo(before.target) <= hauler.pos.getRangeTo(request.target)) continue;
-
-                    remaining.set(before.id, (remaining.get(before.id) || 0) + (hauler.store[RESOURCE_ENERGY] || 0));
-                    assigned.set(hauler.id, request);
-                    remaining.set(request.id, Math.max(0, (remaining.get(request.id) ?? request.amount) - (hauler.store[RESOURCE_ENERGY] || 0)));
-                    progressed = true;
-                    break;
-                }
-            }
-            if (!progressed) break;
-        }
-    };
-
     if (controller && dedicatedRequests.length > 0) {
         const quota = getControllerCarryQuota(room) + dedicatedRequests.filter(isUpgraderFillRequest).length;
         const sorted = byDistance(controller.pos);
-        runMatch(dedicatedRequests, sorted.slice(0, quota));
+        matchRequestsToSuppliers(dedicatedRequests, sorted.slice(0, quota), assigned, remaining);
         // 专线没用掉的搬运工回流通用分配（此前硬切 slice(quota)：
         // 配额虚高时全部载能车被「专线预留」却无人使用，spawn/ext/升级线集体断粮）
         const dedicated = new Set<string>([...assigned.keys()]);
-        runMatch(generalRequests, suppliers.filter(s => !dedicated.has(s.id)));
+        matchRequestsToSuppliers(generalRequests, suppliers.filter(s => !dedicated.has(s.id)), assigned, remaining);
     } else {
-        runMatch(generalRequests.length ? generalRequests : allRequests, suppliers);
+        matchRequestsToSuppliers(generalRequests.length ? generalRequests : allRequests, suppliers, assigned, remaining);
     }
 
     return { assignment: assigned };
