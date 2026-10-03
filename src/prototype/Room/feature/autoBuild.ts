@@ -28,15 +28,6 @@ export default class AutoBuild extends Room {
             }
         }
 
-        // rush 冲级房：无布局（或误设其他类型）时自动生成 rushauto（仓库贴控制器 + 早期路网），
-        // 并确保自动建造开启
-        if (getRoomMode(this) === 'rush' && (memory as any)?.layout !== 'rushauto' &&
-            (!layoutMemory || Object.keys(layoutMemory).length === 0)) {
-            if (LayoutPlanner.buildRush(this.name, { quiet: true }) === OK) {
-                if (memory) memory.autobuild = true;
-            }
-        }
-
         if (memory && memory.autobuild && layoutMemory &&
             Object.keys(layoutMemory).length) {
             // RCL1 不放任何建筑（参考实现开局口径）：200 点升级量的关键窗口期，
