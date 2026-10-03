@@ -1,6 +1,7 @@
 import { getRoomData, getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
+import { runRushRoom } from '@/modules/rush/roomController';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
 import { RoadBuilder } from '@/modules/features/external/externalRoad';
 
@@ -12,19 +13,26 @@ export default class RoomExecute extends Room {
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
         const profile = getRoomModeProfile(this);
+        // rush 房间经济段（任务池 + 孵化）由移植主循环整体接管，其余框架段照常
+        const isRush = getRoomMode(this) === 'rush';
         this.updateEnergyState(false);
         // 冲级面板（仅 rush）：逐 tick 渲染，放 QoS 节流之前——面板不能有缺帧
         this.raceVisual();
-        // 更新任务池
-        this.MissionUpdate();
+
+        if (isRush) {
+            runRushRoom(this);
+        } else {
+            // 更新任务池
+            this.MissionUpdate();
+        }
 
         // 主动防御处理（叠加房间相位错峰，defenseInterval=1 时保持每 tick）
         if (profile.defenseInterval === 1 || isRoomTickAligned(this.name, profile.defenseInterval)) {
             this.activeDefense();
         }
 
-        // 管理房间中的建筑物
-        this.SpawnWork();
+        // 管理房间中的建筑物（rush 房间孵化由移植主循环消费，不走旧 spawn 路径）
+        if (!isRush) this.SpawnWork();
         this.TowerWork();
         this.LinkWork();
         this.TerminalWork();
