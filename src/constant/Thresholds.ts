@@ -75,4 +75,15 @@ export const THRESHOLDS = {
         CHECK_OFFSET: 2,
         ENERGY_COST_SAMPLE_AMOUNT: 1000,
     },
+    RUSH: {
+        // 分段目标：目标等级 → { achieve 达成线, pass 合格线（可省略） }；
+        // 无 pass 的段，达成线即判废线；耗时单位为相对 lv1 基线的 tick
+        SEGMENT_TARGETS: {
+            2: { achieve: 500, pass: 1000 },
+            3: { achieve: 3000, pass: 5000 },
+            4: { achieve: 10000 },
+            5: { achieve: 20000 },
+            6: { achieve: 40000 },
+        },
+    },
 } as const;

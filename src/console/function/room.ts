@@ -7,7 +7,7 @@ import { clearMemoryCache } from "@/prototype/Creep/function/cacheFunction";
 import { ROOM_NAME_SOURCE_TEXT, resolveRoomName } from "@/console/argUtils";
 
 // 动态布局（无需布局中心）
-const DYNAMIC_LAYOUT_SET = new Set(['auto', '63auto', 'scorpior']);
+const DYNAMIC_LAYOUT_SET = new Set(['auto', '63auto', 'scorpior', 'rushauto']);
 const ROOM_MODE_SET = ['main', 'stop', 'low', 'high', 'rush', 'mini'];
 
 // 房间控制
@@ -32,7 +32,12 @@ export default {
         const target = resolved.roomName;
 
         // ── 2. 布局确定：显式传入 > 房间已有配置 > auto ──
-        const layoutName = layout || (getRoomData(target) as any)?.layout || 'auto';
+        let layoutName = layout || (getRoomData(target) as any)?.layout || 'auto';
+        // rush 冲级房默认用 rushauto（控制器锚定：仓库贴控制器 + 早期路网）；显式指定时不覆盖
+        if (!layout && layoutName === 'auto') {
+            const effectiveMode = (getRoomData(target) as any)?.mode || resolveFirstRoomMode();
+            if (effectiveMode === 'rush') layoutName = 'rushauto';
+        }
 
         // ── 3. 静态布局必须有中心（旗帜标记）──
         const centerFlag = Game.flags.centerPos;
