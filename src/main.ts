@@ -19,6 +19,11 @@ import '@/modules/infra/qos';    // QoS 全局挂载
 import '@/modules/infra/BetterMove';    // creep移动优化
 import '@/modules/infra/structureCache';  // 极致建筑缓存
 
+import { configureServerCaps } from '@/modules/shared/gameCapabilities';
+import { serverCaps } from './config';
+
+configureServerCaps(serverCaps);    // 套用官服配置
+
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展
 

@@ -11,6 +11,11 @@ import '@/modules/infra/qos';
 import '@/modules/infra/BetterMove';
 import '@/modules/infra/structureCache';
 
+import { configureServerCaps } from '@/modules/shared/gameCapabilities';
+import { serverCaps } from './config';
+
+configureServerCaps(serverCaps);    // 套用赛季服配置
+
 PrototypeExtension();
 ConsoleExtension();
 

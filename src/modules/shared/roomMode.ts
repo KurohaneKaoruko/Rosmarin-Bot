@@ -17,6 +17,7 @@
  */
 
 import { getRoomData } from '@/modules/shared/memory';
+import { getDefaultRoomMode } from '@/modules/shared/gameCapabilities';
 
 export type RoomModeName = 'low' | 'main' | 'high' | 'rush' | 'mini';
 
@@ -162,6 +163,12 @@ export const getRoomMode = (room: Room): RoomModeName | 'stop' => {
     // 否则整间房会以 main 跑（无专人升级工、外矿管线 L12/13 排不上队），
     // race 实测：托管配置缺失导致整局 1.1 万 tick 零升级。
     if (room.controller?.my) {
+        // 服务器能力配置固定默认档（如要塞服固定 main：RCL8 锁定，冲级特化无意义）
+        const fixed = getDefaultRoomMode();
+        if (fixed !== 'auto') return fixed;
+        // 按订阅档位取默认模式：cpu.limit ≥ 100 直接 rush 冲级，
+        // 否则整间房会以 main 跑（无专人升级工、外矿管线 L12/13 排不上队），
+        // race 实测：托管配置缺失导致整局 1.1 万 tick 零升级。
         const limit = typeof Game.cpu?.limit === 'number' ? Game.cpu.limit : 0;
         return limit >= 100 ? 'rush' : 'main';
     }
