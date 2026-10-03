@@ -158,15 +158,18 @@ export default class TeamAction {
 
         // 队首的“自驱动”：到目标房后靠旗帜收敛；在 homeRoom 时往目标房中心/出口靠拢
         let head = creeps[0];
-        if (team.flag && head.room.name == team.targetRoom) {
-            head.moveTo(team.flag);
-        } else if (head.room.name == team.homeRoom &&
-            head.pos.x > 4 && head.pos.y > 4 && head.pos.x < 45 && head.pos.y < 45
-        ) {
+        if (head.room.name == team.targetRoom) {
+            // 已在目标房：有旗收敛到旗，无旗按数据目标房中心推进
+            head.moveTo(team.flag ? team.flag : new RoomPosition(25, 25, team.targetRoom));
+        } else if (head.room.name == team.homeRoom) {
             let tarPos = team.flag ? team.flag.pos :
                         team.targetRoom ?
                         new RoomPosition(25, 25, team.targetRoom) :
                         head.room.find(FIND_EXIT)[0];
+            // 跨房目标不受边界带限制（边界带会把队伍永久冻在出口前）
+            const crossRoom = tarPos.roomName !== team.homeRoom;
+            const inBand = !(head.pos.x > 4 && head.pos.y > 4 && head.pos.x < 45 && head.pos.y < 45);
+            if (inBand && !crossRoom) return true;
             head.moveTo(tarPos);
             for (let i = 1; i < creeps.length; i++) {
                 if (creeps[i].pos.inRangeTo(tarPos, 2)) continue;
@@ -182,7 +185,6 @@ export default class TeamAction {
         }
         return true;
     }
-
     /**
      * quad 队形集结/归位：优先保证“能 1 tick 恢复就 1 tick 恢复”，避免高 CPU 的全量搜索。
      *
@@ -507,9 +509,9 @@ export default class TeamAction {
      * - 队首处于边界时允许直接 moveTo 目标，用于跨房/出入口通过。\n
      * - 内部会在同房且已到达/疲劳时早退，避免无意义移动。
      */
-    public static LinearMove(team: Team, pos: RoomPosition = team.flag.pos, reverse = false): void {
+    public static LinearMove(team: Team, pos: RoomPosition = team.flag?.pos, reverse = false): void {
         if (team.creeps.length == 0) return;
-        if (!pos) pos = team.flag.pos;
+        if (!pos) pos = team.flag?.pos;
         if (!pos) return;
 
         // 单个creep直接移动
@@ -776,7 +778,8 @@ export default class TeamAction {
 
         const originPos = TeamUtils.getTeamPos(team)!
         const cachedTargetPos = TeamUtils.getCachePos(team, 'targetPos')
-        const targetPos = cachedTargetPos || this.focusTarget(team, originPos)?.pos || team.flag.pos
+        const targetPos = cachedTargetPos || this.focusTarget(team, originPos)?.pos || team.flag?.pos
+            || (team.targetRoom ? new RoomPosition(25, 25, team.targetRoom) : undefined)
 
         if (!targetPos) return false
 
@@ -1333,7 +1336,7 @@ export default class TeamAction {
                 return costs
             },
             flee: status === 'flee',
-            maxRooms: originPos.roomName === team.flag.pos.roomName ? 2 : 20,
+            maxRooms: originPos.roomName === team.flag?.pos.roomName ? 2 : 20,
             maxOps: 8000,
         })
 

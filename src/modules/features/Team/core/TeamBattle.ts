@@ -259,19 +259,22 @@ export default class TeamBattle {
 
     /**
      * 选取寻路目标
+     *
+     * @remarks 扫描房：指挥旗所在房优先；无旗队伍按数据 targetRoom（旗位无视野建不出来时的兜底口径）。
      */
     public static chooseTargets(team: Team) {
-        if (!team.flag) return;
-        const room = team.flag.room;
+        const scanRoomName = team.flag ? team.flag.pos.roomName : team.targetRoom;
+        if (!scanRoomName) return;
+        const room = Game.rooms[scanRoomName];
         // 强制优先打建筑
         const isFocusStructure = team.targetMode === 'structure' || TeamUtils.isDisarmed(team);
         // 强制优先打爬
         const preferCreep = team.targetMode === 'creep'
         // 强制优先打旗
-        const preferFlag = team.targetMode === 'flag'
+        const preferFlag = team.targetMode === 'flag' && !!team.flag
 
         const result: (Creep | Structure | Flag)[] = []
-        const creep = team.creeps.find((c) => c.room.name === team.flag.pos.roomName)
+        const creep = team.creeps.find((c) => c.room.name === scanRoomName)
 
         if (room && creep) {
             if (preferFlag) {
@@ -313,7 +316,7 @@ export default class TeamBattle {
             result.push(...canAttackStructures, ...canAttackCreeps)
         }
 
-        if (result.length === 0) {
+        if (result.length === 0 && team.flag) {
             result.push(team.flag)
         }
         team['_targets'] = result

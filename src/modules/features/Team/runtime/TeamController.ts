@@ -2,6 +2,7 @@ import Team from "../core/TeamClass";
 import TeamCalc from "../core/TeamCalc";
 import { getTeamData } from "@/modules/shared/memory";
 import { getTeamCreeps } from "@/modules/shared/creepTickIndex";
+import { isBoostResCheckEnabled } from "@/modules/shared/gameCapabilities";
 
 /**
  * Team 执行调度器（运行时）。
@@ -50,14 +51,19 @@ export default class TeamController {
 
             // boost
             if (!creep.memory.boosted) {
-                if (creep.memory['boostmap']) {
+                const boostmap = creep.memory['boostmap'];
+                if (boostmap && isBoostResCheckEnabled()) {
                     // Team Creep 必须完成 Boost (must: true)，任务配额扣减由 Boost 内部自动处理
-                    const result = creep.goBoost(creep.memory['boostmap'], { must: true });
+                    const result = creep.goBoost(boostmap, { must: true });
                     if (result === OK) {
                         creep.memory.boosted = true;
                         delete creep.memory['boostmap'];
                     }
-                } else creep.memory.boosted = true;
+                } else {
+                    // 不做 boost 检查：孵化即满状态，直接视为已强化
+                    creep.memory.boosted = true;
+                    delete creep.memory['boostmap'];
+                }
                 continue;
             }
 

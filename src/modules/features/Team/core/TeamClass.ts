@@ -122,11 +122,16 @@ class Team {
      * - 防止对穿：当队形稳定时设置 creep.memory.dontPullMe=true，减少 moveOptimization 的对穿打散。
      */
     execUpdate(): void {
-        // 没有旗帜则创建, 目标房间不一致则更新
+        // 指挥旗丢失时在队首脚下补建（官方口径），但队首还在孵化房时不补——
+        // 孵化房里的旗会把 targetRoom 牵引回自己家（要塞服无视野建旗必失败的场景）
         if (!this.flag && this.creeps && this.creeps.length > 0) {
-            this.creeps[0].pos.createFlag(`Team-${this.name}`);
+            const head = this.creeps[0];
+            if (head?.pos && head.room.name !== this.homeRoom) {
+                try { head.room.createFlag(head.pos.x, head.pos.y, `Team-${this.name}`); } catch { /* 引擎拒绝时下 tick 重试 */ }
+            }
         }
-        else if (this.flag && this.targetRoom != this.flag.pos.roomName) {
+        // 指挥旗位置重定义目标房（已有逻辑）
+        if (this.flag && this.targetRoom != this.flag.pos.roomName) {
             this.targetRoom = this.flag.pos.roomName;
         }
 
@@ -210,7 +215,6 @@ class Team {
      * - 最终会更新推进目标点（targetPos），供移动模块参考。
      */
     execAttack(): void {
-        if (!this.flag) return;
         // 选择目标
         TeamBattle.chooseTargets(this)
         // 自动攻击
@@ -236,7 +240,7 @@ class Team {
      */
     execMove(): void {
         if (this.moved) return;
-        
+
         // 队伍集结
         const isLinear = TeamUtils.isLinear(this);
         if (this.formation === 'line' &&
@@ -247,8 +251,11 @@ class Team {
             return;
         }
 
-        // 队伍移动
-        if (!this.flag) return;
+        // 无指挥旗：以数据里的 targetRoom 为进攻锚点（不能因此冻结跨房移动）
+        const anchor = this.flag ? this.flag.pos
+            : this.targetRoom ? new RoomPosition(25, 25, this.targetRoom)
+            : undefined;
+        if (!anchor) return;
         if (this.creeps.some(c => c.fatigue > 0)) return;
         const isQuad = TeamUtils.isQuad(this);
         const inSamaRoom = TeamUtils.inSameRoom(this);
@@ -256,11 +263,13 @@ class Team {
 
         // 线性队形转方阵队形
         if (this.formation === 'line') {
-            const roomName = this.creeps[0].room.name;
+            const head = this.creeps[0];
+            if (!head) return; // 无活体成员（等解散的空队）：无可移动
+            const roomName = head.room.name;
             const exits = Game.map.describeExits(this.targetRoom);
             const isInExits = [...Object.values(exits), this.targetRoom].includes(roomName);
             if (isQuad && isInExits) this.formation = 'quad';
-            if (this.creeps.length >= 3 && inSamaRoom &&
+            if (this.creeps.length >= 4 && inSamaRoom &&
                 !hasOnEdge && !isQuad && isInExits) {
                 if (TeamAction.formLineToQuad(this)) {
                     this.moved = true;
@@ -269,7 +278,7 @@ class Team {
             }
         }
         // 特殊情况归位
-        else if (!isQuad && isLinear && !hasOnEdge && this.creeps.length >= 3) {
+        else if (!isQuad && isLinear && !hasOnEdge && this.creeps.length >= 4) {
             if (TeamAction.formLineToQuad(this)) {
                 this.moved = true;
                 return;
@@ -283,15 +292,15 @@ class Team {
             TeamVisual.drawMoveDirection(this)
         }
         else if (this.formation === 'line') {
-            TeamAction.LinearMove(this);
+            TeamAction.LinearMove(this, anchor);
             this.moved = true;
             TeamVisual.drawMoveDirection(this)
         }
         // 方阵队形移动
         else if (this.formation === 'quad' && !isQuad &&
-            this.creeps.length >= 2 && hasOnEdge
+            this.creeps.length >= 4 && hasOnEdge
         ) {
-            if (!this['_targets']) this['_targets'] = [this.flag];
+            if (!this['_targets']) this['_targets'] = [anchor];
             const moveGoals: any[] = this['_targets']
             let direction = TeamAction.getTeamMoveDirection(this, moveGoals)
             if (!direction && this.status === 'avoid') {
@@ -309,7 +318,7 @@ class Team {
         } else if (this.formation === 'quad') {
             if (isQuad || this.status === 'flee') {
                 if (hasOnEdge || !TeamAction.switchTeam4Pos(this)) {
-                    if (!this['_targets']) this['_targets'] = [this.flag];
+                    if (!this['_targets']) this['_targets'] = [anchor];
                     let moveGoals: any[] = this['_targets']
                     let direction = TeamAction.getTeamMoveDirection(this, moveGoals)
                     if (!direction && this.status === 'avoid') {
