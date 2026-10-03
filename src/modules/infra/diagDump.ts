@@ -3,6 +3,7 @@
  * 外部工具纯 GET Memory 读取，不经 console（eval 编译在引擎侧留残留，线性吃内存）。
  */
 import { getRoomMode } from '@/modules/shared/roomMode';
+import { getOutMineData } from '@/modules/shared/memory';
 
 // RCL 总进度表（level index → 升到该级所需累计进度点的近似口径，供看门狗显示）
 const RCL_BARS = [0, 0, 200, 45000, 135000, 405000, 1215000, 3645000, 10935000];
@@ -38,6 +39,52 @@ export const writeDiagDumps = (): void => {
                 building: (room.memory as any).building,
                 upgradersStarved: (room.memory as any).upgradersStarved,
                 census,
+            });
+            // 外矿交付链快照：容器/落地能量/工地，定位「舰队空转、能量不回家」
+            const targets = getOutMineData()?.[room.name]?.energy ?? [];
+            // 孵化池角色分布 + 外矿准入预算数字
+            const poolRoles: Record<string, number> = {};
+            for (const task of (room.getAllMissionFromPool?.('spawn') ?? []) as any[]) {
+                const role = task?.data?.memory?.role || '?';
+                poolRoles[role] = (poolRoles[role] || 0) + 1;
+            }
+            let liveLocal = 0;
+            let liveRemote = 0;
+            for (const creep of Object.values(Game.creeps)) {
+                const role = (creep.memory as any).role || '';
+                if (role.startsWith('out-') || role === 'reserver') liveRemote += creep.body.length;
+                else liveLocal += creep.body.length;
+            }
+            const outMineState = (Memory as any).OutMineData ?? null;
+            memAny.__om = JSON.stringify({
+                time: Game.time,
+                pool: poolRoles,
+                carryTrace: (global as any).__carryTrace ?? [],
+                budget: {
+                    capacity: Math.max(1, (room.spawn || []).length) * 500,
+                    liveLocal,
+                    liveRemote,
+                    sourceTiming: (room.memory as any).sourceTiming ?? null,
+                },
+                outMineData: outMineState,
+                targets: targets.slice(0, 6).map((tn: string) => {
+                    const tr = Game.rooms[tn];
+                    if (!tr) return { room: tn, visible: false };
+                    const containers = tr.find(FIND_STRUCTURES, { filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER }) as StructureContainer[];
+                    const sources = tr.find(FIND_SOURCES);
+                    const dropped = sources.reduce((sum, s) =>
+                        sum + s.pos.findInRange(FIND_DROPPED_RESOURCES, 2)
+                            .reduce((a, d) => a + (d.resourceType === RESOURCE_ENERGY ? d.amount : 0), 0), 0);
+                    const sites = tr.find(FIND_MY_CONSTRUCTION_SITES);
+                    return {
+                        room: tn,
+                        containers: containers.length,
+                        containerEnergy: containers.reduce((a, c) => a + (c.store.energy || 0), 0),
+                        dropped,
+                        sites: sites.length,
+                        siteTypes: Object.entries(_.countBy(sites, (s: ConstructionSite) => s.structureType)),
+                    };
+                }),
             });
         }
         break;
