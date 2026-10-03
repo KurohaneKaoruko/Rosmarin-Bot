@@ -1,5 +1,5 @@
 import { VERSION } from '../constant/config';
-import { log } from '@/utils';
+import { log } from '@/modules/utils';
 
 const head = `<span style="color: #D0CAE0;"><b>
 ——————————————————————————— 迷迭香 𝕽𝖔𝖘𝖒𝖆𝖗𝖎𝖓 ${VERSION} ———————————————————————————

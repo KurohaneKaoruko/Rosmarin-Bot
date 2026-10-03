@@ -1,5 +1,5 @@
 import { AUTO_LAB_CONFIG, LabMap, LabLevel, PRODUCTION_MIN, RESOURCE_PRODUCTION, t2, t3 } from '@/constant/ResourceConstant'
-import { log } from '@/utils';
+import { log } from '@/modules/utils';
 import { getLabAB } from '@/modules/shared/labReservations';
 import { getAutoLabData, getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';

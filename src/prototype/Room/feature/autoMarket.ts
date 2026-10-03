@@ -1,4 +1,4 @@
-import { log } from "@/utils"
+import { log } from "@/modules/utils"
 import { BASE_CONFIG } from "@/constant/config";
 import { AUTO_MARKET_CONFIG, AUTO_MARKET_DEFAULT } from "@/constant/ResourceConstant";
 import { getAutoMarketData } from "@/modules/shared/memory";

@@ -1,5 +1,5 @@
 import { compressBodyConfig } from "@/modules/shared/compress";
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import ClaimSpawnFunction from "./claimSpawn";
 import { getFlagSpawnLoad, isActiveAidBuildFlagCreep } from "../function/spawnLoad";
 import { AidBodys } from "./config";

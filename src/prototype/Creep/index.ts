@@ -1,4 +1,4 @@
-import { assignPrototype } from "@/utils"
+import { assignPrototype } from "@/modules/utils"
 import BaseFunction from "./function/baseFunction"
 import CacheFunction from "./function/cacheFunction"
 import MoveFunction from "./function/moveFuntion"

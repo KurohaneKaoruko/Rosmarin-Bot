@@ -1,4 +1,4 @@
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import { THRESHOLDS } from "@/constant/Thresholds";
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 

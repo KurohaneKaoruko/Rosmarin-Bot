@@ -1,4 +1,4 @@
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 
 /**
  * PowerCreep 工作控制

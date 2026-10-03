@@ -1,5 +1,5 @@
 import { RoleData, RoleDefinition } from "@/constant/CreepConstant";
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import { AIO_CONFIG, LOOT_CONFIG, type BoostMap } from "./config";
 import { getSpawnRoomOrRemove, parseFlagNumber, tickThrottle } from "../utils";
 

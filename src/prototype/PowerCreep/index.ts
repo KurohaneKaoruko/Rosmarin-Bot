@@ -1,4 +1,4 @@
-import { assignPrototype } from "@/utils"
+import { assignPrototype } from "@/modules/utils"
 import BaseFunction from "./function/baseFunction"
 import PowerCreepDoubleAction from "./function/doubleAction"
 import PowerCreepUsePower from "./function/usePower"

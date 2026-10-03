@@ -1,4 +1,4 @@
-import { getStructureSignature } from '@/utils';
+import { getStructureSignature } from '@/modules/utils';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 

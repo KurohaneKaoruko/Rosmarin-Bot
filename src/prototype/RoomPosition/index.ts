@@ -1,4 +1,4 @@
-import { assignPrototype } from "@/utils"
+import { assignPrototype } from "@/modules/utils"
 import BaseFunction from "./baseFunction"
 
 const plugins = [

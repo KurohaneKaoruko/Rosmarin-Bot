@@ -1,4 +1,4 @@
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import { compressBodyConfig } from "@/modules/shared/compress";
 import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/modules/shared/memory";
 import { TEAM_CONFIG } from "../config/TeamConfig";

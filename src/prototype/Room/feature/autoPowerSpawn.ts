@@ -1,4 +1,4 @@
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import { getAutoPowerData, getStructData } from "@/modules/shared/memory";
 import { isRoomTickAligned } from "@/modules/shared/roomPhase";
 

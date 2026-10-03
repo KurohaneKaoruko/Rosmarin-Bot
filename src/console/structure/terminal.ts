@@ -1,4 +1,4 @@
-import { log } from "@/utils";
+import { log } from "@/modules/utils";
 import { BASE_CONFIG } from "@/constant/config";
 
 

@@ -1,4 +1,4 @@
-import { assignPrototype } from "@/utils"
+import { assignPrototype } from "@/modules/utils"
 import BaseFunction from "./function/baseFunction"
 import RoomDefense from "./feature/roomDefense"
 import OutMine from "./feature/outMine"

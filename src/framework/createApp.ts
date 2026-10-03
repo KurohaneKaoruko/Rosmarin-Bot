@@ -1,4 +1,4 @@
-import { log } from '@/utils.js';
+import { log } from '@/modules/utils.js';
 import { errorMapper, sourceMappedStackTrace } from './errorMapper.js'
 import { isProfilingEnabled, profileStage, recordObjectCost } from '@/modules/infra/cpuProfiler';
 import { BASE_CONFIG } from '@/constant/config.js'
