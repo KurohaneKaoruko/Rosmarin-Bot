@@ -895,9 +895,41 @@ export class RoadBuilder {
         if (!controller?.my) return;
         const rcl = controller.level;
         if (rcl < 2) return;
+        // 无源房短路（能力闸）：cc 服务升级线的能量补给，无产出源的房间不需要
+        if (!(sourceRoom.source || []).length) return;
         if (rcl >= 5 && (sourceRoom.link || []).some(l => l.pos.inRangeTo(controller.pos, 3))) return;
-        const existingContainers = (sourceRoom.container || []).filter(c => c.pos.inRangeTo(controller.pos, 3));
+        // 容器判定走实时 find（不用 room.container 缓存）：工地建成瞬间缓存未刷新，
+        // 读缓存会误判「无容器」而重复放量，滚出一串容器工地
+        const existingContainers = sourceRoom.find(FIND_STRUCTURES, {
+            filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
+        }) as StructureContainer[];
         const weakContainer = existingContainers.find(c => c.hits / c.hitsMax < 0.3);
+        // 历史重复放置的清理：link 接管前控制器旁只保留一个容器——
+        // 站位评分最高者留下，其余拆除（自己的建筑，参考实现同款唯一 cc 口径）；
+        // 有低耐久容器时走备胎路径，不在此拆
+        if (existingContainers.length > 1 && !weakContainer) {
+            const terrain = sourceRoom.getTerrain();
+            const spawn = (sourceRoom.spawn || [])[0];
+            const inCtrl3 = (x: number, y: number): boolean =>
+                Math.max(Math.abs(x - controller.pos.x), Math.abs(y - controller.pos.y)) <= 3;
+            const standable = (x: number, y: number): boolean =>
+                x >= 1 && x <= 48 && y >= 1 && y <= 48
+                && terrain.get(x, y) !== TERRAIN_MASK_WALL
+                && inCtrl3(x, y);
+            const spotScore = (x: number, y: number): number => {
+                let open = 0;
+                for (let ox = -1; ox <= 1; ox++) {
+                    for (let oy = -1; oy <= 1; oy++) {
+                        if (ox === 0 && oy === 0) continue;
+                        if (standable(x + ox, y + oy)) open++;
+                    }
+                }
+                return open * 4 - (spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0);
+            };
+            const sorted = [...existingContainers].sort((a, b) => spotScore(b.pos.x, b.pos.y) - spotScore(a.pos.x, a.pos.y));
+            for (const extra of sorted.slice(1)) extra.destroy();
+            return;
+        }
         if (existingContainers.length > 0 && !weakContainer) return;
         const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
@@ -917,6 +949,17 @@ export class RoadBuilder {
             && !occupied.has(x + ',' + y)
             && terrain.get(x, y) !== TERRAIN_MASK_WALL
             && inCtrl3(x, y);
+        // 选址评分 = 相邻可升级站位数×4 − 距 spawn 距离（与放置共用一套口径）
+        const spotScore = (x: number, y: number): number => {
+            let open = 0;
+            for (let ox = -1; ox <= 1; ox++) {
+                for (let oy = -1; oy <= 1; oy++) {
+                    if (ox === 0 && oy === 0) continue;
+                    if (standable(x + ox, y + oy)) open++;
+                }
+            }
+            return open * 4 - (spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0);
+        };
 
         let best: { x: number; y: number; score: number } | null = null;
         for (let dx = -3; dx <= 3; dx++) {
@@ -926,15 +969,7 @@ export class RoadBuilder {
                 if (x < 1 || x > 48 || y < 1 || y > 48) continue;
                 if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
                 if (occupied.has(x + ',' + y)) continue;
-                let open = 0;
-                for (let ox = -1; ox <= 1; ox++) {
-                    for (let oy = -1; oy <= 1; oy++) {
-                        if (ox === 0 && oy === 0) continue;
-                        if (standable(x + ox, y + oy)) open++;
-                    }
-                }
-                const baseDist = spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0;
-                const score = open * 4 - baseDist;
+                const score = spotScore(x, y);
                 if (!best || score > best.score) best = { x, y, score };
             }
         }
