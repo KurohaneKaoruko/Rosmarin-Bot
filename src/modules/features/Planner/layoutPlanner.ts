@@ -1,8 +1,9 @@
-import { log } from '@/utils';
+import { log } from '@/modules/utils';
 import { compress, compressBatch, decompress } from '@/modules/shared/compress';
 import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
 import { autoPlanner } from '@/modules/features/Planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
+import { buildRushLayout, rushLayoutMemory } from '@/modules/features/Planner/dynamic/rushPlanner';
 import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/modules/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/modules/shared/memory';
@@ -123,6 +124,8 @@ function normalizeDynamicPlannerResult(roomName: string, layoutType: string, raw
  */
 function getLayoutPointsForRcl(room: Room, structureType: string, layoutArray: number[]): number[] {
     if (structureType === STRUCTURE_ROAD) {
+        // rush 早期铺路：路网是开局搬运效率的一部分，不等 RCL4
+        if (getRoomMode(room) === 'rush') return layoutArray;
         if (room.level < 4) return [];
         const layoutType = getRoomData()?.[room.name]?.layout;
         switch (layoutType) {
@@ -1034,11 +1037,20 @@ export const LayoutPlanner = {
         const only = options?.structType;
         const allSite = room.find(FIND_CONSTRUCTION_SITES);
 
+        // 建造放置优先级（参考实现 BUILD_PRIORITY 口径）：功能建筑靠前，road 垫底——
+        // 开局产能优先转化为 ext/容器（容量与物流先起来），道路网随后补
+        const PLACEMENT_ORDER: Record<string, number> = {
+            spawn: 0, tower: 1, storage: 2, terminal: 3, extension: 4,
+            container: 5, link: 6, road: 8, rampart: 9, extractor: 10,
+            lab: 11, wall: 12, observer: 13, factory: 14, powerSpawn: 15, nuker: 16,
+        };
+
         const maxSites = options?.maxSites;
         const cap = typeof maxSites === 'number' ? maxSites : (typeof MAX_CONSTRUCTION_SITES === 'number' ? MAX_CONSTRUCTION_SITES : 100);
         const keys = only ? [only] : Object.keys(layoutMemory);
         const coreDepotKeys = keys.filter((structureType) => isCoreDepotStructure(structureType));
         const regularKeys = keys.filter((structureType) => !isCoreDepotStructure(structureType));
+        regularKeys.sort((a, b) => (PLACEMENT_ORDER[a] ?? 7) - (PLACEMENT_ORDER[b] ?? 7));
         let budget = Math.max(0, cap - allSite.length);
 
         let created = 0;
@@ -1054,6 +1066,15 @@ export const LayoutPlanner = {
 
             const buildMax = (CONTROLLER_STRUCTURES as any)?.[s]?.[room.level] ?? 0;
             if (!buildMax) continue;
+
+            // RCL<6 容器每源限一个（源容器计数，见下方放置过滤）
+            const placedContainerPerSource = new Map<string, number>();
+            if (s === STRUCTURE_CONTAINER) {
+                for (const src of (room.source || []) as Source[]) {
+                    const near = (room.container || []).filter((c) => c.pos.inRangeTo(src.pos, 2)).length;
+                    if (near > 0) placedContainerPerSource.set(src.id, near);
+                }
+            }
 
             let structures = (room as any)[s] || room.find(FIND_STRUCTURES, { filter: (o) => o.structureType == s });
             if (!Array.isArray(structures)) structures = [structures];
@@ -1072,6 +1093,17 @@ export const LayoutPlanner = {
                 const [x, y] = decompress(p);
                 if (x < 0 || x > 49 || y < 0 || y > 49) continue;
                 const Pos = new RoomPosition(x, y, room.name);
+                // RCL1-5 容器只放源旁、每源一个（参考实现容器集合 = 源容器×N + cc×1）：
+                // 控制器容器由 ensureControllerContainer 评分选址（含低耐久备胎），
+                // 布局里的其余 container 点位（矿物旁/控制器周围/备用位）RCL6+ 再放——
+                // 否则开局五个容器工地围着控制器铺开，抢光 worker 产能
+                if (s === STRUCTURE_CONTAINER && room.level < 6) {
+                    const nearSource = (room.source || []).find((src: Source) => src.pos.inRangeTo(Pos, 2));
+                    if (!nearSource) continue;
+                    const perSource = placedContainerPerSource.get(nearSource.id) || 0;
+                    if (perSource >= 1) continue;
+                    placedContainerPerSource.set(nearSource.id, perSource + 1);
+                }
                 if (Pos.lookFor(LOOK_CONSTRUCTION_SITES).length) continue;
                 const S = Pos.lookFor(LOOK_STRUCTURES);
                 if (shouldSkipBuildAtPos(room, s, S, Pos)) continue;
@@ -1325,6 +1357,53 @@ export const LayoutPlanner = {
         }
         if (!opts?.quiet) {
             log('LayoutPlanner', `迷你房布局构建成功: ${roomName} towers=${towers.length}/${towerQuota} terminal=${terminal.length}（ext 由特殊冲级优先落位负责）`);
+        }
+        return OK;
+    },
+
+    /**
+     * rush 布局可视化（不落盘）：rushauto 控制器锚定布局预览。
+     * @returns Screeps 错误码：OK/ERR_NOT_FOUND/ERR_INVALID_ARGS
+     */
+    visualRush(roomName: string): number {
+        const room = Game.rooms[roomName];
+        if (!room) return ERR_NOT_FOUND;
+        const result = buildRushLayout(room);
+        if (!result) {
+            log('LayoutPlanner', `rush 布局可视化失败: ${roomName} 无控制器或无可锚定点`);
+            return ERR_INVALID_ARGS;
+        }
+        LayoutVisual.showRoomStructures(roomName, result.structMap);
+        log('LayoutPlanner', `rush 布局可视化成功: ${roomName} center(${result.center.x},${result.center.y})`);
+        return OK;
+    },
+
+    /**
+     * rush 布局构建（rushauto）：控制器锚定程序化生成，写入 Memory.RosmarinBot.LayoutData
+     * 并同步 RoomData.center/layout。仓库贴控制器、冲级工位保留、道路全量清单（RCL2 起铺）。
+     * @returns Screeps 错误码：OK/ERR_NOT_FOUND/ERR_INVALID_ARGS
+     */
+    buildRush(roomName: string, opts?: { quiet?: boolean }): number {
+        const room = Game.rooms[roomName];
+        if (!room) return ERR_NOT_FOUND;
+        const computed = rushLayoutMemory(room);
+        if (!computed) {
+            if (!opts?.quiet) log('LayoutPlanner', `rush 布局构建失败: ${roomName} 无控制器或无可锚定点`);
+            return ERR_INVALID_ARGS;
+        }
+
+        const layoutMemory = getLayoutData(roomName) as any;
+        for (const k in layoutMemory) delete layoutMemory[k];
+        for (const type in computed.memory) layoutMemory[type] = computed.memory[type];
+
+        const rooms = getRoomData();
+        if (rooms?.[roomName]) {
+            rooms[roomName]['layout'] = 'rushauto';
+            rooms[roomName]['center'] = { x: computed.center.x, y: computed.center.y };
+        }
+        if (!opts?.quiet) {
+            log('LayoutPlanner', `rush 布局构建成功: ${roomName} center(${computed.center.x},${computed.center.y}) ` +
+                Object.entries(computed.memory).map(([t, pts]) => `${t}×${pts.length}`).join(' '));
         }
         return OK;
     },

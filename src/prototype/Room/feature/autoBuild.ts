@@ -8,7 +8,11 @@ export default class AutoBuild extends Room {
     // 自动建筑
     autoBuild() {
         if (Game.cpu.bucket < 100) return;
-        
+
+        // 无源房不自动建造（能力闸，常规房零影响）：
+        // 没有能量产出源的房间，工地永远无人完工，只会白占 CPU 与掉落衰减
+        if (!(this.source || []).length) return;
+
         if (Game.time % 100 !== (this.memory['index']||0)) return;
 
         // 开启了自动建造, 且有布局Memory, 则自动建筑
@@ -24,9 +28,22 @@ export default class AutoBuild extends Room {
             }
         }
 
+        // rush 冲级房：无布局（或误设其他类型）时自动生成 rushauto（仓库贴控制器 + 早期路网），
+        // 并确保自动建造开启
+        if (getRoomMode(this) === 'rush' && (memory as any)?.layout !== 'rushauto' &&
+            (!layoutMemory || Object.keys(layoutMemory).length === 0)) {
+            if (LayoutPlanner.buildRush(this.name, { quiet: true }) === OK) {
+                if (memory) memory.autobuild = true;
+            }
+        }
+
         if (memory && memory.autobuild && layoutMemory &&
             Object.keys(layoutMemory).length) {
-            LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });
+            // RCL1 不放任何建筑（参考实现开局口径）：200 点升级量的关键窗口期，
+            // 产能全额直供升级线（worker 无工地即换班升级），RCL2 起再铺基建
+            if (this.level >= 2) {
+                LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });
+            }
         }
 
         // 关键建筑造rampart

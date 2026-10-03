@@ -2,6 +2,7 @@ import { getRoomData, getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
+import { RoadBuilder } from '@/modules/features/external/externalRoad';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -40,6 +41,10 @@ export default class RoomExecute extends Room {
         this.autoBuild();        // 自动建筑
         // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
         if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
+        // rush：控制器容器 RCL2 起例行保活（升级专线的主缓冲，被毁/低耐久自动补）
+        if (getRoomMode(this) === 'rush' && isRoomTickAligned(this.name, 150)) {
+            RoadBuilder.ensureControllerContainer(this);
+        }
         if (profile.facilities) {
             this.autoLab();          // 自动Lab合成
             this.autoFactory();      // 自动Factory生产
