@@ -36,6 +36,7 @@ function  memoryClear() {
     const rooms = getRoomData();
     const pools = getMissionPools();
     for (let roomName in pools) {
+        if (Game.rooms[roomName]?.my) continue; // 己方房池子不清理（托管表未必建全）
         if(rooms[roomName]) continue;
         delete pools[roomName];
     }
