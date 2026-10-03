@@ -1,6 +1,14 @@
 import { getRoomMode } from "@/modules/shared/roomMode";
 import { getOutMineData } from "@/modules/shared/memory";
 import { RoleData } from "@/constant/CreepConstant";
+import {
+    RUSH_SEGMENT_LEVELS,
+    applySegmentVerdicts,
+    buildFailSnapshot,
+    evaluateRaceSegments,
+    SegmentStatus,
+} from "@/modules/shared/rushProgress";
+import { THRESHOLDS } from "@/constant/Thresholds";
 
 /** 各等级 → 下一级所需进度点兜底表（实测条优先，缺采样时使用） */
 const RCL_BAR_FALLBACK: Record<number, number> = {
@@ -23,6 +31,14 @@ type RaceMemory = {
     relayAccum: number;
     /** 接力速率采样环 {tick, 累计接力数} */
     relaySamples: RaceSample[];
+    /** 各分段评估状态（逐 tick 刷新） */
+    segments?: SegmentStatus[];
+    /** 该轮 attempt 已判废 */
+    failed?: boolean;
+    /** 首个判废段的目标等级 */
+    failedSegment?: number;
+    /** 判废归因快照 */
+    failSnapshot?: Record<string, unknown>;
 };
 
 const SAMPLE_STEP = 10;
@@ -54,7 +70,7 @@ const getRaceMem = (room: Room): RaceMemory => {
 
 const fmtTick = (n: number): string => {
     if (n >= 1e6) return `${(n / 1e6).toFixed(2)}m`;
-    if (n >= 1000) return `${(n / 1000).toFixed(n >= 1e5 ? 0 : 1)}k`;
+    if (n >= 1000) return `${(n / 1000).toFixed(n >= 1e5 || n % 1000 === 0 ? 0 : 1)}k`;
     return `${Math.round(n)}`;
 };
 const bar = (ratio: number, width = 10): string => {
@@ -83,6 +99,10 @@ export default class RaceVisual extends Room {
             mem.levelRates = {};
             mem.bars = {};
             mem.samples = [];
+            mem.segments = undefined;
+            mem.failed = false;
+            mem.failedSegment = undefined;
+            mem.failSnapshot = undefined;
             mem.baseline = now;
         }
         if (!mem.levels[level]) {
@@ -124,6 +144,25 @@ export default class RaceVisual extends Room {
 
         const remaining = Math.max(0, barPts - progress);
         const etaTicks = rate > 0 ? Math.ceil(remaining / rate) : Infinity;
+
+        // ── 分段评估：状态逐 tick 刷新；判废快照只在首次判废时落账 ──
+        const pointsToReach: Record<number, number> = {};
+        for (const segLevel of RUSH_SEGMENT_LEVELS) {
+            if (segLevel <= level) continue;
+            let pts = Math.max(0, barPts - progress);
+            for (let l = level + 1; l < segLevel; l++) pts += mem.bars[l] || RCL_BAR_FALLBACK[l] || 0;
+            pointsToReach[segLevel] = pts;
+        }
+        mem.segments = evaluateRaceSegments({
+            baseline: mem.baseline,
+            now,
+            level,
+            progress,
+            rate,
+            levels: mem.levels,
+            pointsToReach,
+        });
+        applySegmentVerdicts(mem, mem.segments, seg => buildFailSnapshot(this, seg));
 
         // ── 管线/车队数据（只读轻量采集） ──
         let ocTotal = 0;
@@ -205,6 +244,23 @@ export default class RaceVisual extends Room {
             push(`速率 ${winRate.toFixed(1)}/t (全程均 ${totalRate.toFixed(1)})`, rateColor(winRate));
             push(`预计 lv${level + 1} 还需 ${isFinite(etaTicks) ? fmtTick(etaTicks) + 't' : '?'}`, C.warn);
         }
+        push(`── 分段目标 ─────────`, C.section);
+        for (const seg of mem.segments ?? []) {
+            // 双线段显示「≤达成线/合格线」（顺序即含义），单线段只显示达成线
+            const limit = seg.pass !== seg.target
+                ? `≤${fmtTick(seg.target)}/${fmtTick(seg.pass)}`
+                : `≤${fmtTick(seg.target)}`;
+            if (seg.achievedAt !== undefined) {
+                const grade = seg.failed ? '判废' : (seg.behind ? '合格' : '达成');
+                push(`lv${seg.level} ${limit} ${grade} ${fmtTick(seg.achievedAt)}`, seg.failed ? C.bad : seg.behind ? C.warn : C.good);
+            } else if (seg.failed) {
+                push(`lv${seg.level} ${limit} 已超时${fmtTick(seg.elapsed || 0)} 判废`, C.bad);
+            } else {
+                const etaText = seg.eta !== undefined ? fmtTick(seg.eta) : '?';
+                push(`lv${seg.level} ${limit} 已${fmtTick(seg.elapsed || 0)} ETA ${etaText}${seg.behind ? ' 落后' : ''}`, seg.behind ? C.warn : C.info);
+            }
+        }
+        if (mem.failed) push(`attempt 判废 lv${mem.failedSegment} 超段`, C.bad);
         push(`── 能量管线 ─────────`, C.section);
         push(`孵化能量 ${bar(this.energyAvailable / Math.max(1, this.energyCapacityAvailable), 6)} ${this.energyAvailable}/${this.energyCapacityAvailable}`, C.text);
         push(
@@ -256,5 +312,17 @@ export default class RaceVisual extends Room {
                 visual.text(cell.text, cell.x, top + i * rowH, { color: cell.color, font: '0.68 Consolas', align: 'left' });
             }
         });
+
+        // carrier 状态标注（诊断：送/取 态 + 载量 + 匹配到的请求类型 / 取货源）
+        for (const creep of Object.values(Game.creeps)) {
+            if (creep.room.name !== this.name) continue;
+            const mem = creep.memory as any;
+            if (mem.role !== 'carrier') continue;
+            const load = creep.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
+            const phase = load > 0 ? '送' : '取';
+            const assign = mem._assign ?? (load > 0 ? '满' : '等');
+            const src = mem._fetchSrc ?? (load > 0 ? '' : '等');
+            visual.text(`${phase}${load} ${load > 0 ? assign : (src || '等')}`, creep.pos.x, creep.pos.y - 0.7, { color: '#7fdfff', font: '0.5 Consolas' });
+        }
     }
 }

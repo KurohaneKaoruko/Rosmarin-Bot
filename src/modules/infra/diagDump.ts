@@ -32,7 +32,17 @@ export const writeDiagDumps = (): void => {
                 level: controller.level,
                 progress: controller.progress,
                 progressMax: (controller as any).progressMax || RCL_BARS[controller.level + 1] || 0,
-                race: { baseline: race.baseline, levels: race.levels },
+                race: {
+                    baseline: race.baseline,
+                    levels: race.levels,
+                    segments: race.segments ?? null,
+                    failed: race.failed ?? false,
+                    failedSegment: race.failedSegment ?? null,
+                },
+                // 容器/工地布点：核验控制器侧容器去重与布局容器落位
+                containers: (room.container || []).map((c) => [c.pos.x, c.pos.y]),
+                sites: (room.find(FIND_MY_CONSTRUCTION_SITES) as ConstructionSite[])
+                    .map((s) => `${s.structureType}@${s.pos.x},${s.pos.y}`),
                 cpuLimit: Game.cpu.limit,
                 mode: getRoomMode(room),
                 energyState: (room.memory as any).energyState,
@@ -42,6 +52,24 @@ export const writeDiagDumps = (): void => {
             });
             // 外矿交付链快照：容器/落地能量/工地，定位「舰队空转、能量不回家」
             const targets = getOutMineData()?.[room.name]?.energy ?? [];
+            // carrier 状态快照：FSM/取货缓存/停车，定位游荡与断供
+            const carriers = Object.values(Game.creeps)
+                .filter((c) => c.room.name === room.name && (c.memory as any).role === 'carrier')
+                .map((c) => {
+                    const mem = c.memory as any;
+                    const cache = mem.cache ?? {};
+                    return {
+                        n: c.name.slice(-6),
+                        x: c.pos.x,
+                        y: c.pos.y,
+                        flow: mem.fsm?.['carrier:flow'] ?? '-',
+                        work: mem.working ?? '-',
+                        load: c.store.getUsedCapacity(RESOURCE_ENERGY) || 0,
+                        src: cache.carrierSourceKind ?? '-',
+                        park: mem._parkPos ? 1 : 0,
+                    };
+                });
+            memAny.__carrierDump = JSON.stringify({ time: Game.time, carriers });
             // 孵化池角色分布 + 外矿准入预算数字
             const poolRoles: Record<string, number> = {};
             for (const task of (room.getAllMissionFromPool?.('spawn') ?? []) as any[]) {

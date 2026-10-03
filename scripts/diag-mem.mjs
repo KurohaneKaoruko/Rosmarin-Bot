@@ -1,11 +1,13 @@
 // 纯 GET 读私服 Memory 诊断 (不触发 console eval, 无泄漏)
-// 用法: node scripts/diag-mem.mjs [path]
+// 用法: node scripts/diag-mem.mjs [path] [账号名]
 import fs from 'node:fs';
 import zlib from 'node:zlib';
 
 const BASE = 'http://localhost:21035';
 const secret = JSON.parse(fs.readFileSync('.secret.json', 'utf8'));
-const acc = secret.servers['xx-local'].accounts.Rosmarin;
+const accName = process.argv[3] ?? 'Rosmarin';
+const acc = secret.servers['xx-local'].accounts[accName] ?? secret.servers['xx-local'].accounts.Rosmarin;
+console.log(`[diag] 账号: ${acc.email}`);
 
 const authRes = await fetch(`${BASE}/api/auth/signin`, {
     method: 'POST',
