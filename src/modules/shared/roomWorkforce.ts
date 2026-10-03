@@ -17,6 +17,8 @@ import { getEnergyLevel } from '@/modules/shared/energyLevel';
 import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { decompress } from '@/modules/shared/compress';
+import { buildFillRequests } from '@/prototype/Creep/function/energyLogistics';
+import { buildRushCarrierBody } from '@/modules/shared/rushBody';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
@@ -473,23 +475,23 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     const controller = room.controller;
     if (!controller?.my) return 0;
 
-    // —— 建造期让位（对齐参考实现 building 口径）：存在基础结构工地
-    // （spawn/extension/tower/容器）且无降级风险时，升级定编归零——
-    // 建造能量全额让给 builder，工期压缩到最短；道路工地不触发（量大会永久暂停）
+    // —— 建造优先标记（换班制开关）：基建工地存在 = building 态。
+    // building 态下 worker 全额转建造（升级侧归零，升级由固定升级岗承担）；
+    // 工地清零后 worker 整体转回升级。upgrader 固定升级岗不参与换班
     const prioritySites = (room.find(FIND_MY_CONSTRUCTION_SITES) || []).filter((s: ConstructionSite) =>
         s.structureType === STRUCTURE_SPAWN ||
         s.structureType === STRUCTURE_EXTENSION ||
         s.structureType === STRUCTURE_TOWER ||
         s.structureType === STRUCTURE_CONTAINER,
     );
-    const buildingPhase = prioritySites.length > 0        && Game.time - ((room.memory as any).buildingTick || 0) < 30        && (controller.ticksToDowngrade || 0) >= UPGRADE_NEEDED_TTD;
-    (room.memory as any).building = buildingPhase;
-    if (buildingPhase) return 0;
+    (room.memory as any).building = prioritySites.length > 0
+        && (controller.ticksToDowngrade || 0) >= UPGRADE_NEEDED_TTD;
 
     // —— 让位闸门 ——
     if ((room.memory as any).defend) return 0;
     if (getDowngradeUniversalTarget(room) > 0) return 0;
-    if (shouldDelayUpgraderForPrimaryBuild(room)) return 0;
+    // 低能量基建期推迟升级仅限常规房：rush 的 upgrader 固定升级，开局不参与让位
+    if (shouldDelayUpgraderForPrimaryBuild(room) && !isHighLikeMode(getRoomMode(room))) return 0;
     
 
     const capacity = getUpgradeWorkCapacity(room);
@@ -539,14 +541,28 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     // —— 地面堆积项：每 2000 点掉落能量折算 1 个升级 work，直接消化地上存货 ——
     const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
 
-    // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随饥荒状态浮动
-    //    （升级工近期取能落空 starved>0 → 1.0 让孵化，供能流畅 → 1.2 加码；
-    //    每tick衰减1，自然回扩）。不做 cc 单点水位节流：cc 干涸时收缩升级工是
-    //    反向反馈（升级工变少 → 抽水更少 → cc 更空的死锁）；cc 供能不足由
-    //    专线配额与手填闭环解决。
+    // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随 spawnBalance EMA 浮动
+    //    （参考实现原版口径：+1 物流闲置——无取货请求且有载货搬运 → 1.2 加码；
+    //    −1 升级工取能落空（starved） → 1.0 让孵化；EMA 50t 时间常数自然回摆）。
+    //    不做 cc 单点水位节流：cc 干涸时收缩升级工是反向反馈（升级工变少 →
+    //    抽水更少 → cc 更空的死锁）；cc 供能不足由专线配额与手填闭环解决。
     if (getRoomMode(room) === 'rush') {
         const pileAll = getDroppedPileEnergy(room) + getRemotePileEnergy(room);
-        const multiplier = getUpgradersStarved(room) > 0 ? 1 : 1.2;
+        let loadedCarrier = false;
+        for (const creep of Object.values(Game.creeps)) {
+            if (creep.room.name !== room.name || creep.spawning) continue;
+            if (creep.memory?.role !== 'carrier') continue;
+            if ((creep.store[RESOURCE_ENERGY] || 0) > 0) { loadedCarrier = true; break; }
+        }
+        // 信号优先级：饥饿压过富余——升级工取能落空时即便搬运有货也先减码
+        //（供能在途但取不到，继续加码只会堆更多饿肚子的升级工）
+        const target = getUpgradersStarved(room) > 0
+            ? -1
+            : (buildFillRequests(room).length === 0 && loadedCarrier ? 1 : 0);
+        const memAny = room.memory as any;
+        const alpha = 1 - Math.pow(2, -1 / 50);
+        memAny.spawnBalanceEma = clamp((memAny.spawnBalanceEma ?? 0) * (1 - alpha) + target * alpha, -1, 1);
+        const multiplier = Math.min(1.2, Math.max(1, memAny.spawnBalanceEma / 2 + 0.8));
         const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
 
         const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
@@ -556,6 +572,46 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     //    rush/high 不缩：孵化优先级已护住 spawn，缩编只会拉长饥荒（饿→缩→更饿）——
     const demand = Math.max(incomeWork, surplusWork, pileWork);
     return Math.max(lowerLimit, Math.min(capacity, isHighLikeMode(getRoomMode(room)) ? demand : shrinkByStarved(room, demand)));
+};
+
+// ==================== rush 搬运编制 ====================
+
+/**
+ * rush 期搬运工编制目标（运力公式）：
+ * 运力需求（CARRY 部件）= Σ(单矿净产速率 × 往返路程 × 2) / 50，
+ * 路程用换班实测的 `sourceTiming.pathTime`（spawn→source 路长近似 source→交付点），
+ * 除以当前容量下 rush carrier 体型的人均 CARRY 数得只数。
+ * 路程未实测的 source 不参与（此时回退固定定编表，避免开局瞎猜）。
+ */
+export const getRushCarrierTarget = (room: Room): number => {
+    const timing = (room.memory as any).sourceTiming;
+    if (!timing) return 0;
+    const body = buildRushCarrierBody(room.energyCapacityAvailable || 0);
+    const carryPerCarrier = body ? Number(body[0][1]) : 0;
+    if (carryPerCarrier <= 0) return 0;
+    const perSourceCap = getSourceEnergyPerTick();
+    const harvesters = typeof room.find === 'function'
+        ? room.find(FIND_MY_CREEPS, {
+            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'harvester' && c.memory.targetSourceId),
+        }) as Creep[]
+        : [];
+    let carryParts = 0;
+    for (const source of ((room as any).source as Source[] | undefined) || []) {
+        const pathTime = timing[source.id]?.pathTime;
+        if (typeof pathTime !== 'number' || pathTime <= 0) continue;
+        let work = 0;
+        for (const harvester of harvesters) {
+            if (harvester.memory.targetSourceId !== source.id) continue;
+            work += typeof harvester.getActiveBodyparts === 'function'
+                ? harvester.getActiveBodyparts(WORK)
+                : 0;
+        }
+        const rate = Math.min(perSourceCap, work * 2);
+        if (rate <= 0) continue;
+        carryParts += (rate * 2 * pathTime) / 50;
+    }
+    if (carryParts <= 0) return 0;
+    return Math.ceil(carryParts / carryPerCarrier);
 };
 
 // ==================== 升级孵化加急（富余能量快速消化） ====================
@@ -676,7 +732,7 @@ const UPGRADER_POP_CAP_BY_LEVEL: Record<number, number> = {
     2: 6,
     3: 8,
     4: 8,
-    5: 7,
+    5: 8,
     6: 8,
     7: 8,
     8: 6,

@@ -1,6 +1,6 @@
 import { isRoleId, RoleData, type RoleId } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { GenCreepName } from '@/utils';
+import { GenCreepName } from '@/modules/utils';
 import { decompressBodyConfig } from '@/modules/shared/compress';
 import { getRoomData } from '@/modules/shared/memory';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
@@ -283,21 +283,9 @@ export default class SpawnControl extends Room {
             return null;
         }
 
-        let cost = this.CalculateEnergy(bodypart);
-        if (cost > this.energyCapacityAvailable) {
-            // 容量装不下的体型等比缩容到可孵（各部件按比例取整、保底 1 MOVE），
-            // 而不是删单：常规服体型生成已保证 ≤ 容量，此分支不触发；
-            // 特殊规则服（孵化容量受限）让固定体型任务（战争旗等）缩容出爬
-            const scaled = scaleBodyToCapacity(bodypart, this.energyCapacityAvailable);
-            const scaledCost = scaled.length ? this.CalculateEnergy(scaled) : 0;
-            if (!scaled.length || scaledCost > this.energyCapacityAvailable) {
-                this.deleteMissionFromPool('spawn', task.id);
-                return null;
-            }
-            bodypart.length = 0;
-            bodypart.push(...scaled);
-            cost = scaledCost;
-        }
+        const cost = this.CalculateEnergy(bodypart);
+        // 不做容量钳制/缩容（参考实现 requestCreep 口径：任务原样排队，孵不孵引擎裁决）。
+        // 常规服体型生成 ≤ 容量，无影响；特殊规则服（无限能量 spawn）大体型按原样直孵
 
         if (!data.memory.cache) data.memory.cache = {};
 
