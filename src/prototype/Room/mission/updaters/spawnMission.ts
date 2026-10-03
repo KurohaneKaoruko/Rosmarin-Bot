@@ -4,6 +4,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
 import { estimateRoomEnergyIncome, getUpgradeWorkTarget, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL, UPGRADE_NEEDED_TTD } from '@/modules/shared/roomWorkforce';
 import { buildRushBody, buildRushUpgraderBody } from '@/modules/shared/rushBody';
+import { isEnergyCheckEnabled } from '@/modules/shared/gameCapabilities';
 
 /** rush 期走容量现算体型的角色集合（其余角色维持动态取表路径） */
 const RUSH_BODY_ROLES = new Set(['harvester', 'carrier', 'upgrader', 'worker']);
@@ -19,6 +20,7 @@ import {
     RoleSpawnCheck,
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
+    type SpawnCheckContext,
 } from './spawnRules';
 
 // 供测试与外部模块直接使用孵化判定入口（spawnMission 作为统一出口 re-export）
@@ -110,51 +112,53 @@ export default class SpawnMission extends Room {
                     continue;
                 }
             }
-            if (shouldSpawnRole(role, context, adjusted)) {
-                // rush 体型统一走容量现算（rushBody）：任意预算成本≤预算、分级下探防死锁；
-                // 非 rush 维持原路径（upgrader 按定编缺口配体型，其余空 body 动态取表）
-                const isRush = getRoomMode(this) === 'rush';
-                let body: ((BodyPartConstant | number)[])[] | string = '';
-                if (isRush && RUSH_BODY_ROLES.has(role)) {
-                    const budget = role === 'harvester' && this.level <= 3
-                        ? this.energyCapacityAvailable
-                        : this.energyAvailable;
-                    const rushBody = buildRushBody(role, budget);
-                    // 预算不足最小体型：本轮不发单（空 body 会落到动态取表，且让后续统计踩空）
-                    if (!rushBody) continue;
-                    body = rushBody as any;
-                }
-                if (!body && role === 'upgrader' && !isRush) {
-                    body = buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this));
-                }
-                // 缺口门：WORK 缺口×2 都填不满一个身位时不发单（防小缺口反复孵化空转）。
-                // 降级风险豁免（参考实现同口径）：upgradeNeeded 时再小的缺口也孵
-                if (role === 'upgrader' && Array.isArray(body)) {
-                    const bodyWork = body.reduce((sum, [part, n]) => sum + (part === WORK ? Number(n) : 0), 0);
-                    const deficit = Math.max(0, getUpgradeWorkTarget(this) - adjusted);
-                    const upgradeNeeded = (this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD;
-                    if (!upgradeNeeded && deficit * 2 < bodyWork) continue;
-                }
-                // 升级任务分层（参考实现同口径）：降级风险 → L5 预防降级（先于 worker L8）；
-                // 加急（水位/收入口径） → L10 插到外矿流水线之前；常规 → L7
-                const level = role === 'upgrader'
-                    ? ((this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD
-                        ? 5
-                        : isUpgraderSpawnUrgent(this)
-                            ? UPGRADE_URGENT_SPAWN_LEVEL
-                            : RoleData[role].level)
-                    : RoleData[role].level;
-                this.SpawnMissionAdd(
-                    RoleData[role].code,
-                    body,
-                    level,
-                    role,
-                    { home: this.name } as CreepMemory
-                );
-            }
+            this.checkAndQueueRoleMission(role as RoleId, context, adjusted);
         }
+    }
 
-        return true;
+    /** 单角色孵化判定与发单：rush 体型现算 / 缺口门 / 降级 L5 与加急分层 */
+    private checkAndQueueRoleMission(role: RoleId, context: SpawnCheckContext, adjusted: number): void {
+        if (!shouldSpawnRole(role, context, adjusted)) return;
+        // rush 体型统一走容量现算（rushBody）：任意预算成本≤预算、分级下探防死锁；
+        // 非 rush 维持原路径（upgrader 按定编缺口配体型，其余空 body 动态取表）
+        const isRush = getRoomMode(this) === 'rush';
+        let body: ((BodyPartConstant | number)[])[] | string = '';
+        if (isRush && RUSH_BODY_ROLES.has(role)) {
+            const budget = role === 'harvester' && this.level <= 3
+                ? this.energyCapacityAvailable
+                : this.energyAvailable;
+            const rushBody = buildRushBody(role, budget);
+            // 预算不足最小体型：本轮不发单（空 body 会落到动态取表，且让后续统计踩空）
+            if (!rushBody) return;
+            body = rushBody as any;
+        }
+        if (!body && role === 'upgrader' && !isRush) {
+            body = buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this));
+        }
+        // 缺口门：WORK 缺口×2 都填不满一个身位时不发单（防小缺口反复孵化空转）。
+        // 降级风险豁免（参考实现同口径）：upgradeNeeded 时再小的缺口也孵
+        if (role === 'upgrader' && Array.isArray(body)) {
+            const bodyWork = body.reduce((sum, [part, n]) => sum + (part === WORK ? Number(n) : 0), 0);
+            const deficit = Math.max(0, getUpgradeWorkTarget(this) - adjusted);
+            const upgradeNeeded = (this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD;
+            if (!upgradeNeeded && deficit * 2 < bodyWork) return;
+        }
+        // 升级任务分层（参考实现同口径）：降级风险 → L5 预防降级（先于 worker L8）；
+        // 加急（水位/收入口径） → L10 插到外矿流水线之前；常规 → L7
+        const level = role === 'upgrader'
+            ? ((this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD
+                ? 5
+                : isUpgraderSpawnUrgent(this)
+                    ? UPGRADE_URGENT_SPAWN_LEVEL
+                    : RoleData[role].level)
+            : RoleData[role].level;
+        this.SpawnMissionAdd(
+            RoleData[role].code,
+            body,
+            level,
+            role,
+            { home: this.name } as CreepMemory
+        );
     }
 
     /**
@@ -188,7 +192,8 @@ export default class SpawnMission extends Room {
             energy = this.CalculateEnergy(bodypart);
         }
 
-        if (energy > this.energyCapacityAvailable) return -1;
+        // energyCheck 关闭：超容量不做拒绝，满编体型直入池（服务器无限能量，可孵性引擎裁决）
+        if (energy > this.energyCapacityAvailable && isEnergyCheckEnabled()) return -1;
 
         if (upbody === undefined) {
             this.addMissionToPool('spawn', 'spawn', level, { name, body, memory, energy });
@@ -260,14 +265,19 @@ const updateSpawnMissionSelection = (
     }
 };
 
+/** pickSpawnMission 的可调参数（阈值来自 THRESHOLDS.SPAWN） */
+type PickSpawnMissionOptions = {
+    allowWaitForPriorityEnergy: boolean;
+    queueJumpAllowBelowLevel: number;
+};
+
 const pickSpawnMission = (
     selection: SpawnMissionSelection,
-    allowWaitForPriorityEnergy: boolean,
-    queueJumpAllowBelowLevel: number
+    options: PickSpawnMissionOptions
 ) => {
     if (selection.highestPriority === Infinity) return null;
 
-    if (!allowWaitForPriorityEnergy) {
+    if (!options.allowWaitForPriorityEnergy) {
         return selection.bestAffordableOverall || selection.cheapestBlockedAtHighestPriority;
     }
 
@@ -277,7 +287,7 @@ const pickSpawnMission = (
 
     if (
         selection.bestAffordableOverall &&
-        selection.bestAffordableOverallLevel < queueJumpAllowBelowLevel
+        selection.bestAffordableOverallLevel < options.queueJumpAllowBelowLevel
     ) {
         return selection.bestAffordableOverall;
     }
@@ -323,14 +333,20 @@ export class SpawnTaskGetter extends Room {
 
     getSpawnMission() {
         pruneDelayedUpgraderSpawnMissions(this);
-        const availableEnergy = this.energyAvailable || 0;
-        const allowWaitForPriorityEnergy = THRESHOLDS.SPAWN.ALLOW_WAIT_FOR_PRIORITY_ENERGY;
-        const queueJumpAllowBelowLevel = THRESHOLDS.SPAWN.WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL;
+        // energyCheck 关闭：选择器不做能量可行性筛选（大体型挂单不再被可用能量卡死），引擎裁决
+        const availableEnergy = isEnergyCheckEnabled() ? (this.energyAvailable || 0) : 1e9;
+        const pickOptions = {
+            allowWaitForPriorityEnergy: THRESHOLDS.SPAWN.ALLOW_WAIT_FOR_PRIORITY_ENERGY,
+            queueJumpAllowBelowLevel: THRESHOLDS.SPAWN.WAIT_ENERGY_QUEUE_JUMP_ALLOW_BELOW_LEVEL,
+        };
         const tasks = this.getAllMissionFromPool('spawn');
         const selection = createSpawnMissionSelection();
 
         for (const task of tasks) {
             if (!task || task.lock) continue;
+            // 幻单重试冷却：引擎吞单的挂单退池后间隔重试，不做无效空转
+            const phantomAt = (task as any).phantomRetryAt;
+            if (phantomAt && Game.time < phantomAt) continue;
 
             const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
             if (requiredEnergy == null) continue;
@@ -341,7 +357,7 @@ export class SpawnTaskGetter extends Room {
 
         // 严格尊重优先级：只有最高优先级层没有能孵化的任务时，才等待该层；
         // 少数例外（例如停摆恢复 universal）仍由 SpawnControl 层处理。
-        const picked = pickSpawnMission(selection, allowWaitForPriorityEnergy, queueJumpAllowBelowLevel);
+        const picked = pickSpawnMission(selection, pickOptions);
         if (!picked) return null;
 
         // 收入链连跑保险：外矿 8 房的 OH/OC 挂单每轮重铺（L4/L5 常驻海），

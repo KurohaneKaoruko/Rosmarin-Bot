@@ -4,6 +4,7 @@ import { GenCreepName } from '@/modules/utils';
 import { decompressBodyConfig } from '@/modules/shared/compress';
 import { getRoomData } from '@/modules/shared/memory';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
+import { isEnergyCheckEnabled } from '@/modules/shared/gameCapabilities';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
@@ -29,54 +30,6 @@ const getFullRoleBodyCost = (room: Room, role: RoleId, upbody?: boolean) => {
     const fullConfig = room.GetRoleBodys(role, upbody, undefined);
     const fullBody = room.GenerateBodys(fullConfig, role);
     return fullBody?.length ? room.CalculateEnergy(fullBody) : null;
-};
-
-// 容量装不下的体型等比缩容：各部件按 容量/总价 取整（保底 1 MOVE），
-// 取整后仍超时从数量最多的非 MOVE 部件逐个裁。常规服体型生成 ≤ 容量，不触发。
-const scaleBodyToCapacity = (bodypart: BodyPartConstant[], capacity: number): BodyPartConstant[] => {
-    const partCost = (p: BodyPartConstant) => (BODYPART_COST as any)[p] || 0;
-    let total = 0;
-    const counts = new Map<BodyPartConstant, number>();
-    for (const p of bodypart) {
-        total += partCost(p);
-        counts.set(p, (counts.get(p) || 0) + 1);
-    }
-    if (total <= capacity || bodypart.length === 0) return bodypart;
-
-    const factor = capacity / total;
-    for (const [p, n] of counts) {
-        counts.set(p, Math.max(p === MOVE ? 1 : 0, Math.floor(n * factor)));
-    }
-    const rebuild = (): BodyPartConstant[] => {
-        const out: BodyPartConstant[] = [];
-        for (const p of bodypart) {
-            const left = counts.get(p) || 0;
-            if (left > 0) {
-                out.push(p);
-                counts.set(p, left - 1);
-            }
-        }
-        return out;
-    };
-    let out = rebuild();
-    let cost = out.reduce((sum, p) => sum + partCost(p), 0);
-    while (cost > capacity && out.length > 1) {
-        // 裁掉数量最多且裁后不归零的非 MOVE 部件
-        let dropPart: BodyPartConstant | null = null;
-        let dropCount = 0;
-        for (const [p, n] of counts) {
-            if (p === MOVE && n <= 1) continue;
-            if (n > dropCount) {
-                dropCount = n;
-                dropPart = p;
-            }
-        }
-        if (!dropPart) break;
-        counts.set(dropPart, dropCount - 1);
-        out = rebuild();
-        cost = out.reduce((sum, p) => sum + partCost(p), 0);
-    }
-    return out;
 };
 
 const updateDowngradedFlag = (
@@ -258,6 +211,39 @@ export default class SpawnControl extends Room {
         }
 
         const state = getEnergyState(this);
+        const resolved = this.resolveBodyConfig(role, data, state);
+        const bodypart = this.GenerateBodys(resolved.body, role);
+        if (!bodypart?.length) {
+            this.deleteMissionFromPool('spawn', task.id);
+            return null;
+        }
+
+        const cost = this.CalculateEnergy(bodypart);
+        // 不做容量钳制/缩容（参考实现 requestCreep 口径：任务原样排队，孵不孵引擎裁决）。
+        // 常规服体型生成 ≤ 容量，无影响；特殊规则服（无限能量 spawn）大体型按原样直孵
+
+        if (!data.memory.cache) data.memory.cache = {};
+
+        updateDowngradedFlag(this, role, data, cost, resolved.usedBudget, state);
+
+        const name = GenCreepName(data.name || RoleData[role].code);
+
+        return {
+            bodypart,
+            name,
+            memory: data.memory,
+            taskId: task.id,
+            cost,
+            poolTask: task,
+        };
+    }
+
+    /** 任务体型的解析与决策：字符串解压 / rush 升级分级表 / 预算缩水三分支归一 */
+    private resolveBodyConfig(
+        role: RoleId,
+        data: SpawnTask,
+        state: string,
+    ): { body: ((BodyPartConstant | number)[][]); usedBudget: boolean } {
         let usedBudget = false;
         let body: ((BodyPartConstant | number)[])[] | string = data.body;
         // rush 升级：按当前可用能量走分级表（与孵化端同口径，防零余量死锁）
@@ -276,30 +262,7 @@ export default class SpawnControl extends Room {
             usedBudget = budget !== undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
         }
-
-        const bodypart = this.GenerateBodys(body, role);
-        if (!bodypart?.length) {
-            this.deleteMissionFromPool('spawn', task.id);
-            return null;
-        }
-
-        const cost = this.CalculateEnergy(bodypart);
-        // 不做容量钳制/缩容（参考实现 requestCreep 口径：任务原样排队，孵不孵引擎裁决）。
-        // 常规服体型生成 ≤ 容量，无影响；特殊规则服（无限能量 spawn）大体型按原样直孵
-
-        if (!data.memory.cache) data.memory.cache = {};
-
-        updateDowngradedFlag(this, role, data, cost, usedBudget, state);
-
-        const name = GenCreepName(data.name || RoleData[role].code);
-
-        return {
-            bodypart,
-            name,
-            memory: data.memory,
-            taskId: task.id,
-            cost,
-        };
+        return { body, usedBudget };
     }
 
     SpawnCreep() {
@@ -327,42 +290,44 @@ export default class SpawnControl extends Room {
         const role = data.memory.role;
         if (!isRoleId(role)) return;
         if (result === OK) {
+            // energyCheck 关闭时校验孵化真实启动：引擎可能吞单（OK 但 spawning 未启动）。
+            // 幻单不消耗挂单，退池 30t 后重试——只消耗真正孵得出来的
+            if (!isEnergyCheckEnabled() && !spawn.spawning && !Game.creeps[data.name]) {
+                const poolTask = (data as any).poolTask as any;
+                if (poolTask) poolTask.phantomRetryAt = Game.time + 30;
+                return;
+            }
             finishSpawnTask(this, role, data.taskId);
             return;
         }
+        // energyCheck 关闭：可孵性由引擎裁决，本轮失败直接重试，不进停摆处理
+        if (!isEnergyCheckEnabled()) return;
 
         if (!isRoomTickAligned(this.name, 10)) return;
-        // 处理停摆
-        if (data.cost > this.energyAvailable) {
-            // 远程投资类角色（out-* / reserver）孵不起就静默排队等能量：
-            // 不缩水体（会产出零 CARRY 废体型）、也不代孵 universal（挤占编制）。
-            // 它们的队列优先级天然低于本地角色，本地需求总是先被满足。
-            if (role.startsWith('out-') || role === 'reserver') return;
-
-            const allowEmergencyDownsize = EMERGENCY_DOWNSIZE_ROLES.has(role);
-            if (!allowEmergencyDownsize) {
-                this.trySpawnEmergencyUniversal(spawn, role, data.cost);
-                return;
-            }
-
-            const state = getEnergyState(this);
-            if (state === 'LOW' || state === 'CRITICAL') {
-                const config = this.GetRoleBodys(role, false, this.energyAvailable);
-                const bodypart = this.GenerateBodys(config, role);
-                const cost = this.CalculateEnergy(bodypart);
-                if (bodypart.length > 0 && cost > 0 && cost <= this.energyAvailable) {
-                    if (DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) {
-                        data.memory.downgraded = true;
-                    }
-                    const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
-                    if (emergencyResult === OK) {
-                        finishSpawnTask(this, role, data.taskId);
-                        global.log(`房间 ${this.name} 不足以孵化目标体型 ${role}，已按当前能量孵化缩小体型。`);
-                        return;
-                    }
+        // 能量足以支付本 tick 孵化：不会进入停摆处理
+        if (data.cost <= this.energyAvailable) return;
+        // 远程投资类角色（out-* / reserver）孵不起就静默排队等能量：
+        // 不缩水体（会产出零 CARRY 废体型）、也不代孵 universal（挤占编制）。
+        // 它们的队列优先级天然低于本地角色，本地需求总是先被满足。
+        if (role.startsWith('out-') || role === 'reserver') return;
+        // 低能量期预算小体型重试（仅 EMERGENCY_DOWNSIZE 角色）
+        const state = getEnergyState(this);
+        if ((state === 'LOW' || state === 'CRITICAL') && EMERGENCY_DOWNSIZE_ROLES.has(role)) {
+            const config = this.GetRoleBodys(role, false, this.energyAvailable);
+            const bodypart = this.GenerateBodys(config, role);
+            const cost = this.CalculateEnergy(bodypart);
+            if (bodypart.length > 0 && cost > 0 && cost <= this.energyAvailable) {
+                if (DOWNGRADED_LOGISTICS_ROLE_SET.has(role)) {
+                    data.memory.downgraded = true;
+                }
+                const emergencyResult = spawn.spawnCreep(bodypart, GenCreepName(RoleData[role].code), { memory: data.memory });
+                if (emergencyResult === OK) {
+                    finishSpawnTask(this, role, data.taskId);
+                    global.log(`房间 ${this.name} 不足以孵化目标体型 ${role}，已按当前能量孵化缩小体型。`);
+                    return;
                 }
             }
-            this.trySpawnEmergencyUniversal(spawn, role, data.cost);
         }
+        this.trySpawnEmergencyUniversal(spawn, role, data.cost);
     }
 }

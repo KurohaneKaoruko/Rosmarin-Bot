@@ -8,6 +8,7 @@ import {
     getRoomEnergyState,
     getRoomMode,
     isHighLikeMode,
+    isUpgraderSpawnUrgent,
     getStoredEnergy,
     hasControllerEnergyBuffer,
     shouldDelayUpgraderForPrimaryBuild,
@@ -290,7 +291,10 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         if (Memory['warmode']) return false;
         // 能量储备闸：spawn/extension 里的能量必须留足房间运作底仓（≈两次基础孵化），
         // 只用盈余孵升级工——rush 冲级也不许把开局能量无脑烧光。
-        if (room.energyAvailable < room.energyCapacityAvailable * 0.6 && room.energyAvailable < 800) return false;
+        // 例外：净收入已超过在场升级火力（urgent 口径）时放行——否则低能量位
+        // 「没升级工→能量没人花→能量一直低→永远不发升级单」死锁
+        if (room.energyAvailable < room.energyCapacityAvailable * 0.6 && room.energyAvailable < 800
+            && !isUpgraderSpawnUrgent(room)) return false;
         // 开局序列（race 兼容闸门）：采矿工满编产出稳住之前，升级岗不上线
         if (isRaceCompat() && !isRoomProductionSecured(room)) return false;
         const target = getUpgraderTarget(room);
@@ -419,6 +423,15 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
     const remote = (pool || []).filter(t => REMOTE_POOL_ROLES.has((t.data as any)?.memory?.role || ''));
     if (remote.length === 0) return 0;
     let removed = 0;
+    // 阶段门：RCL4 前外矿单一律禁开——核心经济未立住时它们只会占住孵化槽
+    //（实测低能量死锁：买不起的外矿单卡在队列头，spawn 空转，升级岗被能量闸锁死）
+    if (room.level < 4) {
+        for (const task of remote) {
+            room.deleteMissionFromPool?.('spawn', task.id);
+            removed++;
+        }
+        return removed;
+    }
     if (!isRoomProductionSecured(room)) {
         for (const task of remote) {
             room.deleteMissionFromPool?.('spawn', task.id);
