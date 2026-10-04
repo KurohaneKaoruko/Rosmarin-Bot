@@ -8,6 +8,7 @@ import { getRushRoomHeap } from './roomState';
 import { getCreepsByRole } from './spawnManager';
 import { requestCreep, getHaulerBody, getMinerBody } from './spawnUtils';
 import { getSourceNumOpen } from './basePlan';
+import { runMiner, runHaulerFetchHalf } from './creepExec';
 import type { RushSourceInfo } from './types';
 
 /** 容器损耗折算为能量速率口径（每 tick 修理均摊） */
@@ -208,7 +209,8 @@ export const manageSource = (room: Room): void => {
     let maxIncome = 0;
     let carryPowerLeft = 0;
 
-    for (const hauler of getCreepsByRole(room, 'hauler')) {
+    const haulers = getCreepsByRole(room, 'hauler');
+    for (const hauler of haulers) {
         carryPowerLeft += accumulateHaulerAccounting(hauler);
     }
 
@@ -219,12 +221,13 @@ export const manageSource = (room: Room): void => {
         const anchor = getSourceAnchor(room, source);
         if (!anchor) continue;
 
-        const constructed = (room.find(FIND_STRUCTURES, {
+        const containerAtAnchor = (room.find(FIND_STRUCTURES, {
             filter: (s: Structure) =>
                 s.structureType === STRUCTURE_CONTAINER &&
                 s.pos.x === anchor.x &&
                 s.pos.y === anchor.y,
-        }) as StructureContainer[]).length > 0;
+        }) as StructureContainer[])[0];
+        const constructed = !!containerAtAnchor;
 
         // 运距稳定，按 source 缓存
         if (heap.sourceDistance[source.id] === undefined) {
@@ -250,8 +253,9 @@ export const manageSource = (room: Room): void => {
 
         for (const creep of getCreepsByRole(room, 'miner')) {
             if ((creep.memory as any).sourceId === source.id) {
-                // 执行器接入前 active 恒 false（实际采集产出记账随执行器补）
-                accumulateMinerAccounting(info, creep, false);
+                // 执行器：定点采集（active=本 tick 实际产出）
+                const active = runMiner(creep, source, anchor, containerAtAnchor);
+                accumulateMinerAccounting(info, creep, active);
             }
         }
 
@@ -402,4 +406,52 @@ export const requestSourceWorkers = (
     if (haulerRatio < minerRatio) return assignOrRequestHauler();
 
     return false;
+};
+
+/**
+ * 房间净收入（参考口径公开 API）：
+ * 逐 source 按 net = 速率 − miner 折旧 − hauler 折旧 − 容器损耗 累加。
+ * 供升级预算等下游替代毛收入估算使用。
+ */
+export const getRoomNetIncome = (room: Room): number => {
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn) return 0;
+
+    const heap = getRushRoomHeap(room.name);
+    heap.sourceDistance = heap.sourceDistance || {};
+
+    let net = 0;
+    for (const source of room.find(FIND_SOURCES)) {
+        const anchor = getSourceAnchor(room, source);
+        if (!anchor) continue;
+
+        const container = (room.find(FIND_STRUCTURES, {
+            filter: (s: Structure) =>
+                s.structureType === STRUCTURE_CONTAINER &&
+                s.pos.x === anchor.x &&
+                s.pos.y === anchor.y,
+        }) as StructureContainer[])[0];
+
+        if (heap.sourceDistance[source.id] === undefined) {
+            heap.sourceDistance[source.id] = PathFinder.search(
+                spawn.pos,
+                { pos: new RoomPosition(anchor.x, anchor.y, room.name), range: 1 },
+                { heuristicWeight: 1 },
+            ).path.length;
+        }
+
+        const info: RushSourceInfo = {
+            sourceId: source.id,
+            roomName: room.name,
+            my: true,
+            distance: heap.sourceDistance[source.id],
+            energyPerTick: SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME,
+            numOpen: getSourceNumOpen(room, source),
+            constructed: !!container,
+            linked: false,
+        };
+
+        net += computeSourceIncome(info, { constructed: !!container, linked: false });
+    }
+    return net;
 };

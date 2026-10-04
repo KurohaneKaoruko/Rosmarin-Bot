@@ -20,6 +20,7 @@ import { decompress } from '@/modules/shared/compress';
 import { buildFillRequests } from '@/prototype/Creep/function/energyLogistics';
 import { buildRushCarrierBody } from '@/modules/shared/rushBody';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
+import { getRoomNetIncome } from '@/modules/rush/manageSource';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 // —— 能量水平档位 ——
@@ -563,7 +564,10 @@ export const getUpgradeWorkTarget = (room: Room): number => {
         const alpha = 1 - Math.pow(2, -1 / 50);
         memAny.spawnBalanceEma = clamp((memAny.spawnBalanceEma ?? 0) * (1 - alpha) + target * alpha, -1, 1);
         const multiplier = Math.min(1.2, Math.max(1, memAny.spawnBalanceEma / 2 + 0.8));
-        const rushWork = Math.ceil((scaledIncome + pileAll / 2000) * multiplier);
+        // rush 冲级：用参考口径的净收入（扣除 miner/hauler 折旧与容器损耗）
+        // 替代毛收入估算，避免过度孵化升级工导致「火力虚高但实际产出低」
+        const netIncome = getRoomNetIncome(room);
+        const rushWork = Math.ceil((netIncome + pileAll / 2000) * multiplier);
 
         const rushCapacity = Math.max(capacity, getControllerUpgradeSlotCap(room));
         return Math.max(Math.max(lowerLimit, 5), Math.min(rushCapacity, Math.max(rushWork, surplusWork)));
