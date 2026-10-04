@@ -38,7 +38,9 @@ export {
 const TRANSPORT_MIN = THRESHOLDS.TRANSPORT.MIN_AMOUNT;
 const TRANSPORT_HIGH = THRESHOLDS.TRANSPORT.HIGH_AMOUNT;
 // 单矿最大采集 work 上限
-const HARVESTER_MAX_WORK_PER_SOURCE = 8;
+const HARVESTER_MAX_WORK_PER_SOURCE = Math.ceil(
+    SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME / HARVEST_POWER
+);
 // 只有 transporter 允许在恢复期按“缩水物流”扣减 current；
 // manager 是中心单点位，若扣减会把“已有缩水 manager”误判成缺口，导致反复补人堵路。
 const RECOVERY_DOWNGRADED_CORRECTION_ROLE_SET = new Set(['transporter']);
@@ -110,7 +112,7 @@ const getHarvesterTargetBySource = (room: Room): number => {
     const allowMultiHarvesterPerSource = builtLevel <= 3;
     const harvesterBody = room.GenerateBodys(room.GetRoleBodys('harvester'), 'harvester');
     const workPerHarvester = Math.max(1, getWorkPartCount(harvesterBody));
-    const maxByWorkCap = Math.max(1, Math.floor(HARVESTER_MAX_WORK_PER_SOURCE / workPerHarvester));
+    const maxByWorkCap = Math.max(1, Math.ceil(HARVESTER_MAX_WORK_PER_SOURCE / workPerHarvester));
     for (const source of room.source || []) {
         const slots = getWalkableSourceSlots(room, source);
         if (slots <= 0) continue;

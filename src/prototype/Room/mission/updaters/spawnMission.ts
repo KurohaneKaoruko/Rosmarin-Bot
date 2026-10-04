@@ -4,7 +4,7 @@ import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
 import { estimateRoomEnergyIncome, getUpgradeWorkTarget, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL, UPGRADE_NEEDED_TTD } from '@/modules/shared/roomWorkforce';
 import { buildRushBody, buildRushUpgraderBody } from '@/modules/shared/rushBody';
-import { isEnergyCheckEnabled } from '@/modules/shared/gameCapabilities';
+import { isEnergyCheckEnabled, isRaceCompat } from '@/modules/shared/gameCapabilities';
 
 /** rush 期走容量现算体型的角色集合（其余角色维持动态取表路径） */
 const RUSH_BODY_ROLES = new Set(['harvester', 'carrier', 'upgrader', 'worker']);
@@ -20,6 +20,7 @@ import {
     RoleSpawnCheck,
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
+    isRoomProductionSecured,
     type SpawnCheckContext,
 } from './spawnRules';
 
@@ -342,11 +343,21 @@ export class SpawnTaskGetter extends Room {
         const tasks = this.getAllMissionFromPool('spawn');
         const selection = createSpawnMissionSelection();
 
+        // 起步序列硬闸：采集链未满编时孵化池只放行采集工（应急 UNIV 除外）。
+        // 否则低能量位的缩体型单（worker/搬运）会抢走采集工的本钱，
+        // 开局滚成「1 采集 : N 搬运」的倒挂饿死螺旋；满编后搬运/升级
+        // 各自的编制闸自然接管。
+        const bootstrapHarvesterOnly = isRaceCompat() && !isRoomProductionSecured(this);
+
         for (const task of tasks) {
             if (!task || task.lock) continue;
             // 幻单重试冷却：引擎吞单的挂单退池后间隔重试，不做无效空转
             const phantomAt = (task as any).phantomRetryAt;
             if (phantomAt && Game.time < phantomAt) continue;
+            if (bootstrapHarvesterOnly) {
+                const taskRole = getSpawnTaskRole(task.data as SpawnTask);
+                if (taskRole !== 'harvester' && taskRole !== 'universal') continue;
+            }
 
             const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
             if (requiredEnergy == null) continue;
