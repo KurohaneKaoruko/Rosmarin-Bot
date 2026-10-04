@@ -6,6 +6,7 @@
 import { CPU_TERMINATE_ROOM_MANAGER } from './constants';
 import { manageBuildSpawn, manageBuildState } from './manageBuild';
 import { manageLogistics } from './manageLogistics';
+import { manageSource } from './manageSource';
 import { manageUpgradeSpawn } from './manageUpgrade';
 import { getRushTickState } from './roomState';
 import { getCreepsByRole, pretickSpawn, runSpawnManager } from './spawnManager';
@@ -32,6 +33,9 @@ export const runRushRoom = (room: Room): void => {
     }) as StructureRampart[];
     manageBuildState(room, builders, constructionSites, ramparts);
     manageBuildSpawn(room, builders);
+
+    // source 链：miner/hauler 编成与收入记账（升级预算与 porter 编制的输入）
+    manageSource(room);
 
     // 物流：配送请求收集与搬运工匹配（relay 接力见 3.2）
     const haulers = getCreepsByRole(room, 'hauler');

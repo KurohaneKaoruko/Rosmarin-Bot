@@ -7,6 +7,7 @@ import { getBodyCost } from './creepUtils';
 import { getRushRoomHeap } from './roomState';
 import { getCreepsByRole } from './spawnManager';
 import { requestCreep, getHaulerBody, getMinerBody } from './spawnUtils';
+import { getSourceNumOpen } from './basePlan';
 import type { RushSourceInfo } from './types';
 
 /** 容器损耗折算为能量速率口径（每 tick 修理均摊） */
@@ -190,6 +191,127 @@ export const accumulateHaulerAccounting = (creep: Creep): number => {
         return creep.getActiveBodyparts(CARRY) * CARRY_CAPACITY;
     }
     return 0;
+};
+
+/**
+ * 本矿 source 链主流程：锚点推导 → 在岗记账（miner/hauler）→ 编成核算 → 收入记账 → 补位请求。
+ * 收入入堆（heap.income/maxIncome），供升级预算与 porter 编制等下游读取。
+ */
+export const manageSource = (room: Room): void => {
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn) return;
+
+    const heap = getRushRoomHeap(room.name);
+    heap.sourceDistance = heap.sourceDistance || {};
+
+    let income = 0;
+    let maxIncome = 0;
+    let carryPowerLeft = 0;
+
+    for (const hauler of getCreepsByRole(room, 'hauler')) {
+        carryPowerLeft += accumulateHaulerAccounting(hauler);
+    }
+
+    let requested = false;
+
+    for (const source of room.find(FIND_SOURCES)) {
+        // 容器锚点：已建/工地容器取最近；都没有时取可站立相邻格（落地交付点，autoBuild 容器落地自动对齐）
+        const anchor = getSourceAnchor(room, source);
+        if (!anchor) continue;
+
+        const constructed = (room.find(FIND_STRUCTURES, {
+            filter: (s: Structure) =>
+                s.structureType === STRUCTURE_CONTAINER &&
+                s.pos.x === anchor.x &&
+                s.pos.y === anchor.y,
+        }) as StructureContainer[]).length > 0;
+
+        // 运距稳定，按 source 缓存
+        if (heap.sourceDistance[source.id] === undefined) {
+            heap.sourceDistance[source.id] = PathFinder.search(
+                spawn.pos,
+                { pos: new RoomPosition(anchor.x, anchor.y, room.name), range: 1 },
+                { heuristicWeight: 1 },
+            ).path.length;
+        }
+
+        const info: RushSourceInfo = {
+            sourceId: source.id,
+            roomName: room.name,
+            my: true,
+            distance: heap.sourceDistance[source.id],
+            energyPerTick: SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME,
+            numOpen: getSourceNumOpen(room, source),
+            constructed,
+            linked: false,
+            harvestPower: 0,
+            numMiner: 0,
+        };
+
+        for (const creep of getCreepsByRole(room, 'miner')) {
+            if ((creep.memory as any).sourceId === source.id) {
+                // 执行器接入前 active 恒 false（实际采集产出记账随执行器补）
+                accumulateMinerAccounting(info, creep, false);
+            }
+        }
+
+        const comp = computeSourceComposition(info, carryPowerLeft);
+        carryPowerLeft = comp.carryPowerLeft;
+        income += comp.incomeDelta;
+        maxIncome += comp.maxIncomeDelta;
+
+        if (requested) continue;
+        requested = requestSourceWorkers(room, info, source.id, comp.minerRatio, comp.haulerRatio);
+    }
+
+    heap.income = income;
+    heap.maxIncome = maxIncome;
+};
+
+/** source 旁容器锚点：已建/工地取最近（≤2）；无则取首个非墙相邻格 */
+export const getSourceAnchor = (room: Room, source: Source): { x: number; y: number } | undefined => {
+    let best: { x: number; y: number } | undefined;
+    let bestRange = Infinity;
+
+    const containers = room.find(FIND_STRUCTURES, {
+        filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER,
+    }) as StructureContainer[];
+    for (const container of containers) {
+        const range = Math.max(Math.abs(container.pos.x - source.pos.x), Math.abs(container.pos.y - source.pos.y));
+        if (range <= 2 && range < bestRange) {
+            best = { x: container.pos.x, y: container.pos.y };
+            bestRange = range;
+        }
+    }
+
+    if (best) return best;
+
+    const sites = room.find(FIND_CONSTRUCTION_SITES, {
+        filter: (s: ConstructionSite) => s.structureType === STRUCTURE_CONTAINER,
+    }) as ConstructionSite[];
+    for (const site of sites) {
+        const range = Math.max(Math.abs(site.pos.x - source.pos.x), Math.abs(site.pos.y - source.pos.y));
+        if (range <= 2 && range < bestRange) {
+            best = { x: site.pos.x, y: site.pos.y };
+            bestRange = range;
+        }
+    }
+
+    if (best) return best;
+
+    const terrain = Game.map.getRoomTerrain(room.name);
+    for (const delta of [
+        { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
+        { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
+    ]) {
+        const x = source.pos.x + delta.x;
+        const y = source.pos.y + delta.y;
+        if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        return { x, y };
+    }
+
+    return undefined;
 };
 
 /**
