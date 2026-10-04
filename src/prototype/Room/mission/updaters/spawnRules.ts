@@ -475,6 +475,10 @@ export const effectiveSpawnLevel = (room: Room, task: Task): number => {
     // 每房仅 1 只不会灌池，压到 L9 会在孵化繁忙期永久饿死（与 reserve 提级 L6 的设计冲突）
     if (role === 'reserver') return task.level;
     if (!REMOTE_POOL_ROLES.has(role)) return task.level;
+    // 收入先行（参考实现 REMOTE_SOURCE 恒先于升级消费）：经济外矿（采集/搬运）恢复
+    // 自然档 L4/L5——低于本矿采集 L3、高于升级 L7。旧「压 L9」针对的固定大体型
+    // 买不起堵队列已被体型现算根治；防洪水仍由预算准入与每房挂单上限承担
+    if (role === 'out-harvest' || role === 'out-carry') return task.level;
     return Math.max(task.level, RUSH_REMOTE_LEVEL_FLOOR);
 };
 

@@ -8,28 +8,47 @@ import { getAssignedEnergyTarget } from '@/prototype/Creep/function/energyLogist
 // 源旁掉落捡取的最低数量：避免为个位数能量反复蹲点
 const SOURCE_DROP_PICKUP_MIN = 30;
 
-/** 绑定源线：确定性分散（同名 → 同线，开局同 tick 首绑不会全挤最近源）；绑定后稳定不换线（写在 memory） */
-const getSourceLine = (creep: Creep): Source | null => {
+/** 源线待运量：容器存量 + 源旁 2 格掉落（需求驱动的选线依据） */
+const sourceLinePending = (room: Room, source: Source): number => {
+    const container = (room.container || []).find((c) => c.pos.inRangeTo(source.pos, 2));
+    const drops = source.pos.findInRange(FIND_DROPPED_RESOURCES, 2)
+        .filter((r) => r.resourceType === RESOURCE_ENERGY);
+    return (container?.store[RESOURCE_ENERGY] || 0) + drops.reduce((sum, r) => sum + r.amount, 0);
+};
+
+/** 选线（需求驱动，参考实现 matchHaulers 口径）：按待运量取最大者，同量就近。
+ *  空载起手重选并锁定至取满；锁定线中途干涸则按待运量转场——
+ *  旧「名字 hash 永久绑线」在批量孵化的名字序列上 hash 相关，整批同线，
+ *  另一源容器/掉落无人搬、能量烂地。 */
+const pickSourceLineByDemand = (creep: Creep): Source | null => {
     const mem = creep.memory as any;
-    if (mem.sourceLineId) {
-        const source = Game.getObjectById(mem.sourceLineId as Id<Source>);
-        if (source) return source;
+    if (mem._loadLineId) {
+        const locked = Game.getObjectById(mem._loadLineId as Id<Source>) as Source | null;
+        if (locked && sourceLinePending(creep.room, locked) > 0) return locked;
+        mem._loadLineId = null;
     }
     const sources = (creep.room.source || []) as Source[];
     if (sources.length === 0) return null;
-    const hash = Math.abs([...creep.name].reduce((acc, ch) => ((acc << 5) - acc + ch.charCodeAt(0)) | 0, 0));
-    const pick = sources[hash % sources.length];
-    mem.sourceLineId = pick.id;
-    return pick;
+    if (sources.length === 1) return sources[0];
+    let best: Source | null = null;
+    let bestPending = -1;
+    for (const source of sources) {
+        const pending = sourceLinePending(creep.room, source);
+        const closer = pending === bestPending && best !== null
+            && creep.pos.getRangeTo(source.pos) < creep.pos.getRangeTo(best.pos);
+        if (pending > bestPending || closer) {
+            best = source;
+            bestPending = pending;
+        }
+    }
+    if (best) mem._loadLineId = best.id;
+    return best;
 };
 
-/** 源线还有无可取能量（容器 + 源旁掉落） */
+/** 源线还有无可取能量：需求驱动选线下 = 任意源线有待运即可继续取（选线会自动流向堆积侧） */
 const carrierSourceLineHasEnergy = (creep: Creep): boolean => {
-    const source = getSourceLine(creep);
-    if (!source) return false;
-    const container = (creep.room.container || []).find((c) => c.pos.inRangeTo(source.pos, 2));
-    if (container && (container.store[RESOURCE_ENERGY] || 0) > 0) return true;
-    return source.pos.findInRange(FIND_DROPPED_RESOURCES, 2).some((r) => r.resourceType === RESOURCE_ENERGY && r.amount > 0);
+    const sources = (creep.room.source || []) as Source[];
+    return sources.some((source) => sourceLinePending(creep.room, source) > 0);
 };
 
 const getUsableEnergyIn = (room: Room, source: Source): { container?: StructureContainer; drops: Resource[] } => {
@@ -65,7 +84,11 @@ const findTimeLimitedDeposit = (creep: Creep): Tombstone | Ruin | null => {
 };
 
 /** 源线取货（导出供测试）：返回 true = 已满转送货 */
-export const runCarrierFetch = (creep: Creep): boolean => {    const source = getSourceLine(creep);
+export const runCarrierFetch = (creep: Creep): boolean => {
+    const mem = creep.memory as any;
+    // 空载起手清锁：按待运量重新选线（取货中途锁定不换线，满载纪律防游走）
+    if ((creep.store[RESOURCE_ENERGY] || 0) === 0) mem._loadLineId = null;
+    const source = pickSourceLineByDemand(creep);
     if (!source) return false;
     const { container, drops } = getUsableEnergyIn(creep.room, source);
     const freeCap = creep.store.getFreeCapacity(RESOURCE_ENERGY);
@@ -257,7 +280,7 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     // 相向对穿判定：对方意图格 = 我的当前位置（正面对穿，参考实现 939-942 口径）
     const otherToward = otherSupplying
         ? ((otherMem._toward as { x: number; y: number } | undefined) ?? null)
-        : getSourceLine(other)?.pos ?? null;
+        : pickSourceLineByDemand(other)?.pos ?? null;
     if (!otherToward) return false;
     const otherCoord = intendedCoordOf(other, otherToward);
     if (otherCoord.x !== creep.pos.x || otherCoord.y !== creep.pos.y) return false;
@@ -290,7 +313,7 @@ const CarrierRole = {
                 toward = assigned.pos;
             }
         } else {
-            const source = getSourceLine(creep);
+            const source = pickSourceLineByDemand(creep);
             const container = source ? (creep.room.container || []).find((c) => c.pos.inRangeTo(source.pos, 2)) : undefined;
             const drops = source ? source.pos.findInRange(FIND_DROPPED_RESOURCES, 2).filter((r) => r.resourceType === RESOURCE_ENERGY && r.amount > 0) : [];
             toward = drops.length ? creep.pos.findClosestByRange(drops)?.pos : (container && (container.store[RESOURCE_ENERGY] || 0) > 0 ? container.pos : source?.pos ?? null);
