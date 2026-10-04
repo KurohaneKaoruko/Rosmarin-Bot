@@ -908,6 +908,8 @@ export class RoadBuilder {
         const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
         }).length > 0;
+        // 已有容器工地同样不放：工地也是容器的「在途形态」，漏判会每周期叠一个新工地
+        if (existingSite) return;
 
         const terrain = sourceRoom.getTerrain();
         const spawn = (sourceRoom.spawn || [])[0];
@@ -933,21 +935,31 @@ export class RoadBuilder {
             return open * 4 - (spawn ? Math.max(Math.abs(x - spawn.pos.x), Math.abs(y - spawn.pos.y)) : 0);
         };
 
-        let best: { x: number; y: number; score: number } | null = null;
-        for (let dx = -3; dx <= 3; dx++) {
-            for (let dy = -3; dy <= 3; dy++) {
-                const x = controller.pos.x + dx;
-                const y = controller.pos.y + dy;
-                if (x < 1 || x > 48 || y < 1 || y > 48) continue;
-                if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
-                if (occupied.has(x + ',' + y)) continue;
-                const score = spotScore(x, y);
-                if (!best || score > best.score) best = { x, y, score };
+        // 选址只算一次并持久化：后续一律在既定坐标下单（无既定坐标或已不可用才重算），
+        // 避免周期性重选址让工地位置漂移、越叠越多
+        const memAny = sourceRoom.memory as any;
+        let coord = memAny.controllerContainerCoord as { x: number; y: number } | undefined;
+        const coordUsable = coord &&
+            coord.x >= 1 && coord.x <= 48 && coord.y >= 1 && coord.y <= 48 &&
+            terrain.get(coord.x, coord.y) !== TERRAIN_MASK_WALL && inCtrl3(coord.x, coord.y);
+        if (!coordUsable) {
+            let best: { x: number; y: number; score: number } | null = null;
+            for (let dx = -3; dx <= 3; dx++) {
+                for (let dy = -3; dy <= 3; dy++) {
+                    const x = controller.pos.x + dx;
+                    const y = controller.pos.y + dy;
+                    if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+                    if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+                    if (occupied.has(x + ',' + y)) continue;
+                    const score = spotScore(x, y);
+                    if (!best || score > best.score) best = { x, y, score };
+                }
             }
+            if (!best) return;
+            coord = { x: best.x, y: best.y };
+            memAny.controllerContainerCoord = coord;
         }
-        if (best) {
-            sourceRoom.createConstructionSite(best.x, best.y, STRUCTURE_CONTAINER);
-        }
+        sourceRoom.createConstructionSite(coord.x, coord.y, STRUCTURE_CONTAINER);
     }
 
     /**
