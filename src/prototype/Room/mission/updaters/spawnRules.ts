@@ -426,6 +426,24 @@ export const RUSH_REMOTE_POOL_CAP = 6;
  * 升级单（L5/L7）、worker（L8）之后——「受控让位」的排序落地。
  */
 export const RUSH_REMOTE_LEVEL_FLOOR = 9;
+/** rush 期经济外矿（采集/搬运）优先级下限：参考 TASK_TYPES 序 REMOTE_SOURCE 仅高于
+ *  普通 UPGRADE——与升级单同档，本矿经济（L1-5）恒先于外矿 */
+export const RUSH_REMOTE_ECONOMY_LEVEL_FLOOR = 7;
+
+/**
+ * 外矿解锁闩（单向）：本矿产出首次就绪即永久解锁。
+ * 参考实现语义的落地——开启前外矿单不出（本矿链没饱和轮不到外矿），
+ * 解锁后永不清剿（外矿替补在本矿崩坏时排队等待，在场爬继续采，链不断）。
+ */
+export const isRoomRemoteUnlocked = (room: Room): boolean => {
+    const mem = room.memory as any;
+    if (mem.remoteUnlocked) return true;
+    if (isRoomProductionSecured(room)) {
+        mem.remoteUnlocked = true;
+        return true;
+    }
+    return false;
+};
 
 /**
  * rush 期孵化池的外矿挂单治理：
@@ -437,13 +455,12 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
     const remote = (pool || []).filter(t => REMOTE_POOL_ROLES.has((t.data as any)?.memory?.role || ''));
     if (remote.length === 0) return 0;
     let removed = 0;
-    // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）。
-    // RCL2 起放行且**不随本矿产出波动清剿**——参考实现外矿链永不中断，
-    // 饥荒期外矿收入正是爬出孵化地板的绳索；旧「产出未就绪清池」会让一次
-    // 本矿波动连根拔掉外矿链，重建成本几十只爬。
+    // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）；
+    // 解锁闩未开（本矿产出首次就绪前）同样禁开——参考实现语义：本矿链饱和才轮到外矿。
+    // 解锁后**永不清剿**：本矿波动时外矿替补排队等待、在场爬继续采，链不断。
     // 旧「RCL4 禁开」补丁针对的「买不起的外矿单卡死队列头」已被两层根治：
-    // 外矿单 rush 期体型按当前能量现算 + 采集/搬运恢复自然档 L4/L5
-    if (room.level < 2) {
+    // 外矿单 rush 期体型按当前能量现算 + 采集/搬运压到升级单同档
+    if (room.level < 2 || !isRoomRemoteUnlocked(room)) {
         for (const task of remote) {
             room.deleteMissionFromPool?.('spawn', task.id);
             removed++;
@@ -471,10 +488,11 @@ export const effectiveSpawnLevel = (room: Room, task: Task): number => {
     // 每房仅 1 只不会灌池，压到 L9 会在孵化繁忙期永久饿死（与 reserve 提级 L6 的设计冲突）
     if (role === 'reserver') return task.level;
     if (!REMOTE_POOL_ROLES.has(role)) return task.level;
-    // 收入先行（参考实现 REMOTE_SOURCE 恒先于升级消费）：经济外矿（采集/搬运）恢复
-    // 自然档 L4/L5——低于本矿采集 L3、高于升级 L7。旧「压 L9」针对的固定大体型
-    // 买不起堵队列已被体型现算根治；防洪水仍由预算准入与每房挂单上限承担
-    if (role === 'out-harvest' || role === 'out-carry') return task.level;
+    // 参考 TASK_TYPES 序：REMOTE_SOURCE 仅高于普通 UPGRADE——经济外矿压到升级单同档，
+    // 本矿采集 L3/搬运 L4/worker L5 恒先于外矿；预算准入与每房挂单上限继续防灌池
+    if (role === 'out-harvest' || role === 'out-carry') {
+        return Math.max(task.level, RUSH_REMOTE_ECONOMY_LEVEL_FLOOR);
+    }
     return Math.max(task.level, RUSH_REMOTE_LEVEL_FLOOR);
 };
 

@@ -21,6 +21,7 @@ import {
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
     isRoomProductionSecured,
+    isRoomRemoteUnlocked,
     REMOTE_POOL_ROLES,
     type SpawnCheckContext,
 } from './spawnRules';
@@ -351,9 +352,9 @@ export class SpawnTaskGetter extends Room {
         const tasks = this.getAllMissionFromPool('spawn');
         const selection = createSpawnMissionSelection();
 
-        // 起步序列闸：采集链未满编时只挡 worker 等非收入线；采集工/升级工/外矿收入线放行。
-        // 序列由池内等级排序自洽（采集 L3 < 外矿收入 L4/5 < RSV L6 < 升级 L7 < worker L8），
-        // 外矿放行 = 参考口径「外矿链永不中断」——饥荒期外矿收入是爬出孵化地板的绳索
+        // 起步序列闸：解锁闩未开（本矿产出首次就绪前）只放行采集工/升级工/应急 UNIV，
+        // 外矿收入线与 worker 全挡——参考 TASK_TYPES 序 OWNED_SOURCE 恒先于 REMOTE_SOURCE；
+        // 解锁后外矿单按其档位（经济 L7 / 其他 L9）参与排队，永不再拦（链不断）
         const bootstrapHarvesterOnly = isRaceCompat() && !isRoomProductionSecured(this);
 
         for (const task of tasks) {
@@ -363,10 +364,12 @@ export class SpawnTaskGetter extends Room {
             if (phantomAt && Game.time < phantomAt) continue;
             if (bootstrapHarvesterOnly) {
                 const taskRole = getSpawnTaskRole(task.data as SpawnTask);
-                // 外矿收入线（OH/OC/RSV 等）随行放行：参考口径「外矿链永不中断」，
-                // 其等级（L4/5/6/9）天然排在本矿采集 L3 之后；饥荒期外矿收入正是爬出地板的绳索
-                if (taskRole !== 'harvester' && taskRole !== 'upgrader' && taskRole !== 'universal'
-                    && !REMOTE_POOL_ROLES.has(taskRole as string)) continue;
+                if (REMOTE_POOL_ROLES.has(taskRole as string)) {
+                    // 外矿线：解锁闩未开前不出（本矿链饱和才轮到外矿），解锁后永不拦
+                    if (!isRoomRemoteUnlocked(this)) continue;
+                } else if (taskRole !== 'harvester' && taskRole !== 'upgrader' && taskRole !== 'universal') {
+                    continue;
+                }
             }
 
             const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);

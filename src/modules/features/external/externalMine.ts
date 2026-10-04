@@ -14,7 +14,7 @@ import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
 import { getOutMineData, getRoomData, readRecordedSourceSlotCounts, recordSourceSlotCounts } from '@/modules/shared/memory';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { isRoomProductionSecured } from '@/prototype/Room/mission/updaters/spawnRules';
+import { isRoomProductionSecured, isRoomRemoteUnlocked } from '@/prototype/Room/mission/updaters/spawnRules';
 import { isRaceCompat } from '@/modules/shared/gameCapabilities';
 import {
     CarryRoomCandidateStat,
@@ -2374,9 +2374,10 @@ export class ExternalMine {
         // 控制器容器保活不受任何闸门限制：饥荒期恰恰是升级链最依赖容器的时刻
         //（参考实现每 tick 无条件放工地，不吃能量状态门）
         RoadBuilder.ensureControllerContainer(room);
-        // 外矿链不随本矿波动停摆（参考实现口径：home 打嗝从不清剿外矿，
-        // 外矿收入反而是饥荒期爬出地板的绳索——外矿单在池内等级低于本矿采集，
-        // 序列由孵化池排序自洽；清剿只会让重建成本几十只爬）
+        // 解锁闩：本矿产出首次就绪才开外矿管线（参考 TASK_TYPES 序 OWNED_SOURCE 恒先于
+        // REMOTE_SOURCE）。未解锁期挂单由 pruneRushRemoteMissions 清理；
+        // 解锁后不再设任何闸——本矿波动时外矿替补排队等待，在场爬继续采，链不断
+        if (isRaceCompat() && !isRoomRemoteUnlocked(room)) return;
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
