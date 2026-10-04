@@ -59,6 +59,12 @@ export const clearRushCreepHeap = (creepName: string): void => {
     creepHeaps.delete(creepName);
 };
 
+/** controller 容器（堆 id 由容器管理方 3.4 写入；未落地前为空） */
+export const getControllerContainer = (room: Room): StructureContainer | undefined => {
+    const id = getRushRoomHeap(room.name).controllerContainerId as string | undefined;
+    return id ? (Game.getObjectById<StructureContainer>(id) ?? undefined) : undefined;
+};
+
 /** 交换两名 creep 的堆缓存（relay 换向：身份互换后状态跟着走） */
 export const swapRushCreepHeap = (nameA: string, nameB: string): void => {
     const a = creepHeaps.get(nameA);

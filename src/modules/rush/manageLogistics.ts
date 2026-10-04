@@ -7,7 +7,12 @@
  * relay 接力（3.2）与 porter 取能链路（3.5）在对应批次补齐。
  */
 import { RushMinHeap } from './minHeap';
-import { getRushCreepHeap, getRushRoomHeap, swapRushCreepHeap } from './roomState';
+import {
+    getControllerContainer,
+    getRushCreepHeap,
+    getRushRoomHeap,
+    swapRushCreepHeap,
+} from './roomState';
 import { getCreepsByRole, markSpawnBalanceAdded } from './spawnManager';
 import { getControllerLink } from './manageUpgrade';
 import { shouldRelay } from './manageSource';
@@ -119,11 +124,7 @@ export const createEnergyDeposit = (
     target,
 });
 
-/** controller 容器（堆 id 由容器管理方 3.4 写入；未落地前为空） */
-export const getControllerContainer = (room: Room): StructureContainer | undefined => {
-    const id = getRushRoomHeap(room.name).controllerContainerId as string | undefined;
-    return id ? (Game.getObjectById<StructureContainer>(id) ?? undefined) : undefined;
-};
+/** controller 容器读取已上移 roomState（3.4 容器管理方写入堆 id） */
 
 /** 结构填充请求收集（按类型，过阈值） */
 const getFillRequestsByType = (room: Room, structureType: StructureConstant): LogisticsRequest[] => {

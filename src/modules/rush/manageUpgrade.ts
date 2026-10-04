@@ -6,7 +6,7 @@
  */
 import { getFloodFillPositions } from './algorithm';
 import { ENERGY_STANDARD, ENERGY_LEVEL } from './constants';
-import { getRushRoomHeap, getRushTickState } from './roomState';
+import { getControllerContainer, getRushRoomHeap, getRushTickState } from './roomState';
 import { getCreepsByRole } from './spawnManager';
 import { requestCreep, getUpgraderBody } from './spawnUtils';
 
@@ -70,6 +70,22 @@ export const getUpgradeCapacity = (room: Room): number => {
     const capacity = Math.floor(800 / (range + 1));
     heap.upgradeCapacity = capacity;
     return capacity;
+};
+
+/** 升级取能点：controller link > 容器位掉落 > controller 容器（就近秒取能口径） */
+export const getUpgradeEnergyDepot = (
+    room: Room,
+): StructureLink | Resource | StructureContainer | undefined => {
+    const link = getControllerLink(room);
+    if (link) return link;
+
+    const container = getControllerContainer(room);
+    if (!container) return undefined;
+
+    const dropped = container.pos.lookFor(LOOK_RESOURCES)[0];
+    if (dropped) return dropped;
+
+    return container;
 };
 
 /** 升级 work 预算（每 tick 缓存） */
