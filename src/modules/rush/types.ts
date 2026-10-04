@@ -32,6 +32,8 @@ export type RushRoomTickState = {
     spawnQueue: RushMinHeap<RushSpawnRequest>;
     /** 角色 → 在岗 creep 花名册（preTick 从登记名册重建） */
     creeps: Record<string, Creep[]>;
+    /** 就地取能单位（upgrader/builder 执行器登记，物流段据此送上门） */
+    creepsToFill: Creep[];
     /** 本房型 builder/upgrader 体型的 work 上限缓存（每 tick） */
     builderMaxNumWork?: number;
     upgraderMaxNumWork?: number;
