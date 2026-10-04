@@ -126,9 +126,9 @@ export const getControllerMaxCarryPower = (room: Room): number => {
     if (!distance) {
         const start = room.find(FIND_MY_SPAWNS)[0];
         if (!start) return 0;
-        const path = room.findPath(start.pos, { pos: room.controller!.pos, range: 1 } as any, { heuristicWeight: 1 });
-        mem.controllerDistance = path.length;
-        distance = path.length;
+        const result = PathFinder.search(start.pos, { pos: room.controller!.pos, range: 1 }, { heuristicWeight: 1 });
+        mem.controllerDistance = result.path.length;
+        distance = result.path.length;
     }
 
     return 2 * getMaxWork(room) * distance;
