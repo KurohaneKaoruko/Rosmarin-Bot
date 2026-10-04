@@ -4,7 +4,6 @@
  */
 import { RushMinHeap } from './minHeap';
 import type { RushRoomHeap, RushRoomTickState, RushSpawnRequest } from './types';
-
 /** 每 tick 态：以 Room 实例为键，无失效成本 */
 const tickStates = new WeakMap<Room, RushRoomTickState>();
 
@@ -19,6 +18,7 @@ export const getRushTickState = (room: Room): RushRoomTickState => {
             spawnBalanceSubtracted: false,
             spawnQueue: new RushMinHeap<RushSpawnRequest>((request) => request.priority),
             creeps: {},
+            creepsToFill: [],
         };
         tickStates.set(room, state);
     }
@@ -41,4 +41,20 @@ export const getRushRoomHeap = (roomName: string): RushRoomHeap => {
 
 export const clearRushRoomHeap = (roomName: string): void => {
     roomHeaps.delete(roomName);
+};
+
+/** creep 级跨 tick 堆缓存（挂单/接力防抖等状态） */
+const creepHeaps = new Map<string, Record<string, any>>();
+
+export const getRushCreepHeap = (creepName: string): Record<string, any> => {
+    let heap = creepHeaps.get(creepName);
+    if (!heap) {
+        heap = {};
+        creepHeaps.set(creepName, heap);
+    }
+    return heap;
+};
+
+export const clearRushCreepHeap = (creepName: string): void => {
+    creepHeaps.delete(creepName);
 };

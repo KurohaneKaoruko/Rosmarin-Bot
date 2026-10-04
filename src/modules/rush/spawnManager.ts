@@ -5,7 +5,7 @@
  */
 import { ROLES } from './constants';
 import { getBodyCost } from './creepUtils';
-import { getRushTickState } from './roomState';
+import { clearRushCreepHeap, getRushTickState } from './roomState';
 import type { RushSpawnRequest } from './types';
 
 declare global {
@@ -192,6 +192,7 @@ const cacheCreeps = (room: Room): void => {
 
         if (!creep) {
             delete Memory.creeps[creepName];
+            clearRushCreepHeap(creepName);
             return false;
         }
 

@@ -5,7 +5,9 @@
  */
 import { CPU_TERMINATE_ROOM_MANAGER } from './constants';
 import { manageBuildSpawn, manageBuildState } from './manageBuild';
+import { manageLogistics } from './manageLogistics';
 import { manageUpgradeSpawn } from './manageUpgrade';
+import { getRushTickState } from './roomState';
 import { getCreepsByRole, pretickSpawn, runSpawnManager } from './spawnManager';
 
 export const runRushRoom = (room: Room): void => {
@@ -15,6 +17,8 @@ export const runRushRoom = (room: Room): void => {
     }
 
     pretickSpawn(room);
+
+    const state = getRushTickState(room);
 
     const upgraders = getCreepsByRole(room, 'upgrader');
     const builders = getCreepsByRole(room, 'builder');
@@ -28,6 +32,10 @@ export const runRushRoom = (room: Room): void => {
     }) as StructureRampart[];
     manageBuildState(room, builders, constructionSites, ramparts);
     manageBuildSpawn(room, builders);
+
+    // 物流：配送请求收集与搬运工匹配（relay 接力见 3.2）
+    const haulers = getCreepsByRole(room, 'hauler');
+    manageLogistics(room, haulers, state.creepsToFill);
 
     runSpawnManager(room);
 };
