@@ -2,8 +2,8 @@ import { getRoomData, getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
 import { runRushRoom } from '@/modules/rush/roomController';
+import { manageControllerContainer } from '@/modules/rush/manageConstruction';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
-import { RoadBuilder } from '@/modules/features/external/externalRoad';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -49,9 +49,9 @@ export default class RoomExecute extends Room {
         this.autoBuild();        // 自动建筑
         // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
         if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
-        // rush：控制器容器 RCL2 起例行保活（升级专线的主缓冲，被毁/低耐久自动补）
-        if (getRoomMode(this) === 'rush' && isRoomTickAligned(this.name, 150)) {
-            RoadBuilder.ensureControllerContainer(this);
+        // rush：cc 生命周期（RCL2 起放置保活、唯一 cc、链接期销毁）由移植主循环接管
+        if (isRush && isRoomTickAligned(this.name, 150)) {
+            manageControllerContainer(this);
         }
         if (profile.facilities) {
             this.autoLab();          // 自动Lab合成
