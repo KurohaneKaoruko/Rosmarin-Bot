@@ -897,32 +897,47 @@ export class RoadBuilder {
         if (rcl < 2) return;
         // 无源房短路（能力闸）：cc 服务升级线的能量补给，无产出源的房间不需要
         if (!(sourceRoom.source || []).length) return;
-        if (rcl >= 5 && (sourceRoom.link || []).some(l => l.pos.inRangeTo(controller.pos, 3))) return;
-        // 容器判定走实时 find（不用 room.container 缓存）：工地建成瞬间缓存未刷新，
-        // 读缓存会误判「无容器」而重复放量，滚出一串容器工地
+
+        // 容器/工地判定走实时 find（不用 room.container 缓存）：工地建成瞬间缓存未刷新，
+        // 读缓存会误判「无容器」而重复放量
         const existingContainers = sourceRoom.find(FIND_STRUCTURES, {
             filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
         }) as StructureContainer[];
-        // 唯一 cc 口径：控制器旁最多一个容器；低耐久走维修（tower/worker 既有链路），不再放备胎
-        if (existingContainers.length > 0) return;
-        const existingSite = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
+        const sites = sourceRoom.find(FIND_MY_CONSTRUCTION_SITES, {
             filter: s => s.structureType === STRUCTURE_CONTAINER && s.pos.inRangeTo(controller.pos, 3),
-        }).length > 0;
-        // 已有容器工地同样不放：工地也是容器的「在途形态」，漏判会每周期叠一个新工地
-        if (existingSite) return;
+        });
+
+        // cc 圈生命周期唯一入口：选址 → 放量 → 纠偏 → 退役全在此收口，
+        // 不与其他机制交叉管控（多机制各删各的会形成建→删→再建循环）
+
+        // 链接期退役：升级供给已切 link，容器/工地清场收尾
+        if (rcl >= 5 && (sourceRoom.link || []).some(l => l.pos.inRangeTo(controller.pos, 3))) {
+            for (const container of existingContainers) container.destroy();
+            for (const site of sites) site.remove();
+            return;
+        }
+
+        // 已建成容器直接收编（唯一 cc 口径，低耐久走维修既有链路）。
+        // 不挑位置——建成容器是既得产能，拆了重建是纯浪费；距离口径只约束「新放置」。
+        // 容器既成，圈内工地皆过时残留，一并清掉
+        if (existingContainers.length > 0) {
+            for (const site of sites) site.remove();
+            return;
+        }
 
         const terrain = sourceRoom.getTerrain();
         const spawn = (sourceRoom.spawn || [])[0];
         const occupied = new Set<string>();
         for (const s of sourceRoom.find(FIND_STRUCTURES)) occupied.add(s.pos.x + ',' + s.pos.y);
         for (const s of sourceRoom.find(FIND_CONSTRUCTION_SITES)) occupied.add(s.pos.x + ',' + s.pos.y);
-        const inCtrl3 = (x: number, y: number): boolean =>
-            Math.max(Math.abs(x - controller.pos.x), Math.abs(y - controller.pos.y)) <= 3;
+        // 选址距离口径：与 controller 隔开一格（切比雪夫距离 2）——贴脸放会占掉一个围位，
+        // 隔一格时容器 8 邻全空，升级工最多围 8 个，剩余口子留给搬运工填充
+        const inCtrl2Ring = (x: number, y: number): boolean =>
+            Math.max(Math.abs(x - controller.pos.x), Math.abs(y - controller.pos.y)) === 2;
         const standable = (x: number, y: number): boolean =>
             x >= 1 && x <= 48 && y >= 1 && y <= 48
             && !occupied.has(x + ',' + y)
-            && terrain.get(x, y) !== TERRAIN_MASK_WALL
-            && inCtrl3(x, y);
+            && terrain.get(x, y) !== TERRAIN_MASK_WALL;
         // 选址评分 = 相邻可升级站位数×4 − 距 spawn 距离（与放置共用一套口径）
         const spotScore = (x: number, y: number): number => {
             let open = 0;
@@ -936,16 +951,17 @@ export class RoadBuilder {
         };
 
         // 选址只算一次并持久化：后续一律在既定坐标下单（无既定坐标或已不可用才重算），
-        // 避免周期性重选址让工地位置漂移、越叠越多
+        // 避免周期性重选址让工地位置漂移
         const memAny = sourceRoom.memory as any;
         let coord = memAny.controllerContainerCoord as { x: number; y: number } | undefined;
         const coordUsable = coord &&
             coord.x >= 1 && coord.x <= 48 && coord.y >= 1 && coord.y <= 48 &&
-            terrain.get(coord.x, coord.y) !== TERRAIN_MASK_WALL && inCtrl3(coord.x, coord.y);
+            terrain.get(coord.x, coord.y) !== TERRAIN_MASK_WALL && inCtrl2Ring(coord.x, coord.y);
         if (!coordUsable) {
             let best: { x: number; y: number; score: number } | null = null;
-            for (let dx = -3; dx <= 3; dx++) {
-                for (let dy = -3; dy <= 3; dy++) {
+            for (let dx = -2; dx <= 2; dx++) {
+                for (let dy = -2; dy <= 2; dy++) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) !== 2) continue;
                     const x = controller.pos.x + dx;
                     const y = controller.pos.y + dy;
                     if (x < 1 || x > 48 || y < 1 || y > 48) continue;
@@ -959,7 +975,14 @@ export class RoadBuilder {
             coord = { x: best.x, y: best.y };
             memAny.controllerContainerCoord = coord;
         }
-        sourceRoom.createConstructionSite(coord.x, coord.y, STRUCTURE_CONTAINER);
+
+        // 工地唯一口径：既定坐标上的工地保留，错位残留清除；既定坐标无工地才放量。
+        // 此后每周期都会因「已有容器/已有既定坐标工地」短路，无反复放量空间
+        const atCoord = sites.find(s => s.pos.x === coord.x && s.pos.y === coord.y);
+        for (const site of sites) {
+            if (site !== atCoord) site.remove();
+        }
+        if (!atCoord) sourceRoom.createConstructionSite(coord.x, coord.y, STRUCTURE_CONTAINER);
     }
 
     /**

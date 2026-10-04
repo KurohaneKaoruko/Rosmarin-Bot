@@ -1121,13 +1121,12 @@ export const LayoutPlanner = {
                     if (nearSource) {
                         if ((placedContainerPerSource.get(nearSource.id) || 0) >= 1) continue;
                         placedContainerPerSource.set(nearSource.id, 1);
-                    } else {
-                        const nearController = room.controller && Pos.inRangeTo(room.controller.pos, 3);
-                        if (nearController) {
-                            if (room.level < 2 || room.level > 4) continue;
-                        } else if (room.level < 6) {
-                            continue;
-                        }
+                    } else if (room.controller && Pos.inRangeTo(room.controller.pos, 3)) {
+                        // cc 圈不放：选址权完全归 ensureControllerContainer（评分 + 坐标持久化），
+                        // 布局点位在此放量会与它各管一点，形成建→删→再建循环
+                        continue;
+                    } else if (room.level < 6) {
+                        continue;
                     }
                 }
                 if (Pos.lookFor(LOOK_CONSTRUCTION_SITES).length) continue;
