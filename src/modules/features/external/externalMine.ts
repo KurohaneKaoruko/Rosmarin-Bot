@@ -2168,11 +2168,12 @@ export class ExternalMineSpawner {
             // 饥荒期也要出得起小体型，[W2,M1,C1] 仍有 4/tick 产出），否则全款体型
             // 在贫困房永远攒不齐，外矿会集体老死断供（死亡螺旋）；
             // 每轮派单都按当时预算重新生成，能量回升自动出满配 5W。
-            // rush 例外：缩水体是「低效循环」——小体型运/采同一吞吐要更多只、
-            // 孵化排队更久、房间更穷；rush 的升级抽水不该让收入引擎降级。
+            // rush 同口径（参考 getMinerBody 的 income 语义）：RCL2-3 容量 300-500 时
+            // 满水体 450-550 而房间常驻 150-450，不缩水 = 外矿永远进不了场、
+            // 升级线整段断粮；「缩水体低效」的代价远小于「零外矿」
             const energyState = ExternalMineState.getEnergyState(sourceRoom);
             const rushMode = getRoomMode(sourceRoom) === 'rush';
-            const energyBudget = (!rushMode && (energyState === 'LOW' || energyState === 'CRITICAL'))
+            const energyBudget = (energyState === 'LOW' || energyState === 'CRITICAL')
                 ? Math.max(300, sourceRoom.energyAvailable)
                 : sourceRoom.energyCapacityAvailable;
             // rush 不带自携 CARRY（[W5,M1,C1]=600 > 550，装箱成 [W4,C1,M2] →
