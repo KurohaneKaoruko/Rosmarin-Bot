@@ -1052,12 +1052,13 @@ export const getUpgraderTarget = (room: Room): number => {
         if (room.level >= 8) return 0;
         // rush 冲级目标是最快升级：数量由工位上限决定（不是预算硬限——
         // 预算只影响体型：预算少→体型缩小但数量不减，source 3000+t 回10/t 是充足能源）
-        // 产能瓶颈在采集端而非预算端；多余的升级工最多空转等待，不会死
+        // 产能瓶颈在采集端而非预算端；多余的升级工最多空转等待，不会死。
+        // RCL4 段目标 41/t：12 只 × 3W 已不够，硬顶只防怪异地形，实际由工位/预算封顶
         const rushSlots = Math.max(
             getRushUpgradeSlotCap(room),
             getControllerUpgradeSlotCap(room),
         );
-        return clamp(Math.max(target, rushSlots), 1, 12);
+        return clamp(Math.max(target, rushSlots), 1, 24);
     }
 
     if (mode === 'high' || mode === 'mini') {

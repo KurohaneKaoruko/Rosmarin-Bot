@@ -24,6 +24,7 @@ import {
     getDroppedPileWorkerBoost,
     getMyConstructionSites,
     getRushCarrierTarget,
+    estimateRoomEnergyIncome,
 } from '@/modules/shared/roomWorkforce';
 
 // 存量符号再导出：spawnMission / spawnControl 等历史调用方仍从本模块取用
@@ -297,8 +298,18 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
         // 「没升级工→能量没人花→能量一直低→永远不发升级单」死锁
         if (room.energyAvailable < room.energyCapacityAvailable * 0.6 && room.energyAvailable < 800
             && !isUpgraderSpawnUrgent(room)) return false;
-        // 开局序列（race 兼容闸门）：采矿工满编产出稳住之前，升级岗不上线
-        if (isRaceCompat() && !isRoomProductionSecured(room)) return false;
+        // 孵化节流（参考 UPGRADE_PRIORITY 口径）：净收入吃不满在编火力时不加编、只维持存量，
+        // 防止升级端把采集端吃穿（开局收入爬坡期尤其致命）；存量归零后仍允许从 1 只起步
+        if (isRaceCompat() && current > 0) {
+            const fieldWork = getRoomTickCacheValue(room, 'upgrader_field_work', () =>
+                room.find(FIND_MY_CREEPS, {
+                    filter: (c: Creep) => c.memory?.role === 'upgrader' && !c.spawning,
+                }).reduce((sum, c) => sum + c.getActiveBodyparts(WORK), 0),
+            );
+            if (estimateRoomEnergyIncome(room) <= fieldWork) return false;
+        }
+        // 升级岗不做产出就绪硬闸（参考实现口径：预算与孵化池优先级排序已足够——
+        // harvester 单等级恒高于 upgrader，采集补员自然插队；硬闸只会拖慢升级岗上线）
         const target = getUpgraderTarget(room);
         if (target <= 0) return false;
         // 无缝替班：在编 upgrader 的 TTL 都覆盖不住「实测路程 + 孵化期 + 缓冲」时，
@@ -407,6 +418,7 @@ export const shouldSpawnRole = (
 
 // 外矿链挂单角色（含预订）
 const REMOTE_POOL_ROLES = new Set(['out-harvest', 'out-carry', 'out-build', 'out-defend', 'reserver']);
+export { REMOTE_POOL_ROLES };
 /** rush 期外矿挂单池上限（防孵化池灌爆事故复发） */
 export const RUSH_REMOTE_POOL_CAP = 6;
 /**
@@ -425,9 +437,10 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
     const remote = (pool || []).filter(t => REMOTE_POOL_ROLES.has((t.data as any)?.memory?.role || ''));
     if (remote.length === 0) return 0;
     let removed = 0;
-    // 阶段门：RCL4 前外矿单一律禁开——核心经济未立住时它们只会占住孵化槽
-    //（实测低能量死锁：买不起的外矿单卡在队列头，spawn 空转，升级岗被能量闸锁死）
-    if (room.level < 4) {
+    // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）。
+    // RCL2 起放行——旧「RCL4 禁开」补丁针对的「买不起的外矿单卡死队列头」
+    // 已被两层根治：外矿单 rush 期恒压 L9（等待只挡 L11 scout）+ 体型按当前能量现算
+    if (room.level < 2) {
         for (const task of remote) {
             room.deleteMissionFromPool?.('spawn', task.id);
             removed++;
@@ -458,6 +471,9 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
 export const effectiveSpawnLevel = (room: Room, task: Task): number => {
     if (getRoomMode(room) !== 'rush') return task.level;
     const role = (task.data as any)?.memory?.role || '';
+    // reserver 豁免让位：预定决定外矿 source 容量（有预定 3000 / 无 1500），是收入倍增器；
+    // 每房仅 1 只不会灌池，压到 L9 会在孵化繁忙期永久饿死（与 reserve 提级 L6 的设计冲突）
+    if (role === 'reserver') return task.level;
     if (!REMOTE_POOL_ROLES.has(role)) return task.level;
     return Math.max(task.level, RUSH_REMOTE_LEVEL_FLOOR);
 };

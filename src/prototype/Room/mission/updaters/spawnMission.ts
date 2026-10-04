@@ -3,7 +3,7 @@ import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
 import { estimateRoomEnergyIncome, getUpgradeWorkTarget, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL, UPGRADE_NEEDED_TTD } from '@/modules/shared/roomWorkforce';
-import { buildRushBody, buildRushUpgraderBody } from '@/modules/shared/rushBody';
+import { buildRushBody } from '@/modules/shared/rushBody';
 import { isEnergyCheckEnabled, isRaceCompat } from '@/modules/shared/gameCapabilities';
 
 /** rush 期走容量现算体型的角色集合（其余角色维持动态取表路径） */
@@ -21,6 +21,7 @@ import {
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
     isRoomProductionSecured,
+    REMOTE_POOL_ROLES,
     type SpawnCheckContext,
 } from './spawnRules';
 
@@ -303,10 +304,14 @@ export class SpawnTaskGetter extends Room {
         if (!role) return null;
 
         let body = data.body as ((BodyPartConstant | number)[])[] | string;
-        // rush 升级体与创建时同源（rushBody 容量现算）：按当前可用能量下探，
-        // 固定满档体型会被建造/搬运的常态抽取压死，extension 攒到成本线以下就永远孵不出
-        if (role === 'upgrader' && getRoomMode(this) === 'rush') {
-            body = (buildRushUpgraderBody(energyAvailable) ?? '') as any;
+        // rush 期本矿四职按当前可用能量现算体型（rushBody 容量现算）：
+        // 固定满档体型会被建造/搬运的常态抽取压死——能量落在「够小体、不够大体」的区间时，
+        // 动态角色（升级工）连续孵化而固定角色（采集工）永远付不起，滚成只孵一职的死循环。
+        // 参考实现口径：无稳定收入时矿工体型按当前能量取（getMinerBody 的 income 口径）。
+        // 外矿角色不在此处理：无等级表（GetRoleBodys 会返回空 → Infinity），
+        // 其体型由派单侧每轮重铺时按预算现算（externalMine 的 buildRemoteMinerBody 口径）
+        if (RUSH_BODY_ROLES.has(role) && getRoomMode(this) === 'rush') {
+            body = (buildRushBody(role, energyAvailable) ?? '') as any;
         }
         const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
         let requiredEnergy = Number(data.energy || 0);
@@ -314,10 +319,13 @@ export class SpawnTaskGetter extends Room {
         // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
         if (!hasFixedBody) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
+            // rush 期外矿角色恒按当前能量缩（参考实现 haulerBody = energyAvailable 口径）：
+            // 外矿单在 L9 等待位上不会卡本矿层，缩体型让外矿在 RCL2-3 就能以小队进场供能
             const allowBudgetSpawn =
                 ((state === 'LOW' || state === 'CRITICAL') &&
                 SPAWN_GETTER_BUDGET_ROLES.has(role)) ||
-                (role === 'worker' && getMyConstructionSites(this).length > 0);
+                (role === 'worker' && getMyConstructionSites(this).length > 0) ||
+                (getRoomMode(this) === 'rush' && REMOTE_POOL_ROLES.has(role));
             const budget = allowBudgetSpawn ? energyAvailable : undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
             const bodypart = this.GenerateBodys(body as any[], role);
@@ -343,10 +351,9 @@ export class SpawnTaskGetter extends Room {
         const tasks = this.getAllMissionFromPool('spawn');
         const selection = createSpawnMissionSelection();
 
-        // 起步序列硬闸：采集链未满编时孵化池只放行采集工（应急 UNIV 除外）。
-        // 否则低能量位的缩体型单（worker/搬运）会抢走采集工的本钱，
-        // 开局滚成「1 采集 : N 搬运」的倒挂饿死螺旋；满编后搬运/升级
-        // 各自的编制闸自然接管。
+        // 起步序列闸：采集链未满编时孵化池只放行采集工与升级工（应急 UNIV 除外）。
+        // 升级工放行依据参考实现口径——预算与池内等级排序已保证采集补员优先，
+        // 升级工体型下限高（250 起）不会在能量谷底抢本钱；worker/搬运仍被挡在门外
         const bootstrapHarvesterOnly = isRaceCompat() && !isRoomProductionSecured(this);
 
         for (const task of tasks) {
@@ -356,7 +363,7 @@ export class SpawnTaskGetter extends Room {
             if (phantomAt && Game.time < phantomAt) continue;
             if (bootstrapHarvesterOnly) {
                 const taskRole = getSpawnTaskRole(task.data as SpawnTask);
-                if (taskRole !== 'harvester' && taskRole !== 'universal') continue;
+                if (taskRole !== 'harvester' && taskRole !== 'upgrader' && taskRole !== 'universal') continue;
             }
 
             const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);
