@@ -6,9 +6,10 @@
  */
 import { BUILD_PRIORITY, RCL_TO_BUILD_RAMPART } from './constants';
 import { getMaxWork } from './manageUpgrade';
-import { getRushTickState } from './roomState';
+import { getControllerContainer, getRushTickState } from './roomState';
 import { getCreepsByRole } from './spawnManager';
 import { requestCreep, getBuilderBody } from './spawnUtils';
+import { runBuilder } from './creepExec';
 
 /** builder 火力折算（BUILD_POWER 的经验放大） */
 const BUILD_POWER_MULTIPLIER = 4;
@@ -126,12 +127,21 @@ export const getPriorityTargets = (
  * buildPower 记账（work×4，并计入共享 numWork）→ emergency 冻结 →
  * 缺口打包（最小 2）→ 闲量/upgrader 转职 → 按容量打包入队 BUILD 档。
  */
-export const manageBuildSpawn = (room: Room, builders: Creep[]): void => {
+export const manageBuildSpawn = (room: Room, builders: Creep[], constructionSites: ConstructionSite[] = [], ramparts: StructureRampart[] = []): void => {
     const mem = room.memory as any;
     const state = getRushTickState(room);
 
     if (!mem.building) {
         return;
+    }
+
+    // 执行器：取能（沉淀点）→ 优先目标建造/维修
+    const energyDepot = getBuildEnergyDepot(room, undefined, getControllerContainer(room));
+    const priorityTargets = getPriorityTargets(room, constructionSites, ramparts, energyDepot);
+
+    for (const creep of builders) {
+        if (creep.spawning) continue;
+        runBuilder(creep, energyDepot, priorityTargets.length > 0 ? priorityTargets[0] : undefined);
     }
 
     if (!state.canSpawn) {

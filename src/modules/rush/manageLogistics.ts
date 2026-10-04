@@ -17,6 +17,7 @@ import { getCreepsByRole, markSpawnBalanceAdded } from './spawnManager';
 import { getControllerLink } from './manageUpgrade';
 import { shouldRelay } from './manageSource';
 import { requestCreep, getHaulerBody } from './spawnUtils';
+import { runHaulerFetchHalf } from './creepExec';
 
 /** 配送优先级（越小越优先） */
 export const ENERGY_FILL_PRIORITY: Record<string, number> = {
@@ -389,6 +390,11 @@ export const manageLogistics = (room: Room, haulers: Creep[], creepsToFill: Cree
 
     for (const hauler of haulers) {
         if (hauler.memory.role === 'hauler' && !(hauler.memory as any).startSupplying) {
+            // 空载且未挂单 → 去 source 锚点取能（取满后 startSupplying 置位，进入供货循环）
+            const haulerHeap = getRushCreepHeap(hauler.name);
+            if (hauler.store.getUsedCapacity(RESOURCE_ENERGY) === 0 && !haulerHeap.targetRequest) {
+                runHaulerFetchHalf(hauler);
+            }
             continue;
         }
 

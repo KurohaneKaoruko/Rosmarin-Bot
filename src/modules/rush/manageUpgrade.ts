@@ -6,9 +6,10 @@
  */
 import { getFloodFillPositions } from './algorithm';
 import { ENERGY_STANDARD, ENERGY_LEVEL } from './constants';
-import { getControllerContainer, getRushRoomHeap, getRushTickState } from './roomState';
+import { getControllerContainer, getRushCreepHeap, getRushRoomHeap, getRushTickState } from './roomState';
 import { getCreepsByRole } from './spawnManager';
 import { requestCreep, getUpgraderBody } from './spawnUtils';
+import { runUpgrader } from './creepExec';
 
 declare global {
     interface Memory {
@@ -241,6 +242,13 @@ export const manageUpgradeSpawn = (room: Room, upgraders: Creep[], builders: Cre
 
     if (mem.upgradeNeeded) {
         upgraders.push(...builders);
+    }
+
+    // 执行器：升级 + 就地取能（depot = link > 掉落 > 容器）
+    const depot = getUpgradeEnergyDepot(room);
+    for (const creep of upgraders) {
+        if (creep.spawning) continue;
+        runUpgrader(room, creep, depot);
     }
 
     if (!state.canSpawn) {

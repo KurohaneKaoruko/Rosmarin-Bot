@@ -202,9 +202,14 @@ describe('升级单发放', () => {
         name: `u${work}_${ttl}`,
         memory: { role: 'upgrader' },
         room: { name: 'W1N1' },
+        pos: { x: 25, y: 28, roomName: 'W1N1', getRangeTo: () => 2 },
         body: new Array(work + 1).fill({ type: 'work' }),
         getActiveBodyparts: (p: string) => (p === 'work' ? work : 0),
         ticksToLive: ttl,
+        store: { getUsedCapacity: () => 0, getFreeCapacity: () => 100 },
+        findInRange: () => [],
+        transfer: vi.fn(() => 0),
+        upgradeController: vi.fn(() => 0),
     });
 
     it('加码场景：收入高、spawnBalance 加码 → 预算升，发 upgradePreference（urgent）', () => {
