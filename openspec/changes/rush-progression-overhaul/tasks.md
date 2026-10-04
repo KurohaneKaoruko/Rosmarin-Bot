@@ -31,7 +31,7 @@
 
 - [x] 4.1 移植 basePlan 锚点适配与 source 链引导（原「CONTROLLER_STRUCTURES 分层 + 建造 MinHeap」按用户决定不移植：布局与工地放置保持本地 autoBuild，basePlan 仅作锚点适配器），验证 vitest 桩测试覆盖锚点推导与 source 链流程
 - [ ] 4.2 移植 controller 容器建造检查节奏（1<rcl<5 每次建造检查尝试）与建筑复查周期（500t/降级触发），验证与 3.4 的唯一 cc 协同
-- [ ] 4.3 移植 rclRecord 秒表接入分段监控（替换判废表数据源为 Thresholds.RUSH 双档），验证面板与落盘字段一致
+- [x] 4.3 移植 rclRecord 秒表接入分段监控（替换判废表数据源为 Thresholds.RUSH 双档），验证面板与落盘字段一致
 
 ## 5. 下线与回归
 
