@@ -265,6 +265,10 @@ function handleCoreDepotSite(
     if (sites.some((site) => site.structureType === STRUCTURE_CONTAINER)) return 0;
     if (structures.some((structure) => structure.structureType === STRUCTURE_CONTAINER)) return 0;
     if (shouldSkipBuildAtPos(room, STRUCTURE_CONTAINER, structures, pos)) return 0;
+    // cc 圈冲突守卫：核心库点位贴着 controller 时，占位容器会和 cc 叠进同一个升级缓冲圈
+    // （历史实录：hub 点位 roll 到 controller 旁 2 格，占位×2 + cc 反复放量 = 控制器边一圈容器）。
+    // 此时不放占位——缓冲职责由 cc 承担（物流/升级取能本就认 controller 旁 3 格内的容器）
+    if (room.controller && pos.inRangeTo(room.controller.pos, 3)) return 0;
 
     return room.createConstructionSite(point.x, point.y, STRUCTURE_CONTAINER) === OK ? 1 : 0;
 }
