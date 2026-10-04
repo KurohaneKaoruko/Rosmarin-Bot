@@ -2374,18 +2374,9 @@ export class ExternalMine {
         // 控制器容器保活不受任何闸门限制：饥荒期恰恰是升级链最依赖容器的时刻
         //（参考实现每 tick 无条件放工地，不吃能量状态门）
         RoadBuilder.ensureControllerContainer(room);
-        // 开局序列（参考实现观察口径）：先矿工满编、产出稳住，之后才解锁外矿扩张。
-        // 硬闸清池：光挡新单不够——池内残留的 out-*/reserver 挂单仍会抢占 spawn 槽
-        if (isRaceCompat() && !isRoomProductionSecured(room)) {
-            const pool = (room.getAllMissionFromPool?.('spawn') || []) as any[];
-            for (const task of pool) {
-                const role = task?.data?.memory?.role as string | undefined;
-                if (role && (role.startsWith('out-') || role === 'reserver')) {
-                    room.deleteMissionFromPool?.('spawn', task.id);
-                }
-            }
-            return;
-        }
+        // 外矿链不随本矿波动停摆（参考实现口径：home 打嗝从不清剿外矿，
+        // 外矿收入反而是饥荒期爬出地板的绳索——外矿单在池内等级低于本矿采集，
+        // 序列由孵化池排序自洽；清剿只会让重建成本几十只爬）
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 

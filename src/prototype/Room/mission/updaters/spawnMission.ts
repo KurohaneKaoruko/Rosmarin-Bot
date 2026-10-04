@@ -351,9 +351,9 @@ export class SpawnTaskGetter extends Room {
         const tasks = this.getAllMissionFromPool('spawn');
         const selection = createSpawnMissionSelection();
 
-        // 起步序列闸：采集链未满编时孵化池只放行采集工与升级工（应急 UNIV 除外）。
-        // 升级工放行依据参考实现口径——预算与池内等级排序已保证采集补员优先，
-        // 升级工体型下限高（250 起）不会在能量谷底抢本钱；worker/搬运仍被挡在门外
+        // 起步序列闸：采集链未满编时只挡 worker 等非收入线；采集工/升级工/外矿收入线放行。
+        // 序列由池内等级排序自洽（采集 L3 < 外矿收入 L4/5 < RSV L6 < 升级 L7 < worker L8），
+        // 外矿放行 = 参考口径「外矿链永不中断」——饥荒期外矿收入是爬出孵化地板的绳索
         const bootstrapHarvesterOnly = isRaceCompat() && !isRoomProductionSecured(this);
 
         for (const task of tasks) {
@@ -363,7 +363,10 @@ export class SpawnTaskGetter extends Room {
             if (phantomAt && Game.time < phantomAt) continue;
             if (bootstrapHarvesterOnly) {
                 const taskRole = getSpawnTaskRole(task.data as SpawnTask);
-                if (taskRole !== 'harvester' && taskRole !== 'upgrader' && taskRole !== 'universal') continue;
+                // 外矿收入线（OH/OC/RSV 等）随行放行：参考口径「外矿链永不中断」，
+                // 其等级（L4/5/6/9）天然排在本矿采集 L3 之后；饥荒期外矿收入正是爬出地板的绳索
+                if (taskRole !== 'harvester' && taskRole !== 'upgrader' && taskRole !== 'universal'
+                    && !REMOTE_POOL_ROLES.has(taskRole as string)) continue;
             }
 
             const requiredEnergy = this.getSpawnTaskRequiredEnergy(task, availableEnergy);

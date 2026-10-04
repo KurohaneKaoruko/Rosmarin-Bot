@@ -438,16 +438,12 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
     if (remote.length === 0) return 0;
     let removed = 0;
     // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）。
-    // RCL2 起放行——旧「RCL4 禁开」补丁针对的「买不起的外矿单卡死队列头」
-    // 已被两层根治：外矿单 rush 期恒压 L9（等待只挡 L11 scout）+ 体型按当前能量现算
+    // RCL2 起放行且**不随本矿产出波动清剿**——参考实现外矿链永不中断，
+    // 饥荒期外矿收入正是爬出孵化地板的绳索；旧「产出未就绪清池」会让一次
+    // 本矿波动连根拔掉外矿链，重建成本几十只爬。
+    // 旧「RCL4 禁开」补丁针对的「买不起的外矿单卡死队列头」已被两层根治：
+    // 外矿单 rush 期体型按当前能量现算 + 采集/搬运恢复自然档 L4/L5
     if (room.level < 2) {
-        for (const task of remote) {
-            room.deleteMissionFromPool?.('spawn', task.id);
-            removed++;
-        }
-        return removed;
-    }
-    if (!isRoomProductionSecured(room)) {
         for (const task of remote) {
             room.deleteMissionFromPool?.('spawn', task.id);
             removed++;
