@@ -7,9 +7,10 @@
  * relay 接力（3.2）与 porter 取能链路（3.5）在对应批次补齐。
  */
 import { RushMinHeap } from './minHeap';
-import { getRushCreepHeap, getRushRoomHeap } from './roomState';
+import { getRushCreepHeap, getRushRoomHeap, swapRushCreepHeap } from './roomState';
 import { getCreepsByRole, markSpawnBalanceAdded } from './spawnManager';
 import { getControllerLink } from './manageUpgrade';
+import { shouldRelay } from './manageSource';
 import { requestCreep, getHaulerBody } from './spawnUtils';
 
 /** 配送优先级（越小越优先） */
@@ -275,6 +276,103 @@ export const runSupplier = (hauler: Creep, request: LogisticsRequest): ScreepsRe
     return hauler.transfer(target as AnyStoreStructure, RESOURCE_ENERGY);
 };
 
+/** 记录本 tick 移动意图（执行器发 move 时调用；relay 对穿判定输入） */
+export const markRushIntent = (creep: Creep, x: number, y: number): void => {
+    const heap = getRushCreepHeap(creep.name);
+    heap.intent = { x, y };
+    heap.intentTick = Game.time;
+};
+
+/**
+ * relay 接力：对穿的两名 hauler 相向换货并交换记忆（身份互换）。
+ * 门：本 tick 未接力过、非撤退、互为对方意图格、等容量颗粒、供方 TTL>50；
+ * 附带：取能途中顺路捡墓碑/掉落；意图格站着 miner 时 pull 搭车。
+ */
+export const getRelayTarget = (creep: Creep): Creep | undefined => {
+    const heap = getRushCreepHeap(creep.name);
+    if (heap.relayed === Game.time || (creep.memory as any).retreat) {
+        return undefined;
+    }
+
+    if (heap.intentTick !== Game.time) {
+        return undefined;
+    }
+    const intendedCoord = heap.intent as { x: number; y: number };
+
+    if (!(creep.memory as any).supplying) {
+        const tombstone = creep.room.lookForAt(LOOK_TOMBSTONES, intendedCoord.x, intendedCoord.y)[0] as
+            | Tombstone
+            | undefined;
+        if (tombstone && tombstone.store.getUsedCapacity(RESOURCE_ENERGY) && creep.withdraw(tombstone, RESOURCE_ENERGY) === OK) {
+            return undefined;
+        }
+
+        const resource = creep.room.lookForAt(LOOK_RESOURCES, intendedCoord.x, intendedCoord.y)[0] as
+            | Resource
+            | undefined;
+        if (resource && resource.resourceType === RESOURCE_ENERGY && creep.pickup(resource) === OK) {
+            return undefined;
+        }
+    }
+
+    const other = creep.room.lookForAt(LOOK_CREEPS, intendedCoord.x, intendedCoord.y)[0] as Creep | undefined;
+
+    if (other && other.my && other.memory.role === 'miner') {
+        other.pull(creep);
+        (creep as any)._bePulled = true;
+        return undefined;
+    }
+
+    if (!other || !other.my || other.memory.role !== 'hauler') {
+        return undefined;
+    }
+
+    const otherHeap = getRushCreepHeap(other.name);
+    if (otherHeap.relayed === Game.time || (other.memory as any).retreat) {
+        return undefined;
+    }
+    if ((creep.memory as any).supplying === (other.memory as any).supplying) {
+        if (!(creep.memory as any).supplying && (other as any)._bePulled) {
+            other.pull(creep);
+            (creep as any)._bePulled = true;
+            return undefined;
+        }
+    }
+
+    const otherIntent = otherHeap.intent as { x: number; y: number } | undefined;
+    if (!otherIntent || otherIntent.x !== creep.pos.x || otherIntent.y !== creep.pos.y) {
+        return undefined;
+    }
+
+    const supplier = (creep.memory as any).supplying ? creep : other;
+    const fetcher = (creep.memory as any).supplying ? other : creep;
+
+    if (supplier.store.getCapacity(RESOURCE_ENERGY) !== fetcher.store.getCapacity(RESOURCE_ENERGY)) {
+        return undefined;
+    }
+
+    if ((supplier.ticksToLive ?? CREEP_LIFE_TIME) <= 50) {
+        return undefined;
+    }
+
+    if (supplier.transfer(fetcher, RESOURCE_ENERGY) === OK) {
+        // 换向：记忆与堆一起对换（供/取身份互换后状态跟着走）
+        const mem1 = Memory.creeps[creep.name];
+        const mem2 = Memory.creeps[other.name];
+        Memory.creeps[creep.name] = mem2;
+        Memory.creeps[other.name] = mem1;
+
+        swapRushCreepHeap(creep.name, other.name);
+
+        getRushCreepHeap(creep.name).relayed = Game.time;
+        getRushCreepHeap(other.name).relayed = Game.time;
+
+        return other;
+    }
+
+    return undefined;
+};
+
 /**
  * 物流主流程（relay/porter 取能批次随后补齐）：
  * 已挂单搬运工继续供货；闲量搬运工先记加码信号，
@@ -314,6 +412,18 @@ export const manageLogistics = (room: Room, haulers: Creep[], creepsToFill: Cree
             if ((hauler as any).amount > 0) {
                 idlers.push(hauler);
             }
+        } else if (hauler.memory.role === 'hauler' && shouldRelay(room)) {
+            const relayTarget = getRelayTarget(hauler);
+            const relayRequest =
+                relayTarget && getRushCreepHeap(relayTarget.name).targetRequest
+                    ? (requests[(getRushCreepHeap(relayTarget.name).targetRequest as LogisticsRequest).id] as
+                        | LogisticsRequest
+                        | undefined)
+                    : undefined;
+            if (relayTarget && relayRequest) {
+                // 取能半程由 hauler 执行器承接（source 链批次接入）
+                runSupplier(relayTarget, relayRequest);
+            }
         }
     }
 
@@ -336,7 +446,20 @@ export const manageLogistics = (room: Room, haulers: Creep[], creepsToFill: Cree
     for (const hauler of idlers) {
         const heap = getRushCreepHeap(hauler.name);
         if (heap.targetRequest) {
-            runSupplier(hauler, heap.targetRequest as LogisticsRequest);
+            if (runSupplier(hauler, heap.targetRequest as LogisticsRequest) === OK) {
+                delete heap.targetRequest;
+            } else if (hauler.memory.role === 'hauler' && shouldRelay(room)) {
+                const relayTarget = getRelayTarget(hauler);
+                const relayRequest =
+                    relayTarget && getRushCreepHeap(relayTarget.name).targetRequest
+                        ? (requests[(getRushCreepHeap(relayTarget.name).targetRequest as LogisticsRequest).id] as
+                            | LogisticsRequest
+                            | undefined)
+                        : undefined;
+                if (relayTarget && relayRequest) {
+                    runSupplier(relayTarget, relayRequest);
+                }
+            }
             continue;
         }
 

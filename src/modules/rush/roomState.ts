@@ -58,3 +58,11 @@ export const getRushCreepHeap = (creepName: string): Record<string, any> => {
 export const clearRushCreepHeap = (creepName: string): void => {
     creepHeaps.delete(creepName);
 };
+
+/** 交换两名 creep 的堆缓存（relay 换向：身份互换后状态跟着走） */
+export const swapRushCreepHeap = (nameA: string, nameB: string): void => {
+    const a = creepHeaps.get(nameA);
+    const b = creepHeaps.get(nameB);
+    creepHeaps.set(nameA, b);
+    creepHeaps.set(nameB, a);
+};
