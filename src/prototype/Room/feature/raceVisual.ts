@@ -238,13 +238,13 @@ export default class RaceVisual extends Room {
         const push = (text: string, color: string) => rows.push([{ text, color, x: 0.5 }]);
 
         const maxed = level >= 8;
-        push(maxed ? `冲级 lv8 满级` : `冲级 lv${level} → lv${level + 1}`, C.header);
+        push(maxed ? `冲级 RCL8 满级` : `冲级 RCL${level} → RCL${level + 1}`, C.header);
         if (maxed) {
             push(`${bar(1)} 满级`, C.good);
         } else {
             push(`${bar(progress / barPts)} ${(progress / barPts * 100).toFixed(0)}% ${fmtTick(progress)}/${fmtTick(barPts)}`, C.info);
             push(`速率 ${winRate.toFixed(1)}/t (全程均 ${totalRate.toFixed(1)})`, rateColor(winRate));
-            push(`预计 lv${level + 1} 还需 ${isFinite(etaTicks) ? fmtTick(etaTicks) + 't' : '?'}`, C.warn);
+            push(`预计 RCL${level + 1} 还需 ${isFinite(etaTicks) ? fmtTick(etaTicks) + 't' : '?'}`, C.warn);
         }
         push(`── 分段目标 ─────────`, C.section);
         for (const seg of mem.segments ?? []) {
@@ -254,15 +254,15 @@ export default class RaceVisual extends Room {
                 : `≤${fmtTick(seg.target)}`;
             if (seg.achievedAt !== undefined) {
                 const grade = seg.failed ? '判废' : (seg.behind ? '合格' : '达成');
-                push(`lv${seg.level} ${limit} ${grade} ${fmtTick(seg.achievedAt)}`, seg.failed ? C.bad : seg.behind ? C.warn : C.good);
+                push(`RCL${seg.level} ${limit} ${grade} ${fmtTick(seg.achievedAt)}`, seg.failed ? C.bad : seg.behind ? C.warn : C.good);
             } else if (seg.failed) {
-                push(`lv${seg.level} ${limit} 已超时${fmtTick(seg.elapsed || 0)} 判废`, C.bad);
+                push(`RCL${seg.level} ${limit} 已超时${fmtTick(seg.elapsed || 0)} 判废`, C.bad);
             } else {
                 const etaText = seg.eta !== undefined ? fmtTick(seg.eta) : '?';
-                push(`lv${seg.level} ${limit} 已${fmtTick(seg.elapsed || 0)} ETA ${etaText}${seg.behind ? ' 落后' : ''}`, seg.behind ? C.warn : C.info);
+                push(`RCL${seg.level} ${limit} 已${fmtTick(seg.elapsed || 0)} ETA ${etaText}${seg.behind ? ' 落后' : ''}`, seg.behind ? C.warn : C.info);
             }
         }
-        if (mem.failed) push(`attempt 判废 lv${mem.failedSegment} 超段`, C.bad);
+        if (mem.failed) push(`attempt 判废 RCL${mem.failedSegment} 超段`, C.bad);
         push(`── 能量管线 ─────────`, C.section);
         push(`孵化能量 ${bar(this.energyAvailable / Math.max(1, this.energyCapacityAvailable), 6)} ${this.energyAvailable}/${this.energyCapacityAvailable}`, C.text);
         push(
@@ -295,7 +295,7 @@ export default class RaceVisual extends Room {
             const prev = mem.levels[l - 1];
             const seg = l > 1 && prev ? mem.levels[l] - prev : 0;
             milestones.push({
-                text: `lv${l} ${fmtTick(Math.max(0, seg))}(${fmtTick(at)})`,
+                text: `RCL${l} ${fmtTick(Math.max(0, seg))}(${fmtTick(at)})`,
                 color: l === level ? C.good : C.muted,
                 x: milestones.length % 2 === 0 ? 0.5 : 7.5,
             });
