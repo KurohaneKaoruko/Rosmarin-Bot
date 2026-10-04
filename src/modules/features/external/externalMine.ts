@@ -648,6 +648,9 @@ export class ExternalMineState {
     // 下一轮扩图写回，表现为「莫名其妙自动乱加外矿」。上限 4 与触发条件对齐。
     static autoAddNearbyEnergyTargets(sourceRoomName: string, known: string[]): string[] {
         if (known.length > 0) return known;
+        // 满级房双保险：调用侧已闸，这里再挡一层（其他调用方未来接入也不会越界）
+        const srcRoom = Game.rooms[sourceRoomName];
+        if (srcRoom?.controller?.my && srcRoom.controller.level >= 8) return known;
         const match = sourceRoomName.match(/^([WE])(\d+)([NS])(\d+)$/);
         if (!match) return known;
         const px = match[1] === 'E' ? Number(match[2]) : -Number(match[2]) - 1;
@@ -2386,8 +2389,10 @@ export class ExternalMine {
 
         let targetRooms = ExternalMine.getManagedTargetRooms(room, 'energy');
 
-        // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个
-        if (ExternalMine.getRoomMode(room) === 'rush' && targetRooms.length < 4
+        // rush 自动扩图：目标不足时自动把一圈相邻房间加入列表（幂等），上限 4 个。
+        // RCL8 满级不再自动扩图：满级房的升级需求已结束，自动加房只会白耗孵化预算；
+        // 只许采集手动添加的外矿（列表为空 = 不采，不再自动引导）
+        if (ExternalMine.getRoomMode(room) === 'rush' && room.level < 8 && targetRooms.length < 4
             && runState.canRunSecondaryAction && isRoomTickAligned(room.name, 100, 7)) {
             targetRooms = ExternalMineState.autoAddNearbyEnergyTargets(room.name, targetRooms);
         }
