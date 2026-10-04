@@ -1,9 +1,8 @@
 import { getRoomData, getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
-import { runRushRoom } from '@/modules/rush/roomController';
-import { manageControllerContainer } from '@/modules/rush/manageConstruction';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
+import { RoadBuilder } from '@/modules/features/external/externalRoad';
 
 export default class RoomExecute extends Room {
     exec() {
@@ -13,26 +12,19 @@ export default class RoomExecute extends Room {
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
         const profile = getRoomModeProfile(this);
-        // rush 房间经济段（任务池 + 孵化）由移植主循环整体接管，其余框架段照常
-        const isRush = getRoomMode(this) === 'rush';
         this.updateEnergyState(false);
         // 冲级面板（仅 rush）：逐 tick 渲染，放 QoS 节流之前——面板不能有缺帧
         this.raceVisual();
-
-        if (isRush) {
-            runRushRoom(this);
-        } else {
-            // 更新任务池
-            this.MissionUpdate();
-        }
+        // 更新任务池
+        this.MissionUpdate();
 
         // 主动防御处理（叠加房间相位错峰，defenseInterval=1 时保持每 tick）
         if (profile.defenseInterval === 1 || isRoomTickAligned(this.name, profile.defenseInterval)) {
             this.activeDefense();
         }
 
-        // 管理房间中的建筑物（rush 房间孵化由移植主循环消费，不走旧 spawn 路径）
-        if (!isRush) this.SpawnWork();
+        // 管理房间中的建筑物
+        this.SpawnWork();
         this.TowerWork();
         this.LinkWork();
         this.TerminalWork();
@@ -49,9 +41,9 @@ export default class RoomExecute extends Room {
         this.autoBuild();        // 自动建筑
         // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
         if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
-        // rush：cc 生命周期（RCL2 起放置保活、唯一 cc、链接期销毁）由移植主循环接管
-        if (isRush && isRoomTickAligned(this.name, 150)) {
-            manageControllerContainer(this);
+        // rush：控制器容器 RCL2 起例行保活（升级专线的主缓冲，被毁/低耐久自动补）
+        if (getRoomMode(this) === 'rush' && isRoomTickAligned(this.name, 150)) {
+            RoadBuilder.ensureControllerContainer(this);
         }
         if (profile.facilities) {
             this.autoLab();          // 自动Lab合成
