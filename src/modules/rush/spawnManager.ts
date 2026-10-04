@@ -5,18 +5,9 @@
  */
 import { ROLES } from './constants';
 import { getBodyCost } from './creepUtils';
+import { GenCreepName } from '@/modules/utils';
 import { clearRushCreepHeap, getRushTickState } from './roomState';
 import type { RushSpawnRequest } from './types';
-
-declare global {
-    interface Memory {
-        /** creep 名计数器（名称生成防重，全局共享） */
-        creepNameCounter?: number;
-    }
-}
-
-/** 名称计数上限 */
-const MAX_CREEP_NAME_COUNTER = 1 << 16;
 
 /** spawnUsage EMA 窗口（= creep 寿命） */
 const CREEP_LIFE_TIME = 1500;
@@ -132,44 +123,8 @@ const spawnByRequest = (room: Room, spawn: StructureSpawn, request: RushSpawnReq
     return result;
 };
 
-/** 生成唯一名：角色短码_房名编码36进制计数（全局计数器） */
-const generateCreepName = (roleInitial: string, roomName: string): string => {
-    Memory.creepNameCounter = Memory.creepNameCounter || 0;
-
-    let creepName: string;
-
-    do {
-        Memory.creepNameCounter += 1;
-
-        if (Memory.creepNameCounter >= MAX_CREEP_NAME_COUNTER) {
-            Memory.creepNameCounter = 0;
-        }
-
-        const encodedCounter = (encodeRoomName(roomName) << 16) | Memory.creepNameCounter;
-
-        creepName = `${roleInitial}_${encodedCounter.toString(36)}`;
-    } while (Game.creeps[creepName]);
-
-    return creepName;
-};
-
-/** 房名 → 16bit 编码（W0/E1、N0/S1 + 坐标） */
-const encodeRoomName = (roomName: string): number => {
-    const match = roomName.match(/^([WE])(\d+)([NS])(\d+)$/);
-    if (!match) throw new Error('Invalid room name');
-
-    const [, horizontalDir, horizontalCoord, verticalDir, verticalCoord] = match;
-
-    const horizontalPrefix = horizontalDir === 'W' ? 0 : 1;
-    const verticalPrefix = verticalDir === 'N' ? 0 : 1;
-
-    return (
-        (horizontalPrefix << 15) |
-        (verticalPrefix << 14) |
-        (parseInt(horizontalCoord, 10) << 7) |
-        parseInt(verticalCoord, 10)
-    );
-};
+/** 生成唯一名：本地命名约定（GenCreepName），角色短码作类型代码 */
+const generateCreepName = (roleInitial: string, _roomName: string): string => GenCreepName(roleInitial);
 
 /** 登记到房间花名册（cacheCreeps 每 tick 重建在岗 roster 并清理亡者） */
 const registerRequest = (request: RushSpawnRequest, name: string): void => {
