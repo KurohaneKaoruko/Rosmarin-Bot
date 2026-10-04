@@ -45,6 +45,8 @@ export default class RoomExecute extends Room {
         if (getRoomMode(this) === 'rush' && isRoomTickAligned(this.name, 150)) {
             RoadBuilder.ensureControllerContainer(this);
         }
+        // 容器唯一性巡检：产出锚点圈各至多 1 容器/工地，残留与重复清退（链接期 controller 圈退役）
+        if (isRoomTickAligned(this.name, 150)) this.auditRoomContainers();
         if (profile.facilities) {
             this.autoLab();          // 自动Lab合成
             this.autoFactory();      // 自动Factory生产

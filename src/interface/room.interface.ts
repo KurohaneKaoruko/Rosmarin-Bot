@@ -331,7 +331,10 @@ interface Room {
      * 确保控制器旁有能量缓冲工地（storage/terminal，冲级/常驻升级的取能配套）
      */
     ensureControllerBufferSite(): void;
-    
+
+    /** 容器唯一性巡检：产出锚点圈各至多 1 容器/工地，残留清退 */
+    auditRoomContainers(): void;
+
     /** 
      * 获取房间所有者名字
      * @returns 房间控制器所有者的用户名，无所有者返回空字符串

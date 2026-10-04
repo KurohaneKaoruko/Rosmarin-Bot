@@ -15,6 +15,7 @@ import ObserveControl from "./structure/observeControl"
 
 import AutoMarket from "./feature/autoMarket"
 import AutoBuild from "./feature/autoBuild"
+import ContainerAudit from "./feature/containerAudit"
 import AutoLab from "./feature/autoLab"
 import AutoFactory from "./feature/autoFactory"
 import AutoPowerSpawn from "./feature/autoPowerSpawn"
@@ -50,6 +51,7 @@ const plugins = [
     
     AutoMarket,     // 自动市场交易
     AutoBuild,      // 自动建筑
+    ContainerAudit, // 容器唯一性巡检
     AutoLab,        // 自动Lab合成
     AutoFactory,    // 自动Factory生产
     AutoPowerSpawn, // 自动PowerSpawn
