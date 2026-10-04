@@ -1050,15 +1050,15 @@ export const getUpgraderTarget = (room: Room): number => {
     if (mode === 'rush') {
         // 满级房冲级爬一孵出来就会走退役流程，别再下单
         if (room.level >= 8) return 0;
-        // rush 冲级目标是最快升级：数量由工位上限决定（不是预算硬限——
-        // 预算只影响体型：预算少→体型缩小但数量不减，source 3000+t 回10/t 是充足能源）
-        // 产能瓶颈在采集端而非预算端；多余的升级工最多空转等待，不会死。
-        // RCL4 段目标 41/t：12 只 × 3W 已不够，硬顶只防怪异地形，实际由工位/预算封顶
-        const rushSlots = Math.max(
+        // 预算决定编制（参考 manageUpgrade 口径）：numWork < maxWork 才补，
+        // maxWork = 净收入 × 1.0~1.2——收入是升级火力的硬上界，数量超预算 =
+        // 火力空转（「大部分升级工没能量用」的根因就是把工位下限当编制）。
+        // 工位/人口帽只作上限：站不下的多孵也白孵
+        const slots = Math.max(
             getRushUpgradeSlotCap(room),
             getControllerUpgradeSlotCap(room),
         );
-        return clamp(Math.max(target, rushSlots), 1, 24);
+        return clamp(target, 1, Math.max(1, Math.min(popCap, slots)));
     }
 
     if (mode === 'high' || mode === 'mini') {
