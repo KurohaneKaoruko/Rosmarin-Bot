@@ -3,6 +3,8 @@
 > 方向修订（用户决定，2026-10-03）：放弃「在既有系统上打补丁」的路线，改为**整建制移植**一套自包含的 rush 经济核心（孵化决策/体型生成/能量物流/升级预算/建造编排），RCL1-6 单房冲级路径整体走新模块；既有系统上的全部 rush 补丁下线。函数级移植清单与逐项校验表见 `.other/rush-port-plan.md`（内部工作文档）。
 > 以下任务取代原 1-5 组任务清单；已完成并保留的部分：分段监控（组1）、容器唯一 cc 修复、分段双档表。
 > 方向修订（用户决定，2026-10-04）：**只取参考的升级效率**——creep 命名（本地 GenCreepName）、代码架构、自动布局（本地 autoBuild）全部保持本地不变。据此：basePlan 移植范围改为锚点适配器（startCoord/source 容器锚点/controller link 位，供 sourceInfos 与取能锚点）；CONTROLLER_STRUCTURES 分层与建造 MinHeap 不再移植（工地放置归 autoBuild）；rush 孵化的 creep 名走本地命名。
+> 方向修订（用户决定，2026-10-05）：`928103c` 已回退 rush 模块对既有系统的侵入性接线（rush 代码限制在 `src/modules/rush/` 内，不接入房间主循环）；`b420087` 将 controller 容器（cc）全生命周期收口到 `RoadBuilder.ensureControllerContainer` 单一机制并根除建删循环。据此调整：**4.2 取消**（其移植对象「每次建造检查尝试放置容器」即被根除的建删循环）；**3.5 暂缓**（接线前提已被 928103c 撤销）；**5.1 冻结**（下线清单的前提「移植版接入并实测达标」未成立；energyLogistics 的结构处置由 `modular-architecture-refactor` 按下沉+倒置承接；636c7d0/7ecadc7/c44a418 刚调优相关链路，不再单独动刀）；5.3/5.4 的 attempt 以恢复接线为前置。
+> **终态修订（用户决定，2026-10-05）**：TS 移植路线整体废弃——方案已切换为「race 分支直接内置完整实现」（`src/branch/race/racebot/`），不再采用无法正常运行的移植版。`src/modules/rush/` 待删除（唯一外部消费 `roomWorkforce.getRoomNetIncome` 需 verbatim 迁入，保持行为零变化），`test/rush-*.test.ts` 随之移除；删除批次并入 `modular-architecture-refactor`（先行重构，本变更冻结暂存，重构完成后归档处置）。
 
 ## 1. 移植骨架
 
@@ -25,17 +27,17 @@
 - [x] 3.2 移植 relay 接力（颗粒、对穿换向、TTL 保护、往复防抖、pull 搭车），验证 vitest 桩测试覆盖换向与防抖
 - [x] 3.3 移植溢流沉淀（空闲搬运工反馈信号 + 控制器容器位 drop + upgrader 取能顺序），验证 vitest 桩测试覆盖有/无消费者两分支
 - [x] 3.4 移植 controller 容器生命周期（RCL2 起尝试放置、RCL6 换 link 时销毁、唯一 cc），验证 vitest 桩测试覆盖放置/销毁/幂等
-- [ ] 3.5 移植 distributor/porter（storage 后的中心配送），本地冒烟验证 storage 建成后启用
+- 3.5 （作废，2026-10-05 终态修订）移植版整体废弃，distributor/porter 不再移植——race 分支新方案的完整实现已含对应机制
 
 ## 4. 建造与编排移植
 
-- [x] 4.1 移植 basePlan 锚点适配与 source 链引导（原「CONTROLLER_STRUCTURES 分层 + 建造 MinHeap」按用户决定不移植：布局与工地放置保持本地 autoBuild，basePlan 仅作锚点适配器），验证 vitest 桩测试覆盖锚点推导与 source 链流程
-- [ ] 4.2 移植 controller 容器建造检查节奏（1<rcl<5 每次建造检查尝试）与建筑复查周期（500t/降级触发），验证与 3.4 的唯一 cc 协同
+- 4.1 移植 basePlan 锚点适配与 source 链引导（原「CONTROLLER_STRUCTURES 分层 + 建造 MinHeap」按用户决定不移植：布局与工地放置保持本地 autoBuild，basePlan 仅作锚点适配器），验证 vitest 桩测试覆盖锚点推导与 source 链流程
+- 4.2 （取消，2026-10-05）移植对象「每次建造检查尝试放置容器」即 b420087 根除的建删循环；cc 生命周期归 `RoadBuilder.ensureControllerContainer` 单一机制
 - [x] 4.3 移植 rclRecord 秒表接入分段监控（替换判废表数据源为 Thresholds.RUSH 双档），验证面板与落盘字段一致
 
 ## 5. 下线与回归
 
-- [ ] 5.1 按 `.other/rush-port-plan.md` 下线清单删除被替换的 rush 补丁（rushBody/roomWorkforce rush 分支/spawnRules rush 分支/spawnMission rush 块/energyLogistics/carrier 闸门），验证 `pnpm build` 无残留引用
-- [ ] 5.2 非 rush 模式（low/main/high/mini）回归抽查：孵化、物流、升级路径零变化，验证既有用例与新桩测试全绿
-- [ ] 5.3 私服完整 attempt：五段达成/合格线对照（lv2 500/1k、lv3 3k/5k、lv4 10k、lv5 20k、lv6 40k），逐段归因快照归档
-- [ ] 5.4 未达标段迭代：按归因快照调整移植参数并重跑，直至达标或记录差距与原因
+- 5.1 （移交，2026-10-05）下线清单前提「移植版替换旧链路」已消失；`src/modules/rush/` 删除与 `getRoomNetIncome` 迁移并入 `modular-architecture-refactor` 解环批次；既有 rush 补丁分支的去留随官服 rush 模式定位在重构后处理
+- 5.2 （移交）非 rush 模式回归由 `modular-architecture-refactor` 各批次验证承担（tsc + 三入口构建 + 本地服快照对比）
+- 5.3 （移交 race 分支新方案）五段 attempt 对照随 racebot 完整实现的 attempt 循环进行，不属本变更
+- 5.4 （移交 race 分支新方案）未达标段迭代随新方案 attempt 循环进行
