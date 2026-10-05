@@ -5,9 +5,11 @@
 //     "screeps.com": { "protocol": "...", "hostname": "...", "port": 443, "path": "/",
 //       "accounts": { "账号名": { "token": "...", "branch": "..." } } },
 //     "local": { "copyPath": "..." }   // 纯本地复制目标, 无连接信息也无账号
-//   }
+//   },
+//   "branches": { "main": { "path": "./src/main.ts" }, "local": { "path": "./src/branch/local/main.ts" } }
 // }
-// branch 是代码分支, 属于账号级配置 (各账号可不同); 缺省时上传插件兜底为 main
+// branches 在根级: 分支名 → 构建入口路径; 选分支即决定「打包哪个入口」+「上传到服务器哪个 branch」
+// 账号上也可挂 branch (accounts.<账号名>.branch), 供直接跑 rolldown 时兜底; 走 submit 时由 branches 的键覆盖
 // 上传目标 = 服务器连接信息 + 账号凭据 合并; 命令行参数用 server@account 指定
 import fs from 'fs';
 import path from 'path';
@@ -24,6 +26,9 @@ export const loadSecret = () => {
 };
 
 export const getServers = (secret) => secret?.servers ?? {};
+
+/** 根级分支表: 分支名 → { path: 构建入口 } */
+export const getBranches = (secret) => secret?.branches ?? {};
 
 // 某台服务器下的账号列表 (local 等纯复制目标没有 accounts)
 export const getServerAccounts = (server) => server?.accounts ?? {};

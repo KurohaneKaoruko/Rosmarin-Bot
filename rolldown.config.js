@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import screeps from './plugins/plugin-screeps.js';
 import { loadSecret, resolveTarget } from './scripts/secret.js';
+import { copyDirInto, deployToLocalClient, prepareSourceMap } from './plugins/upload.js';
 import { defineConfig } from 'rolldown';
 import { minify as terserMinify } from 'terser';
 
@@ -12,29 +13,6 @@ const filePath = {
 const formatDisplayPath = (targetPath) => {
 	const relativePath = path.relative(process.cwd(), targetPath);
 	return relativePath ? relativePath.split(path.sep).join('/') : '.';
-};
-
-const collectFiles = (dir) => {
-	if (!fs.existsSync(dir)) return [];
-	const entries = fs.readdirSync(dir, { withFileTypes: true });
-	const files = [];
-	for (const entry of entries) {
-		const fullPath = path.join(dir, entry.name);
-		if (entry.isDirectory()) files.push(...collectFiles(fullPath));
-		else files.push(fullPath);
-	}
-	return files;
-};
-
-const copyFiles = ({ fromDir, toDir }) => {
-	const sourceDir = path.resolve(process.cwd(), fromDir);
-	const files = collectFiles(sourceDir);
-	for (const file of files) {
-		const relative = path.relative(sourceDir, file);
-		const target = path.join(toDir, relative);
-		fs.mkdirSync(path.dirname(target), { recursive: true });
-		fs.copyFileSync(file, target);
-	}
 };
 
 const cleanDistPlugin = ({ distDir }) => ({
@@ -48,32 +26,35 @@ const cleanDistPlugin = ({ distDir }) => ({
 const copyWasmToDistPlugin = ({ distDir }) => ({
 	name: 'copy-wasm-to-dist',
 	writeBundle() {
-		copyFiles({ fromDir: filePath.wasmDir, toDir: distDir });
+		copyDirInto(path.resolve(process.cwd(), filePath.wasmDir), distDir);
+	}
+});
+
+// 放在 obfuscate 之后: terser 会把 map 重新写成「压缩后 → 源码」的复合映射, 整理要在那之后做
+const prepareSourceMapPlugin = ({ outputFile }) => ({
+	name: 'prepare-sourcemap',
+	writeBundle() {
+		const mapJs = prepareSourceMap({
+			distDir: path.dirname(path.resolve(process.cwd(), outputFile)),
+			outputFile: path.basename(outputFile)
+		});
+		if (!mapJs) return;
+		const mapSizeMb = (fs.statSync(mapJs).size / 1024 / 1024).toFixed(2);
+		console.log(`[build] sourcemap: ${formatDisplayPath(mapJs)} (${mapSizeMb}MB)`);
 	}
 });
 
 const copyToLocalClientPlugin = ({ outputFile, copyPath }) => ({
 	name: 'copy-to-local-client',
 	writeBundle() {
-		const distMain = path.resolve(process.cwd(), outputFile);
-		const distMap = `${distMain}.map`;
-		const displayCopyPath = formatDisplayPath(copyPath);
+		console.log(`[submit] 阶段 2/2: 复制到本地客户端 -> ${formatDisplayPath(copyPath)}`);
 
-		console.log(`[submit] 阶段 2/2: 开始复制到本地客户端 -> ${displayCopyPath}`);
-
-		fs.mkdirSync(copyPath, { recursive: true });
-		fs.copyFileSync(distMain, path.join(copyPath, path.basename(distMain)));
-		copyFiles({ fromDir: filePath.wasmDir, toDir: copyPath });
-
-		if (fs.existsSync(distMap)) {
-			const mapContent = fs.readFileSync(distMap, 'utf8');
-			const prefix = 'module.exports = ';
-			const outMapContent = mapContent.trim().startsWith(prefix) ? mapContent : `${prefix}${mapContent};`;
-			const outMapFile = path.join(copyPath, `${path.basename(distMain)}.map.js`);
-			fs.writeFileSync(outMapFile, outMapContent);
-		}
-
-		console.log(`[submit] 阶段 2/2: 复制完成 -> ${displayCopyPath}`);
+		deployToLocalClient({
+			distDir: path.dirname(path.resolve(process.cwd(), outputFile)),
+			outputFile: path.basename(outputFile),
+			wasmDir: path.resolve(process.cwd(), filePath.wasmDir),
+			copyPath
+		});
 	}
 });
 
@@ -207,10 +188,20 @@ export default defineConfig(() => {
 	if (!dest) console.log('未指定目标, 代码将被编译但不会上传');
 	else if (!config) throw new Error('无效目标，请检查 .secret.json 中的 servers 配置');
 
-	// 入口按服务器规则档解析（.secret.json 服务器条目的 entry 字段，缺省 main = 官服）
-	const variant = config?.entry ?? 'main';
-	const input = variant === 'main' ? 'src/main.ts' : `src/branch/${variant}/main.ts`;
-	console.log(`[build] 入口: ${input} (规则档: ${variant})`);
+	// NO_UPLOAD=1: 仅打包指定入口，不上传/不复制（构建基线与本地验证用）
+	const noUpload = process.env.NO_UPLOAD === '1';
+	if (noUpload) console.log('[build] NO_UPLOAD=1: 仅打包，不上传/不复制');
+
+	// 入口按分支解析：VARIANT/服务器 entry 命中的分支名 → .secret.json 根级 branches[分支].path
+	// 缺省 main；branches 未配置时回退旧约定 src/main.ts / src/branch/<variant>/main.ts
+	const variant = process.env.VARIANT ?? config?.entry ?? 'main';
+	const branchPath = secret?.branches?.[variant]?.path;
+	const input = branchPath
+		?? (variant === 'main' ? 'src/main.ts' : `src/branch/${variant}/main.ts`);
+	if (branchPath && !fs.existsSync(path.resolve(process.cwd(), branchPath))) {
+		throw new Error(`分支 ${variant} 的入口不存在: ${branchPath}`);
+	}
+	console.log(`[build] 入口: ${input} (分支: ${variant})`);
 
 	const outputFile = 'dist/main.js';
 	const distDir = path.dirname(path.resolve(process.cwd(), outputFile));
@@ -226,11 +217,13 @@ export default defineConfig(() => {
 		mode: obfuscateMode
 	});
 
-	const pluginDeploy = config?.copyPath
-		? copyToLocalClientPlugin({ outputFile, copyPath: config.copyPath })
-		: config
-			? screeps({ config })
-			: undefined;
+	// 上传目标 branch: submit 选定的分支经 BRANCH 传入, 覆盖账号级 branch; 缺省用分支名(与入口同名)
+	const deployBranch = process.env.BRANCH ?? config?.branch ?? variant;
+	const pluginDeploy = !config || noUpload
+		? undefined
+		: config.copyPath
+			? copyToLocalClientPlugin({ outputFile, copyPath: config.copyPath })
+			: screeps({ config: { ...config, branch: deployBranch } });
 
 	return {
 		input,
@@ -252,6 +245,7 @@ export default defineConfig(() => {
 			cleanDistPlugin({ distDir }),
 			copyWasmToDistPlugin({ distDir }),
 			pluginObfuscate,
+			prepareSourceMapPlugin({ outputFile }),
 			pluginDeploy
 		].filter(Boolean),
 		external: (id) => {
