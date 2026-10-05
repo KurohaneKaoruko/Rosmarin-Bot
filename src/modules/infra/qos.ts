@@ -1,3 +1,5 @@
+import { getStatsMemory } from '@/modules/shared/memory';
+import { ROLES } from '@/constant/CreepConstant';
 /**
  * QoS（Quality of Service）档位
  * - normal：资源充足，模块按正常频率运行
@@ -82,9 +84,9 @@ function ensureStatsRoot() {
 }
 
 /**
- * 每 tick 计算 QoS 档位，并同步到 global 与 Memory.stats
+ * 每 tick 计算 QoS 档位，并同步到 global 与 getStatsMemory()
  * - global.QoS：便于模块在运行期直接读取（不写 Memory 也可用）
- * - Memory.stats.qos：便于 HUD/日志侧观测（本项目已有 Statistics 模块）
+ * - getStatsMemory().qos：便于 HUD/日志侧观测（本项目已有 Statistics 模块）
  */
 export function updateQoS(): QoSState {
     const bucket = Number(Game.cpu.bucket || 0);
@@ -103,7 +105,7 @@ export function updateQoS(): QoSState {
 
     (global as any).QoS = state;
     ensureStatsRoot();
-    (Memory.stats as any).qos = state;
+    (getStatsMemory() as any).qos = state;
 
     return state;
 }
@@ -169,20 +171,20 @@ export const isTickAligned = (mod: number, offset = 0, tick = Game.time) => {
  */
 export const ROLE_CPU_FREEZE_PRIORITY: Record<string, number> = {
     // —— 最先冻结：升级类 ——
-    'upgrader': -10,
-    'up-upgrade': -10,
-    'aid-upgrade': -8,
+    [ROLES.upgrader]: -10,
+    [ROLES['up-upgrade']]: -10,
+    [ROLES['aid-upgrade']]: -8,
     // —— 其次：建造/维修/清理/侦察 ——
-    'worker': -5,
+    [ROLES.worker]: -5,
     'cleaner': -4,
-    'scout': -3,
-    'up-repair': -2,
+    [ROLES.scout]: -3,
+    [ROLES['up-repair']]: -2,
     // —— 保命链：正分，emergency 永不冻结（显式登记以表达牺牲顺序）——
-    'harvester': 10,
-    'universal': 5,
-    'carrier': 1,
-    'transporter': 1,
-    'manager': 1,
+    [ROLES.harvester]: 10,
+    [ROLES.universal]: 5,
+    [ROLES.carrier]: 1,
+    [ROLES.transporter]: 1,
+    [ROLES.manager]: 1,
 };
 
 /** emergency 档下该角色是否应被冻结（跳过本 tick 执行） */
@@ -192,7 +194,7 @@ export function shouldSkipCreepInEmergency(role?: string): boolean {
     return (ROLE_CPU_FREEZE_PRIORITY[role || ''] ?? 0) < 0;
 }
 
-const qosApi: QoSAPI = {
+export const qos: QoSAPI = {
     updateQoS,
     getQoS,
     shouldRun,
@@ -206,12 +208,10 @@ const qosApi: QoSAPI = {
  * 说明：仅需在入口 main.ts 引入本模块，即可自动完成挂载。
  */
 export function mountQoS(): QoSAPI {
-    if (!global.qos) global.qos = qosApi;
+    if (!global.qos) global.qos = qos;
     return global.qos;
 }
 
-// 模块加载即挂载，供全局直接调用 global.qos.xxx
-mountQoS();
 
 declare global {
     namespace NodeJS {

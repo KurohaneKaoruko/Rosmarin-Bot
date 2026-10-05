@@ -1,3 +1,5 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { parseShardRoomName } from '@/modules/shared/shardRoom';
 import { cleanupOutboxAgainstRemoteAcks, getKnownShardNames, publishExpandCreepCounts, publishExpandPlanSummary, publishExpandStatus, pullIncomingCommands, readInterShardLocalRoot, readInterShardRemoteRoot, removePublishedExpandPlan } from '@/modules/features/interShard';
 import { getBotMemory, getMissionPools } from '@/modules/shared/memory';
@@ -69,7 +71,7 @@ const getExpandCreepCounts = (() => {
 
 const getExpandSpawnCounts = (room: Room, expandId: string): Record<string, number> => {
     const counts: Record<string, number> = {};
-    const tasks = room.getAllMissionFromPool('spawn') || [];
+    const tasks = room.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
     for (const task of tasks) {
         if (!task || task.type !== 'spawn') continue;
         const mem = (task.data as any)?.memory;
@@ -204,32 +206,32 @@ const runOnePlanInRoom = (mem: LocalExpandMemory, room: Room, plan: LocalExpandP
     const spawnCounts = getExpandSpawnCounts(room, plan.id);
     const roleCount = (role: string) => (creepCounts[plan.id]?.[role] || 0) + (spawnCounts[role] || 0);
 
-    const needClaimer = Math.max(0, plan.desired.claimer - roleCount('claimer'));
-    const needBuilder = Math.max(0, plan.desired.builder - roleCount('aid-build'));
-    const needCarry = Math.max(0, plan.desired.carry - roleCount('aid-carry'));
-    const needUpgrader = Math.max(0, plan.desired.upgrader - roleCount('aid-upgrade'));
+    const needClaimer = Math.max(0, plan.desired.claimer - roleCount(ROLES.claimer));
+    const needBuilder = Math.max(0, plan.desired.builder - roleCount(ROLES['aid-build']));
+    const needCarry = Math.max(0, plan.desired.carry - roleCount(ROLES['aid-carry']));
+    const needUpgrader = Math.max(0, plan.desired.upgrader - roleCount(ROLES['aid-upgrade']));
 
     if (needClaimer > 0) {
         const spawnName = `EXP-CLAIM#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'claimer', { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, ROLES.claimer, { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needBuilder > 0) {
         const spawnName = `EXP-BUILD#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-build', { homeRoom: room.name, sourceRoom: plan.targetRoom, targetRoom: plan.targetRoom, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, ROLES['aid-build'], { homeRoom: room.name, sourceRoom: plan.targetRoom, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needCarry > 0) {
         const spawnName = `EXP-CARRY#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-carry', { homeRoom: room.name, sourceRoom: room.name, targetRoom: plan.targetRoom, resource: RESOURCE_ENERGY, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, ROLES['aid-carry'], { homeRoom: room.name, sourceRoom: room.name, targetRoom: plan.targetRoom, resource: RESOURCE_ENERGY, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }
     if (needUpgrader > 0) {
         const spawnName = `EXP-UPGRADE#${plan.id}`;
-        const rc = room.SpawnMissionAdd(spawnName, '', -1, 'aid-upgrade', { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
+        const rc = room.SpawnMissionAdd(spawnName, '', -1, ROLES['aid-upgrade'], { homeRoom: room.name, targetRoom: plan.targetRoom, expandId: plan.id } as any);
         if (rc === OK) plan.lastSpawnTick = Game.time;
         return;
     }

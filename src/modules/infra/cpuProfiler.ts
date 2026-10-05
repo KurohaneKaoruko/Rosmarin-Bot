@@ -1,8 +1,9 @@
+import { getStatsMemory } from '@/modules/shared/memory';
 /**
  * CPU 观测（Tier 0-4）。
  *
- * 默认关闭、生产零开销；开启方式：控制台执行 Memory.stats.profiler = true
- * （关闭：delete Memory.stats.profiler）。
+ * 默认关闭、生产零开销；开启方式：控制台执行 getStatsMemory().profiler = true
+ * （关闭：delete getStatsMemory().profiler）。
  *
  * - profileStage：阶段采样，滚动 50 tick 均值（rooms/creeps/start/end…）
  * - recordObjectCost：单对象成本，仅记录最近一个采样 tick 的 top 排行
@@ -56,5 +57,5 @@ export const getProfilerReport = () => ({
         }))
         .sort((a, b) => b.avg - a.avg),
     lastTickTopObjects: [...lastTickObjectCosts].sort((a, b) => b.cpu - a.cpu).slice(0, 20),
-    note: '开启: Memory.stats.profiler = true / 关闭: delete Memory.stats.profiler',
+    note: '开启: getStatsMemory().profiler = true / 关闭: delete getStatsMemory().profiler',
 });

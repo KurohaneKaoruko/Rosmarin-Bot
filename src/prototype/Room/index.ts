@@ -73,4 +73,6 @@ const plugins = [
     RoomExecute,    // 房间执行
 ]
 
-export default () => plugins.forEach(plugin => assignPrototype(Room, plugin))
+export default () => {
+    plugins.forEach(plugin => assignPrototype(Room, plugin))
+}

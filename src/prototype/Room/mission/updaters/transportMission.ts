@@ -1,3 +1,6 @@
+import { qos } from '@/modules/infra/qos';
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { compress } from '@/modules/shared/compress';
 import { getLabAB } from '@/modules/shared/labReservations';
 import { getRoomData, getStructData } from '@/modules/shared/memory';
@@ -194,10 +197,10 @@ export default class TransportMission extends Room {
         const highMode = getRoomModeProfile(this).highIntensity;
         // 常规升级已并入 worker，worker 空闲时会顶上控制器升级，也计入缓冲消费者
         const hasUpgradeConsumer =
-            (creepNum['worker'] || 0) +
-            (creepNum['upgrader'] || 0) +
-            (creepNum['aid-upgrade'] || 0) +
-            (creepNum['universal'] || 0) > 0;
+            (creepNum[ROLES.worker] || 0) +
+            (creepNum[ROLES.upgrader] || 0) +
+            (creepNum[ROLES['aid-upgrade']] || 0) +
+            (creepNum[ROLES.universal] || 0) > 0;
         if (!highMode && !hasUpgradeConsumer) return availableEnergy;
 
         const ticksToDowngrade = controller.ticksToDowngrade || 0;
@@ -243,7 +246,7 @@ export default class TransportMission extends Room {
         const source = this.storage || this.terminal;
         if (!source) return availableEnergy;
 
-        const checkAllLabs = global.qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
+        const checkAllLabs = qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset);
         const labs = this.lab.filter((lab: StructureLab) => {
             if (!lab) return false;
             const freeCap = lab.store.getFreeCapacity(RESOURCE_ENERGY) || 0;
@@ -270,7 +273,7 @@ export default class TransportMission extends Room {
 
     private fillPowerSpawnEnergy(availableEnergy: number, offset = 0) {
         if (this.level !== 8 || !this.powerSpawn || !this.storage) return availableEnergy;
-        if (!global.qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset)) return availableEnergy;
+        if (!qos.isTickAligned(THRESHOLDS.TICK.LAB_CHECK, offset)) return availableEnergy;
         if (this.powerSpawn.pos.inRangeTo(this.getCenter(), 1)) return availableEnergy;
 
         const amount = this.powerSpawn.store.getFreeCapacity(RESOURCE_ENERGY) || 0;
@@ -293,8 +296,8 @@ export default class TransportMission extends Room {
         if (this.getResAmount(RESOURCE_ENERGY) < requiredEnergy) return availableEnergy;
 
         const shouldFill = urgent
-            ? global.qos.isTickAligned(10, offset)
-            : global.qos.isTickAligned(20, offset);
+            ? qos.isTickAligned(10, offset)
+            : qos.isTickAligned(20, offset);
         if (!shouldFill) return availableEnergy;
 
         const cap = this.nuker.store.getFreeCapacity(RESOURCE_ENERGY) || 0;
@@ -364,12 +367,12 @@ export default class TransportMission extends Room {
      * @returns OK/false 等任务池写入结果
      */
     TransportMissionAdd(level: number, data: TransportTask) {
-        let existingTaskId = this.checkSameMissionInPool('transport', 'transport',
+        let existingTaskId = this.checkSameMissionInPool(MISSION_POOLS.transport, 'transport',
                     {source:data.source, target:data.target, resourceType:data.resourceType} as any);
         if (existingTaskId) {
-            return this.updateMissionPool('transport', existingTaskId, {level, data});
+            return this.updateMissionPool(MISSION_POOLS.transport, existingTaskId, {level, data});
         } else {
-            return this.addMissionToPool('transport', 'transport', level, data);
+            return this.addMissionToPool(MISSION_POOLS.transport, 'transport', level, data);
         }
     }
 
@@ -413,7 +416,7 @@ export default class TransportMission extends Room {
             return target.store.getFreeCapacity(data.resourceType) > 0 && data.amount > 0;
         }
 
-        this.checkMissionPool('transport', checkFunc);
+        this.checkMissionPool(MISSION_POOLS.transport, checkFunc);
     }
 
     /**
@@ -480,7 +483,7 @@ export default class TransportMission extends Room {
      */
     UpdateNukerMission(offset = 0) {
         const room = this;
-        if (!global.qos.isTickAligned(THRESHOLDS.TICK.NUKER_CHECK, offset)) return;
+        if (!qos.isTickAligned(THRESHOLDS.TICK.NUKER_CHECK, offset)) return;
         if(room.level < 8) return;
         if(!room.nuker) return;
         const storage = room.storage;
@@ -568,7 +571,7 @@ export default class TransportMission extends Room {
         const labBtype = structMem.labBtype;
 
         const isShutDown = !structMem.lab || !labA || !labB || !labAtype || !labBtype;
-        const hasBoostTasks = ((this.getAllMissionFromPool('boost') as Task[]) || []).length > 0;
+        const hasBoostTasks = ((this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[]) || []).length > 0;
         const reactionProduct = isShutDown ? null : REACTIONS[labAtype][labBtype];
 
         for (const lab of this.lab) {
@@ -628,14 +631,14 @@ export class TransportTaskGetter extends Room {
     getTransportMission(creep: Creep) {
         const posInfo = getTransportMissionPosInfo(creep);
         while (true) {
-            const task = this.getMissionFromPool('transport', posInfo, (transportTask) => transportTask.type === 'transport');
+            const task = this.getMissionFromPool(MISSION_POOLS.transport, posInfo, (transportTask) => transportTask.type === 'transport');
             if (!task) return null;
             if (!this.isTransportTaskValid(task)) {
-                this.deleteMissionFromPool('transport', task.id);
+                this.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
                 continue;
             }
 
-            this.lockMissionInPool('transport', task.id, creep.id);
+            this.lockMissionInPool(MISSION_POOLS.transport, task.id, creep.id);
             return task;
         }
     }

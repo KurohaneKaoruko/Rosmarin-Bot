@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
@@ -14,7 +15,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     const res = Object.keys(creep.store)[0] as ResourceConstant;
     const carriers = getRoomTickCacheValue(creep.room, 'out_mineral_carriers', () =>
         creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'out-carry'
+            filter: (c) => c.memory.role === ROLES['out-carry']
         }) as Creep[]
     );
     const nearbyCarrier = carriers.find((c) =>

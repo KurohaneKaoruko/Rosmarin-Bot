@@ -1,3 +1,4 @@
+import { getWhitelistIds, isPixelGenEnabled, isWarMode, setModeName, setPixelGenEnabled, setWarMode, setWhitelistIds } from '@/modules/shared/memory';
 import { BASE_CONFIG } from '@/constant/BaseConstant';
 import { log } from '@/modules/utils';
 import { getMissionPools, getStructData } from "@/modules/shared/memory";
@@ -16,7 +17,7 @@ const Base = {
     bot: {
         mode(mode: string) {
             if (mode !== 'default' && mode !== 'auto') return Error('请输入正确的模式(default/auto)');
-            Memory['mode'] = mode;
+            setModeName(mode);
             log('', `Bot运行模式已切换到 ${
                 mode === 'default' ? '默认' : '全自动'
             } 模式`);
@@ -24,14 +25,16 @@ const Base = {
         },
         // 开关全局战争模式
         warmode() {
-            Memory['warmode'] = !Memory['warmode'];
-            log('', `战争模式已${Memory['warmode'] ? '开启' : '关闭'}`);
+            const next = !isWarMode();
+            setWarMode(next);
+            log('', `战争模式已${next ? '开启' : '关闭'}`);
             return OK;
         },
 
         pixel() {
-            Memory['GenPixel'] = !Memory['GenPixel'];
-            log('', `搓Pixel功能已${Memory['GenPixel'] ? '开启' : '关闭'}`);
+            const next = !isPixelGenEnabled();
+            setPixelGenEnabled(next);
+            log('', `搓Pixel功能已${next ? '开启' : '关闭'}`);
             return OK;
         },
 
@@ -55,19 +58,21 @@ const Base = {
     },
     whitelist: {
         add(id: string): OK | Error {
-            if(!Memory['whitelist']) Memory['whitelist'] = [];
-            if(Memory['whitelist'].includes(id)) return Error("白名单中已存在, 无法添加");
-            Memory['whitelist'].push(id);
+            const ids = getWhitelistIds();
+            if(ids.includes(id)) return Error("白名单中已存在, 无法添加");
+            ids.push(id);
+            setWhitelistIds(ids);
             return OK;
         },
         remove(id: string): OK | Error {
-            if(!Memory['whitelist']) return Error("白名单不存在");
-            if(!Memory['whitelist'].includes(id)) return Error("白名单中不存在, 无法移除");
-            Memory['whitelist'].splice(Memory['whitelist'].indexOf(id), 1);
+            const ids = getWhitelistIds();
+            if(!ids.includes(id)) return Error("白名单中不存在, 无法移除");
+            ids.splice(ids.indexOf(id), 1);
+            setWhitelistIds(ids);
             return OK;
         },
         show(): string[] {
-            return Memory['whitelist'] || [];
+            return getWhitelistIds();
         }
     },
     clear: {

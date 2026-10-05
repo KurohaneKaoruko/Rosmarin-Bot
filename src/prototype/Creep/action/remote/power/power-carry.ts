@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
@@ -78,7 +79,7 @@ const onSource = (creep: Creep): WorkEvent => {
     if (!powerBank && !powerDropped && !powerRuin) {
         const powerCarryCreeps = getRoomTickCacheValue(creep.room, 'power_carry_target_creeps', () =>
             creep.room.find(FIND_MY_CREEPS, {
-                filter: (c) => c.memory.role == 'power-carry' && c.memory.targetRoom == creep.room.name
+                filter: (c) => c.memory.role == ROLES['power-carry'] && c.memory.targetRoom == creep.room.name
             }) as Creep[]
         );
         powerCarryCreeps.forEach((c) => { c.memory['suicide'] = true; });

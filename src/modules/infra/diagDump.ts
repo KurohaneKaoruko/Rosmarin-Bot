@@ -2,6 +2,7 @@
  * 诊断自采样落盘：每 30t 把 race 采样与运行状态写入 Memory 专用键，
  * 外部工具纯 GET Memory 读取，不经 console（eval 编译在引擎侧留残留，线性吃内存）。
  */
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from '@/modules/shared/roomMode';
 import { getOutMineData } from '@/modules/shared/memory';
 
@@ -59,7 +60,7 @@ export const writeDiagDumps = (): void => {
             const targets = getOutMineData()?.[room.name]?.energy ?? [];
             // carrier 状态快照：FSM/取货缓存/停车，定位游荡与断供
             const carriers = Object.values(Game.creeps)
-                .filter((c) => c.room.name === room.name && (c.memory as any).role === 'carrier')
+                .filter((c) => c.room.name === room.name && (c.memory as any).role === ROLES.carrier)
                 .map((c) => {
                     const mem = c.memory as any;
                     const cache = mem.cache ?? {};
@@ -82,7 +83,7 @@ export const writeDiagDumps = (): void => {
             let liveRemote = 0;
             for (const creep of Object.values(Game.creeps)) {
                 const role = (creep.memory as any).role || '';
-                if (role.startsWith('out-') || role === 'reserver') liveRemote += creep.body.length;
+                if (role.startsWith('out-') || role === ROLES.reserver) liveRemote += creep.body.length;
                 else liveLocal += creep.body.length;
             }
             const outMineState = (Memory as any).OutMineData ?? null;

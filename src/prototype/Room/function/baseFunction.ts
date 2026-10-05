@@ -1,3 +1,5 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
 import { inWhitelist } from '@/modules/shared/whitelist';
 import { getRoomData, getStructData } from '@/modules/shared/memory';
@@ -22,8 +24,8 @@ const getMyCreepsByRoleByRoom = (() => {
     };
 })();
 
-const LEGACY_SHARED_SOURCE_ROLE_SET = new Set(['worker', 'upgrader', 'universal', 'aid-upgrade']);
-const STRICT_SOURCE_ROLE_SET = new Set(['harvester', 'out-harvest']);
+const LEGACY_SHARED_SOURCE_ROLE_SET = new Set<string>([ROLES.worker, ROLES.upgrader, ROLES.universal, ROLES['aid-upgrade']]);
+const STRICT_SOURCE_ROLE_SET = new Set<string>([ROLES.harvester, ROLES['out-harvest']]);
 const SOURCE_PRIORITY_MAP = {
     harvester: 0,
     universal: 1,
@@ -285,10 +287,10 @@ export default class BaseFunction extends Room {
         const capRef = Math.max(300, cap);
         const creepNum = this.getCreepNum();
         const logisticNum =
-            (creepNum['carrier'] || 0) +
-            (creepNum['transporter'] || 0) +
-            (creepNum['manager'] || 0) +
-            (creepNum['universal'] || 0);
+            (creepNum[ROLES.carrier] || 0) +
+            (creepNum[ROLES.transporter] || 0) +
+            (creepNum[ROLES.manager] || 0) +
+            (creepNum[ROLES.universal] || 0);
         const spawnNeedsEnergy = this.CheckSpawnAndTower();
         const energyRatio = capRef > 0 ? (avail / capRef) : 0;
         const hasStoredEnergy = totalEnergy >= capRef;
@@ -436,7 +438,7 @@ export default class BaseFunction extends Room {
                 if (!otherRole) return false;
                 if (!useSharedCrowd) return otherRole === role;
                 if (!LEGACY_SHARED_SOURCE_ROLE_SET.has(otherRole)) return false;
-                if (otherRole !== 'universal' && c.memory.working) return false;
+                if (otherRole !== ROLES.universal && c.memory.working) return false;
                 return true;
             })
             : [];
@@ -501,7 +503,7 @@ export default class BaseFunction extends Room {
         let body: any[];
         const budget = energyBudget ?? this.energyCapacityAvailable;
 
-        if (role === 'manager' && energyBudget !== undefined) {
+        if (role === ROLES.manager && energyBudget !== undefined) {
             const minConfig = RoleData[role]?.bodypart;
             if (minConfig) {
                 const minBody = this.GenerateBodys(minConfig, role);
@@ -531,7 +533,7 @@ export default class BaseFunction extends Room {
         if (lv !== 8) return [...body];
 
         switch (role) {
-            case 'harvester':
+            case ROLES.harvester:
                 if(this.source.some(s => (s.effects||[])
                     .some(e => e.effect == PWR_REGEN_SOURCE))) {
                     body = RoleLevelData[role][lv].upbodypart;
@@ -566,13 +568,13 @@ export default class BaseFunction extends Room {
         // 生成优先级，越往前越优先
         
         switch (role) {
-        case 'power-attack':
+        case ROLES['power-attack']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             if (move) body_list = AddList(body_list, move - 1, MOVE)
             if (attack) body_list = AddList(body_list, attack, ATTACK)
             if (move) body_list = AddList(body_list, 1, MOVE)
             break;
-        case 'power-carry':
+        case ROLES['power-carry']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             while (carry > 0 || move > 0) {
                 if (carry) body_list = AddList(body_list, 1, CARRY)
@@ -580,7 +582,7 @@ export default class BaseFunction extends Room {
                 carry--; move--;
             }
             break;
-        case 'out-carry':
+        case ROLES['out-carry']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             let carryCount = Math.min(Math.floor(carry/2), move);
             for (let i = 0; i < carryCount; i++) {
@@ -590,7 +592,7 @@ export default class BaseFunction extends Room {
             if (carry-carryCount*2) body_list = AddList(body_list, carry-carryCount*2, CARRY);
             if (move-carryCount) body_list = AddList(body_list, move-carryCount, MOVE);
             break;
-        case 'out-defend':
+        case ROLES['out-defend']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             if (move) body_list = AddList(body_list, move - 2, MOVE)
             if (attack) body_list = AddList(body_list, attack, ATTACK)
@@ -599,14 +601,14 @@ export default class BaseFunction extends Room {
             if (move) body_list = AddList(body_list, 2, MOVE)
             if (heal) body_list = AddList(body_list, 1, HEAL)
             break;
-        case 'out-attack':
+        case ROLES['out-attack']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             if (move) body_list = AddList(body_list, move-2, MOVE)
             if (attack) body_list = AddList(body_list, attack, ATTACK)
             if (heal) body_list = AddList(body_list, heal, HEAL)
             if (move) body_list = AddList(body_list, 2, MOVE)
             break;
-        case 'out-renged':
+        case ROLES['out-ranged']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)
             if (move) body_list = AddList(body_list, move - 2, MOVE)
             if (range_attack) body_list = AddList(body_list, range_attack, RANGED_ATTACK)
@@ -725,7 +727,7 @@ export default class BaseFunction extends Room {
         // 注意：BoostTask 的 data 结构 { mineral, totalAmount, owners }
         // checkSameMissionInPool 需要匹配 data 的每个 key。但这里只需要匹配 mineral
         // 所以我们手动查找
-        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        const boostPool = this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[];
         let task = boostPool?.find(t => (t.data as BoostTask).mineral === mineral);
 
         if (task) {
@@ -740,7 +742,7 @@ export default class BaseFunction extends Room {
                 data.owners[resolvedOwnerId].time = Game.time;
             }
             // 提交更新到内存 (虽然引用修改已经生效，但为了规范)
-            this.updateMissionPool('boost', task.id, { data });
+            this.updateMissionPool(MISSION_POOLS.boost, task.id, { data });
         } else {
             // 创建新任务
             const data: BoostTask = {
@@ -752,7 +754,7 @@ export default class BaseFunction extends Room {
             if (resolvedOwnerId) {
                 data.owners[resolvedOwnerId] = { amount, time: Game.time };
             }
-            this.addMissionToPool('boost', 'boost', 0, data);
+            this.addMissionToPool(MISSION_POOLS.boost, 'boost', 0, data);
         }
 
         return true;
@@ -761,7 +763,7 @@ export default class BaseFunction extends Room {
     /** 提交lab boost已完成量 */
     SubmitBoostTask(mineral: ResourceConstant, amount: number, ownerId?: string) {
         if (!amount || amount <= 0) return ERR_INVALID_ARGS;
-        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        const boostPool = this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[];
         if (!boostPool) return ERR_NOT_FOUND;
         
         const task = boostPool.find(t => (t.data as BoostTask).mineral === mineral);
@@ -803,7 +805,7 @@ export default class BaseFunction extends Room {
         // 任务完成判断逻辑交给 UpdateBoostMission 或 submitMission 的 deleteFunc
         // 但这里我们手动调用 submitMission 来更新
         const deleteFunc = (d: BoostTask) => d.totalAmount <= 0;
-        this.submitMission('boost', task.id, data, deleteFunc);
+        this.submitMission(MISSION_POOLS.boost, task.id, data, deleteFunc);
 
         return OK;
     }
@@ -850,12 +852,12 @@ export default class BaseFunction extends Room {
 
     /** 删除lab boost任务 */
     RemoveBoostTask(mineral: string) {
-        const boostPool = this.getAllMissionFromPool('boost') as Task[];
+        const boostPool = this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[];
         if (!boostPool) return ERR_NOT_FOUND;
         
         const task = boostPool.find(t => (t.data as BoostTask).mineral === mineral);
         if (task) {
-            this.deleteMissionFromPool('boost', task.id);
+            this.deleteMissionFromPool(MISSION_POOLS.boost, task.id);
             console.log(`删除boost任务: ${mineral}`);
             return OK;
         }

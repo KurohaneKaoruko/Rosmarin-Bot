@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 export type SpawnMemoryMatcher = (memory: any) => boolean;
 export type SpawnLiveMatcher = (creep: Creep) => boolean;
 
@@ -31,7 +32,7 @@ export const getFlagSpawnLoad = (
     }
 
     let queued = 0;
-    const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+    const tasks = spawnRoom.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
     for (const task of tasks as any[]) {
         if (matchesFlagSpawnMemory(task?.data?.memory, flagName, role, legacyMatch)) {
             queued++;

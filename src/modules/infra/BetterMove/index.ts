@@ -3083,7 +3083,7 @@ RoomPosition.prototype.findSquadPathTo = wrapFn(findSquadPathTo, 'findSquadPathT
 // findClosestByPath 暂未完成，后续版本可能更新
 // RoomPosition.prototype.findClosestByPath = wrapFn(betterFindClosestByPath, 'findClosestByPath');
 
-global.BetterMove = {
+export const betterMoveApi = {
     squadMove,
     squadMoveTo,
     preTickBetterMove,

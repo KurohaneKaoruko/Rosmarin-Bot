@@ -1,3 +1,4 @@
+import { betterMoveApi } from '@/modules/infra/BetterMove/index';
 import { MoveWorkTileCandidate, readMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 const isSamePosition = (left: RoomPosition, right: RoomPosition): boolean => {
@@ -42,10 +43,10 @@ function isProjectWorkTile(creep: Creep | PowerCreep, pos: RoomPosition): boolea
  */
 const MoveModule: RuntimeModule = {
     start: () => {
-        global.BetterMove.preTickBetterMove();
+        betterMoveApi.preTickBetterMove();
     },
     end: () => {
-        global.BetterMove.endTickResolve(isProjectWorkTile);
+        betterMoveApi.endTickResolve(isProjectWorkTile);
     }
 };
 

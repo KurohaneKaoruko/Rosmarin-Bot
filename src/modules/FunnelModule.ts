@@ -7,6 +7,8 @@
  * - 捐赠量 = min(接收方缺口, 捐助方 terminal 能量一半)，保证捐助方等级不跌破 100
  * - 同一接收方 500 tick 冷却，给能量在途留时间
  */
+import { log } from '@/modules/utils';
+import { getFunnelCooldownMap } from '@/modules/shared/memory';
 import { getEnergyLevel, getStandardReserve } from '@/modules/shared/energyLevel';
 
 const FUNNEL_CHECK_INTERVAL = 20;
@@ -19,8 +21,7 @@ export const FunnelModule = {
     end: function () {
         if (Game.time % FUNNEL_CHECK_INTERVAL !== 0) return;
 
-        const mem = Memory as any;
-        mem.funnelCooldown ??= {};
+        const mem = getFunnelCooldownMap();
 
         const participants = Object.values(Game.rooms)
             .filter((room) => room.my && room.terminal && room.controller?.my)
@@ -33,7 +34,7 @@ export const FunnelModule = {
 
         const receivers = participants
             .filter((entry) => entry.level < FUNNEL_EMERGENCY_LEVEL)
-            .filter((entry) => Game.time - (mem.funnelCooldown[entry.room.name] || 0) > FUNNEL_RECEIVER_COOLDOWN)
+            .filter((entry) => Game.time - (mem[entry.room.name] || 0) > FUNNEL_RECEIVER_COOLDOWN)
             .sort((a, b) => a.level - b.level);
         if (receivers.length === 0) return;
 
@@ -56,16 +57,16 @@ export const FunnelModule = {
 
             if (amount < FUNNEL_MIN_DONATE) {
                 // 捐不出有效量：本周期跳过该接收方并进入冷却，避免每 20 tick 空转
-                mem.funnelCooldown[receiver.room.name] = Game.time;
+                mem[receiver.room.name] = Game.time;
                 continue;
             }
 
             const result = donor.terminal.send(RESOURCE_ENERGY, amount, receiver.room.name);
             if (result === OK) {
-                mem.funnelCooldown[receiver.room.name] = Game.time;
-                global.log(`[funnel] ${donor.room.name} → ${receiver.room.name} 漏斗补给 ${amount} 能量（等级 ${donor.level} → ${receiver.level}）`);
+                mem[receiver.room.name] = Game.time;
+                log(`[funnel] ${donor.room.name} → ${receiver.room.name} 漏斗补给 ${amount} 能量（等级 ${donor.level} → ${receiver.level}）`);
             } else {
-                global.log(`[funnel] ${donor.room.name} → ${receiver.room.name} 发送失败: ${result}`);
+                log(`[funnel] ${donor.room.name} → ${receiver.room.name} 发送失败: ${result}`);
             }
         }
     },

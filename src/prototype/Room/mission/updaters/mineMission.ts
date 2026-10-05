@@ -1,3 +1,5 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { OUTMINE_CONFIG } from '@/constant/BaseConstant';
 import { getOutMineData, getRoomData } from '@/modules/shared/memory';
 import { getCreepByTargetRoom } from '@/modules/shared/creepTickIndex';
@@ -50,7 +52,7 @@ const createMineCreepMemory = (sourceRoom: string, targetRoom: string, extra: Re
 
 const updateMineTaskIfChanged = (room: Room, task: Task, data: MineTask, changed: boolean) => {
     if (!changed) return;
-    room.updateMissionPool('mine', task.id, { data });
+    room.updateMissionPool(MISSION_POOLS.mine, task.id, { data });
 };
 
 const assignPowerBoostTasks = (room: Room, boostLevel: number, boostOwnerId: string) => {
@@ -81,7 +83,7 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, spawnM
     const powerBank = targetRoomObj ? getPowerBankInRoom(targetRoomObj) : undefined;
 
     if (targetRoomObj && !powerBank) {
-        room.deleteMissionFromPool('mine', task.id);
+        room.deleteMissionFromPool(MISSION_POOLS.mine, task.id);
         console.log(`${targetRoom} 的 PowerBank 已耗尽, 已移出开采队列。`);
         return;
     }
@@ -91,19 +93,19 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, spawnM
     let powerTeamNum = mineData.creep;
 
     if (!powerBank || powerBank.hits > 500000) {
-        pa = countActiveCreeps(creepByTargetRoom['power-attack'], 100);
-        ph = countActiveCreeps(creepByTargetRoom['power-heal'], 100);
+        pa = countActiveCreeps(creepByTargetRoom[ROLES['power-attack']], 100);
+        ph = countActiveCreeps(creepByTargetRoom[ROLES['power-heal']], 100);
     } else {
-        pa = (creepByTargetRoom['power-attack'] || []).length;
-        ph = (creepByTargetRoom['power-heal'] || []).length;
+        pa = (creepByTargetRoom[ROLES['power-attack']] || []).length;
+        ph = (creepByTargetRoom[ROLES['power-heal']] || []).length;
         powerTeamNum = 1;
     }
 
     // 第一阶段：维持攻坚队（PA / PH）与可选 ranged 队列。
     if (!mineData.count) mineData.count = 0;
     if (mineData.count < mineData.max) {
-        const panum = pa + getSpawnMissionCount(spawnMissionNum, 'power-attack');
-        const phnum = ph + getSpawnMissionCount(spawnMissionNum, 'power-heal');
+        const panum = pa + getSpawnMissionCount(spawnMissionNum, ROLES['power-attack']);
+        const phnum = ph + getSpawnMissionCount(spawnMissionNum, ROLES['power-heal']);
         let needUpdate = false;
         
         for (let i = Math.min(panum, phnum); i < powerTeamNum; i++) {
@@ -113,8 +115,8 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, spawnM
                 boostOwnerId,
             });
 
-            const paRet = room.SpawnMissionAdd('PA', [], -1, 'power-attack', memory);
-            const phRet = room.SpawnMissionAdd('PH', [], -1, 'power-heal', memory);
+            const paRet = room.SpawnMissionAdd('PA', [], -1, ROLES['power-attack'], memory);
+            const phRet = room.SpawnMissionAdd('PH', [], -1, ROLES['power-heal'], memory);
             if (paRet !== OK || phRet !== OK) break;
 
             assignPowerBoostTasks(room, mineData.boostLevel, boostOwnerId);
@@ -130,13 +132,13 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, spawnM
 
     if (!mineData.prCount) mineData.prCount = 0;
     if (mineData.prCount < mineData.prMax && mineData.prNum > 0) {
-        const prnum = (creepByTargetRoom['power-ranged'] || []).length +
-            getSpawnMissionCount(spawnMissionNum, 'power-ranged');
+        const prnum = (creepByTargetRoom[ROLES['power-ranged']] || []).length +
+            getSpawnMissionCount(spawnMissionNum, ROLES['power-ranged']);
         let needUpdate = false;
         
         for (let i = prnum; i < mineData.prNum; i++) {
             const memory = createMineCreepMemory(room.name, targetRoom);
-            room.SpawnMissionAdd('PR', [], -1, 'power-ranged', memory);
+            room.SpawnMissionAdd('PR', [], -1, ROLES['power-ranged'], memory);
             mineData.prCount = mineData.prCount + 1;
             needUpdate = true;
         }
@@ -152,14 +154,14 @@ const handlePowerMine = (room: Room, task: Task, mineData: PowerMineTask, spawnM
     const threshold = getPowerCarryThreshold(room, targetRoom, maxPc, mineData);
 
     if (powerBank.hits <= threshold) {
-        const pc = countActiveCreeps(creepByTargetRoom['power-carry'], 150);
+        const pc = countActiveCreeps(creepByTargetRoom[ROLES['power-carry']], 150);
         
         if (pa < 1 || ph < 1) return;
 
-        const pcnum = pc + getSpawnMissionCount(spawnMissionNum, 'power-carry');
+        const pcnum = pc + getSpawnMissionCount(spawnMissionNum, ROLES['power-carry']);
         for (let i = pcnum; i < maxPc; i++) {
             const memory = createMineCreepMemory(room.name, targetRoom);
-            room.SpawnMissionAdd('PC', [], -1, 'power-carry', memory);
+            room.SpawnMissionAdd('PC', [], -1, ROLES['power-carry'], memory);
         }
     }
 };
@@ -170,7 +172,7 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, sp
 
     let depositWorkerNum = mineData.num;
     if (!depositWorkerNum || depositWorkerNum <= 0) {
-        room.deleteMissionFromPool('mine', task.id);
+        room.deleteMissionFromPool(MISSION_POOLS.mine, task.id);
         console.log(`${targetRoom} 的任务数量异常, 已移出开采队列。`);
         return;
     }
@@ -180,9 +182,9 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, sp
         depositWorkerNum = getDepositHarvestCount(targetRoomObj);
         if (depositWorkerNum > 0) {
             mineData.num = depositWorkerNum;
-            room.updateMissionPool('mine', task.id, { data: mineData });
+            room.updateMissionPool(MISSION_POOLS.mine, task.id, { data: mineData });
         } else {
-            room.deleteMissionFromPool('mine', task.id);
+            room.deleteMissionFromPool(MISSION_POOLS.mine, task.id);
             console.log(`${targetRoom} 的 Deposit 已耗尽, 已移出开采队列。`);
             return;
         }
@@ -192,18 +194,18 @@ const handleDepositMine = (room: Room, task: Task, mineData: DepositMineTask, sp
 
     const creepByTargetRoom = getCreepByTargetRoom(targetRoom);
 
-    const dh = countActiveCreeps(creepByTargetRoom['deposit-harvest'], 200);
-    const dhnum = dh + getSpawnMissionCount(spawnMissionNum, 'deposit-harvest');
+    const dh = countActiveCreeps(creepByTargetRoom[ROLES['deposit-harvest']], 200);
+    const dhnum = dh + getSpawnMissionCount(spawnMissionNum, ROLES['deposit-harvest']);
     if (dhnum < depositWorkerNum) {
         const memory = createMineCreepMemory(room.name, targetRoom);
-        room.SpawnMissionAdd('DH', [], -1, 'deposit-harvest', memory);
+        room.SpawnMissionAdd('DH', [], -1, ROLES['deposit-harvest'], memory);
     }
 
-    const dt = countActiveCreeps(creepByTargetRoom['deposit-transfer'], 150);
-    const dtnum = dt + getSpawnMissionCount(spawnMissionNum, 'deposit-transfer');
+    const dt = countActiveCreeps(creepByTargetRoom[ROLES['deposit-transfer']], 150);
+    const dtnum = dt + getSpawnMissionCount(spawnMissionNum, ROLES['deposit-transfer']);
     if (dtnum < depositWorkerNum / 2) {
         const memory = createMineCreepMemory(room.name, targetRoom);
-        room.SpawnMissionAdd('DT', [], -1, 'deposit-transfer', memory);
+        room.SpawnMissionAdd('DT', [], -1, ROLES['deposit-transfer'], memory);
     }
 };
 
@@ -352,7 +354,7 @@ export default class MineMission extends Room {
         if (!targetRoom) return;
 
         if (outminePower) {
-            const existId = this.checkSameMissionInPool('mine', 'power', { targetRoom: roomName } as any);
+            const existId = this.checkSameMissionInPool(MISSION_POOLS.mine, 'power', { targetRoom: roomName } as any);
             if (!existId) {
                 const powerTeamNum = getPowerBankHarvestCount(targetRoom);
                 if (powerTeamNum > 0) {
@@ -363,7 +365,7 @@ export default class MineMission extends Room {
                         targetRoom: roomName,
                     };
 
-                    this.addMissionToPool('mine', 'power', 1, data);
+                    this.addMissionToPool(MISSION_POOLS.mine, 'power', 1, data);
                     console.log(`在 ${roomName} 发现 PowerBank (${powerBank.power} power), 已加入开采队列。`);
                     console.log(`将从 ${this.name} 派出 ${data.creep} 数量的T${data.boostLevel}采集队。Ranged数量:${data.prNum}。`);
                 }
@@ -371,7 +373,7 @@ export default class MineMission extends Room {
         }
 
         if (outmineDeposit) {
-            const existId = this.checkSameMissionInPool('mine', 'deposit', { targetRoom: roomName } as any);
+            const existId = this.checkSameMissionInPool(MISSION_POOLS.mine, 'deposit', { targetRoom: roomName } as any);
             if (!existId) {
                 const depositWorkerNum = getDepositHarvestCount(targetRoom);
                 if (depositWorkerNum > 0) {
@@ -380,7 +382,7 @@ export default class MineMission extends Room {
                         num: depositWorkerNum,
                         active: true
                     };
-                    this.addMissionToPool('mine', 'deposit', 1, data);
+                    this.addMissionToPool(MISSION_POOLS.mine, 'deposit', 1, data);
                     console.log(`在 ${roomName} 发现 Deposit, 已加入开采队列。`);
                     console.log(`将从 ${this.name} 派出总共 ${depositWorkerNum} 数量的采集队。`);
                 }
@@ -396,7 +398,7 @@ export default class MineMission extends Room {
      * - deposit：孵化 DH/DT
      */
     UpdateMineMission() {
-        const tasks = this.getAllMissionFromPool('mine');
+        const tasks = this.getAllMissionFromPool(MISSION_POOLS.mine);
         if (!tasks || tasks.length === 0) return;
 
         const lookInterval = OUTMINE_CONFIG.LOOK_INTERVAL;

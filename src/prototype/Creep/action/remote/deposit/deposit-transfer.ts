@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
@@ -51,7 +52,7 @@ const onSource = (creep: Creep): WorkEvent => {
             if (!resourceType) return WORK_EVENTS.STAY;
             creep.goWithdraw(tombstone, resourceType);
             return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
-        } else if (targetType === 'harvester' && !creep.pos.isNearTo(target as Creep)) {
+        } else if (targetType === ROLES.harvester && !creep.pos.isNearTo(target as Creep)) {
             creep.moveTo(target as Creep);
             return WORK_EVENTS.STAY;
         }
@@ -91,7 +92,7 @@ const onSource = (creep: Creep): WorkEvent => {
 
     const harvesters = getRoomTickCacheValue(creep.room, 'deposit_transfer_harvesters', () =>
         creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'deposit-harvest' &&
+            filter: (c) => c.memory.role === ROLES['deposit-harvest'] &&
                 c.room.name === c.memory.targetRoom &&
                 c.store.getUsedCapacity() > 0
         }) as Creep[]
@@ -104,7 +105,7 @@ const onSource = (creep: Creep): WorkEvent => {
         if (!closestHarvester) closestHarvester = creep.pos.findClosestByRange(activeHarvesters);
         if (!creep.pos.isNearTo(closestHarvester)) {
             cache.targetId = closestHarvester.id;
-            cache.targetType = 'harvester';
+            cache.targetType = ROLES.harvester;
             creep.moveTo(closestHarvester, { visualizePathStyle: { stroke: '#00ff00' }, ignoreCreeps: false });
             return creep.store.getFreeCapacity() == 0 ? WORK_EVENTS.TO_TARGET : WORK_EVENTS.STAY;
         }

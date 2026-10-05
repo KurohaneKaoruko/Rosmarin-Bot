@@ -1,3 +1,5 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { compressBodyConfig } from "@/modules/shared/compress";
 import { getRoomData } from "@/modules/shared/memory";
 import { log } from "@/modules/utils";
@@ -41,16 +43,16 @@ export default class ClaimSpawnFunction extends Flag {
 
         for (const name in Game.creeps) {
             const creep = Game.creeps[name];
-            if (creep.memory?.role !== 'claimer') continue;
+            if (creep.memory?.role !== ROLES.claimer) continue;
             if (creep.memory?.targetRoom !== targetRoom) continue;
             live++;
         }
 
-        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+        const tasks = spawnRoom.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
         for (const task of tasks as any[]) {
             const memory = task?.data?.memory as any;
             if (!memory) continue;
-            if (memory.role !== 'claimer') continue;
+            if (memory.role !== ROLES.claimer) continue;
             if (memory.targetRoom !== targetRoom) continue;
 
             if (memory.spawnFlag === flagName) queuedTaskIds.push(task.id);
@@ -81,7 +83,7 @@ export default class ClaimSpawnFunction extends Flag {
             : claimerState.queuedTaskIds.slice(1);
         if (redundantTaskIds.length > 0) {
             for (const taskId of redundantTaskIds) {
-                room.deleteMissionFromPool('spawn', taskId);
+                room.deleteMissionFromPool(MISSION_POOLS.spawn, taskId);
                 queuedClaimers--;
             }
             log('CLAIM', `${room.name} 清理了 ${redundantTaskIds.length} 个重复 claimer 任务 -> ${targetRoom}`);
@@ -101,7 +103,7 @@ export default class ClaimSpawnFunction extends Flag {
 
         const hasClaimer = claimerState.live > 0 || queuedClaimers > 0;
         if (!hasClaimer && (!targetRoomObj || !targetRoomObj.my)) {
-            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { homeRoom: room.name, targetRoom, spawnFlag: flagName } as any);
+            const ret = room.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, ROLES.claimer, { homeRoom: room.name, targetRoom, spawnFlag: flagName } as any);
             if (ret === OK) {
                 log('CLAIM', `${room.name} 派出了一个 claimer 来占领 ${targetRoom}`);
             } else {
@@ -112,7 +114,7 @@ export default class ClaimSpawnFunction extends Flag {
         const claimAidLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'aid-build',
+            ROLES['aid-build'],
             (memory) => memory.targetRoom === targetRoom && memory.sourceRoom === targetRoom,
             isActiveAidBuildFlagCreep
         );
@@ -120,7 +122,7 @@ export default class ClaimSpawnFunction extends Flag {
 
         if (claimAidNum < CLAIM_AID_BUILD_TARGET_COUNT) {
             const memory = { homeRoom: room.name, sourceRoom: targetRoom, targetRoom, spawnFlag: flagName } as any;
-            const ret = room.SpawnMissionAdd('', compressBodyConfig([]), -1, 'aid-build', memory);
+            const ret = room.SpawnMissionAdd('', compressBodyConfig([]), -1, ROLES['aid-build'], memory);
             if (ret === OK) {
                 log('CLAIM', `${room.name} 派出了一个 aid-build 援助建造 ${targetRoom} (${claimAidNum + 1}/${CLAIM_AID_BUILD_TARGET_COUNT})`);
             } else {
@@ -160,7 +162,7 @@ export default class ClaimSpawnFunction extends Flag {
         if (controller?.my) {
             for (const name in Game.creeps) {
                 const creep = Game.creeps[name];
-                if (creep.memory?.role !== 'claimer') continue;
+                if (creep.memory?.role !== ROLES.claimer) continue;
                 if (creep.memory?.targetRoom !== targetRoom) continue;
                 creep.suicide();
             }
@@ -181,16 +183,16 @@ export default class ClaimSpawnFunction extends Flag {
         let queuedClaimerCount = 0;
         for (const name in Game.creeps) {
             const creep = Game.creeps[name];
-            if (creep.memory?.role !== 'claimer') continue;
+            if (creep.memory?.role !== ROLES.claimer) continue;
             if (creep.memory?.targetRoom !== targetRoom) continue;
             liveClaimerCount++;
         }
         for (const room of Object.values(Game.rooms)) {
             if (!room.my) continue;
-            const tasks = room.getAllMissionFromPool('spawn') || [];
+            const tasks = room.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
             for (const task of tasks as any[]) {
                 const memory = task?.data?.memory as any;
-                if (memory?.role !== 'claimer') continue;
+                if (memory?.role !== ROLES.claimer) continue;
                 if (memory.targetRoom !== targetRoom) continue;
                 queuedClaimerCount++;
             }
@@ -217,7 +219,7 @@ export default class ClaimSpawnFunction extends Flag {
             return true;
         }
 
-        const ret = bestRoom.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, 'claimer', { homeRoom: bestRoom.name, targetRoom, spawnFlag: flagName } as any);
+        const ret = bestRoom.SpawnMissionAdd('', '', CLAIM_SPAWN_PRIORITY, ROLES.claimer, { homeRoom: bestRoom.name, targetRoom, spawnFlag: flagName } as any);
         if (ret === OK) {
             log('CLAIM', `自动占领：${bestRoom.name}（距离 ${bestDistance}）派出 claimer -> ${targetRoom}`);
         } else {

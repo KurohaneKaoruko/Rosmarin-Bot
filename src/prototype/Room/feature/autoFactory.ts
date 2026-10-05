@@ -1,3 +1,4 @@
+import { log } from '@/modules/utils';
 import { AUTO_FACTORY_CONFIG, AUTO_FACTORY_FALLBACK, Goods, PRODUCTION_MIN, zipMap } from "@/constant/ResourceConstant";
 import { getAutoFactoryData, getMissionPools, getStructData } from "@/modules/shared/memory";
 import { isRoomTickAligned } from "@/modules/shared/roomPhase";
@@ -35,7 +36,7 @@ export default class AutoFactory extends Room {
                 botmem.factoryProduct = null;
                 botmem.factoryAmount = 0;
                 delete (botmem as any).factoryWaitSince;
-                global.log(`[${this.name}] 已自动结束factory生产任务(达到限额): ${Product}. 现库存: ${cur}`)
+                log(`[${this.name}] 已自动结束factory生产任务(达到限额): ${Product}. 现库存: ${cur}`)
                 return;
             }
         }
@@ -112,12 +113,12 @@ export default class AutoFactory extends Room {
                 botmem.factoryProduct = null;
                 botmem.factoryAmount = 0;
                 delete (botmem as any).factoryWaitSince;
-                global.log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
+                log(`[${this.name}] 已自动结束factory生产任务(超时缺料): ${Product}. 现库存: ${getAvail(Product as any)}`)
             } else {
                 botmem.factoryProduct = null;
                 botmem.factoryAmount = 0;
                 delete (botmem as any).factoryWaitSince;
-                global.log(`[${this.name}] 已自动结束factory生产任务(无配方): ${Product}.`)
+                log(`[${this.name}] 已自动结束factory生产任务(无配方): ${Product}.`)
             }
         }
 
@@ -150,7 +151,7 @@ export default class AutoFactory extends Room {
         botmem.factoryProduct = task;
         botmem.factoryAmount = taskAmount;
 
-        global.log(`[${this.name}] 已自动分配factory生产任务: ${task}, 限额: ${taskAmount || '无'}`)
+        log(`[${this.name}] 已自动分配factory生产任务: ${task}, 限额: ${taskAmount || '无'}`)
         return OK;
     }
 }

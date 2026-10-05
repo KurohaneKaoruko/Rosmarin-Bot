@@ -1,3 +1,5 @@
+import { getWhitelistIds } from '@/modules/shared/memory';
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { resolveBoundPartner, runHealAndFollow, tryBindNearestPartner } from '@/prototype/Creep/function/boundPartner';
 import { ensureInTargetRoomForCombat, runRangedCombat } from '@/prototype/Creep/function/combatCore';
@@ -101,7 +103,7 @@ const runPowerAttack = (creep: Creep) => {
             } else {
                 const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_non_whitelist_hostiles', () =>
                     creep.room.find(FIND_HOSTILE_CREEPS, {
-                        filter: (candidate) => !Memory['whitelist'].includes(candidate.owner.username)
+                        filter: (candidate) => !getWhitelistIds().includes(candidate.owner.username)
                     }) as Creep[]
                 );
                 const nearCreeps = roomHostiles.filter((candidate) => creep.pos.inRangeTo(candidate, 1));
@@ -122,7 +124,7 @@ const runPowerAttack = (creep: Creep) => {
     ) {
         const powerCarryCreeps = getRoomTickCacheValue(creep.room, 'power_attack_power_carries', () =>
             creep.room.find(FIND_MY_CREEPS, {
-                filter: (candidate) => candidate.memory.role === 'power-carry'
+                filter: (candidate) => candidate.memory.role === ROLES['power-carry']
             }) as Creep[]
         );
         if (!powerCarryCreeps.some((candidate) => creep.pos.inRangeTo(candidate, 10))) return;
@@ -152,7 +154,7 @@ const runPowerHeal = (creep: Creep) => {
         tryBindNearestPartner(
             creep,
             'power_heal_attack_creeps',
-            (candidate) => candidate.memory.role === 'power-attack' &&
+            (candidate) => candidate.memory.role === ROLES['power-attack'] &&
                 candidate.memory.targetRoom === creep.memory.targetRoom
         );
         return;
@@ -185,7 +187,7 @@ const runPowerRanged = (creep: Creep) => {
                 }) as Creep[]
             );
             return injuredMyCreeps.filter((ally) =>
-                ally.hits < ally.hitsMax && (self.pos.inRangeTo(ally, 3) || ally.memory.role === 'power-ranged')
+                ally.hits < ally.hitsMax && (self.pos.inRangeTo(ally, 3) || ally.memory.role === ROLES['power-ranged'])
             );
         },
     });

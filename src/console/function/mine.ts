@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { CostMatrixCache, RoadMemory, RoadBuilder, PathPlanner, RoadVisual } from '@/modules/features/external/externalRoad';
 import { HighwayMineVisual } from '@/modules/shared/highwayMineVisual';
 import { getOutMineData, getRoomData } from '@/modules/shared/memory';
@@ -285,10 +286,10 @@ export default {
             
             // 先尝试删除旧任务（如果存在）
             const duplicateTask = { targetRoom } as any;
-            const existId = room.checkSameMissionInPool('mine', 'power', duplicateTask);
-            if (existId) room.deleteMissionFromPool('mine', existId);
+            const existId = room.checkSameMissionInPool(MISSION_POOLS.mine, 'power', duplicateTask);
+            if (existId) room.deleteMissionFromPool(MISSION_POOLS.mine, existId);
 
-            room.addMissionToPool('mine', 'power', 1, data);
+            room.addMissionToPool(MISSION_POOLS.mine, 'power', 1, data);
             console.log(`房间 ${sourceRoom} 即将向 ${targetRoom} 派出 ${num} 数量的T${boostLevel} Power开采队。`);
             return OK;
         },
@@ -306,10 +307,10 @@ export default {
 
             // 先尝试删除旧任务（如果存在）
             const duplicateTask = { targetRoom } as any;
-            const existId = room.checkSameMissionInPool('mine', 'deposit', duplicateTask);
-            if (existId) room.deleteMissionFromPool('mine', existId);
+            const existId = room.checkSameMissionInPool(MISSION_POOLS.mine, 'deposit', duplicateTask);
+            if (existId) room.deleteMissionFromPool(MISSION_POOLS.mine, existId);
 
-            room.addMissionToPool('mine', 'deposit', 1, data);
+            room.addMissionToPool(MISSION_POOLS.mine, 'deposit', 1, data);
             console.log(`房间 ${sourceRoom} 即将向 ${targetRoom} 派出 ${num} 数量的Deposit开采队。`);
             return OK;
         },
@@ -319,19 +320,19 @@ export default {
             if (!room) return;
             
             // 删除任务池中的任务
-            const mineTasks = room.getAllMissionFromPool('mine');
+            const mineTasks = room.getAllMissionFromPool(MISSION_POOLS.mine);
             if (mineTasks) {
                 for (const task of mineTasks) {
                     const data = task.data as MineTask;
                     if (data.targetRoom !== targetRoom) continue;
                     if (type && task.type !== type) continue;
                     
-                    room.deleteMissionFromPool('mine', task.id);
+                    room.deleteMissionFromPool(MISSION_POOLS.mine, task.id);
                 }
             }
 
             // 删除相关的 Spawn 任务
-            const spawnmission = room.getAllMissionFromPool('spawn');
+            const spawnmission = room.getAllMissionFromPool(MISSION_POOLS.spawn);
             if (!spawnmission) return OK;
             for (const mission of spawnmission) {
                 const data = mission.data as SpawnTask;
@@ -340,7 +341,7 @@ export default {
                     if (type === 'power' && !data.memory.role.startsWith('power-')) continue;
                     if (type === 'deposit' && !data.memory.role.startsWith('deposit-')) continue;
 
-                    room.deleteMissionFromPool('spawn', mission.id);
+                    room.deleteMissionFromPool(MISSION_POOLS.spawn, mission.id);
                 }
             }
             console.log(`房间 ${sourceRoom} 的 ${targetRoom} 开采已取消。`);

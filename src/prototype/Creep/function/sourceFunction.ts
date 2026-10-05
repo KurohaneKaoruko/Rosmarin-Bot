@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 export default class SourceFunction extends Creep {
     /**
      * 计算采集产能
@@ -66,7 +67,7 @@ export default class SourceFunction extends Creep {
 
         const claimed = new Map<string, number>();
         for (const creep of Object.values(Game.creeps)) {
-            if (!creep || creep.memory?.role !== 'harvester') continue;
+            if (!creep || creep.memory?.role !== ROLES.harvester) continue;
             const id = (creep.memory as any).targetSourceId as Id<Source> | undefined;
             if (!id) continue;
             claimed.set(id, (claimed.get(id) || 0) + 1);
@@ -284,7 +285,7 @@ export default class SourceFunction extends Creep {
 
             // 仅禁止主房 harvester 自动创建容器工地（其他角色仍可自动建）
             const role = this.memory?.role as string | undefined;
-            const allowAutoSite = role !== 'harvester';
+            const allowAutoSite = role !== ROLES.harvester;
             if (allowAutoSite && this.pos.inRangeTo(source, 1)) {
                 const result = this.pos.createConstructionSite(STRUCTURE_CONTAINER);
                 return result === OK ? 'acted' : 'blocked';

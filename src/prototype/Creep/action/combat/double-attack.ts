@@ -1,3 +1,4 @@
+import { getWhitelistIds } from '@/modules/shared/memory';
 type DoubleAttackTarget = Creep | Structure;
 
 const isDoubleAttackTarget = (target: _HasId | null): target is DoubleAttackTarget =>
@@ -130,7 +131,7 @@ function AutoFindTarget(creep: Creep) {
 function AutoActionAttack(creep: Creep) {
     let target = getCachedDoubleAttackTarget(creep);
 
-    if (target && 'owner' in target && Memory['whitelist']?.includes(target.owner.username)) {
+    if (target && 'owner' in target && getWhitelistIds().includes(target.owner.username)) {
         creep.memory['targetId'] = null;
         target = null;
     }

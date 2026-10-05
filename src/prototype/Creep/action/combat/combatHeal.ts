@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {
     CombatHealPriority,
@@ -51,25 +52,25 @@ type CombatHealPolicy = {
 /** 按角色 id 分工：这是「一个执行器、四种角色」的唯一配置点。 */
 const COMBAT_HEAL_POLICIES: Record<string, CombatHealPolicy> = {
     // 外矿双人队的治疗手：只要自己受伤就先自愈，其余治疗量给搭档
-    'out-2heal': {
+    [ROLES['out-2heal']]: {
         bind: {
             cacheKey: 'out_2heal_attackers',
-            filter: (_self, candidate) => candidate.memory.role === 'out-2attack',
+            filter: (_self, candidate) => candidate.memory.role === ROLES['out-2attack'],
         },
         selfHeal: 'always',
         unbound: 'selfHeal',
     },
     // 沉积物小队的治疗手：同上
-    'deposit-heal': {
+    [ROLES['deposit-heal']]: {
         bind: {
             cacheKey: 'deposit_heal_attackers',
-            filter: (_self, candidate) => candidate.memory.role === 'deposit-attack',
+            filter: (_self, candidate) => candidate.memory.role === ROLES['deposit-attack'],
         },
         selfHeal: 'always',
         unbound: 'selfHeal',
     },
     // 母房守卫的治疗手：把 HEAL 优先留给更该救的搭档，且守住站位/退役回收 boost
-    'defend-2heal': {
+    [ROLES['defend-2heal']]: {
         bind: {
             cacheKey: 'defend2_heal_candidates',
             filter: (_self, candidate) => candidate.memory.role === 'defend2-attack',
@@ -81,11 +82,11 @@ const COMBAT_HEAL_POLICIES: Record<string, CombatHealPolicy> = {
         ensureBoosted: true,
     },
     // 双人队的治疗手：只在小队内结伴；等搭档时顺手救最近的伤兵
-    'double-heal': {
+    [ROLES['double-heal']]: {
         bind: {
             cacheKey: 'double_heal_squad_candidates',
             filter: (self, candidate) =>
-                candidate.memory.role !== 'double-heal' && candidate.memory.squad === self.memory.squad,
+                candidate.memory.role !== ROLES['double-heal'] && candidate.memory.squad === self.memory.squad,
         },
         selfHeal: 'ifWorseThanPartner',
         unbound: { kind: 'rescueNearest', minDamage: 100 },

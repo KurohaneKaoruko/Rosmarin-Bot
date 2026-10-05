@@ -1,3 +1,4 @@
+import { isWarMode } from '@/modules/shared/memory';
 import { getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
@@ -8,7 +9,7 @@ export default class FactoryControl extends Room {
         if (!factory) return;
         // 冷却时不处理
         if (factory.cooldown != 0) return;
-        if (Memory['warmode']) return;
+        if (isWarMode()) return;
 
         const memory = getStructData(this.name);
         // 关停时不处理

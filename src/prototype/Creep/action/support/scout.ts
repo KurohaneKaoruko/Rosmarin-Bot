@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { recordSourceSlotCounts } from '@/modules/shared/memory';
 
@@ -183,7 +184,7 @@ const ensureScoutTargetRoom = (creep: Creep): string | undefined => {
 const hasFriendlyNonScoutInRoom = (creep: Creep): boolean => {
     if (typeof FIND_MY_CREEPS === 'undefined' || typeof creep.room.find !== 'function') return false;
     const creeps = creep.room.find(FIND_MY_CREEPS) as Creep[];
-    return creeps.some((other) => other.name !== creep.name && other.memory?.role !== 'scout');
+    return creeps.some((other) => other.name !== creep.name && other.memory?.role !== ROLES.scout);
 };
 
 /**

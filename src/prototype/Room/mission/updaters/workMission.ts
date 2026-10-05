@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { compress, decompress } from '@/modules/shared/compress';
 import { getLayoutData, getStructData } from '@/modules/shared/memory';
 import { THRESHOLDS } from '@/constant/Thresholds';
@@ -104,9 +105,6 @@ export default class WorkMission extends Room {
         void offset;
         const botMem = getStructData(this.name) as any;
         if (!botMem.wallRepair) botMem.wallRepair = {};
-        if (global.WallRampartRepairMission && global.WallRampartRepairMission[this.name]) {
-            delete global.WallRampartRepairMission[this.name];
-        }
     }
 
 
@@ -120,11 +118,11 @@ export default class WorkMission extends Room {
     BuildRepairMissionCheck() {
         const hasBuildTarget = this.getOwnedConstructionSites().length > 0;
         const buildCheck = (task: Task) => task.type === 'build' && hasBuildTarget;
-        this.checkMissionPool('build', buildCheck);
+        this.checkMissionPool(MISSION_POOLS.build, buildCheck);
 
         const hasRepairTarget = this.hasRepairTarget();
         const repairCheck = (task: Task) => task.type === 'repair' && hasRepairTarget;
-        this.checkMissionPool('repair', repairCheck);
+        this.checkMissionPool(MISSION_POOLS.repair, repairCheck);
     }
 }
 
@@ -346,13 +344,13 @@ const clearWallRepairTask = (
 // ==================== Getter ====================
 export class WorkTaskGetter extends Room {
     getBuildMission(creep: Creep) {
-        if (!this.checkMissionInPool('build')) return null;
-        return this.getMissionFromPool('build', getWorkTaskPosInfo(creep));
+        if (!this.checkMissionInPool(MISSION_POOLS.build)) return null;
+        return this.getMissionFromPool(MISSION_POOLS.build, getWorkTaskPosInfo(creep));
     }
 
     getRepairMission(creep: Creep) {
-        if (!this.checkMissionInPool('repair')) return null;
-        return this.getMissionFromPool('repair', getWorkTaskPosInfo(creep));
+        if (!this.checkMissionInPool(MISSION_POOLS.repair)) return null;
+        return this.getMissionFromPool(MISSION_POOLS.repair, getWorkTaskPosInfo(creep));
     }
 
     getWallMission(creep: Creep) {

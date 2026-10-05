@@ -1,3 +1,4 @@
+import { qos } from '@/modules/infra/qos';
 import { getNukerData } from "@/modules/shared/memory";
 
 /**
@@ -15,7 +16,7 @@ export const NukeModule = {
      */
     tick: function () {
         // 仅在资源允许时执行，避免在低 bucket 下影响主循环。
-        if (!global.qos.shouldRun({ every: 10, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return;
+        if (!qos.shouldRun({ every: 10, minBucket: 2000, allowLevels: ['normal', 'constrained'] })) return;
 
         const nukerData = getNukerData();
         if (nukerData.requests.length === 0) return;

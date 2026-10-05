@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { OUTMINE_CONFIG } from '@/constant/BaseConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
@@ -127,7 +128,7 @@ const onSource = (creep: Creep): WorkEvent => {
         if (deposit.cooldown > 0 && creep.store.getUsedCapacity() > 0) {
             const transferCreeps = getRoomTickCacheValue(creep.room, 'deposit_harvest_transfer_creeps', () =>
                 creep.room.find(FIND_MY_CREEPS, {
-                    filter: (c) => c.memory.role === 'deposit-transfer'
+                    filter: (c) => c.memory.role === ROLES['deposit-transfer']
                 }) as Creep[]
             );
             const nearbyTransport = transferCreeps.find((c) =>
@@ -148,7 +149,7 @@ const onSource = (creep: Creep): WorkEvent => {
 const onTarget = (creep: Creep): WorkEvent => {
     const transferCreeps = getRoomTickCacheValue(creep.room, 'deposit_harvest_transfer_creeps', () =>
         creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === 'deposit-transfer'
+            filter: (c) => c.memory.role === ROLES['deposit-transfer']
         }) as Creep[]
     );
     const nearbyTransport = transferCreeps.find((c) =>

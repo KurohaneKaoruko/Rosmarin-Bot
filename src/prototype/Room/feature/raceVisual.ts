@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from "@/modules/shared/roomMode";
 import { getOutMineData } from "@/modules/shared/memory";
 import { isRacePanelEnabled } from "@/modules/shared/gameCapabilities";
@@ -175,13 +176,13 @@ export default class RaceVisual extends Room {
         const memAny = this.memory as any;
         for (const creep of Object.values(Game.creeps)) {
             const role = creep.memory?.role;
-            if (role === 'out-carry') {
+            if (role === ROLES['out-carry']) {
                 ocTotal++;
                 if ((creep.memory as any).relayedTick === now) relayThisTick++;
-            } else if (role === 'out-harvest') {
+            } else if (role === ROLES['out-harvest']) {
                 ohTotal++;
                 if (creep.pos.roomName === (creep.memory as any).targetRoom) ohOnSite++;
-            } else if (role === 'upgrader') {
+            } else if (role === ROLES.upgrader) {
                 uWork += creep.getActiveBodyparts(WORK);
             }
         }
@@ -319,7 +320,7 @@ export default class RaceVisual extends Room {
         for (const creep of Object.values(Game.creeps)) {
             if (creep.room.name !== this.name) continue;
             const mem = creep.memory as any;
-            if (mem.role !== 'carrier') continue;
+            if (mem.role !== ROLES.carrier) continue;
             const load = creep.store.getUsedCapacity(RESOURCE_ENERGY) || 0;
             const phase = load > 0 ? '送' : '取';
             const assign = mem._assign ?? (load > 0 ? '满' : '等');

@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 
@@ -23,7 +24,7 @@ const isStoreStructure = (target: Structure | null): target is AnyStoreStructure
 
 const clearTransportMission = (creep: Creep, mission: Task | null | undefined) => {
     if (mission) {
-        creep.room.deleteMissionFromPool('transport', mission.id);
+        creep.room.deleteMissionFromPool(MISSION_POOLS.transport, mission.id);
     }
     delete creep.memory.mission;
 };

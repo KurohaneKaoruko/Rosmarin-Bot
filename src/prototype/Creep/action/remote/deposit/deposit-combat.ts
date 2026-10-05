@@ -1,3 +1,5 @@
+import { getWhitelistIds } from '@/modules/shared/memory';
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { resolveBoundPartner } from '@/prototype/Creep/function/boundPartner';
 import { ensureInTargetRoomForCombat, runRangedCombat } from '@/prototype/Creep/function/combatCore';
@@ -10,7 +12,7 @@ const runDepositAttack = (creep: Creep) => {
     const combatHostiles = getRoomTickCacheValue(creep.room, 'deposit_attack_combat_hostiles', () =>
         creep.room.find(FIND_HOSTILE_CREEPS, {
             filter: (hostile) =>
-                !Memory['whitelist'].includes(hostile.owner.username) &&
+                !getWhitelistIds().includes(hostile.owner.username) &&
                 hostile.body.some((part) =>
                     part.type === ATTACK ||
                     part.type === RANGED_ATTACK ||
@@ -49,7 +51,7 @@ const runDepositRanged = (creep: Creep) => {
         hostilesInRange: (self) => {
             const combatHostiles = getRoomTickCacheValue(self.room, 'deposit_ranged_combat_hostiles', () =>
                 self.room.find(FIND_HOSTILE_CREEPS, {
-                    filter: (hostile) => !Memory['whitelist'].includes(hostile.owner.username) &&
+                    filter: (hostile) => !getWhitelistIds().includes(hostile.owner.username) &&
                         hostile.body.some((part) =>
                             part.type === ATTACK ||
                             part.type === RANGED_ATTACK ||
@@ -70,8 +72,8 @@ const runDepositRanged = (creep: Creep) => {
             const damagedAllies = getRoomTickCacheValue(self.room, 'deposit_ranged_damaged_allies', () =>
                 self.room.find(FIND_MY_CREEPS, {
                     filter: (ally) => ally.hits < ally.hitsMax &&
-                        ally.memory.role !== 'deposit-attack' &&
-                        ally.memory.role !== 'deposit-heal'
+                        ally.memory.role !== ROLES['deposit-attack'] &&
+                        ally.memory.role !== ROLES['deposit-heal']
                 }) as Creep[]
             );
             return damagedAllies.filter((ally) => self.pos.inRangeTo(ally, 3));

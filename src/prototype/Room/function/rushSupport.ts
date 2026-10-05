@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { isSpecialRushActive } from '@/modules/shared/roomMode';
 import { getLayoutData } from '@/modules/shared/memory';
 import { decompressBatch } from '@/modules/shared/compress';
@@ -41,7 +42,7 @@ function dispatchRushCourier(room: Room, spawn: StructureSpawn): void {
     // 闸门①：防御态（紧急状态）不发车
     if (room.memory.defend) return;
 
-    const courier = room.find(FIND_MY_CREEPS, { filter: c => c.memory.role === 'rush-courier' })[0];
+    const courier = room.find(FIND_MY_CREEPS, { filter: c => c.memory.role === ROLES['rush-courier'] })[0];
     if (courier) {
         driveRushCourier(courier, spawn);
         return;
@@ -55,7 +56,7 @@ function dispatchRushCourier(room: Room, spawn: StructureSpawn): void {
     // 闸门③：控制器旁有在工作且快断能的 upgrader 才发车（墓碑能量要有紧急消费者）
     const controller = room.controller!;
     const hasHungryUpgrader = room.find(FIND_MY_CREEPS, { filter: c => {
-        if (c.memory.role !== 'upgrader' && c.memory.role !== 'up-upgrade') return false;
+        if (c.memory.role !== ROLES.upgrader && c.memory.role !== ROLES['up-upgrade']) return false;
         if (c.pos.getRangeTo(controller.pos) > 4) return false;
         const work = c.getActiveBodyparts(WORK);
         if (work <= 0) return false;
@@ -80,7 +81,7 @@ function dispatchRushCourier(room: Room, spawn: StructureSpawn): void {
     const container = room.container?.find(c => c.pos.inRangeTo(controller.pos, 2));
     const dir = directionTo(spawn.pos, container ? container.pos : controller.pos);
     spawn.spawnCreep(body, 'rc' + Game.time, {
-        memory: { role: 'rush-courier', home: room.name } as CreepMemory,
+        memory: { role: ROLES['rush-courier'], home: room.name } as CreepMemory,
         directions: [dir],
     });
 }

@@ -1,6 +1,7 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features/external/externalMine';
 import { RoadMemory } from '@/modules/features/external/externalRoad';
-import { getAssignedEnergyTarget } from '@/prototype/Creep/function/energyLogistics';
+import { getAssignedEnergyTarget } from '@/modules/shared/energyLogistics';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const routeExitCache: Record<string, { tick: number; exit: number | null }> = {};
@@ -608,7 +609,7 @@ const tryRelayHandoff = (creep: Creep): Creep | null => {
     const candidates = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
         filter: (c: Creep) =>
             c.id !== creep.id &&
-            c.memory.role === 'out-carry' &&
+            c.memory.role === ROLES['out-carry'] &&
             (c.memory as any).relayedTick !== Game.time,
     }) as Creep[];
     for (const other of candidates) {

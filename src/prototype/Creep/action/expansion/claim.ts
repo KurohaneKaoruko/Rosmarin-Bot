@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 const runClaimer = (creep: Creep) => {
     if (!creep.memory.targetRoom) {
         creep.say('🚨 无目标');
@@ -82,7 +83,7 @@ const runAttackClaimer = (creep: Creep) => {
         const area = [controller.pos.y - 1, controller.pos.x - 1, controller.pos.y + 1, controller.pos.x + 1]
             .map((value) => Math.max(0, Math.min(value, 49)));
         const creeps = creep.room.lookForAtArea(LOOK_CREEPS, area[0], area[1], area[2], area[3], true)
-            .filter((result) => result.creep.my && result.creep.memory.role === 'attack-claimer');
+            .filter((result) => result.creep.my && result.creep.memory.role === ROLES['attack-claimer']);
         if (creeps.length < creep.memory['num'] && creep.ticksToLive > 10) return;
         if (creep.ticksToLive <= 10) {
             creeps.forEach((result) => result.creep.attackController(controller));

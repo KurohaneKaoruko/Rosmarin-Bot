@@ -1,3 +1,4 @@
+import { log } from '@/modules/utils';
 import { getRoleHandler } from './action';
 import { ensureMemoryCache } from './function/cacheFunction';
 import { RoleData } from '@/constant/CreepConstant';
@@ -11,11 +12,7 @@ const reportExecuteIssue = (key: string, message: string) => {
     if (creepExecuteErrorTickCache[key] === tick) return;
     creepExecuteErrorTickCache[key] = tick;
 
-    if (typeof global.log === 'function') {
-        global.log(message);
-        return;
-    }
-    console.log(message);
+    log(message);
 };
 
 export default class CreepExecute extends Creep {

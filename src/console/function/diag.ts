@@ -1,3 +1,4 @@
+import { getStatsMemory } from '@/modules/shared/memory';
 import { evaluateSourceWorkTiles } from '@/prototype/Creep/function/sourceFunction';
 import { getProfilerReport } from '@/modules/infra/cpuProfiler';
 
@@ -9,7 +10,7 @@ import { getProfilerReport } from '@/modules/infra/cpuProfiler';
  */
 export default {
     diag: {
-        /** CPU 观测报告：开启采样 Memory.stats.profiler = true 后等待 50 tick 再查看 */
+        /** CPU 观测报告：开启采样 getStatsMemory().profiler = true 后等待 50 tick 再查看 */
         cpu() {
             return getProfilerReport();
         },

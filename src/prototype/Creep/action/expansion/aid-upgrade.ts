@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
@@ -66,7 +67,7 @@ const aidSourcePrep = (creep: Creep): boolean => {
     }
 
     // 2) boost：资源不足时 ensureBoosted 内部自动放弃 → 无强化出发
-    if (!creep.ensureBoosted(mem.boostmap || ROLE_BOOST_CONFIGS['aid-upgrade'])) return true;
+    if (!creep.ensureBoosted(mem.boostmap || ROLE_BOOST_CONFIGS[ROLES['aid-upgrade']])) return true;
 
     return false; // 准备完成 → 出发
 };

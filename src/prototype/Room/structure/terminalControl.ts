@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { log } from "@/modules/utils";
 import { THRESHOLDS } from "@/constant/Thresholds";
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
@@ -15,7 +16,7 @@ export default class TerminalControl extends Room {
         const sendData = task.data as SendTask;
         const { targetRoom, resourceType, amount } = sendData;
         if (!targetRoom || !resourceType || !amount || amount <= 0) {
-            this.deleteMissionFromPool('terminal', task.id);
+            this.deleteMissionFromPool(MISSION_POOLS.terminal, task.id);
             return;
         }
 
@@ -53,14 +54,14 @@ export default class TerminalControl extends Room {
         if (result === OK) {
             const remaining = amount - sendAmount;
             if (remaining > 0) {
-                this.updateMissionPool('terminal', task.id, {data: {...sendData, amount: remaining}} as any);
+                this.updateMissionPool(MISSION_POOLS.terminal, task.id, {data: {...sendData, amount: remaining}} as any);
             } else {
-                this.deleteMissionFromPool('terminal', task.id);
+                this.deleteMissionFromPool(MISSION_POOLS.terminal, task.id);
             }
             log('资源发送', `${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType}, 能量消耗: ${cost}`);
         } else {
             if (result === ERR_INVALID_ARGS) {
-                this.deleteMissionFromPool('terminal', task.id);
+                this.deleteMissionFromPool(MISSION_POOLS.terminal, task.id);
             }
             log('资源发送', `${this.name} -> ${targetRoom}, ${sendAmount} ${resourceType} 失败，错误代码：${result}`);
         }

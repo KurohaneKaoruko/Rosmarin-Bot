@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { compress, decompress } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
@@ -222,7 +223,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
             if (!roomCache.buildId) {
                 const mySites = sites.filter((s: ConstructionSite) => s && (s as any).my);
                 if (!mySites.length) {
-                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool('build', task.id);
+                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool(MISSION_POOLS.build, task.id);
                     return true;
                 }
                 let best = null as ConstructionSite | null;
@@ -238,7 +239,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
                     }
                 }
                 if (!best) {
-                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool('build', task.id);
+                    if (task.id !== LOCAL_BUILD_TASK_ID) creep.room.deleteMissionFromPool(MISSION_POOLS.build, task.id);
                     return true;
                 }
                 roomCache.buildId = best.id;
@@ -312,7 +313,7 @@ const BuildRepairWork = function (creep: Creep, candidates: MoveWorkTileCandidat
                 }
 
                 if (!best) {
-                    creep.room.deleteMissionFromPool('repair', task.id);
+                    creep.room.deleteMissionFromPool(MISSION_POOLS.repair, task.id);
                     return true;
                 }
 

@@ -1,4 +1,5 @@
 import { getStructData } from '@/modules/shared/memory';
+import { isWarMode } from '@/modules/shared/memory';
 
 export default class PowerSpawnControl extends Room {
     PowerSpawnWork() {
@@ -6,7 +7,7 @@ export default class PowerSpawnControl extends Room {
         const powerSpawn = this.powerSpawn;
         if (!powerSpawn) return;
         // 战争时不处理
-        if (Memory['warmode']) return;
+        if (isWarMode()) return;
         const mem = getStructData(this.name);
         // 关停时不处理
         if(!mem?.powerSpawn) return;

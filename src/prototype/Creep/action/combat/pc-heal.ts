@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 
 
 const runLegacy = (creep: Creep) => {
@@ -38,7 +39,7 @@ const runLegacy = (creep: Creep) => {
     const lockedHealerName = (pc.memory as any).healerName as string | undefined;
     if (lockedHealerName && lockedHealerName !== creep.name) {
         const locked = Game.creeps[lockedHealerName];
-        if (locked && locked.memory.role === 'pc-heal') {
+        if (locked && locked.memory.role === ROLES['pc-heal']) {
             if (creep.room.my) creep.suicide();
             return;
         }

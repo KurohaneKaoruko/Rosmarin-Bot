@@ -1,3 +1,4 @@
+import { getDdMemory as ensureDdMemory } from '@/modules/shared/memory';
 /**
  * DD (Definite Domination) 交流系统 v4.4
  * 
@@ -590,8 +591,8 @@ function cleanupExpiredRequests(): void {
 // ==================== Memory ====================
 
 function getDDMemory(): DDMemory {
-    if (!Memory.dd) Memory.dd = {}
-    return Memory.dd
+    ensureDdMemory()
+    return ensureDdMemory()
 }
 
 function loadHistory(): DDMessage[] {

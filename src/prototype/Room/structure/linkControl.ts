@@ -1,3 +1,4 @@
+import { qos } from '@/modules/infra/qos';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 
 /**
@@ -18,7 +19,7 @@ export default class LinkControl extends Room {
         if (this.link.length < 2) return;  // 至少需要两个 Link
 
         if (!isRoomTickAligned(this.name, 10)) return;
-        if (!global.qos.shouldRun({ minBucket: 2000 })) return;
+        if (!qos.shouldRun({ minBucket: 2000 })) return;
 
         const centerPos = this.getCenter();
 

@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 type BoostConfig = {
     bodypart: [BodyPartConstant, number][];
     boostmap: BoostMap;
@@ -16,19 +17,19 @@ type LootConfig = {
 };
 
 const AidBodys: { [role: string]: { [tier: string]: BoostConfig } } = {
-    'aid-build': {
+    [ROLES['aid-build']]: {
         'T3': {
             bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
             boostmap: { [WORK]: 'XLH2O', [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' }
         }
     },
-    'aid-upgrade': {
+    [ROLES['aid-upgrade']]: {
         'T3': {
             bodypart: [[WORK, 35], [CARRY, 5], [MOVE, 10]],
             boostmap: { [WORK]: 'XGH2O', [CARRY]: 'XKH2O', [MOVE]: 'XZHO2' }
         }
     },
-    'aid-carry': {
+    [ROLES['aid-carry']]: {
         'T3': {
             bodypart: [[CARRY, 25], [MOVE, 25]],
             boostmap: { [CARRY]: 'XKH2O' }

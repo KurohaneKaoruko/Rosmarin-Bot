@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 type LinkPlan =
@@ -132,11 +133,11 @@ function executeManagerMission(creep: Creep, task: Task): boolean {
     target = getStructure(taskdata.target);
 
     if (!source || !target) {
-        creep.room.deleteMissionFromPool('transport', task.id);
+        creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
         return false;
     }
     if (!source.pos.inRange(target.pos, 2)) {
-        creep.room.deleteMissionFromPool('transport', task.id);
+        creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
         return false;
     }
 
@@ -145,7 +146,7 @@ function executeManagerMission(creep: Creep, task: Task): boolean {
 
     // 如果任务数据不合法，则移除任务
     if (!amount || typeof amount !== 'number' || amount <= 0) {
-        creep.room.deleteMissionFromPool('transport', task.id);
+        creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
         return false;
     }
 
@@ -154,7 +155,7 @@ function executeManagerMission(creep: Creep, task: Task): boolean {
 
     if (creep.store.getUsedCapacity(type) === 0 && creep.store.getFreeCapacity() > 0) {
         if (source.store[type] === 0) {
-            creep.room.deleteMissionFromPool('transport', task.id);
+            creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
             return false;
         }
         const withdrawAmount = Math.min(amount, creep.store.getFreeCapacity(type), source.store[type]);
@@ -171,7 +172,7 @@ function executeManagerMission(creep: Creep, task: Task): boolean {
     }
 
     if (transferResult === ERR_FULL) {
-        creep.room.deleteMissionFromPool('transport', task.id);
+        creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
         return true;
     }
 
@@ -180,7 +181,7 @@ function executeManagerMission(creep: Creep, task: Task): boolean {
         const data = task.data as TransportTask;
         data.amount -= transferredAmount;
         if (data.amount <= 0) {
-            creep.room.deleteMissionFromPool('transport', task.id);
+            creep.room.deleteMissionFromPool(MISSION_POOLS.transport, task.id);
         }
     }
 

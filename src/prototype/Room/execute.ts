@@ -1,68 +1,27 @@
+import { qos } from '@/modules/infra/qos';
 import { getRoomData, getStructData } from '@/modules/shared/memory';
-import { isRoomTickAligned } from '@/modules/shared/roomPhase';
-import { getRoomMode, getRoomModeProfile } from '@/modules/shared/roomMode';
-import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
-import { RoadBuilder } from '@/modules/features/external/externalRoad';
+import { getRoomModeProfile } from '@/modules/shared/roomMode';
+import { roomFeaturesOf, runRoomFeature } from './featureRegistry';
 
 export default class RoomExecute extends Room {
     exec() {
-        // 处理上一 tick 的 Observer 回调
+        // 处理上一 tick 的 Observer 回调（stop 模式也要跑：回调清场不能欠账）
         this.ObserveCallbackTick();
 
         const mode = getRoomData()?.[this.name]?.mode;
         if (mode === 'stop') return;
         const profile = getRoomModeProfile(this);
-        this.updateEnergyState(false);
-        // 冲级面板（仅 rush）：逐 tick 渲染，放 QoS 节流之前——面板不能有缺帧
-        this.raceVisual();
-        // 更新任务池
-        this.MissionUpdate();
 
-        // 主动防御处理（叠加房间相位错峰，defenseInterval=1 时保持每 tick）
-        if (profile.defenseInterval === 1 || isRoomTickAligned(this.name, profile.defenseInterval)) {
-            this.activeDefense();
+        // 编排见 featureRegistry.ts：pre 段（保命面）→ QoS 门 → post 段（可延后面）
+        for (const feature of roomFeaturesOf('pre')) {
+            runRoomFeature(this, feature, profile);
         }
 
-        // 管理房间中的建筑物
-        this.SpawnWork();
-        this.TowerWork();
-        this.LinkWork();
-        this.TerminalWork();
-        if (profile.facilities) {
-            this.LabWork();
-            this.FactoryWork();
-            this.PowerSpawnWork();
+        if (!qos.shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
+
+        for (const feature of roomFeaturesOf('post')) {
+            runRoomFeature(this, feature, profile);
         }
-
-        if(!global.qos.shouldRun({ allowLevels: ['normal', 'constrained'] })) return;
-        
-        // 自动化处理
-        if (profile.market) this.autoMarket();       // 自动市场交易（low 关闭）
-        this.autoBuild();        // 自动建筑
-        // 控制器旁能量缓冲工地（升级工「围在周边秒取能」的配套，低频放置）
-        if (isRoomTickAligned(this.name, 150)) this.ensureControllerBufferSite();
-        // rush：控制器容器 RCL2 起例行保活（升级专线的主缓冲，被毁/低耐久自动补）
-        if (getRoomMode(this) === 'rush' && isRoomTickAligned(this.name, 150)) {
-            RoadBuilder.ensureControllerContainer(this);
-        }
-        if (profile.facilities) {
-            this.autoLab();          // 自动Lab合成
-            this.autoFactory();      // 自动Factory生产
-            this.autoPower();        // 自动Power处理
-        }
-        if (profile.remoteMining) this.outMine();          // 外矿采集（low 关闭）
-
-        // 自爆拉能快递仅 mini 使用（rush 的升级供能走能量中枢与控制器专线，
-        // 不再依赖自爆墓碑——rush 在 spawn 旁堆快递会挤占孵化与交通）
-        if (getRoomMode(this) === 'mini') rushBoost(this);
-        // spawn 错位重建：建完第二个 spawn 后，把不在布局位的旧 spawn 拆到布局位（所有模式）
-        if (isRoomTickAligned(this.name, 60)) relocateOldSpawn(this);
-
-        // 显示防御cost矩阵
-        if (profile.defenseCostMatrix) this.showDefenseCostMatrix();
-
-        // Observer 工作
-        this.ObserveWork();
     }
 
     // 房间初始化

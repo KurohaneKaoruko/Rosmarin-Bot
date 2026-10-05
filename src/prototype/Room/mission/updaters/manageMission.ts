@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { LabMap, Goods, BarList } from "@/constant/ResourceConstant";
 import { BASE_CONFIG } from "@/constant/BaseConstant";
 import { getStructData } from "@/modules/shared/memory";
@@ -282,12 +283,12 @@ export default class ManageMission extends Room {
 
         const free = targetObj.store?.getFreeCapacity(normalizedResourceType) || 0;
         if (free <= 0) {
-            const existingTaskId = this.checkSameMissionInPool('transport', 'manage', {
+            const existingTaskId = this.checkSameMissionInPool(MISSION_POOLS.transport, 'manage', {
                 source: sourceKey,
                 target: targetKey,
                 resourceType: normalizedResourceType,
             } as ManageTask);
-            if (existingTaskId) this.deleteMissionFromPool('transport', existingTaskId);
+            if (existingTaskId) this.deleteMissionFromPool(MISSION_POOLS.transport, existingTaskId);
             return false;
         }
 
@@ -300,16 +301,16 @@ export default class ManageMission extends Room {
             resourceType: normalizedResourceType,
             amount,
         } as ManageTask;
-        const existingTaskId = this.checkSameMissionInPool('transport', 'manage', {
+        const existingTaskId = this.checkSameMissionInPool(MISSION_POOLS.transport, 'manage', {
             source: sourceKey,
             target: targetKey,
             resourceType: normalizedResourceType,
         } as ManageTask);
         if (existingTaskId) {
-            return this.updateMissionPool('transport', existingTaskId,
+            return this.updateMissionPool(MISSION_POOLS.transport, existingTaskId,
                 { data: taskData });
         } else {
-            return this.addMissionToPool('transport', 'manage', 0, taskData);
+            return this.addMissionToPool(MISSION_POOLS.transport, 'manage', 0, taskData);
         }
     }
 
@@ -321,15 +322,15 @@ export default class ManageMission extends Room {
      */
     SendMissionAdd(targetRoom: string, resourceType: string | ResourceConstant, amount: number) {
         const normalizedResourceType = normalizeManageResourceType(resourceType);
-        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {
+        const existingTaskId = this.checkSameMissionInPool(MISSION_POOLS.terminal, 'send', {
             targetRoom,
             resourceType: normalizedResourceType,
         } as SendTask);
         if (existingTaskId) {
-            return this.updateMissionPool('terminal', existingTaskId,
+            return this.updateMissionPool(MISSION_POOLS.terminal, existingTaskId,
                 { data: { targetRoom, resourceType: normalizedResourceType, amount } as SendTask });
         } else {
-            return this.addMissionToPool('terminal', 'send', 0, 
+            return this.addMissionToPool(MISSION_POOLS.terminal, 'send', 0, 
                 { targetRoom, resourceType: normalizedResourceType, amount } as SendTask);
         }
     }
@@ -346,22 +347,22 @@ export default class ManageMission extends Room {
         const normalizedResourceType = normalizeManageResourceType(resourceType);
         if (!amount || typeof amount !== 'number' || amount <= 0) return false;
 
-        const existingTaskId = this.checkSameMissionInPool('terminal', 'send', {
+        const existingTaskId = this.checkSameMissionInPool(MISSION_POOLS.terminal, 'send', {
             targetRoom,
             resourceType: normalizedResourceType,
         } as SendTask);
         if (existingTaskId) {
-            const task = this.getMissionFromPoolById('terminal', existingTaskId);
+            const task = this.getMissionFromPoolById(MISSION_POOLS.terminal, existingTaskId);
             const currentAmount = (task?.data as SendTask | undefined)?.amount ?? 0;
             let nextAmount = Math.max(currentAmount, amount);
             if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
             if (nextAmount === currentAmount) return OK;
-            return this.updateMissionPool('terminal', existingTaskId, {data: {amount: nextAmount} as any});
+            return this.updateMissionPool(MISSION_POOLS.terminal, existingTaskId, {data: {amount: nextAmount} as any});
         }
 
         let nextAmount = amount;
         if (typeof maxAmount === 'number') nextAmount = Math.min(nextAmount, maxAmount);
-        return this.addMissionToPool('terminal', 'send', 0, {
+        return this.addMissionToPool(MISSION_POOLS.terminal, 'send', 0, {
             targetRoom,
             resourceType: normalizedResourceType,
             amount: nextAmount,
@@ -394,21 +395,21 @@ const hasEnoughResourceForSendTask = (room: Room, task: Task) => {
 // ==================== Getter ====================
 export class ManageTaskGetter extends Room {
     getManageMission() {
-        return this.getMissionFromPoolFirst('transport', (task) => task.type === 'manage') || null;
+        return this.getMissionFromPoolFirst(MISSION_POOLS.transport, (task) => task.type === 'manage') || null;
     }
 
     // 发送任务会被 TerminalWork 分批执行，这里不要求一次性满足全部 amount，但需要满足一个最小批量。
     getSendMission() {
-        return this.getMissionFromPoolFirst('terminal', (task) => canDispatchSendTask(this.terminal, task));
+        return this.getMissionFromPoolFirst(MISSION_POOLS.terminal, (task) => canDispatchSendTask(this.terminal, task));
     }
 
     getSendMissionTotalAmount() {
         const sends: Record<string, number> = {};
-        const tasks = this.getAllMissionFromPool('terminal').filter((task) => task.type === 'send');
+        const tasks = this.getAllMissionFromPool(MISSION_POOLS.terminal).filter((task) => task.type === 'send');
         for (const task of tasks) {
             const data = task.data as SendTask;
             if (!hasEnoughResourceForSendTask(this, task)) {
-                this.deleteMissionFromPool('terminal', task.id);
+                this.deleteMissionFromPool(MISSION_POOLS.terminal, task.id);
                 continue;
             }
             sends[data.resourceType] = data.amount + (sends[data.resourceType] || 0);

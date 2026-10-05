@@ -1,3 +1,5 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { compressBodyConfig } from "@/modules/shared/compress";
 import { log } from "@/modules/utils";
 import ClaimSpawnFunction from "./claimSpawn";
@@ -17,7 +19,7 @@ const getGlobalReserverLoad = (targetRoom: string) => {
 
     for (const creepName in Game.creeps) {
         const creep = Game.creeps[creepName];
-        if (!creep || creep.memory?.role !== 'reserver') continue;
+        if (!creep || creep.memory?.role !== ROLES.reserver) continue;
         if (creep.memory?.targetRoom !== targetRoom) continue;
         live++;
     }
@@ -25,10 +27,10 @@ const getGlobalReserverLoad = (targetRoom: string) => {
     for (const roomName in Game.rooms) {
         const room = Game.rooms[roomName];
         if (!room || typeof (room as any).getAllMissionFromPool !== 'function') continue;
-        const tasks = room.getAllMissionFromPool('spawn') || [];
+        const tasks = room.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
         for (const task of tasks as any[]) {
             const memory = task?.data?.memory;
-            if (!memory || memory.role !== 'reserver') continue;
+            if (!memory || memory.role !== ROLES.reserver) continue;
             if (memory.targetRoom !== targetRoom) continue;
             queued++;
         }
@@ -79,7 +81,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'aid-build',
+            ROLES['aid-build'],
             (memory) => memory.targetRoom === targetRoom && memory.sourceRoom === sourceRoom,
             isActiveAidBuildFlagCreep
         );
@@ -90,8 +92,8 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && AidBodys['aid-build'][boost]) {
-            const config = AidBodys['aid-build'][boost];
+        if (boost && AidBodys[ROLES['aid-build']][boost]) {
+            const config = AidBodys[ROLES['aid-build']][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
             if (room.CheckBoostRes(bodys, boostmap)) {
@@ -103,7 +105,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             }
         }
 
-        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), MANUAL_AID_BUILD_SPAWN_PRIORITY, 'aid-build', memory);
+        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), MANUAL_AID_BUILD_SPAWN_PRIORITY, ROLES['aid-build'], memory);
         if (ret !== OK) {
             log('AID', `${room.name} -> ${targetRoom} spawn aid-build failed ret=${ret}, e=${room.energyAvailable}/${room.energyCapacityAvailable}`);
             return true;
@@ -130,7 +132,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'aid-upgrade',
+            ROLES['aid-upgrade'],
             (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
@@ -140,8 +142,8 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && AidBodys['aid-upgrade'][boost]) {
-            const config = AidBodys['aid-upgrade'][boost];
+        if (boost && AidBodys[ROLES['aid-upgrade']][boost]) {
+            const config = AidBodys[ROLES['aid-upgrade']][boost];
             bodys = config.bodypart || [];
             const boostmap = config.boostmap;
             if (room.CheckBoostRes(bodys, boostmap)) {
@@ -153,7 +155,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             }
         }
 
-        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, 'aid-upgrade', memory);
+        const ret = room.SpawnMissionAdd('', compressBodyConfig(bodys), -1, ROLES['aid-upgrade'], memory);
         if (ret === OK && memory['boostmap']) {
             room.AssignBoostTaskByBody(bodys, memory['boostmap'] as any, memory['boostOwnerId'] as any);
         }
@@ -175,13 +177,13 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'aid-upgrade',
+            ROLES['aid-upgrade'],
             (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
         // 大体型冲级 upgrader（50 部件）+ boost 任务接线（同 aid-build 模式：资源足则由 BoostMission 灌 lab）
-        const bodys = room.GetRoleBodys('aid-upgrade');
+        const bodys = room.GetRoleBodys(ROLES['aid-upgrade']);
         const boostmap: Record<string, MineralBoostConstant[]> = { [WORK]: ['XGH2O', 'GH2O', 'GH'] };
         const memory: CreepMemory = {
             homeRoom: room.name,
@@ -197,7 +199,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             (memory as any).boostOwnerId = ownerId;
         }
 
-        room.SpawnMissionAdd('', compressBodyConfig(bodys ?? []), -1, 'aid-upgrade', memory);
+        room.SpawnMissionAdd('', compressBodyConfig(bodys ?? []), -1, ROLES['aid-upgrade'], memory);
         return true;
     }
 
@@ -216,7 +218,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'aid-carry',
+            ROLES['aid-carry'],
             (memory) =>
                 memory.targetRoom === targetRoom &&
                 memory.sourceRoom === room.name &&
@@ -235,9 +237,9 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
 
         // 是否BOOST
         const boost = this.getBoostTierFromName(flagName);
-        if (boost && AidBodys['aid-carry'][boost]) {
-            bodys = AidBodys['aid-carry'][boost].bodypart || [];
-            const boostmap = AidBodys['aid-carry'][boost].boostmap || {};
+        if (boost && AidBodys[ROLES['aid-carry']][boost]) {
+            bodys = AidBodys[ROLES['aid-carry']][boost].bodypart || [];
+            const boostmap = AidBodys[ROLES['aid-carry']][boost].boostmap || {};
             if (room.CheckBoostRes(bodys, boostmap)) {
                 memory['boostmap'] = boostmap;
                 memory['boostOwnerId'] = `${flagName}:${Game.time}`;
@@ -247,7 +249,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             }
         }
 
-        const ret = room.SpawnMissionAdd('', bodys, -1, 'aid-carry', memory);
+        const ret = room.SpawnMissionAdd('', bodys, -1, ROLES['aid-carry'], memory);
         if (ret === OK && memory['boostmap']) {
             room.AssignBoostTaskByBody(bodys, memory['boostmap'], memory['boostOwnerId'] as any);
         }
@@ -318,7 +320,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
 
         if (readyForClaim && counts.claimer < 1) {
             const memory = { homeRoom: room.name, targetRoom, spawnFlag: flagName, jumpMode: true } as any;
-            const ret = room.SpawnMissionAdd('', compressBodyConfig([[MOVE, 1], [CLAIM, 1]]), JUMP_SPAWN_PRIORITY, 'claimer', memory);
+            const ret = room.SpawnMissionAdd('', compressBodyConfig([[MOVE, 1], [CLAIM, 1]]), JUMP_SPAWN_PRIORITY, ROLES.claimer, memory);
             if (ret === OK) {
                 log('JUMP', `${room.name} -> ${targetRoom} ready, spawn claimer`);
             } else if (Game.time - (jumpMem['lastJumpClaimFailTime'] || 0) >= 30) {
@@ -337,7 +339,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
                 spawnFlag: flagName,
                 jumpMode: true
             } as any;
-            const ret = room.SpawnMissionAdd('', compressBodyConfig(body), JUMP_SPAWN_PRIORITY, 'aid-build', memory);
+            const ret = room.SpawnMissionAdd('', compressBodyConfig(body), JUMP_SPAWN_PRIORITY, ROLES['aid-build'], memory);
             if (ret === OK) {
                 log('JUMP', `${room.name} -> ${targetRoom} spawn aid-build (${counts.builder + 1}/${desiredBuilder})`);
             } else if (Game.time - (jumpMem['lastJumpBuildFailTime'] || 0) >= 30) {
@@ -367,7 +369,7 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
     }
 
     private cleanupJumpLegacyTasks(spawnRoom: Room, flagName: string, targetRoom: string): void {
-        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+        const tasks = spawnRoom.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
         let removed = 0;
         for (const task of [...(tasks as any[])]) {
             const data = task?.data as any;
@@ -375,13 +377,13 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             if (!memory || memory.spawnFlag !== flagName || memory.targetRoom !== targetRoom) continue;
 
             const role = memory.role;
-            if (role !== 'aid-build' && role !== 'aid-carry' && role !== 'claimer') continue;
+            if (role !== ROLES['aid-build'] && role !== ROLES['aid-carry'] && role !== ROLES.claimer) continue;
 
             const body = data?.body;
             const emptyBody = body === '' || (Array.isArray(body) && body.length === 0);
             if (!emptyBody) continue;
 
-            spawnRoom.deleteMissionFromPool('spawn', task.id);
+            spawnRoom.deleteMissionFromPool(MISSION_POOLS.spawn, task.id);
             removed++;
         }
 
@@ -391,13 +393,13 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
     }
 
     private cleanupJumpCarryTasks(spawnRoom: Room, flagName: string, targetRoom: string): void {
-        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+        const tasks = spawnRoom.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
         let removed = 0;
         for (const task of [...(tasks as any[])]) {
             const memory = task?.data?.memory as any;
             if (!memory || memory.spawnFlag !== flagName || memory.targetRoom !== targetRoom) continue;
-            if (memory.role !== 'aid-carry') continue;
-            spawnRoom.deleteMissionFromPool('spawn', task.id);
+            if (memory.role !== ROLES['aid-carry']) continue;
+            spawnRoom.deleteMissionFromPool(MISSION_POOLS.spawn, task.id);
             removed++;
         }
 
@@ -554,27 +556,27 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
             if (creep.memory?.spawnFlag !== flagName) continue;
             if (creep.memory?.targetRoom !== targetRoom) continue;
 
-            if (creep.memory?.role === 'aid-build') {
+            if (creep.memory?.role === ROLES['aid-build']) {
                 builderLive++;
                 if (creep.room.name === targetRoom) builderAtTarget++;
             }
-            else if (creep.memory?.role === 'aid-carry') {
+            else if (creep.memory?.role === ROLES['aid-carry']) {
                 carryLive++;
                 if (creep.room.name === targetRoom) carryAtTarget++;
             }
-            else if (creep.memory?.role === 'claimer') claimerLive++;
+            else if (creep.memory?.role === ROLES.claimer) claimerLive++;
         }
 
-        const tasks = spawnRoom.getAllMissionFromPool('spawn') || [];
+        const tasks = spawnRoom.getAllMissionFromPool(MISSION_POOLS.spawn) || [];
         for (const task of tasks as any[]) {
             const memory = task?.data?.memory as any;
             if (!memory) continue;
             if (memory.spawnFlag !== flagName) continue;
             if (memory.targetRoom !== targetRoom) continue;
 
-            if (memory.role === 'aid-build') builderQueued++;
-            else if (memory.role === 'aid-carry') carryQueued++;
-            else if (memory.role === 'claimer') claimerQueued++;
+            if (memory.role === ROLES['aid-build']) builderQueued++;
+            else if (memory.role === ROLES['aid-carry']) carryQueued++;
+            else if (memory.role === ROLES.claimer) claimerQueued++;
         }
 
         return {
@@ -608,12 +610,12 @@ export default class AidSpawnFunction extends ClaimSpawnFunction {
         const spawnLoad = getFlagSpawnLoad(
             room,
             flagName,
-            'reserver',
+            ROLES.reserver,
             (memory) => memory.targetRoom === targetRoom && memory.homeRoom === room.name
         );
         if (spawnLoad.total >= 1) return true;
 
-        room.SpawnMissionAdd('', '', -1, 'reserver', { homeRoom: room.name, targetRoom, spawnFlag: flagName });
+        room.SpawnMissionAdd('', '', -1, ROLES.reserver, { homeRoom: room.name, targetRoom, spawnFlag: flagName });
         return true;
     }
 

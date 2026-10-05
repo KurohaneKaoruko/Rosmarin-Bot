@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { getLabAB, ensureBoostLabs, type BoostLabsMemory } from '@/modules/shared/labReservations';
 import { getStructData, getTeamData } from '@/modules/shared/memory';
 
@@ -28,7 +29,7 @@ export default class BoostMission extends Room {
         const forbiddenLabIds = this.getForbiddenBoostLabIds();
 
         // 2. 获取当前活跃的 Boost 任务
-        const activeTasks = (this.getAllMissionFromPool('boost') as Task[]) || [];
+        const activeTasks = (this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[]) || [];
 
         if (activeTasks.length === 0) {
             // 没有 boost 任务时：只清理 task 征用；fixed 仍要持续补能量/补矿以保证随时可用
@@ -116,7 +117,7 @@ export default class BoostMission extends Room {
 
     private addBoostTransportMissionIfAbsent(task: TransportTask, match: Partial<TransportTask>) {
         // 检查是否已有相同的搬运任务
-        if (this.checkSameMissionInPool('transport', 'transport', match as any)) return;
+        if (this.checkSameMissionInPool(MISSION_POOLS.transport, 'transport', match as any)) return;
         this.addTransportMission(this.TransportLevel('boost'), task);
     }
 
@@ -231,13 +232,13 @@ export default class BoostMission extends Room {
      * 清理无效的 Boost 任务
      */
     private cleanInvalidBoostTasks() {
-        const boostTasks = this.getAllMissionFromPool('boost') as Task[];
+        const boostTasks = this.getAllMissionFromPool(MISSION_POOLS.boost) as Task[];
         if (!boostTasks) return;
 
         for (const task of boostTasks) {
             const data = task.data as BoostTask;
             if (data.totalAmount <= 0) {
-                this.deleteMissionFromPool('boost', task.id);
+                this.deleteMissionFromPool(MISSION_POOLS.boost, task.id);
                 continue;
             }
 
@@ -261,7 +262,7 @@ export default class BoostMission extends Room {
             if (data.totalAmount < 0) data.totalAmount = 0;
             if (modified) {
                 if (data.totalAmount <= 0) {
-                    this.deleteMissionFromPool('boost', task.id);
+                    this.deleteMissionFromPool(MISSION_POOLS.boost, task.id);
                 } else {
                     // 更新任务数据引用已生效
                 }

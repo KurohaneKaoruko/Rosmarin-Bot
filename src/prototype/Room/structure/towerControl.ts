@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { compress } from '@/modules/shared/compress';
 import { estimateHealPower, getTowerEffectByDistance } from '@/modules/shared/combatCalc';
 import { isRoomTickAligned, getRoomPhase } from '@/modules/shared/roomPhase';
@@ -278,11 +279,11 @@ export default class TowerControl extends Room {
         const targetCache = towerRepairTargetByRoom;
         if (isRoomTickAligned(this.name, 20)) {
             targetCache[this.name] = null;
-            if (this.checkMissionInPool('repair')) {
+            if (this.checkMissionInPool(MISSION_POOLS.repair)) {
                 const centerPos = this.getCenter();
                 const posInfo = compress(centerPos.x, centerPos.y);
                 const hits = this[RESOURCE_ENERGY] > 200000 ? 1e6 : this[RESOURCE_ENERGY] > 100000 ? 3e5 : 3e4;
-                const task = this.getMissionFromPool('repair', posInfo,
+                const task = this.getMissionFromPool(MISSION_POOLS.repair, posInfo,
                     (t) => {
                         const repairData = t.data as RepairTask;
                         if (!repairData || !(repairData as any).target) return false;
@@ -296,7 +297,7 @@ export default class TowerControl extends Room {
                         const target = Game.getObjectById((repairData as any).target) as Structure | null;
                         if (!target) return false;
                         if ((repairData as any).hits != null && target.hits >= (repairData as any).hits) {
-                            this.deleteMissionFromPool('repair', task.id);
+                            this.deleteMissionFromPool(MISSION_POOLS.repair, task.id);
                             return false;
                         }
                         targetCache[this.name] = target.id;

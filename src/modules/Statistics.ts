@@ -1,4 +1,7 @@
 /** 统计模块 */
+import { getStatsMemory } from '@/modules/shared/memory';
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 import { RoleData } from '@/constant/CreepConstant';
 import { getCreepRoleCountsAll } from '@/modules/shared/creepTickIndex';
 import { getAllOrdersCached, hasMarketCredits, hasMarketOrderApi } from '@/modules/shared/marketUtils';
@@ -23,7 +26,7 @@ export const Statistics = {
     end: function() {
         const targets = getStatsTargetsCached();
         if (targets.length <= 0) return;
-        if (!Memory.stats) Memory.stats = {}
+        getStatsMemory();
 
         updateCPUinfo();       // 统计 CPU 使用量
 
@@ -42,64 +45,64 @@ export const Statistics = {
 
 function updateCPUinfo() {
     const used = Game.cpu.getUsed();
-    Memory.stats.cpu = used;   // 统计 CPU 总使用量
+    getStatsMemory().cpu = used;   // 统计 CPU 总使用量
     // bucket 当前剩余量
-    try { Memory.stats.bucket = Game.cpu.bucket; }
-    catch (e) { Memory.stats.bucket = 0; };
+    try { getStatsMemory().bucket = Game.cpu.bucket; }
+    catch (e) { getStatsMemory().bucket = 0; };
 
-    if(!Memory.stats.cpuUsed) Memory.stats.cpuUsed = { total: 0,count: 0 };
+    if(!getStatsMemory().cpuUsed) getStatsMemory().cpuUsed = { total: 0,count: 0 };
 
-    Memory.stats.cpuUsed['total'] += used;
-    Memory.stats.cpuUsed['count'] += 1;
-    if (Memory.stats.cpuUsed['count'] >= CPU_AVG_WINDOW) {
-        let total = Memory.stats.cpuUsed['total'];
-        let count = Memory.stats.cpuUsed['count'];
-        Memory.stats.AvgCpuUsed = total / count;
-        Memory.stats.cpuUsed = { total: 0,count: 0 };
+    getStatsMemory().cpuUsed['total'] += used;
+    getStatsMemory().cpuUsed['count'] += 1;
+    if (getStatsMemory().cpuUsed['count'] >= CPU_AVG_WINDOW) {
+        let total = getStatsMemory().cpuUsed['total'];
+        let count = getStatsMemory().cpuUsed['count'];
+        getStatsMemory().AvgCpuUsed = total / count;
+        getStatsMemory().cpuUsed = { total: 0,count: 0 };
     }
 
 }
 
 function updateGclGpl() {
     // 统计 GCL / GPL 的升级百分比和等级
-    Memory.stats.gcl = (Game.gcl.progress / Game.gcl.progressTotal) * 100
-    Memory.stats.gclLevel = Game.gcl.level
-    Memory.stats.gpl = (Game.gpl.progress / Game.gpl.progressTotal) * 100
-    Memory.stats.gplLevel = Game.gpl.level
+    getStatsMemory().gcl = (Game.gcl.progress / Game.gcl.progressTotal) * 100
+    getStatsMemory().gclLevel = Game.gcl.level
+    getStatsMemory().gpl = (Game.gpl.progress / Game.gpl.progressTotal) * 100
+    getStatsMemory().gplLevel = Game.gpl.level
 
     // 统计 GCL / GPL 的估计升级时间
     const INTERVAL = 1000
     if (Game.time % INTERVAL !== 1) return;
-    const timeDelta = (Date.now() - (Number(Memory.stats.GCLGPLprevTimestamp) || Date.now())) / 1000;    // 时间差
-    Memory.stats.GCLGPLprevTimestamp = Date.now();    // 记录当前时间戳
+    const timeDelta = (Date.now() - (Number(getStatsMemory().GCLGPLprevTimestamp) || Date.now())) / 1000;    // 时间差
+    getStatsMemory().GCLGPLprevTimestamp = Date.now();    // 记录当前时间戳
 
-    const gclIncrement = Game.gcl.progress - (Number(Memory.stats.gclProgress) || Game.gcl.progress);    // GCL 的进度增量
+    const gclIncrement = Game.gcl.progress - (Number(getStatsMemory().gclProgress) || Game.gcl.progress);    // GCL 的进度增量
     const gclRemaining = Game.gcl.progressTotal - Game.gcl.progress;    // GCL 的剩余进度
-    Memory.stats.gclProgress = Game.gcl.progress;   // GCL 的当前进度
+    getStatsMemory().gclProgress = Game.gcl.progress;   // GCL 的当前进度
     if (gclIncrement > 0) {
-        Memory.stats.gclUpTick = ((gclRemaining / gclIncrement) * INTERVAL) || 0;    // GCL 升级所需的tick数
-        Memory.stats.gclUpTime = ((gclRemaining / gclIncrement) * timeDelta) || 0;    // GCL 预计升级所需时间
+        getStatsMemory().gclUpTick = ((gclRemaining / gclIncrement) * INTERVAL) || 0;    // GCL 升级所需的tick数
+        getStatsMemory().gclUpTime = ((gclRemaining / gclIncrement) * timeDelta) || 0;    // GCL 预计升级所需时间
     } else {
-        Memory.stats.gclUpTick = 0;
-        Memory.stats.gclUpTime = 0;
+        getStatsMemory().gclUpTick = 0;
+        getStatsMemory().gclUpTime = 0;
     }
 
-    const gplIncrement = Game.gpl.progress - (Number(Memory.stats.gplProgress) || Game.gpl.progress);    // GPL 的进度增量
+    const gplIncrement = Game.gpl.progress - (Number(getStatsMemory().gplProgress) || Game.gpl.progress);    // GPL 的进度增量
     const gplRemaining = Game.gpl.progressTotal - Game.gpl.progress;    // GPL 的剩余进度
-    Memory.stats.gplProgress = Game.gpl.progress;    // GPL 的当前进度
+    getStatsMemory().gplProgress = Game.gpl.progress;    // GPL 的当前进度
     if (gplIncrement > 0) {
-        Memory.stats.gplUpTick = ((gplRemaining / gplIncrement) * INTERVAL) || 0;    // GPL 升级所需的tick数
-        Memory.stats.gplUpTime = ((gplRemaining / gplIncrement) * timeDelta) || 0;    // GPL 预计升级所需时间
+        getStatsMemory().gplUpTick = ((gplRemaining / gplIncrement) * INTERVAL) || 0;    // GPL 升级所需的tick数
+        getStatsMemory().gplUpTime = ((gplRemaining / gplIncrement) * timeDelta) || 0;    // GPL 预计升级所需时间
     } else {
-        Memory.stats.gplUpTick = 0;
-        Memory.stats.gplUpTime = 0;
+        getStatsMemory().gplUpTick = 0;
+        getStatsMemory().gplUpTime = 0;
     }
 }
 
 
 function updateRoomStats() {
     // 房间等级 & 房间能量储备
-    const stats = Memory.stats;
+    const stats = getStatsMemory();
     stats.rclLevel = {};
     stats.rclProgress = {};
     stats.energyHistory = stats.energy || {};
@@ -170,54 +173,54 @@ function updateRoomStats() {
 function updateCreepCount() {
     // 统计所有 creep 的数量
     const roleCounts = getCreepRoleCountsAll();
-    Memory.stats.creeps = { ...roleCounts };
+    getStatsMemory().creeps = { ...roleCounts };
     let creepCount = 0;
     for (const role in roleCounts) {
         creepCount += roleCounts[role] || 0;
     }
-    Memory.stats.creepCount = creepCount;
+    getStatsMemory().creepCount = creepCount;
 }
 
 function updateCreditInfo() {
     if (!hasMarketCredits()) {
-        Memory.stats.credit = 0;
-        Memory.stats.creditChanges = 0;
-        Memory.stats.energyAveragePrice = 0;
-        Memory.stats.energyAverageSellPrice = 0;
+        getStatsMemory().credit = 0;
+        getStatsMemory().creditChanges = 0;
+        getStatsMemory().energyAveragePrice = 0;
+        getStatsMemory().energyAverageSellPrice = 0;
         return;
     }
 
-    Memory.stats.credit = Game.market.credits;
+    getStatsMemory().credit = Game.market.credits;
 
     if(Game.time % LONG_STAT_INTERVAL !== 1) return;
     const cr = Game.market.credits;
-    Memory.stats.creditChanges = cr - (Number(Memory.stats.lastCredit) || cr)
-    Memory.stats.lastCredit = cr;
+    getStatsMemory().creditChanges = cr - (Number(getStatsMemory().lastCredit) || cr)
+    getStatsMemory().lastCredit = cr;
 
     if (!hasMarketOrderApi()) {
-        Memory.stats.energyAveragePrice = 0;
-        Memory.stats.energyAverageSellPrice = 0;
+        getStatsMemory().energyAveragePrice = 0;
+        getStatsMemory().energyAverageSellPrice = 0;
         return;
     }
 
     // 能量前十求购均价
     const orders = getAllOrdersCached(ORDER_BUY, RESOURCE_ENERGY);
     if (!orders || orders.length === 0) {
-        Memory.stats.energyAveragePrice = 0;
+        getStatsMemory().energyAveragePrice = 0;
     } else {
         const topOrders = selectTopOrders(orders, MARKET_ORDER_LIMIT, (a, b) => b.price - a.price);
         const averagePrice = topOrders.length > 0 ? topOrders.reduce((sum, order) => sum + order.price, 0) / topOrders.length : 0;
-        Memory.stats.energyAveragePrice = averagePrice;
+        getStatsMemory().energyAveragePrice = averagePrice;
     }
 
     // 能量前十出售均价
     const sellOrders = getAllOrdersCached(ORDER_SELL, RESOURCE_ENERGY);
     if (!sellOrders || sellOrders.length === 0) {
-        Memory.stats.energyAverageSellPrice = 0;
+        getStatsMemory().energyAverageSellPrice = 0;
     } else {
         const topSellOrders = selectTopOrders(sellOrders, MARKET_ORDER_LIMIT, (a, b) => a.price - b.price);
         const averageSellPrice = topSellOrders.length > 0 ? topSellOrders.reduce((sum, order) => sum + order.price, 0) / topSellOrders.length : 0;
-        Memory.stats.energyAverageSellPrice = averageSellPrice;
+        getStatsMemory().energyAverageSellPrice = averageSellPrice;
     }
     
 }
@@ -317,10 +320,10 @@ function gatherRoomLive(room: Room) {
         for (const name in Game.creeps) {
             const c = Game.creeps[name];
             const role = c.memory?.role;
-            if (role !== 'out-harvest' && role !== 'out-carry') continue;
+            if (role !== ROLES['out-harvest'] && role !== ROLES['out-carry']) continue;
             if (c.memory?.sourceRoom !== room.name) continue;
             if (!outList.includes(c.memory?.targetRoom || '')) continue;
-            if (role === 'out-harvest') outHarvest += 1;
+            if (role === ROLES['out-harvest']) outHarvest += 1;
             else outCarry += 1;
         }
     }
@@ -332,7 +335,7 @@ function gatherRoomLive(room: Room) {
         energyState: mem.energyState || '-',
         ea: room.energyAvailable,
         ecap: room.energyCapacityAvailable,
-        queue: room.getAllMissionFromPool ? room.getAllMissionFromPool('spawn').length : 0,
+        queue: room.getAllMissionFromPool ? room.getAllMissionFromPool(MISSION_POOLS.spawn).length : 0,
         spawning,
         siteCount: sites.length,
         siteSummary,
@@ -365,7 +368,7 @@ const ENERGY_STATE_STYLE: Record<string, { text: string; color: string }> = {
 };
 
 function drawStatsHUD(roomNames: string[]) {
-    const stats = Memory.stats || {};
+    const stats = getStatsMemory() || {};
     const creepCount = stats.creepCount || 0;
     const roleSummaryLines = getTopRolesSummaryLines(stats.creeps);
     for (const roomName of roomNames) {

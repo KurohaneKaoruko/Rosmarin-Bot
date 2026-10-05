@@ -1,3 +1,4 @@
+import { getWhitelistIds } from '@/modules/shared/memory';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { engageTarget } from '@/prototype/Creep/function/combatCore';
 
@@ -178,7 +179,7 @@ const runOutDefend = (creep: Creep) => {
 
     const hostileCreeps = getRoomTickCacheValue(creep.room, 'out_defend_hostiles', () =>
         creep.room.find(FIND_HOSTILE_CREEPS, {
-            filter: (hostile) => !Memory['whitelist']?.includes(hostile.owner.username)
+            filter: (hostile) => !getWhitelistIds().includes(hostile.owner.username)
         }) as Creep[]
     );
     let targets: Array<Creep | StructureInvaderCore> = hostileCreeps;
@@ -240,7 +241,7 @@ const runOutInvader = (creep: Creep) => {
     if (targets.length === 0) {
         targets = getRoomTickCacheValue(creep.room, 'out_invader_hostile_creeps', () =>
             creep.room.find(FIND_HOSTILE_CREEPS, {
-                filter: (hostile) => !Memory['whitelist']?.includes(hostile.owner.username) && (
+                filter: (hostile) => !getWhitelistIds().includes(hostile.owner.username) && (
                     hostile.getActiveBodyparts(ATTACK) > 0 || hostile.getActiveBodyparts(RANGED_ATTACK) > 0
                 )
             }) as Creep[]

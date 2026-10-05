@@ -1,24 +1,26 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ROLES } from '@/constant/CreepConstant';
 // ── 中央 boost 配置表（Tier 1 boost 管理统一）──────────────────
 // 角色 -> 部件 -> 候选 boost 资源（按优先级降级，前者不足自动用后者）。
 // 仅收「标准角色」；动态分档（power 的 boostLevel、defend-single 的 must 切换）
 // 仍由调用方显式传入。新增需要 boost 的角色：在这里加一行，角色里调 ensureBoosted()。
 export const ROLE_BOOST_CONFIGS: Record<string, Record<string, MineralBoostConstant[]>> = {
-    'worker': { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    'up-repair': { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    'up-upgrade': { [WORK]: ['XGH2O', 'GH2O', 'GH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'aid-build': { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
-    'aid-upgrade': { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
-    'aid-carry': { [CARRY]: ['XKH2O', 'KH2O', 'KH'] },
-    'dismantle': { [WORK]: ['XZH2O', 'ZH2O', 'ZH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'aio': { [TOUGH]: ['XGHO2'], [HEAL]: ['XLHO2'], [RANGED_ATTACK]: ['XKHO2'], [MOVE]: ['XZHO2'] },
-    'one-ranged': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'double-attack': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [ATTACK]: ['XUH2O', 'UH2O', 'UH'] },
-    'double-heal': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'] },
-    'double-dismantle': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [WORK]: ['XZH2O', 'ZH2O', 'ZH'] },
-    'defend-attack': { [ATTACK]: ['XUH2O', 'UH2O', 'UH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'defend-ranged': { [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'defend-2attack': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [ATTACK]: ['XUH2O', 'UH2O', 'UH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
-    'defend-2heal': { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES.worker]: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
+    [ROLES['up-repair']]: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
+    [ROLES['up-upgrade']]: { [WORK]: ['XGH2O', 'GH2O', 'GH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES['aid-build']]: { [WORK]: ['XLH2O', 'LH2O', 'LH'] },
+    [ROLES['aid-upgrade']]: { [WORK]: ['XGH2O', 'GH2O', 'GH'] },
+    [ROLES['aid-carry']]: { [CARRY]: ['XKH2O', 'KH2O', 'KH'] },
+    [ROLES.dismantle]: { [WORK]: ['XZH2O', 'ZH2O', 'ZH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES.aio]: { [TOUGH]: ['XGHO2'], [HEAL]: ['XLHO2'], [RANGED_ATTACK]: ['XKHO2'], [MOVE]: ['XZHO2'] },
+    [ROLES['one-ranged']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES['double-attack']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [ATTACK]: ['XUH2O', 'UH2O', 'UH'] },
+    [ROLES['double-heal']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'] },
+    [ROLES['double-dismantle']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [WORK]: ['XZH2O', 'ZH2O', 'ZH'] },
+    [ROLES['defend-attack']]: { [ATTACK]: ['XUH2O', 'UH2O', 'UH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES['defend-ranged']]: { [RANGED_ATTACK]: ['XKHO2', 'KHO2', 'KO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES['defend-2attack']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [ATTACK]: ['XUH2O', 'UH2O', 'UH'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
+    [ROLES['defend-2heal']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
 };
 
 export default class BoostFunction extends Creep {
@@ -226,7 +228,7 @@ export default class BoostFunction extends Creep {
             const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
             const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
 
-            const boostPool = this.room.getAllMissionFromPool('boost') as any[] | undefined;
+            const boostPool = this.room.getAllMissionFromPool(MISSION_POOLS.boost) as any[] | undefined;
             const ownersMap: Record<string, number> = {};
             if (boostPool) {
                 for (const t of boostPool) {
@@ -440,7 +442,7 @@ export default class BoostFunction extends Creep {
             const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
 
             if (must && allowEnsure) {
-                const boostPool = this.room.getAllMissionFromPool('boost') as any[] | undefined;
+                const boostPool = this.room.getAllMissionFromPool(MISSION_POOLS.boost) as any[] | undefined;
                 let reserved = 0;
                 if (boostPool) {
                     for (const t of boostPool) {

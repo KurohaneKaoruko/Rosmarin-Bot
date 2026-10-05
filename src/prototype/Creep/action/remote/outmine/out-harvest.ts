@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { runWorkLayer } from '@/framework/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
@@ -28,7 +29,7 @@ const transferToNearbyCarrier = (creep: Creep): boolean => {
     const carriers = getRoomTickCacheValue(creep.room, 'out_harvest_nearby_carriers', () =>
         creep.room.find(FIND_MY_CREEPS, {
             filter: (c) =>
-                c.memory.role === 'out-carry' &&
+                c.memory.role === ROLES['out-carry'] &&
                 c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
         }) as Creep[]
     );

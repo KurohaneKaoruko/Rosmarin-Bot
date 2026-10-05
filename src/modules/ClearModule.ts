@@ -53,7 +53,7 @@ function  memoryClear() {
         let room = Game.rooms[roomName];
         let Mem = Memory.rooms[roomName];
         if (room?.my) continue;
-        if (room) { // 如果有视野，则重置计数
+        if (room) { // 有视野但非己方：仅清计数
             if (!Mem['MemoryClearCount']) continue;
             delete Mem['MemoryClearCount'];
             continue;

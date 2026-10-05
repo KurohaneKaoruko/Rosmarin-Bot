@@ -1,12 +1,13 @@
 /**
  * 任务提交
  */
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { getMissionPools } from '@/modules/shared/memory';
 
 export default class MissionSubmit extends Room {
     // 提交运输任务
     submitTransportMission(id: Task['id'], amount: TransportTask['amount']) {
-        const task = this.getMissionFromPoolById('transport', id);
+        const task = this.getMissionFromPoolById(MISSION_POOLS.transport, id);
         if (!task) return;
         amount = (task.data as TransportTask).amount - amount;
         if (amount < 0) amount = 0;
@@ -16,15 +17,15 @@ export default class MissionSubmit extends Room {
             return false;
         }
 
-        this.submitMission('transport', id, {amount} as any, deleteFunc);
+        this.submitMission(MISSION_POOLS.transport, id, {amount} as any, deleteFunc);
         return OK;
     }
 
     // 提交孵化任务
     submitSpawnMission(id: Task['id']) {
-        const task = this.getMissionFromPoolById('spawn', id);
+        const task = this.getMissionFromPoolById(MISSION_POOLS.spawn, id);
         if (!task) return;
-        this.deleteMissionFromPool('spawn', id);
+        this.deleteMissionFromPool(MISSION_POOLS.spawn, id);
         return OK;
     }
 
@@ -60,7 +61,7 @@ export default class MissionSubmit extends Room {
 
     // 提交mine任务
     submitMineMission(id: Task['id'], data: Partial<MineTask>) {
-        const task = this.getMissionFromPoolById('mine', id);
+        const task = this.getMissionFromPoolById(MISSION_POOLS.mine, id);
         if (!task) return;
         
         // 合并数据
@@ -77,7 +78,7 @@ export default class MissionSubmit extends Room {
             return false;
         }
 
-        this.submitMission('mine', id, newData, deleteFunc);
+        this.submitMission(MISSION_POOLS.mine, id, newData, deleteFunc);
         return OK;
     }
 }

@@ -2,8 +2,9 @@
 // 一只搬运工绑定一条源线，空载回我方容器取满（满载纪律：容器不足一车则在容器旁
 // 捡散落并等待，不四处找货），满载按能量中枢的请求配送（spawn/ext/tower/cc/断供升级工，
 // 两阶段匹配 + 专线回流）。无请求时持能原地待命——搬运工永远在两点之间，不自主游荡。
+import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { getAssignedEnergyTarget } from '@/prototype/Creep/function/energyLogistics';
+import { getAssignedEnergyTarget } from '@/modules/shared/energyLogistics';
 
 // 源旁掉落捡取的最低数量：避免为个位数能量反复蹲点
 const SOURCE_DROP_PICKUP_MIN = 30;
@@ -203,7 +204,7 @@ export const runCarrierDeliver = (creep: Creep, urgentEnergy: boolean): boolean 
             return false;
         }
         const hasUpgrader = Object.values(Game.creeps).some(c =>
-            c.room.name === creep.room.name && !c.spawning && (c.memory as any)?.role === 'upgrader');
+            c.room.name === creep.room.name && !c.spawning && (c.memory as any)?.role === ROLES.upgrader);
         if (!hasUpgrader) return false;
         const depot = cc ?? controller;
         if (creep.pos.inRangeTo(depot, 1)) {
@@ -260,12 +261,12 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     }
 
     const other = creep.room.lookForAt(LOOK_CREEPS, coord.x, coord.y)[0];
-    if (!other || !other.my || (other.memory as any).role !== 'carrier') return false;
+    if (!other || !other.my || (other.memory as any).role !== ROLES.carrier) return false;
     const otherMem = other.memory as any;
     if (otherMem._relayed === Game.time) return false;
 
     // 矿工 pull 搭车：空车意图格上是矿工 → 让矿工拉自己（省一步移动）
-    if (!supplying && other.memory.role === 'harvester' && other.store[RESOURCE_ENERGY] > 0) {
+    if (!supplying && other.memory.role === ROLES.harvester && other.store[RESOURCE_ENERGY] > 0) {
         other.pull(creep);
         mem._relayed = Game.time;
         return true;

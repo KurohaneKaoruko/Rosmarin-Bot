@@ -2,6 +2,7 @@
  * 任务更新主模块
  * @description 以固定频率调度各类任务更新入口（spawn/transport/manage/work/mine 等）
  */
+import { qos } from '@/modules/infra/qos';
 import { getRoomData } from '@/modules/shared/memory';
 import { getRoomPhase } from '@/modules/shared/roomPhase';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
@@ -44,7 +45,7 @@ export default class Mission extends Room {
         for (const item of schedule) {
             // 相位叠加房间哈希：同频任务在房间之间天然错开
             const offset = (item.offset + roomPhase) % item.interval;
-            if (global.qos.isTickAligned(item.interval, offset)) item.run(item.offset);
+            if (qos.isTickAligned(item.interval, offset)) item.run(item.offset);
         }
     }
 }

@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
 import { runWorkLayer } from '@/framework/ai/adapters';
@@ -72,7 +73,7 @@ const borrowFromAdjacentUpgrader = (creep: Creep): boolean => {
     const selfDist = creep.pos.getRangeTo(cc.pos);
     const mate = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
         filter: (c: Creep) => {
-            if (c.id === creep.id || c.memory.role !== 'upgrader') return false;
+            if (c.id === creep.id || c.memory.role !== ROLES.upgrader) return false;
             if ((c.store[RESOURCE_ENERGY] || 0) === 0) return false;
             if ((c as any)._transfered === Game.time) return false;
             return c.pos.getRangeTo(cc.pos) < selfDist;

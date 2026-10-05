@@ -1,3 +1,4 @@
+import { isWarMode } from '@/modules/shared/memory';
 import { CompoundColor } from '@/constant/ResourceConstant';
 import { ensureLabAB, getLabAB } from '@/modules/shared/labReservations';
 import { getStructData } from '@/modules/shared/memory';
@@ -13,7 +14,7 @@ export default class LabControl extends Room {
         // 可视化
         this.VisualLabInfo();
 
-        if (Memory['warmode']) return;
+        if (isWarMode()) return;
         
         // 反应
         this.RunReaction();

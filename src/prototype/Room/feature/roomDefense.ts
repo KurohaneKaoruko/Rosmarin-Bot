@@ -1,3 +1,5 @@
+import { qos } from '@/modules/infra/qos';
+import { ROLES } from '@/constant/CreepConstant';
 import { getStructureSignature } from '@/modules/utils';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
@@ -23,10 +25,10 @@ const getDefenderCounts = (() => {
         const myCreeps = room.find(FIND_MY_CREEPS);
         for (const creep of myCreeps as any[]) {
             const role = creep?.memory?.role;
-            if (role === 'defend-attack') counts.attack++;
-            else if (role === 'defend-ranged') counts.ranged++;
-            else if (role === 'defend-2attack') counts.doubleAttack++;
-            else if (role === 'defend-2heal') counts.doubleHeal++;
+            if (role === ROLES['defend-attack']) counts.attack++;
+            else if (role === ROLES['defend-ranged']) counts.ranged++;
+            else if (role === ROLES['defend-2attack']) counts.doubleAttack++;
+            else if (role === ROLES['defend-2heal']) counts.doubleHeal++;
         }
         cache.byRoom[room.name] = counts;
         return counts;
@@ -34,7 +36,7 @@ const getDefenderCounts = (() => {
 })();
 
 // 防御角色：这类 creep 是盾，掉血由治疗/撤退消化，不算「被袭击升级 safe」的信号
-const DEFENDER_ROLE_SET = new Set(['defend-attack', 'defend-ranged', 'defend-2attack', 'defend-2heal']);
+const DEFENDER_ROLE_SET = new Set<string>([ROLES['defend-attack'], ROLES['defend-ranged'], ROLES['defend-2attack'], ROLES['defend-2heal']]);
 
 function selectTopByScore<T>(items: T[], limit: number, compare: (a: T, b: T) => number): T[] {
     if (!items || items.length <= 0 || limit <= 0) return [];
@@ -54,6 +56,14 @@ function selectTopByScore<T>(items: T[], limit: number, compare: (a: T, b: T) =>
     return result;
 }
 
+const Hostiles: Record<string, any> = {};
+const DefenseCostMatrixBase: Record<string, any> = {};
+const ROOM_EXITS: Record<string, any> = {};
+const DefenseCostMatrixScratch: Record<string, any> = {};
+const DefenseCostMatrix: Record<string, any> = {};
+const DefenseDangerCostMatrix: Record<string, any> = {};
+let DefenseDangerOffsets: { r1: [number, number, number][]; r2: [number, number, number][]; r3: [number, number, number][]; r4: [number, number, number][] } | undefined;
+
 export default class RoomDefense extends Room {
     activeDefense() {
         // 如果处于安全模式，则不进行后续处理
@@ -65,7 +75,7 @@ export default class RoomDefense extends Room {
         // 关于主动防御的检查（每 5 tick，叠加房间相位错峰）
         if (!isRoomTickAligned(this.name, 5)) return;
         
-        if (!Memory['whitelist']) Memory['whitelist'] = [];
+        
         const roomHostiles = this.findEnemyCreeps({
             filter: c => c.owner.username !== 'Invader' &&
                 c.body?.some(b =>
@@ -79,12 +89,12 @@ export default class RoomDefense extends Room {
         const powerHostiles = this.findEnemyPowerCreeps() as any;
         const threats = roomHostiles.concat(powerHostiles);
 
-        if (!global.Hostiles) global.Hostiles = {};
+        
 
         if (threats.length === 0) {
-            global.Hostiles[this.name] = [];
+            Hostiles[this.name] = [];
             // 无威胁时撤销未孵化的防御兵孵化任务，避免防御冷却期仍继续出兵
-            this.deleteSpawnMissionsByRole(['defend-attack', 'defend-ranged', 'defend-2attack', 'defend-2heal']);
+            this.deleteSpawnMissionsByRole([ROLES['defend-attack'], ROLES['defend-ranged'], ROLES['defend-2attack'], ROLES['defend-2heal']]);
             if (this.memory['defendUntil'] && this.memory['defendUntil'] > Game.time) {
                 this.memory.defend = true;
             } else {
@@ -121,7 +131,7 @@ export default class RoomDefense extends Room {
 
         /** --------主动防御孵化-------- */
         // 40A红球 或 40R蓝球
-        global.Hostiles[this.name] = hostiles.map((hostile: Creep) => hostile.id);
+        Hostiles[this.name] = hostiles.map((hostile: Creep) => hostile.id);
         
         const threatLevel = hostiles.reduce((sum: number, c: any) => {
             if (!c?.body) return sum + 5;
@@ -135,7 +145,7 @@ export default class RoomDefense extends Room {
         }, 0);
 
         if (Array.isArray(this[STRUCTURE_RAMPART]) && this[STRUCTURE_RAMPART].length > 0) {
-            const allowHeavyDefenseCalc = global.qos.shouldRun({ minBucket: 2000, allowLevels: ['normal', 'constrained'] });
+            const allowHeavyDefenseCalc = qos.shouldRun({ minBucket: 2000, allowLevels: ['normal', 'constrained'] });
             if (!allowHeavyDefenseCalc) {
                 this.memory['breached'] = true;
                 this.memory['resourceUnsafeUntil'] = Math.max(Number(this.memory['resourceUnsafeUntil'] || 0), Game.time + 1500);
@@ -206,10 +216,10 @@ export default class RoomDefense extends Room {
         const doubleHealDefenderNum = defenderCounts.doubleHeal;
         
         const SpawnMissionNum = this.getSpawnMissionNum() ?? {};
-        const attackQueueNum = SpawnMissionNum['defend-attack'] || 0;
-        const rangedQueueNum = SpawnMissionNum['defend-ranged'] || 0;
-        const doubleAttackQueueNum = SpawnMissionNum['defend-2attack'] || 0;
-        const doubleHealQueueNum = SpawnMissionNum['defend-2heal'] || 0;
+        const attackQueueNum = SpawnMissionNum[ROLES['defend-attack']] || 0;
+        const rangedQueueNum = SpawnMissionNum[ROLES['defend-ranged']] || 0;
+        const doubleAttackQueueNum = SpawnMissionNum[ROLES['defend-2attack']] || 0;
+        const doubleHealQueueNum = SpawnMissionNum[ROLES['defend-2heal']] || 0;
 
         const hasMeleeThreat = hostiles.some((c: any) => c?.body && c.body.some((p: BodyPartDefinition) =>
             p.type == ATTACK || p.type == WORK || p.type == CLAIM
@@ -230,13 +240,13 @@ export default class RoomDefense extends Room {
         if (useDouble) {
             const desiredDouble = 1;
             if (doubleAttackDefenderNum + doubleAttackQueueNum < desiredDouble) {
-                const body = this.GetRoleBodys('defend-2attack');
-                const ret = this.SpawnMissionAdd('', body, -1, 'defend-2attack', {home: this.name} as any);
+                const body = this.GetRoleBodys(ROLES['defend-2attack']);
+                const ret = this.SpawnMissionAdd('', body, -1, ROLES['defend-2attack'], {home: this.name} as any);
                 if (ret === OK) this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
             if (doubleHealDefenderNum + doubleHealQueueNum < desiredDouble) {
-                const body = this.GetRoleBodys('defend-2heal');
-                const ret = this.SpawnMissionAdd('', body, -1, 'defend-2heal', {home: this.name} as any);
+                const body = this.GetRoleBodys(ROLES['defend-2heal']);
+                const ret = this.SpawnMissionAdd('', body, -1, ROLES['defend-2heal'], {home: this.name} as any);
                 if (ret === OK) this.AssignBoostTaskByBody(body, { [HEAL]: 'XLHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
@@ -309,22 +319,22 @@ export default class RoomDefense extends Room {
         }
 
         if (desiredAttack > 0 && (attackDefenderNum + attackQueueNum < desiredAttack)) {
-            const body = this.GetRoleBodys('defend-attack');
+            const body = this.GetRoleBodys(ROLES['defend-attack']);
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
                 this.level >= 7 && this['XUH2O'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-            const ret = this.SpawnMissionAdd('', body, -1, 'defend-attack', {home: this.name, mustBoost} as any);
+            const ret = this.SpawnMissionAdd('', body, -1, ROLES['defend-attack'], {home: this.name, mustBoost} as any);
             if (mustBoost) {
                 if (ret === OK) this.AssignBoostTaskByBody(body, { [ATTACK]: 'XUH2O', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
         }
 
         if (desiredRanged > 0 && (rangedDefenderNum + rangedQueueNum < desiredRanged)) {
-            const body = this.GetRoleBodys('defend-ranged');
+            const body = this.GetRoleBodys(ROLES['defend-ranged']);
             let mustBoost = false;
             if ((enemyStats.boosted || enemyStats.heal >= 10 || threatLevel > 20) &&
                 this.level >= 7 && this['XKHO2'] >= 3000 && this['XZHO2'] >= 3000) mustBoost = true;
-            const ret = this.SpawnMissionAdd('', body, -1, 'defend-ranged', {home: this.name, mustBoost} as any);
+            const ret = this.SpawnMissionAdd('', body, -1, ROLES['defend-ranged'], {home: this.name, mustBoost} as any);
             if (mustBoost) {
                 if (ret === OK) this.AssignBoostTaskByBody(body, { [RANGED_ATTACK]: 'XKHO2', [MOVE]: 'XZHO2', [TOUGH]: 'XGHO2' });
             }
@@ -417,8 +427,8 @@ export default class RoomDefense extends Room {
     // 获取防御用CostMatrix
     // 做了相当多的优化, 消耗大约1~5CPU每次
     getDefenseCostMatrix(show: boolean = false): CostMatrix {
-        if (!global.DefenseCostMatrix) global.DefenseCostMatrix = {};
-        const dcm = global.DefenseCostMatrix[this.name];
+        
+        const dcm = DefenseCostMatrix[this.name];
         if (dcm && dcm.costMatrix &&
             typeof dcm.lastCheckTick === 'number' &&
             dcm.lastCheckTick + 5 > Game.time) {
@@ -455,11 +465,9 @@ export default class RoomDefense extends Room {
             return dcm.costMatrix;
         }
 
-        if (!global['DefenseCostMatrixBase']) global['DefenseCostMatrixBase'] = {};
-        let base = global['DefenseCostMatrixBase'][this.name];
+        let base = DefenseCostMatrixBase[this.name];
         if (!base) {
-            if (!global['ROOM_EXITS']) global['ROOM_EXITS'] = {};
-            let exits = global['ROOM_EXITS'][this.name];
+                let exits = ROOM_EXITS[this.name];
             let visitedEXITS = !exits ? {
                 [LEFT]: new Uint8Array(50),
                 [RIGHT]: new Uint8Array(50),
@@ -491,20 +499,19 @@ export default class RoomDefense extends Room {
                 }
             }}
             if (visitedEXITS) {
-                global['ROOM_EXITS'][this.name] = exits;
+                ROOM_EXITS[this.name] = exits;
                 visitedEXITS = null;
             }
 
-            base = global['DefenseCostMatrixBase'][this.name] = {
+            base = DefenseCostMatrixBase[this.name] = {
                 costMatrix: baseCosts,
                 avoidArea: baseAvoidArea,
             };
         }
 
-        if (!global['DefenseCostMatrixScratch']) global['DefenseCostMatrixScratch'] = {};
-        let scratch = global['DefenseCostMatrixScratch'][this.name];
+        let scratch = DefenseCostMatrixScratch[this.name];
         if (!scratch) {
-            scratch = global['DefenseCostMatrixScratch'][this.name] = {
+            scratch = DefenseCostMatrixScratch[this.name] = {
                 avoidArea: new Uint8Array(3200),
                 rampartCost1: new Uint8Array(3200),
                 visitedMark: new Uint8Array(3200),
@@ -543,7 +550,7 @@ export default class RoomDefense extends Room {
             scratch.barrierLen = 0;
         }
         scratch.rampartLen = 0;
-        const exits = global['ROOM_EXITS'][this.name] || [];
+        const exits = ROOM_EXITS[this.name] || [];
         const markStruct = (s: any) => {
             if (!s) return;
             if (s.structureType === STRUCTURE_RAMPART && s.my) {
@@ -686,16 +693,16 @@ export default class RoomDefense extends Room {
             console.log('- 总开销:', (CPU_end - CPU_start).toFixed(4));
         }
 
-        global.DefenseCostMatrix[this.name] = { sig: structSig, costMatrix: costs, lastCheckTick: Game.time };
+        DefenseCostMatrix[this.name] = { sig: structSig, costMatrix: costs, lastCheckTick: Game.time };
         return costs;
     }
 
     getDefenseDangerCostMatrix(): CostMatrix {
-        if (!global.DefenseDangerCostMatrix) global.DefenseDangerCostMatrix = {};
-        const cache = global.DefenseDangerCostMatrix[this.name];
+        
+        const cache = DefenseDangerCostMatrix[this.name];
         if (cache && cache.tick === Game.time && cache.costMatrix) return cache.costMatrix;
 
-        if (!global.DefenseDangerOffsets) {
+        if (!DefenseDangerOffsets) {
             const r1: Array<[number, number, number]> = [];
             const r2: Array<[number, number, number]> = [];
             const r3: Array<[number, number, number]> = [];
@@ -710,7 +717,7 @@ export default class RoomDefense extends Room {
                     if (d <= 4) r4.push([dx, dy, d]);
                 }
             }
-            global.DefenseDangerOffsets = { r1, r2, r3, r4 };
+            DefenseDangerOffsets = { r1, r2, r3, r4 };
         }
 
         const base = this.getDefenseCostMatrix(false);
@@ -733,7 +740,7 @@ export default class RoomDefense extends Room {
             if (next !== old) matrix.set(x, y, next);
         };
 
-        const offsets = global.DefenseDangerOffsets;
+        const offsets = DefenseDangerOffsets;
         for (const hostile of hostiles) {
             if (!hostile?.pos || hostile.pos.roomName !== this.name) continue;
             const hasRanged = hostile.getActiveBodyparts(RANGED_ATTACK) > 0;
@@ -754,7 +761,7 @@ export default class RoomDefense extends Room {
             }
         }
 
-        global.DefenseDangerCostMatrix[this.name] = { tick: Game.time, costMatrix: matrix };
+        DefenseDangerCostMatrix[this.name] = { tick: Game.time, costMatrix: matrix };
         return matrix;
     }
 

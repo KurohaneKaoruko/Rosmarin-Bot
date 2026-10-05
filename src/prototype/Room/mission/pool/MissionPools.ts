@@ -4,7 +4,10 @@
  */
 
 import { decompress } from "@/modules/shared/compress";
-import { getMissionPools } from "@/modules/shared/memory";
+import { getMissionPools, sanitizeMissionPoolMemory } from "@/modules/shared/memory";
+import { MISSION_POOLS } from "@/constant/MissionConstant";
+
+export { sanitizeMissionPoolMemory };
 
 export const MISSION_POOL_NAMES = [
     'transport',
@@ -45,27 +48,6 @@ const createEmptyMissionPoolMemory = (): MissionPoolMemory => ({
     boost: [],
 });
 
-export const sanitizeMissionPoolMemory = (memory?: MissionPoolMemory | Record<string, Task[]> | null): MissionPoolMemory => {
-    const normalized = createEmptyMissionPoolMemory();
-    if (!memory || typeof memory !== 'object') return normalized;
-
-    for (const tasks of Object.values(memory)) {
-        if (!Array.isArray(tasks)) continue;
-        for (const task of tasks) {
-            const poolName = TASK_TYPE_TO_POOL[task?.type as MissionTaskType];
-            if (!poolName) continue;
-            normalized[poolName].push(task);
-        }
-    }
-
-    for (const key of Object.keys(memory)) {
-        delete memory[key];
-    }
-    Object.assign(memory, normalized);
-    return memory as MissionPoolMemory;
-};
-
-/** 通用的任务池模块 */
 export default class MissionPools extends Room {
     // 清理本房间 spawn 任务角色计数缓存
     private clearSpawnMissionNumCache() {
@@ -103,13 +85,6 @@ export default class MissionPools extends Room {
         return state.pool.findIndex(task => task.id === id);
     }
 
-    // 任务池初始化
-    public initMissionPool() {
-        this.getRoomMissionPools();
-        return OK;
-    }
-
-    // (私有方法) 添加任务到任务池
     private pushTaskToPool(poolName: MissionPoolName, task: Task) {
         if (!task) return ERR_NOT_FOUND;
         const pool = this.getRoomMissionPools()[poolName];
@@ -124,6 +99,12 @@ export default class MissionPools extends Room {
         return (Gametime + Random).toUpperCase();
     }
 
+    // 任务池初始化
+    public initMissionPool() {
+        this.getRoomMissionPools();
+        return OK;
+    }
+
     // 添加任务到任务池
     public addMissionToPool(PoolName: MissionPoolName, type: Task["type"], level: Task["level"], data: Task["data"]) {
         const poolName = TASK_TYPE_TO_POOL[type] || PoolName;
@@ -131,7 +112,7 @@ export default class MissionPools extends Room {
         const id = `${type.toUpperCase()}-${this.generateId()}`;
         const task: Task = { id, type, level, data };
         this.pushTaskToPool(poolName, task);
-        if (poolName === 'spawn') this.clearSpawnMissionNumCache();
+        if (poolName === MISSION_POOLS.spawn) this.clearSpawnMissionNumCache();
         return OK;
     }
 
@@ -310,7 +291,7 @@ export default class MissionPools extends Room {
         if (index === -1) return;
 
         state.pool.splice(index, 1);
-        if (state.poolName === 'spawn') this.clearSpawnMissionNumCache();
+        if (state.poolName === MISSION_POOLS.spawn) this.clearSpawnMissionNumCache();
 
         return OK;
     }
