@@ -1,6 +1,6 @@
 import { LAB_T1_PRIORITY, LabMap, RESOURCE_PRODUCTION, t1, t2, t3 } from '@/constant/ResourceConstant';
 import { resolveLabFromMem } from '@/modules/shared/labReservations';
-import { sanitizeMissionPoolMemory } from '@/prototype/Room/mission/pool/MissionPools';
+import { sanitizeMissionPoolMemory } from '@/modules/shared/memory';
 
 const COLORS = {
     theme: '#D0CAE0',

@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 /**
  * rush 体型生成器：按能量预算现算体型，替代固定分级表。
  * 契约：任意预算下成本 ≤ 预算；预算 ≥ 各自下限即可孵化（多级下探防死锁）；
@@ -93,10 +94,10 @@ export const buildRushWorkerBody = (budget: number): RushBody | null => {
 /** rush 各经济角色的容量现算体型统一入口（不在册角色返回 null 走原路径） */
 export const buildRushBody = (role: string, budget: number): RushBody | null => {
     switch (role) {
-        case 'harvester': return buildRushHarvesterBody(budget);
-        case 'carrier': return buildRushCarrierBody(budget);
-        case 'upgrader': return buildRushUpgraderBody(budget);
-        case 'worker': return buildRushWorkerBody(budget);
+        case ROLES.harvester: return buildRushHarvesterBody(budget);
+        case ROLES.carrier: return buildRushCarrierBody(budget);
+        case ROLES.upgrader: return buildRushUpgraderBody(budget);
+        case ROLES.worker: return buildRushWorkerBody(budget);
         default: return null;
     }
 };

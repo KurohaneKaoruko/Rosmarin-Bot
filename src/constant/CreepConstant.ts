@@ -358,6 +358,24 @@ export type RoleId = keyof typeof RoleData;
 export const isRoleId = (role?: string): role is RoleId =>
     !!role && role in RoleData;
 
+/**
+ * 角色标识常量表（词表单一来源，派生自 RoleData 键）：
+ * 功能代码引用 ROLES.x 而非字面量，改名/审查全走此表。
+ * 值类型为键字面量（映射恒等），保证 RoleData[ROLES.x] 保留具体条目类型。
+ */
+export const ROLES = Object.freeze(
+    Object.fromEntries((Object.keys(RoleData) as RoleId[]).map((id) => [id, id])),
+) as { readonly [K in RoleId]: K };
+
+/** 执行器标识常量表（派生自 RoleData[].executor；roleRegistry 索引键与分发引用此表） */
+export const EXECUTORS = Object.freeze(
+    Object.fromEntries(
+        (Object.entries(RoleData) as [RoleId, RoleDefinition][])
+            .filter(([, def]) => def.executor)
+            .map(([id, def]) => [def.executor!, def.executor!]),
+    ),
+) as Readonly<Record<string, string>>;
+
 // 根据等级的动态部件
 export const RoleLevelData = {
     'harvester': {

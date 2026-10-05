@@ -17,11 +17,27 @@ import { getEnergyLevel } from '@/modules/shared/energyLevel';
 import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { decompress } from '@/modules/shared/compress';
-import { buildFillRequests } from '@/prototype/Creep/function/energyLogistics';
 import { buildRushCarrierBody } from '@/modules/shared/rushBody';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
-import { getRoomNetIncome } from '@/modules/rush/manageSource';
+import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
+
+/**
+ * 填充请求提供方（解耦倒置）：定编侧只关心「房间有无待填能量请求」，
+ * 具体实现由组合根 init 注入（能量中枢的请求收集），消除 shared→功能层反向依赖。
+ */
+export type FillRequestProvider = (room: Room) => unknown[];
+
+let fillRequestProvider: FillRequestProvider | null = null;
+
+/** 组合根 init 时注入填充请求实现；须先于首次定编调用 */
+export const registerFillRequestProvider = (provider: FillRequestProvider): void => {
+    fillRequestProvider = provider;
+};
+
+/** 房间当前填充请求；未注入（启动极早期/测试环境）时返回空数组 */
+export const getRegisteredFillRequests = (room: Room): unknown[] =>
+    fillRequestProvider ? fillRequestProvider(room) : [];
 
 // —— 能量水平档位 ——
 /** startFunnel：低于该档升级吞吐按收入等比收缩（不归零） */
@@ -73,8 +89,8 @@ const getManagerCarryCapacity = (room: Room): number => {
         typeof (room as any).GenerateBodys !== 'function') {
         return LINK_MANAGER_CARRY_FALLBACK;
     }
-    const bodyConfig = (room as any).GetRoleBodys('manager');
-    const body = (room as any).GenerateBodys(bodyConfig, 'manager') as BodyPartConstant[];
+    const bodyConfig = (room as any).GetRoleBodys(ROLES.manager);
+    const body = (room as any).GenerateBodys(bodyConfig, ROLES.manager) as BodyPartConstant[];
     let carry = 0;
     for (const part of body || []) {
         if (part === CARRY) carry += 50;
@@ -165,7 +181,7 @@ export const registerUpgraderStarve = (room: Room): void => {
 const shrinkByStarved = (room: Room, demandWork: number): number => {
     const starved = getUpgradersStarved(room);
     if (starved <= 0) return demandWork;
-    const floorWork = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
+    const floorWork = Math.max(1, getGeneratedRoleWorkPartCount(room, ROLES.upgrader));
     let shrunk = demandWork;
     if (starved > 0) shrunk = Math.round(shrunk * 0.75) - 1;
     if (starved > STARVED_SECOND_STAGE) shrunk = Math.round(shrunk * 0.75) - 1;
@@ -390,7 +406,7 @@ export const estimateRoomEnergyIncome = (room: Room): number => {
         const sources = (room as any).source as Source[] | undefined;
         if (sources && sources.length && typeof room.find === 'function') {
             const harvesters = room.find(FIND_MY_CREEPS, {
-                filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'harvester' && c.memory.targetSourceId),
+                filter: (c: Creep) => !!(c && c.memory && c.memory.role === ROLES.harvester && c.memory.targetSourceId),
             }) as Creep[];
             const perSourceCap = getSourceEnergyPerTick();
             for (const source of sources) {
@@ -410,7 +426,7 @@ export const estimateRoomEnergyIncome = (room: Room): number => {
             income += Math.max(0, remoteIncome);
         } else {
             const creepNum = (room as any).getCreepNum?.() || {};
-            income += Math.min(20, (creepNum['out-harvest'] || 0) * 5);
+            income += Math.min(20, (creepNum[ROLES['out-harvest']] || 0) * 5);
         }
         return income;
     });
@@ -552,14 +568,14 @@ export const getUpgradeWorkTarget = (room: Room): number => {
         let loadedCarrier = false;
         for (const creep of Object.values(Game.creeps)) {
             if (creep.room.name !== room.name || creep.spawning) continue;
-            if (creep.memory?.role !== 'carrier') continue;
+            if (creep.memory?.role !== ROLES.carrier) continue;
             if ((creep.store[RESOURCE_ENERGY] || 0) > 0) { loadedCarrier = true; break; }
         }
         // 信号优先级：饥饿压过富余——升级工取能落空时即便搬运有货也先减码
         //（供能在途但取不到，继续加码只会堆更多饿肚子的升级工）
         const target = getUpgradersStarved(room) > 0
             ? -1
-            : (buildFillRequests(room).length === 0 && loadedCarrier ? 1 : 0);
+            : (getRegisteredFillRequests(room).length === 0 && loadedCarrier ? 1 : 0);
         const memAny = room.memory as any;
         const alpha = 1 - Math.pow(2, -1 / 50);
         memAny.spawnBalanceEma = clamp((memAny.spawnBalanceEma ?? 0) * (1 - alpha) + target * alpha, -1, 1);
@@ -596,7 +612,7 @@ export const getRushCarrierTarget = (room: Room): number => {
     const perSourceCap = getSourceEnergyPerTick();
     const harvesters = typeof room.find === 'function'
         ? room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'harvester' && c.memory.targetSourceId),
+            filter: (c: Creep) => !!(c && c.memory && c.memory.role === ROLES.harvester && c.memory.targetSourceId),
         }) as Creep[]
         : [];
     let carryParts = 0;
@@ -642,9 +658,9 @@ const LEVEL_WORKER_FIRST = 110;
 export const getActiveUpgradeWorkCount = (room: Room): number => {
     if (typeof room.find !== 'function') return 0;
     const family = getRoomMode(room) === 'rush'
-        ? ['upgrader']
-        : ['upgrader', 'worker'];
-    const familySet = new Set(family);
+        ? [ROLES.upgrader]
+        : [ROLES.upgrader, ROLES.worker];
+    const familySet = new Set<string>(family);
     const creeps = room.find(FIND_MY_CREEPS, {
         filter: (c: Creep) => !!(c && c.memory && familySet.has(c.memory.role || '')),
     }) as Creep[];
@@ -687,7 +703,7 @@ export const getGeneratedRoleWorkPartCount = (room: Room, role: string): number 
     });
 };
 
-const getWorkerWorkPartCount = (room: Room) => getGeneratedRoleWorkPartCount(room, 'worker');
+const getWorkerWorkPartCount = (room: Room) => getGeneratedRoleWorkPartCount(room, ROLES.worker);
 
 // builder 目标数的参考 work 基线
 const WORKER_BUILD_REFERENCE_WORK = 3;
@@ -1037,7 +1053,7 @@ export const getUpgraderTarget = (room: Room): number => {
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
 
-    const workPerUpgrader = Math.max(1, getGeneratedRoleWorkPartCount(room, 'upgrader'));
+    const workPerUpgrader = Math.max(1, getGeneratedRoleWorkPartCount(room, ROLES.upgrader));
     // 人口上限：升级侧的预算是按 **work** 给的（30/90 work），折算只数时要除上每只的 WORK 部件数。
     // 低 RCL 的能量容量撑不起大体型（例如容量 400 时 GetRoleBodys 会一路退到 1 WORK 的体型），
     // 于是同样一笔 work 预算会折出几十只——线上 RCL3 冲级房实测 38 只升级工，
@@ -1125,7 +1141,7 @@ export const getUpgraderSuccessionNeeds = (room: Room): number => {
     const upgraders = getRoomTickCacheValue(room, 'succession_upgraders', () =>
         typeof room.find !== 'function' ? [] as Creep[] :
         ((room.find(FIND_MY_CREEPS, {
-            filter: (c: Creep) => !!(c && c.memory && c.memory.role === 'upgrader'),
+            filter: (c: Creep) => !!(c && c.memory && c.memory.role === ROLES.upgrader),
         }) as Creep[]) || []).slice()
     );
     if (upgraders.length === 0) return 0;
@@ -1154,7 +1170,7 @@ export const getWorkerUpgradeTarget = (room: Room): number => {
     const workTarget = getUpgradeWorkTarget(room);
     if (workTarget <= 0) return 0;
 
-    const upgraderWork = getUpgraderTarget(room) * getGeneratedRoleWorkPartCount(room, 'upgrader');
+    const upgraderWork = getUpgraderTarget(room) * getGeneratedRoleWorkPartCount(room, ROLES.upgrader);
     const remaining = workTarget - upgraderWork;
     if (remaining <= 0) return 0;
 
@@ -1189,7 +1205,238 @@ export const getWorkerConstructionQuota = (room: Room): number => {
 export const hasWorkerUpgradeDemand = (room: Room): boolean => getWorkerUpgradeTarget(room) > 0;
 
 /** worker 家族角色（共享 worker 执行器的定编个体） */
-export const WORKER_FAMILY_ROLES = ['worker'] as const;
+export const WORKER_FAMILY_ROLES = [ROLES.worker] as const;
 
 /** 控制器升级工位的名册角色：worker 与 upgrader 共用一张名册，避免两族抢同一格 */
-export const UPGRADE_SLOT_ROLES = ['worker', 'upgrader'] as const;
+export const UPGRADE_SLOT_ROLES = [ROLES.worker, ROLES.upgrader] as const;
+
+// ==================== 房间净收入口径（verbatim 自 src/modules/rush/manageSource 迁移） ====================
+// rush 移植版模块删除（用户决定 2026-10-05）后，升级预算仍依赖此参考口径净收入
+// （替代毛收入估算，636c7d0 调优基线）。除 source 路径距离缓存由进程内堆改为模块级 Map
+// （同进程生命周期语义）与 exports 收敛为模块私有外，逐行保持原实现。
+
+/** 容器损耗折算为能量速率口径（每 tick 修理均摊） */
+const NET_INCOME_CONTAINER_REPAIR_LOSS_OWNED = (REPAIR_COST * CONTAINER_DECAY) / CONTAINER_DECAY_TIME_OWNED;
+
+type NetIncomeSourceInfo = {
+    sourceId: string;
+    roomName: string;
+    my: boolean;
+    distance: number;
+    energyPerTick: number;
+    numOpen: number;
+    constructed?: boolean;
+    linked?: boolean;
+    type?: 'normal' | 'keeper';
+};
+
+/** 体型造价（逐部件累加） */
+const getBodyCost = (body: BodyPartConstant[]): number =>
+    body.reduce((sum, part) => sum + BODYPART_COST[part], 0);
+
+/** miner 体型：1M 起步 → work<5 前置堆叠 → 速度门补 M → carry 补到 4×work 口径 → work 堆到 maxWork */
+const getMinerBody = (
+    energyCapacity: number,
+    maxWork: number,
+    needCarry: boolean,
+    speed = 0.5,
+): BodyPartConstant[] => {
+    let cost = 0;
+    let work = 0;
+    let move = 0;
+    let carry = 0;
+
+    move += 1;
+    cost += BODYPART_COST[MOVE];
+
+    if (needCarry) {
+        carry += 1;
+        cost += BODYPART_COST[CARRY];
+    }
+
+    while (cost < energyCapacity && work + move + carry < MAX_CREEP_SIZE) {
+        if (work < 5 && work < maxWork && energyCapacity >= cost + BODYPART_COST[WORK]) {
+            work++;
+            cost += BODYPART_COST[WORK];
+            continue;
+        }
+
+        if ((move === 0 || move / work < speed) && energyCapacity >= cost + BODYPART_COST[MOVE]) {
+            move++;
+            cost += BODYPART_COST[MOVE];
+            continue;
+        }
+
+        const desiredCarry = needCarry ? Math.ceil((4 * work * HARVEST_POWER) / CARRY_CAPACITY) : 1;
+
+        if (work >= 5 && carry < desiredCarry && energyCapacity >= cost + BODYPART_COST[CARRY]) {
+            carry++;
+            cost += BODYPART_COST[CARRY];
+            continue;
+        }
+
+        if (maxWork && work >= maxWork) {
+            break;
+        }
+
+        if (energyCapacity >= cost + BODYPART_COST[WORK]) {
+            work++;
+            cost += BODYPART_COST[WORK];
+            continue;
+        }
+
+        break;
+    }
+
+    const body: BodyPartConstant[] = [];
+
+    for (let i = 0; i < work - 1; i++) body.push(WORK);
+    for (let i = 0; i < carry; i++) body.push(CARRY);
+    for (let i = 0; i < move; i++) body.push(MOVE);
+
+    body.push(WORK);
+
+    return body;
+};
+
+/** 采集力上限：速率 + 已有容器(+1) 修正（keeper 分支为外矿口径，本矿净收入不触达，verbatim 保留） */
+const getMaxHarvestPower = (
+    energyPerTick: number,
+    type: 'normal' | 'keeper' | undefined,
+    constructed?: boolean,
+): number => energyPerTick + (type === 'keeper' ? 6 : constructed ? 1 : 0);
+
+/** 本矿净收入：速率 − miner 折旧 − hauler 折旧（link 直供为 0）− 容器损耗 */
+const computeSourceIncome = (
+    info: NetIncomeSourceInfo,
+    options: { constructed?: boolean; linked?: boolean } = {},
+): number => {
+    const energyPerTick = info.energyPerTick;
+    const maxWork = Math.ceil(getMaxHarvestPower(energyPerTick, info.type, options.constructed) / HARVEST_POWER);
+    const minerBody = getMinerBody(10000, maxWork, !!options.linked);
+    const cost = getBodyCost(minerBody);
+    const minerCost = cost / (CREEP_LIFE_TIME - info.distance);
+    const haulerCost = options.linked
+        ? 0
+        : (energyPerTick * info.distance * 0.04 * (options.constructed ? 75 : 100)) / CREEP_LIFE_TIME;
+    const loss = options.constructed ? NET_INCOME_CONTAINER_REPAIR_LOSS_OWNED : 1;
+    return energyPerTick - minerCost - haulerCost - loss;
+};
+
+/** source 旁容器锚点：已建/工地取最近（≤2）；无则取首个非墙相邻格 */
+const getSourceAnchor = (room: Room, source: Source): { x: number; y: number } | undefined => {
+    let best: { x: number; y: number } | undefined;
+    let bestRange = Infinity;
+
+    const containers = room.find(FIND_STRUCTURES, {
+        filter: (s: Structure) => s.structureType === STRUCTURE_CONTAINER,
+    }) as StructureContainer[];
+    for (const container of containers) {
+        const range = Math.max(Math.abs(container.pos.x - source.pos.x), Math.abs(container.pos.y - source.pos.y));
+        if (range <= 2 && range < bestRange) {
+            best = { x: container.pos.x, y: container.pos.y };
+            bestRange = range;
+        }
+    }
+
+    if (best) return best;
+
+    const sites = room.find(FIND_CONSTRUCTION_SITES, {
+        filter: (s: ConstructionSite) => s.structureType === STRUCTURE_CONTAINER,
+    }) as ConstructionSite[];
+    for (const site of sites) {
+        const range = Math.max(Math.abs(site.pos.x - source.pos.x), Math.abs(site.pos.y - source.pos.y));
+        if (range <= 2 && range < bestRange) {
+            best = { x: site.pos.x, y: site.pos.y };
+            bestRange = range;
+        }
+    }
+
+    if (best) return best;
+
+    const terrain = Game.map.getRoomTerrain(room.name);
+    for (const delta of [
+        { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
+        { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
+    ]) {
+        const x = source.pos.x + delta.x;
+        const y = source.pos.y + delta.y;
+        if (x < 1 || x > 48 || y < 1 || y > 48) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        return { x, y };
+    }
+    return undefined;
+};
+
+const NET_INCOME_EIGHT = [
+    { x: 0, y: -1 }, { x: 1, y: -1 }, { x: 1, y: 0 }, { x: 1, y: 1 },
+    { x: 0, y: 1 }, { x: -1, y: 1 }, { x: -1, y: 0 }, { x: -1, y: -1 },
+];
+
+/** source 周围可站立邻格数（工作位口径：非墙即计） */
+const getSourceNumOpen = (room: Room, source: Source): number => {
+    const terrain = Game.map.getRoomTerrain(room.name);
+    let open = 0;
+    for (const delta of NET_INCOME_EIGHT) {
+        const x = source.pos.x + delta.x;
+        const y = source.pos.y + delta.y;
+        if (x < 0 || x > 49 || y < 0 || y > 49) continue;
+        if (terrain.get(x, y) === TERRAIN_MASK_WALL) continue;
+        open++;
+    }
+    return open;
+};
+
+/** source 路径距离缓存（roomName → sourceId → path 长度；进程生命周期，原 rush 堆等价物） */
+const NET_INCOME_SOURCE_DISTANCE = new Map<string, Record<string, number>>();
+
+/**
+ * 房间净收入（参考口径公开 API）：
+ * 逐 source 按 net = 速率 − miner 折旧 − hauler 折旧 − 容器损耗 累加。
+ * 供升级预算等下游替代毛收入估算使用。
+ */
+export const getRoomNetIncome = (room: Room): number => {
+    const spawn = room.find(FIND_MY_SPAWNS)[0];
+    if (!spawn) return 0;
+
+    let sourceDistance = NET_INCOME_SOURCE_DISTANCE.get(room.name);
+    if (!sourceDistance) {
+        sourceDistance = {};
+        NET_INCOME_SOURCE_DISTANCE.set(room.name, sourceDistance);
+    }
+
+    let net = 0;
+    for (const source of room.find(FIND_SOURCES)) {
+        const anchor = getSourceAnchor(room, source);
+        if (!anchor) continue;
+
+        const container = (room.find(FIND_STRUCTURES, {
+            filter: (s: Structure) =>
+                s.structureType === STRUCTURE_CONTAINER &&
+                s.pos.x === anchor.x &&
+                s.pos.y === anchor.y,
+        }) as StructureContainer[])[0];
+
+        if (sourceDistance[source.id] === undefined) {
+            sourceDistance[source.id] = PathFinder.search(
+                spawn.pos,
+                { pos: new RoomPosition(anchor.x, anchor.y, room.name), range: 1 },
+                { heuristicWeight: 1 },
+            ).path.length;
+        }
+
+        const info: NetIncomeSourceInfo = {
+            sourceId: source.id,
+            roomName: room.name,
+            my: true,
+            distance: sourceDistance[source.id],
+            energyPerTick: SOURCE_ENERGY_CAPACITY / ENERGY_REGEN_TIME,
+            numOpen: getSourceNumOpen(room, source),
+            constructed: !!container,
+            linked: false,
+        };
+
+        net += computeSourceIncome(info, { constructed: !!container, linked: false });
+    }
+    return net;
+};

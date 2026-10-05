@@ -1,3 +1,4 @@
+import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { getStructData } from '@/modules/shared/memory';
 
 // 颜色常量
@@ -100,7 +101,7 @@ const getRoomLevelIcon = (level?: number): string => {
 // 各结构状态渲染函数
 const renderSpawn = (room: Room): string => {
     if (!room.spawn?.length) return notBuilt();
-    const missionCount = room.getMissionNumInPool('spawn');
+    const missionCount = room.getMissionNumInPool(MISSION_POOLS.spawn);
     const { icon, color } = missionCount > 0 
         ? { icon: ICONS.warning, color: COLORS.warning }
         : { icon: ICONS.good, color: COLORS.good };

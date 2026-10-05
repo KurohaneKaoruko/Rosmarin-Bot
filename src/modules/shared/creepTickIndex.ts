@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 import { isRoleId } from '@/constant/CreepConstant'
 
 type TargetRoomCreepInfo = {
@@ -27,7 +28,7 @@ const EMPTY_ROLE_COUNT_MAP: RoleCountMap = Object.freeze({}) as RoleCountMap
 // 只有 transporter 继续走“缩水体型补正”：
 // - transporter 是纯吞吐位，恢复期补一只满体型通常是收益；
 // - manager 是中心单点位，若把缩水 manager 当作“缺口”继续补，会在中心区叠出多只堵路。
-const DOWNGRADED_LOGISTICS_ROLE_SET = new Set(['transporter'])
+const DOWNGRADED_LOGISTICS_ROLE_SET = new Set<string>([ROLES.transporter])
 
 let tickCache: CreepTickIndexCache | undefined
 

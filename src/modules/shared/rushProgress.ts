@@ -2,6 +2,7 @@
  * 冲级分段节奏评估：以 lv1 基线对照分段目标表，输出各段达成/预计/落后/判废状态；
  * 段超时判废该轮 attempt 并生成归因快照，供面板与落盘消费。
  */
+import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 
 export type SegmentStatus = {
@@ -104,7 +105,7 @@ export const buildFailSnapshot = (room: Room, segment: SegmentStatus): Record<st
         if (creep.room.name !== room.name) continue;
         const role = (creep.memory as any)?.role || '?';
         census[role] = (census[role] || 0) + 1;
-        if (role === 'upgrader') upgradeWork += creep.getActiveBodyparts(WORK);
+        if (role === ROLES.upgrader) upgradeWork += creep.getActiveBodyparts(WORK);
     }
     const spawnPool: Record<string, number> = {};
     for (const task of ((room as any).getAllMissionFromPool?.('spawn') ?? []) as any[]) {

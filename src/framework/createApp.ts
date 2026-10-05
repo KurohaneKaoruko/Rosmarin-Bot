@@ -1,3 +1,5 @@
+import { qos } from '@/modules/infra/qos';
+import { getHeartbeatTick, setHeartbeatTick } from '@/modules/shared/memory';
 import { log } from '@/modules/utils.js';
 import { errorMapper, sourceMappedStackTrace } from './errorMapper.js'
 import { isProfilingEnabled, profileStage, recordObjectCost } from '@/modules/infra/cpuProfiler';
@@ -190,12 +192,12 @@ export const createApp = () => {
         runCall('init');
         initOK = true;
         if (Game.shard.name === 'sim') return;
-        if (Memory.lastinit) {
-            log(name, `<b>挂载完成。[距离上次挂载 ${Game.time - Memory.lastinit} tick]</b>`);
+        if (getHeartbeatTick() !== undefined) {
+            log(name, `<b>挂载完成。[距离上次挂载 ${getHeartbeatTick()} tick]</b>`);
         } else {
             log(name, `<b>挂载完成。</b>`);
         }
-        Memory.lastinit = Game.time;
+        setHeartbeatTick(Game.time);
     };
 
     let _MemoryCache: Memory;
@@ -215,7 +217,7 @@ export const createApp = () => {
     /** 主要逻辑 */
     const exec = () => {
         // 先更新 QoS（用于后续模块统一降级/节流的判定依据）
-        global.qos.updateQoS();
+        qos.updateQoS();
         runInit();
         profileStage('start', () => runCall('start'));
         profileStage('rooms', () => runners.room());
@@ -227,7 +229,7 @@ export const createApp = () => {
         // tick 末统一输出隔离收集的错误
         flushCollectedErrors();
         // 上报本 tick CPU：连续超限触发 QoS 熔断降级（bucket 满时 QoS 原判定看不到超限）
-        global.qos.noteTickCpu(Game.cpu.getUsed());
+        qos.noteTickCpu(Game.cpu.getUsed());
     };
 
     /** 运行 */
