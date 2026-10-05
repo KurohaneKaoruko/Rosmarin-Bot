@@ -1,12 +1,9 @@
 // 特殊规则服入口（要塞挑战：RCL8 锁定 / 无限能量 spawn / 无源房）
 // 只挂孵化 + 战斗 + 移动所需；经济/扩张/团队等模块不加载（tree-shake 出 bundle）
-import '@/compat';               // 环境兼容垫片（必须保持首位）
+// 环境兼容垫片（必须保持首位）
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
-import { ClearModule } from '@/modules/ClearModule';
-import { MoveModule } from '@/modules/MoveModule';
-import { TeamModule } from '@/modules/TeamModule';
 
 import '@/modules/infra/qos';           // QoS 全局挂载
 import '@/modules/infra/BetterMove';    // creep 移动优化
@@ -17,14 +14,29 @@ ConsoleExtension();      // 控制台命令拓展
 
 import { configureServerCaps } from '@/modules/shared/gameCapabilities';
 import { serverCaps } from './config';
+import { registerFillRequestProvider } from '@/modules/shared/roomWorkforce';
+import { registerOutMineIncomeProvider } from '@/prototype/Room/feature/outMine';
+import { buildFillRequests } from '@/modules/shared/energyLogistics';
+import './team';    // 要塞服 team 模块表层：注册 ATK 旗型解析（须在首次孵化扫描前）
 
 configureServerCaps(serverCaps);    // 套用要塞服配置
+registerFillRequestProvider(buildFillRequests);    // 定编填充信号 ← 能量中枢
+registerOutMineIncomeProvider();    // 定编外矿收入 ← 外矿模块
+
+import { ClearModule } from '@/modules/ClearModule';
+import { MoveModule } from '@/modules/MoveModule';
+import { TeamModule } from '@/modules/TeamModule';
+const MODULE_MANIFEST = [
+    ClearModule,
+    MoveModule,
+    TeamModule,
+] as const;
 
 const App = createApp();
 
-App.on(ClearModule);      // 过期数据清理
-App.on(MoveModule);       // 移动模块
-App.on(TeamModule);       // 小队系统（ATK/TEAM_ 指令旗孵化 + 队伍行为控制）
+for (const module of MODULE_MANIFEST) {
+    App.on(module);
+}
 
 import { writeDiagDumps } from '@/modules/infra/diagDump';
 

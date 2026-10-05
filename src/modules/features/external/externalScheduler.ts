@@ -1,3 +1,4 @@
+import { ROLES } from '@/constant/CreepConstant';
 /**
  * 外矿补员调度的纯决策层。
  *
@@ -9,8 +10,8 @@
 // 外矿采集工 / 搬运工的角色集合。
 // 两者分别设额度：采集工定编小（单源 1 个）且是搬运的前置，绝不能被搬运队列堵住；
 // 搬运工体型最大、孵化最久，才是真正需要限流的一方。
-export const OUTMINE_HARVEST_ROLE_SET: ReadonlySet<string> = new Set(['out-harvest']);
-export const OUTMINE_CARRY_ROLE_SET: ReadonlySet<string> = new Set(['out-carry']);
+export const OUTMINE_HARVEST_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES['out-harvest']]);
+export const OUTMINE_CARRY_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES['out-carry']]);
 // 并集：用于「本房整体挂了多少外矿经济任务」的派单排序。
 export const OUTMINE_PENDING_ECONOMY_ROLE_SET: ReadonlySet<string> = new Set([
     ...OUTMINE_HARVEST_ROLE_SET,
@@ -71,8 +72,8 @@ export const countPendingEconomyMissions = (
 // 这些任务是按当前需求算出来的，不含一次性任务（防御、侦查、预定）。
 export const OUTMINE_PLANNED_ROLE_SET: ReadonlySet<string> = new Set([
     ...OUTMINE_PENDING_ECONOMY_ROLE_SET,
-    'out-build',
-    'out-mineral',
+    ROLES['out-build'],
+    ROLES['out-mineral'],
 ]);
 
 /**

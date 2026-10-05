@@ -1,4 +1,3 @@
-import '@/compat';               // 环境兼容垫片（必须保持首位：无 Power 玩法的服务器缺 PowerCreep 全局类）
 import { createApp } from '@/framework/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
@@ -21,8 +20,13 @@ import '@/modules/infra/structureCache';  // 极致建筑缓存
 
 import { configureServerCaps } from '@/modules/shared/gameCapabilities';
 import { serverCaps } from './config';
+import { registerFillRequestProvider } from '@/modules/shared/roomWorkforce';
+import { buildFillRequests } from '@/modules/shared/energyLogistics';
+import { registerOutMineIncomeProvider } from '@/prototype/Room/feature/outMine';
 
 configureServerCaps(serverCaps);    // 套用官服配置
+registerFillRequestProvider(buildFillRequests);    // 定编填充信号 ← 能量中枢
+registerOutMineIncomeProvider();    // 定编外矿收入 ← 外矿模块
 
 PrototypeExtension();    // 原型拓展
 ConsoleExtension();      // 控制台命令拓展

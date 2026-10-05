@@ -1,3 +1,5 @@
+const OutMineRoadCache: { costMatrix: Record<string, any> } = { costMatrix: {} };
+
 /**
  * 外矿道路模块
  * 提供外矿道路的路径规划、缓存管理、内存管理、维护和可视化功能。
@@ -32,7 +34,7 @@ export class CostMatrixCache {
      */
     static get(roomName: string): CostMatrix | undefined {
         this.ensureCache();
-        const cache = global.OutMineRoadCache!.costMatrix[roomName];
+        const cache = OutMineRoadCache!.costMatrix[roomName];
         if (!cache) return undefined;
         if (this.isExpired(roomName)) {
             this.invalidate(roomName);
@@ -49,7 +51,7 @@ export class CostMatrixCache {
      */
     static set(roomName: string, matrix: CostMatrix, ttl?: number): void {
         this.ensureCache();
-        global.OutMineRoadCache!.costMatrix[roomName] = {
+        OutMineRoadCache!.costMatrix[roomName] = {
             matrix,
             createdAt: Game.time,
             ttl: ttl ?? EXTERNAL_ROAD_CONFIG.COST_MATRIX_TTL,
@@ -78,7 +80,7 @@ export class CostMatrixCache {
      */
     static isExpired(roomName: string): boolean {
         this.ensureCache();
-        const cache = global.OutMineRoadCache!.costMatrix[roomName];
+        const cache = OutMineRoadCache!.costMatrix[roomName];
         if (!cache) return true;
         return Game.time - cache.createdAt > cache.ttl;
     }
@@ -90,7 +92,7 @@ export class CostMatrixCache {
     static cleanup(): number {
         this.ensureCache();
         let count = 0;
-        const costMatrix = global.OutMineRoadCache!.costMatrix;
+        const costMatrix = OutMineRoadCache!.costMatrix;
         for (const roomName in costMatrix) {
             if (this.isExpired(roomName)) {
                 delete costMatrix[roomName];
@@ -106,7 +108,7 @@ export class CostMatrixCache {
      */
     static invalidate(roomName: string): void {
         this.ensureCache();
-        delete global.OutMineRoadCache!.costMatrix[roomName];
+        delete OutMineRoadCache!.costMatrix[roomName];
     }
 
     /**
@@ -114,7 +116,7 @@ export class CostMatrixCache {
      */
     static clear(): void {
         this.ensureCache();
-        global.OutMineRoadCache!.costMatrix = {};
+        OutMineRoadCache!.costMatrix = {};
     }
 
     /**
@@ -123,7 +125,7 @@ export class CostMatrixCache {
      */
     static getStats(): { total: number; expired: number; rooms: string[] } {
         this.ensureCache();
-        const costMatrix = global.OutMineRoadCache!.costMatrix;
+        const costMatrix = OutMineRoadCache!.costMatrix;
         const rooms = Object.keys(costMatrix);
         let expired = 0;
         for (const roomName of rooms) {
@@ -136,14 +138,7 @@ export class CostMatrixCache {
      * 确保全局缓存对象存在
      */
     private static ensureCache(): void {
-        if (!global.OutMineRoadCache) {
-            global.OutMineRoadCache = {
-                costMatrix: {},
-            };
-        }
-        if (!global.OutMineRoadCache.costMatrix) {
-            global.OutMineRoadCache.costMatrix = {};
-        }
+        // 缓存为模块级常量（OutMineRoadCache），无需懒初始化
     }
 }
 
