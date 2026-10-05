@@ -216,6 +216,7 @@ export default class TeamCache {
                 }
             })
 
+            if (!Memory.rooms[roomName]) Memory.rooms[roomName] = {} as RoomMemory
             const oldTowerInfos = Memory.rooms[roomName]['towerInfos']
             Memory.rooms[roomName]['towerInfos'] = towerInfos
 
@@ -245,7 +246,7 @@ export default class TeamCache {
         }
 
         // 看不见房间尝试从内存中拿
-        const towerInfos = Memory.rooms[roomName]['towerInfos']
+        const towerInfos = Memory.rooms[roomName]?.['towerInfos']
         if (!towerInfos) return this.emptyRoomArray
 
         // 存在直接返回

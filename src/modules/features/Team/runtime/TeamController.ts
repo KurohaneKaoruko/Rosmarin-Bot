@@ -1,5 +1,7 @@
 import Team from "../core/TeamClass";
 import TeamCalc from "../core/TeamCalc";
+import TeamAction from "../core/TeamAction";
+import TeamUtils from "../core/TeamUtils";
 import { getTeamData } from "@/modules/shared/memory";
 import { getTeamCreeps } from "@/modules/shared/creepTickIndex";
 import { isBoostResCheckEnabled } from "@/modules/shared/gameCapabilities";
@@ -120,19 +122,31 @@ export default class TeamController {
                     Game.flags[`Team-${teamID}`]?.remove();
                     continue;
                 }
-                // 如果成员未齐, 将现有成员移到房间边缘避免堵路
+                // 如果成员未齐: 有指挥旗走旗位集结；无旗（目标房无视野建不出）
+                // 未进目标房的成员向目标房中心行进；已进目标房的在进门处原地待机（房间门口待机），
+                // 聚齐后由 attack 状态整队推进
                 if (teamData.creeps.length < teamData.num) {
                     const teamFlag = Game.flags[`Team-${teamID}`]
-                    if (teamFlag) teamData.creeps.forEach(creepID => {
-                        const creep = Game.getObjectById(creepID) as Creep;
-                        if (!creep) return;
-                        if (creep.room.name == teamData.homeRoom &&
-                            !creep.pos.isNearEdge(4) &&
-                            !creep.pos.inRangeTo(teamFlag, 3)
-                        ) {
-                            creep.moveTo(teamFlag, { range: 3 });
+                    if (teamFlag) {
+                        teamData.creeps.forEach(creepID => {
+                            const creep = Game.getObjectById(creepID) as Creep;
+                            if (!creep) return;
+                            if (creep.room.name == teamData.homeRoom &&
+                                !creep.pos.isNearEdge(4) &&
+                                !creep.pos.inRangeTo(teamFlag, 3)
+                            ) {
+                                creep.moveTo(teamFlag, { range: 3 });
+                            }
+                        });
+                    } else {
+                        // 无指挥旗：跨房用 findRoute 出口方向步进（moveTo 不支持跨房）；
+                        // 已进目标房的在进门边缘待机（房间门口待机），聚齐后整队推进
+                        for (const creep of teamData.creeps.map(Game.getObjectById).filter(Boolean) as Creep[]) {
+                            if (creep.room.name === teamData.targetRoom) continue;
+                            const dir = TeamUtils.routeExitDir(creep.room.name, teamData.targetRoom);
+                            if (dir) creep.move(dir);
                         }
-                    });
+                    }
                     continue;
                 }
                 // 成员集齐则排序, 结束准备状态

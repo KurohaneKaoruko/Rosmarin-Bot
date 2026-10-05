@@ -3,6 +3,16 @@ import TeamCache from './TeamCache';
 import TeamCalc from './TeamCalc';
 import TeamVisual from './TeamVisual';
 import RoomArray from './RoomArray'
+import { formationTemplate, sectorToward, shapeOfCount, TowardName } from './FormationTables';
+
+/** 引擎对无视野房间的格子会抛访问异常：无法判定的格子按可通行放行，不阻断队伍处理 */
+const safeWalkable = (pos: RoomPosition): boolean => {
+    try {
+        return pos.walkable(true);
+    } catch {
+        return true;
+    }
+};
 
 const emptyCostMatrix = new PathFinder.CostMatrix()
 const tempRoomArray = new RoomArray()
@@ -645,20 +655,23 @@ export default class TeamAction {
             return
         }
 
-        // 多人小队穿边：保持同步同向移动，尽量维持 quad 紧密度，减少边缘承伤导致治疗覆盖不足
+        // 多人小队穿边：保持同步同向移动。仅 quad 做穿边保形驻留——
+        // cross/square3/line 不做 quad 判定驻留（3×3 全对相邻恒 false 会永久卡门）
         if (creeps.length >= 3) {
             if (
                 creeps.some(
                     (creep) => creep.pos.isRoomEdge() && creep.pos.getDirectPos(direction).roomName != creep.pos.roomName,
                 )
             ) {
-                // 穿边时可能出现“队伍被拆成两房”的过渡态：如果继续移动会打散 quad，而站桩 1 tick 能保持 quad，
-                // 则本 tick 不下发 move，等待边界传送把队伍合回同一侧后再继续推进。
-                const holdQuad = TeamUtils.willTeamBeQuadNextTick(team, undefined)
-                const moveQuad = TeamUtils.willTeamBeQuadNextTick(team, direction)
-                if (holdQuad && !moveQuad) {
-                    team.cache.lastMoveHold = true
-                    return
+                if (team.formation === 'quad') {
+                    // 穿边时可能出现“队伍被拆成两房”的过渡态：如果继续移动会打散 quad，而站桩 1 tick 能保持 quad，
+                    // 则本 tick 不下发 move，等待边界传送把队伍合回同一侧后再继续推进。
+                    const holdQuad = TeamUtils.willTeamBeQuadNextTick(team, undefined)
+                    const moveQuad = TeamUtils.willTeamBeQuadNextTick(team, direction)
+                    if (holdQuad && !moveQuad) {
+                        team.cache.lastMoveHold = true
+                        return
+                    }
                 }
                 creeps.forEach((creep) => creep.move(direction))
                 return
@@ -762,6 +775,191 @@ export default class TeamAction {
             targets = team['_targets'].filter((s) => 'hits' in s) as (Creep | Structure)[]
         }
         return originPos.findClosestByRange(targets)
+    }
+
+    /**
+     * 扩展队形（cross/square3）移动入口：同房散队模板集结；成阵后按索敌目标/锚点八向群移。
+     */
+    public static execMoveExtended(team: Team, anchor: RoomPosition | undefined): boolean {
+        const shape = shapeOfCount(team.creeps.length);
+        if (!shape) return false;
+        const goal = team['_targets']?.[0]?.pos ?? anchor;
+
+        // 临时痕迹：扩展队形逐 tick 分支去向（查完移除）
+        const dbg = ((Memory as any).xtrace ??= []) as any[];
+        const say = (did: string) => {
+            const last = dbg[dbg.length - 1];
+            if (last && last.t === Game.time && last.team === team.name) last.did = did;
+        };
+        if (!dbg.length || dbg[dbg.length - 1].t !== Game.time || dbg[dbg.length - 1].team !== team.name) {
+            dbg.push({
+                t: Game.time, at: 'ext', team: team.name, status: team.status, n: team.creeps.length,
+                same: TeamUtils.inSameRoom(team), shaped: TeamUtils.isExtendedShape(team),
+                goal: goal ? `${goal.x},${goal.y},${goal.roomName}` : null,
+            });
+            if (dbg.length > 40) dbg.shift();
+        }
+
+        const inTargetCount = team.creeps.filter(c => c.room.name === team.targetRoom).length;
+
+        // ── 分裂态（部分成员已过门）：向已过门的队首成员集结凑齐，不逐个送 ──
+        if (inTargetCount > 0 && inTargetCount < team.creeps.length) {
+            const leader = team.creeps.find(c => c.room.name === team.targetRoom)!;
+            for (const c of team.creeps) {
+                if (c.room.name === team.targetRoom) continue;  // 已过门的就位（execAttack 自动开火）
+                if (c.fatigue > 0) continue;                    // 疲劳自然滞留
+                // 跨房用 findRoute 出口方向步进（moveTo 不支持跨房）；同房向队首聚拢
+                if (c.room.name === leader.room.name) {
+                    if (!c.pos.inRangeTo(leader.pos, 2)) c.moveTo(leader.pos, { range: 2 });
+                } else {
+                    const dir = TeamUtils.routeExitDir(c.room.name, leader.room.name);
+                    if (dir) c.move(dir);
+                }
+            }
+            say('split-rally');
+            return true;
+        }
+
+        // ── 全员同房 ──
+        if (TeamUtils.inSameRoom(team)) {
+            const inTargetRoom = team.creeps[0].room.name === team.targetRoom;
+
+            // 目标房内：成阵 → 集火整队推进（execAttack 同步开火）
+            if (inTargetRoom) {
+                if (!TeamUtils.isExtendedShape(team)) { say('target-form'); return TeamAction.GatherByTemplate(team, shape); }
+                if (team.creeps.some(c => c.fatigue > 0)) { say('target-fatigue'); return true; }
+                const focus = TeamAction.focusTarget(team, TeamUtils.getTeamPos(team));
+                const goalPos = (focus ? focus.pos : null) ?? goal;
+                if (!goalPos) { say('no-goal'); return false; }
+                const direction = TeamAction.getTeamMoveDirection(team, [{ pos: goalPos }]);
+                say(direction ? 'target-advance:' + direction : 'no-direction');
+                if (!direction) return false;
+                TeamAction.move(team, direction);
+                return true;
+            }
+
+            // 孵化房：先成阵（锚点已离 spawn 群）；集结超时未成阵也整队向目标房推进
+            if (!TeamUtils.isExtendedShape(team)) {
+                if (!team.cache.gatherSince) team.cache.gatherSince = Game.time;
+                if (Game.time - team.cache.gatherSince < 40) { say('home-gather'); return TeamAction.GatherByTemplate(team, shape); }
+                delete team.cache.gatherSince;
+            }
+            const exitGoal = team.targetRoom ? new RoomPosition(25, 25, team.targetRoom) : goal;
+            if (!exitGoal) { say('no-exit'); return false; }
+            if (team.creeps.some(c => c.fatigue > 0)) { say('home-fatigue'); return true; }
+            const direction = TeamAction.getTeamMoveDirection(team, [{ pos: exitGoal }]);
+            say(direction ? 'home-march:' + direction : 'no-direction');
+            if (!direction) return false;
+            TeamAction.move(team, direction);
+            return true;
+        }
+
+        // ── 全员在第三房（路过的过渡态）：整队向目标房推进 ──
+        const exitGoal = team.targetRoom ? new RoomPosition(25, 25, team.targetRoom) : goal;
+        if (!exitGoal) { say('no-transit'); return false; }
+        if (team.creeps.some(c => c.fatigue > 0)) { say('transit-fatigue'); return true; }
+        const direction = TeamAction.getTeamMoveDirection(team, [{ pos: exitGoal }]);
+        say(direction ? 'transit-march:' + direction : 'no-direction');
+        if (!direction) return false;
+        TeamAction.move(team, direction);
+        return true;
+    }
+
+    /**
+     * 扩展队形模板集结：成员按角色分配到当前朝向的旋转模板占位
+     * （治疗成员优先中心/后排槽位，攻击/远攻成员就近入前沿臂位）。
+     */
+    /**
+     * 集结锚点：成员质心；压 spawn 群时沿目标房方向推到 ≥4 格外，
+     * 并按 teamID 散列沿推进方向垂直向错开多队集结点（±6 格内）。
+     */
+    public static stagingAnchorOf(teamName: string, creeps: Creep[], targetRoom: string | undefined): RoomPosition {
+        const roomName = creeps[0].room.name;
+        const clamp = (v: number) => Math.max(1, Math.min(48, v));
+        const xs = creeps.map(c => c.pos.x), ys = creeps.map(c => c.pos.y);
+        let cx = clamp(Math.round(xs.reduce((a, b) => a + b, 0) / xs.length));
+        let cy = clamp(Math.round(ys.reduce((a, b) => a + b, 0) / ys.length));
+        const spawns = Game.rooms[roomName] ? Game.rooms[roomName].find(FIND_MY_SPAWNS) : [];
+        const clearOfSpawns = (x: number, y: number): boolean =>
+            spawns.every(s => Math.max(Math.abs(x - s.pos.x), Math.abs(y - s.pos.y)) >= 4);
+        if (spawns.length && !clearOfSpawns(cx, cy)) {
+            const nearest = spawns.reduce((a, b) =>
+                (Math.abs(cx - a.pos.x) + Math.abs(cy - a.pos.y) <= Math.abs(cx - b.pos.x) + Math.abs(cy - b.pos.y)) ? a : b);
+            const dir = nearest.pos.getDirectionTo(targetRoom ? new RoomPosition(25, 25, targetRoom) : nearest.pos);
+            const DXY: Record<DirectionConstant, [number, number]> = {
+                [TOP]: [0, -1], [TOP_RIGHT]: [1, -1], [RIGHT]: [1, 0], [BOTTOM_RIGHT]: [1, 1],
+                [BOTTOM]: [0, 1], [BOTTOM_LEFT]: [-1, 1], [LEFT]: [-1, 0], [TOP_LEFT]: [-1, -1],
+            };
+            const [ddx, ddy] = DXY[dir] ?? [1, 0];
+            cx = clamp(nearest.pos.x + ddx * 5);
+            cy = clamp(nearest.pos.y + ddy * 5);
+            let guard = 0;
+            while (!clearOfSpawns(cx, cy) && guard++ < 5) {
+                cx = clamp(cx + ddx);
+                cy = clamp(cy + ddy);
+            }
+        }
+        if (targetRoom) {
+            const dirToTarget = new RoomPosition(cx, cy, roomName).getDirectionTo(new RoomPosition(25, 25, targetRoom));
+            const [fdx, fdy] = ({
+                [TOP]: [0, -1], [TOP_RIGHT]: [1, -1], [RIGHT]: [1, 0], [BOTTOM_RIGHT]: [1, 1],
+                [BOTTOM]: [0, 1], [BOTTOM_LEFT]: [-1, 1], [LEFT]: [-1, 0], [TOP_LEFT]: [-1, -1],
+            } as Record<DirectionConstant, [number, number]>)[dirToTarget] ?? [1, 0];
+            const hash = [...teamName].reduce((a, ch) => (a * 31 + ch.charCodeAt(0)) % 997, 7);
+            const lateral = ((hash % 5) - 2) * 3;
+            if (lateral) {
+                cx = clamp(cx + -fdy * lateral);
+                cy = clamp(cy + fdx * lateral);
+            }
+        }
+        return new RoomPosition(cx, cy, roomName);
+    }
+
+    public static GatherByTemplate(team: Team, shape: 'cross' | 'square3'): boolean {
+        if (team.creeps.length === 0) return false;
+        const slots = formationTemplate(shape, team.toward as TowardName);
+        const clamp = (v: number) => Math.max(1, Math.min(48, v));
+        const anchor = TeamAction.stagingAnchorOf(team.name, team.creeps, team.targetRoom);
+        const cx = clamp(anchor.x), cy = clamp(anchor.y);
+        const roomName = team.creeps[0].room.name;
+
+        const remaining = [...team.creeps];
+        const heals = remaining.filter(c => c.getActiveBodyparts(HEAL) > 0);
+        const attackers = remaining.filter(c => c.getActiveBodyparts(HEAL) === 0);
+        // 治疗槽优先给治疗成员，其余槽位攻击/远攻优先（就近贪心入位）
+        const ordered = [...slots].sort((a, b) => Number(b.heal) - Number(a.heal));
+        for (const slot of ordered) {
+            const target = new RoomPosition(clamp(cx + slot.x), clamp(cy + slot.y), roomName);
+            const pool = slot.heal && heals.length ? heals : (attackers.length ? attackers : heals);
+            let best: Creep | undefined;
+            let bestD = Infinity;
+            for (const c of pool) {
+                const d = c.pos.getRangeTo(target);
+                if (d < bestD) { bestD = d; best = c; }
+            }
+            if (!best) continue;
+            if (heals.indexOf(best) >= 0) heals.splice(heals.indexOf(best), 1);
+            if (attackers.indexOf(best) >= 0) attackers.splice(attackers.indexOf(best), 1);
+            remaining.splice(remaining.indexOf(best), 1);
+            if (!best.pos.isEqualTo(target)) best.moveTo(target);
+        }
+        // 剩余成员（槽位已满）：就近跟随
+        for (const c of remaining) {
+            c.moveTo(new RoomPosition(clamp(cx), clamp(cy), roomName));
+        }
+        return true;
+    }
+
+    /**
+     * 扩展队形朝向旋转：按攻击目标相对队伍中心的八向扇区解析新朝向。
+     */
+    public static switchFormationPos(team: Team, targetPos: RoomPosition): boolean {
+        const center = TeamUtils.getTeamPos(team);
+        if (!center) return false;
+        const toward = sectorToward(targetPos.x - center.x, targetPos.y - center.y);
+        if (team.toward === toward) return false;
+        team.toward = toward;
+        return true;
     }
 
 

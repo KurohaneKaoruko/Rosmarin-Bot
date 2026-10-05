@@ -4,26 +4,33 @@ import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/modules/shared
 import { isBoostResCheckEnabled } from "@/modules/shared/gameCapabilities";
 import { TEAM_CONFIG } from "../config/TeamConfig";
 
-/** ATK 旗默认配置：双远程输出 + 双顶级治疗（要塞攻坚最稳的远程编队） */
-const ATK_DEFAULT_CONFIG = 'R25/4';
-/** ATK 旗默认孵化间隔：0 = 无定时，孵化队列空闲即派下一队 */
-const ATK_DEFAULT_INTERVAL = 0;
-/** ATK 同时存在的队伍上限 */
-const ATK_TEAM_CAP = 10;
-
-/** 旗名解析出的孵化参数（TEAM_/ATK 两种旗型归一） */
-type TeamSpawnSpec = {
-    kind: 'TEAM' | 'ATK';
+/** 旗名解析出的孵化参数（各旗型解析器归一后的产出） */
+export type TeamSpawnSpec = {
+    /** 旗型标识（仅用于日志与统计） */
+    kind: string;
     config: string;
-    /** 孵化房；ATK 缺省表示主房暂无视野，本轮跳过不拆旗 */
+    /** 孵化房；缺省 = 主房暂无视野（是否等待由 keepOnMissingRoom 决定） */
     spawnRoomName?: string;
-    /** 目标房；TEAM_ 恒为旗所在房，ATK 可由旗名指定或自动选取 */
+    /** 目标房 */
     targetRoom?: string;
-    /** 最大派兵次数；undefined = TEAM_ 一次性 / ATK 无限 */
+    /** 最大派兵次数；undefined = 由 noMaxIsInfinite 决定无 N 时的行为 */
     maxCount?: number;
-    /** 孵化间隔 tick */
+    /** 孵化间隔 tick；0 = 无定时，队列空闲即派 */
     interval: number;
+    /** 无 N（或 N0）时是否无限派兵（false = 一次性派送后撤旗） */
+    noMaxIsInfinite?: boolean;
+    /** boost 缺货时是否只等待不拆旗 */
+    keepOnBoostShortage?: boolean;
+    /** 主房暂无视野时是否等待不拆旗 */
+    keepOnMissingRoom?: boolean;
+    /** 控制器等级 <1 的无主目标房是否拦截孵化 */
+    blockUnownedController?: boolean;
+    /** 场上同时存在的队伍上限（缺省不限制） */
+    teamCap?: number;
 };
+
+/** 旗型解析器：旗名 + 旗对象 → 归一孵化参数（TEAM_ 内置解析之外的旗型由表层模块注册） */
+export type SpecProvider = (flagName: string, flag: Flag) => TeamSpawnSpec | undefined;
 
 export default class TeamSpawner {
     /**
@@ -53,13 +60,21 @@ export default class TeamSpawner {
      */
     private static readonly IGNORE_TTL_AFTER_TIMEOUT = 1000;
 
+    /** 表层模块注册的旗型解析器（TEAM_ 内置解析之外的旗型由此扩展） */
+    private static specProviders: SpecProvider[] = [];
+
+    /** 注册旗型解析器（每个旗名命中第一个返回非 undefined 的解析器） */
+    public static registerSpecProvider(provider: SpecProvider): void {
+        this.specProviders.push(provider);
+    }
+
     /**
      * 小队孵化入口。
      *
      * - 每 10 tick 扫描一次所有旗帜：\n
      *   - `Team-xxxx`：队伍标记旗（队伍不存在则清理）\n
      *   - `TEAM_...`：孵化指令旗（按旗名协议解析参数并下发孵化/boost/队伍数据）\n
-     *   - `ATK...`：攻击指令旗（旗所在房即目标；孵化房/配置/次数/间隔可带参）
+     *   - 其他旗型：由表层模块注册的解析器提供（如要塞服 ATK 攻击旗）
      * - 本方法只负责调度，不在此处堆叠业务细节。
      *
      * @remarks
@@ -81,10 +96,14 @@ export default class TeamSpawner {
             // Team-xxxx 队伍标记旗
             if (this.handleTeamFlag(flagName, flag)) continue;
 
-            // TEAM_... 孵化指令旗 / ATK... 攻击指令旗
-            const spec = flagName.startsWith('TEAM_')
-                ? this.parseTeamFlag(flagName)
-                : this.parseAtkFlag(flagName, flag);
+            // TEAM_... 孵化指令旗（内置）；其他旗型交由表层注册的解析器（如 ATK 攻击旗）
+            let spec = flagName.startsWith('TEAM_') ? this.parseTeamFlag(flagName) : undefined;
+            if (!spec) {
+                for (const provider of this.specProviders) {
+                    spec = provider(flagName, flag);
+                    if (spec) break;
+                }
+            }
             if (!spec) continue;
             specs.set(flagName, spec);
             this.tryEnqueueSpawnFlag(flagName, flag, spec);
@@ -113,66 +132,6 @@ export default class TeamSpawner {
         };
     }
 
-    /**
-     * 解析 ATK 攻击旗：`ATK[/_孵化房][/_配置][/_N次数][/_T间隔]`。
-     *
-     * @remarks
-     * - 目标 = 旗所在房间（旗插哪打到哪）。\n
-     * - 孵化房：旗名参数优先；缺省自动选取离旗最近的己方房。\n
-     * - 配置缺省 R25/4；短名（如 R28）自动补全 /4、/2。\n
-     * - 次数缺省无限（N0 同义）；间隔缺省 500t。
-     */
-    private static parseAtkFlag(flagName: string, flag: Flag): TeamSpawnSpec | undefined {
-        if (!/^ATK([/_].*)?$/.test(flagName)) return undefined;
-
-        let spawnParam: string | undefined;
-        let maxCount: number | undefined;
-        let interval: number | undefined;
-        const rest: string[] = [];
-        for (const seg of flagName.slice(3).split(/[/_]/)) {
-            if (!seg) continue;
-            const n = seg.match(/^N(\d+)$/);
-            if (n) { maxCount = parseInt(n[1]); continue; }
-            const t = seg.match(/^T(\d+)$/);
-            if (t) { interval = parseInt(t[1]); continue; }
-            if (/^[EW]\d+[NS]\d+$/.test(seg)) { spawnParam ??= seg.toUpperCase(); continue; }
-            rest.push(seg);
-        }
-
-        // 配置段拼回（'R28'+'4' → 'R28/4'）；无子段的短名自动补 /4、/2
-        let config = rest.length ? rest.join('/') : ATK_DEFAULT_CONFIG;
-        if (!TEAM_CONFIG[config] && !config.includes('/')) {
-            config = TEAM_CONFIG[`${config}/4`] ? `${config}/4` : `${config}/2`;
-        }
-        if (!TEAM_CONFIG[config]) {
-            console.log(`[ATK] ${flagName} 配置 ${config} 不存在（如 R25/4、R28/4、RH/4）`);
-            this.removeFlagAndMemory(flagName, flag, false);
-            return undefined;
-        }
-
-        // 孵化房：旗名参数优先，否则离旗最近的己方房
-        const myRooms = Object.values(Game.rooms).filter(r => r.my);
-        let spawnRoomName = spawnParam;
-        if (!spawnRoomName && myRooms.length) {
-            spawnRoomName = myRooms
-                .map(r => ({ name: r.name, dist: Game.map.getRoomLinearDistance(r.name, flag.pos.roomName) }))
-                .sort((a, b) => a.dist - b.dist)[0].name;
-        }
-
-        return { kind: 'ATK', config, spawnRoomName, targetRoom: flag.pos.roomName, maxCount, interval: interval ?? ATK_DEFAULT_INTERVAL };
-    }    /**
-     * 处理 `Team-xxxx` 队伍标记旗。
-     *
-     * @param flagName 旗帜名（用于判断是否 `Team-` 前缀并解析 teamID）
-     * @param flag 旗帜对象
-     * @returns 是否已处理该旗帜。\n
-     * - `true`：已处理（调用方应 `continue`）\n
-     * - `false`：非 `Team-` 前缀（调用方继续执行其他逻辑）
-     *
-     * @remarks
-     * 该旗帜一般由孵化流程创建（`createTeam`），用于在地图上标记队伍集合/移动点。\n
-     * 若 `Memory.RosmarinBot.TeamData[teamID]` 不存在，则说明队伍已被清理或从未成功创建，应删除该旗帜避免残留。
-     */
     private static handleTeamFlag(flagName: string, flag: Flag): boolean {
         if (!flagName.startsWith('Team-')) return false;
         const teamID = flagName.match(/Team-(\w+)/)?.[1];
@@ -199,11 +158,11 @@ export default class TeamSpawner {
 
         const room = spec.spawnRoomName ? Game.rooms[spec.spawnRoomName] : undefined;
         if (!room || !room.my) {
-            if (spec.kind === 'ATK') return;
+            if (spec.keepOnMissingRoom) return;
             this.removeFlagAndMemory(flagName, flag, false);
             return;
         }
-        if (spec.kind === 'ATK' && !spec.targetRoom) return;
+        if (spec.keepOnMissingRoom && !spec.targetRoom) return;
 
         const Team_Config = TEAM_CONFIG[spec.config];
         if (!Team_Config) {
@@ -214,7 +173,7 @@ export default class TeamSpawner {
 
         // boost 资源检查关闭时跳过
         const RES_MAP = isBoostResCheckEnabled() ? this.calcBoostNeeds(Team_Config) : undefined;
-        if (RES_MAP && !this.ensureBoostResources(room, RES_MAP, flagName, flag, spec.kind === 'ATK')) return;
+        if (RES_MAP && !this.ensureBoostResources(room, RES_MAP, flagName, flag, !!spec.keepOnBoostShortage)) return;
 
         const alreadyQueued = this.isFlagQueued(room.name, flagName) || this.isFlagActive(room.name, flagName);
         if (flagMemory[TeamSpawner.FLAG_QUEUED_MARK] && !alreadyQueued) {
@@ -304,10 +263,10 @@ export default class TeamSpawner {
 
         const room = spec.spawnRoomName ? Game.rooms[spec.spawnRoomName] : undefined;
         if (!room || !room.my || room.name !== roomName) {
-            if (spec.kind !== 'ATK') this.removeFlagAndMemory(flagName, flag, false);
+            if (!spec.keepOnMissingRoom) this.removeFlagAndMemory(flagName, flag, false);
             return;
         }
-        if (spec.kind === 'ATK' && !spec.targetRoom) return;
+        if (spec.keepOnMissingRoom && !spec.targetRoom) return;
 
         const Team_Config = TEAM_CONFIG[spec.config];
         if (!Team_Config) {
@@ -320,7 +279,7 @@ export default class TeamSpawner {
 
         // boost 资源检查关闭时跳过检查与 boost 任务下发
         const RES_MAP = isBoostResCheckEnabled() ? this.calcBoostNeeds(Team_Config) : undefined;
-        if (RES_MAP && !this.ensureBoostResources(room, RES_MAP, flagName, flag, spec.kind === 'ATK')) return;
+        if (RES_MAP && !this.ensureBoostResources(room, RES_MAP, flagName, flag, !!spec.keepOnBoostShortage)) return;
 
         if (RES_MAP && Object.keys(RES_MAP).length) {
             for (const m in RES_MAP) {
@@ -328,7 +287,7 @@ export default class TeamSpawner {
             }
         }
 
-        this.createTeam(teamID, Team_Config, room, flag);
+        this.createTeam(teamID, Team_Config, room, flag, spec.config);
         this.spawnTeamCreeps(teamID, Team_Config, room);
         this.updateSpawnCounter(flagName, spec, flag, teamID);
 
@@ -450,7 +409,7 @@ export default class TeamSpawner {
         // 如果有视野, 检查目标房间（ATK 的目标房可能不是旗所在房）
         const targetRoom = spec.targetRoom ? Game.rooms[spec.targetRoom] : flag.room;
         if (targetRoom) {
-            if (spec.kind === 'TEAM' && targetRoom.controller?.level < 1) {
+            if (spec.blockUnownedController && targetRoom.controller?.level < 1) {
                 flagMemory['spawnCount'] = 2e32;
             } else if (targetRoom.controller?.safeMode) {
                 flagMemory['lastTime'] = Game.time + targetRoom.controller.safeMode;
@@ -460,9 +419,11 @@ export default class TeamSpawner {
 
         // 孵化间隔：0（缺省）= 队列空闲即派，仅受场上队伍上限约束
         if (spec.interval > 0 && Game.time - (flagMemory['lastTime'] || 0) < spec.interval) return false;
-        if (spec.kind === 'ATK') {
+
+        // 场上队伍上限（spec.teamCap 存在时生效）
+        if (spec.teamCap) {
             const teams = getTeamData() as any;
-            if (teams && Object.keys(teams).length >= ATK_TEAM_CAP) return false;
+            if (teams && Object.keys(teams).length >= spec.teamCap) return false;
         }
         return true;
     }
@@ -536,14 +497,16 @@ export default class TeamSpawner {
      * - 队伍初始状态设为 `ready`，由 TeamController 检测成员齐全后切到 `attack`。\n
      * - `try/catch` 分支用于处理 `createFlag` 失败时的兜底：先在 (0,0) 建旗，再写入 Memory.flags 的 setPosition。
      */
-    private static createTeam(teamID: string, Team_Config: any[], room: Room, flag: Flag): void {
+    private static createTeam(teamID: string, Team_Config: any[], room: Room, flag: Flag, configKey: string): void {
         // 创建小队
         const teamMem = ensureTeamData(teamID);
+        // 配置键推导队形：/5 → cross（八向十字）、/9 → square3（三方阵），其余 line
+        const formation = /\/5$/.test(configKey) ? 'cross' : /\/9$/.test(configKey) ? 'square3' : 'line';
         Object.assign(teamMem, {
             name: teamID,
             status: 'ready',
             toward: '↑',
-            formation: 'line',
+            formation,
             creeps: [],
             num: Team_Config.length,
             time: Game.time,
@@ -605,9 +568,9 @@ export default class TeamSpawner {
         log('TeamModule', `${flagName} 已派送小队 ${teamID} 到 ${spec.targetRoom ?? flag.pos.roomName}, 配置:${spec.config},`);
 
         const maxCount = spec.maxCount;
-        if (spec.kind === 'ATK' && (!maxCount || maxCount <= 0)) return;
-
-        if (maxCount === undefined) {
+        // 无 N（或 N0）：noMaxIsInfinite 的旗型无限派兵，其余一次性撤旗
+        if (!maxCount || maxCount <= 0) {
+            if (spec.noMaxIsInfinite) return;
             this.removeFlagAndMemory(flagName, flag, true);
             return;
         }

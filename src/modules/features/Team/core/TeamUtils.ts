@@ -1,7 +1,53 @@
 /**
  * 工具函数
  */
+import { formationTemplate, shapeOfCount, TowardName } from './FormationTables';
+
 export default class TeamUtils {
+    // 扩展队形形状判定
+    /**
+     * 成员位置是否与当前朝向的旋转模板完全一致（平移不变；跨房视为不满足）。
+     */
+    private static matchShape(team: Team, shape: 'cross' | 'square3'): boolean {
+        if (!TeamUtils.inSameRoom(team)) return false;
+        const toward = team.toward as TowardName;
+        const slots = formationTemplate(shape, toward);
+        const norm = (list: { x: number; y: number }[]) => {
+            const minX = Math.min(...list.map(p => p.x));
+            const minY = Math.min(...list.map(p => p.y));
+            return list.map(p => ({ x: p.x - minX, y: p.y - minY }))
+                .sort((a, b) => a.x - b.x || a.y - b.y);
+        };
+        const actual = norm(team.creeps.map(c => ({ x: c.pos.x, y: c.pos.y })));
+        const expected = norm(slots.map(s => ({ x: s.x, y: s.y })));
+        return actual.every((p, i) => p.x === expected[i].x && p.y === expected[i].y);
+    }
+
+    /** cross（5 人十字）当前朝向下是否成阵 */
+    public static isCross(team: Team): boolean {
+        return team.creeps.length === 5 && TeamUtils.matchShape(team, 'cross');
+    }
+
+    /** square3（9 人方阵）当前朝向下是否成阵 */
+    public static isSquare3(team: Team): boolean {
+        return team.creeps.length === 9 && TeamUtils.matchShape(team, 'square3');
+    }
+
+    /** 成员数对应的扩展队形是否已成阵（散队判定用） */
+    public static isExtendedShape(team: Team): boolean {
+        const shape = shapeOfCount(team.creeps.length);
+        if (!shape) return false;
+        return shape === 'cross' ? TeamUtils.isCross(team) : TeamUtils.isSquare3(team);
+    }
+
+    // 跨房移动：该引擎 creep.moveTo 不支持跨房寻路，用 findRoute 出口方向步进
+    public static routeExitDir(from: string, to: string): DirectionConstant | undefined {
+        if (from === to) return undefined;
+        const route = Game.map.findRoute(from, to);
+        if (route === ERR_NO_PATH || !route.length) return undefined;
+        return route[0].exit;
+    }
+
     // 获取队伍坐标范围
     /**
      * 获取队伍在当前房间坐标系下的包围盒范围。

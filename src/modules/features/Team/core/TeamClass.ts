@@ -2,6 +2,7 @@ import TeamUtils from './TeamUtils';
 import TeamAction from './TeamAction';
 import TeamBattle from './TeamBattle';
 import TeamVisual from './TeamVisual';
+import { TeamFormationName, TowardName } from './FormationTables';
 
 /**
  * 小队实体（Team 状态机）。
@@ -14,8 +15,8 @@ import TeamVisual from './TeamVisual';
 class Team {
     name: string;
     status: 'ready' | 'attack' | 'flee' | 'avoid' | 'sleep'; // 状态
-    toward: '↑' | '←' | '→' | '↓';    // 朝向
-    formation: 'line' | 'quad';  // 队形
+    toward: TowardName;    // 朝向（八向）
+    formation: TeamFormationName;  // 队形
     moveMode: string;    // 移动模式
     homeRoom: string;    // 孵化房间
     targetRoom: string;  // 目标房间
@@ -257,6 +258,13 @@ class Team {
             : undefined;
         if (!anchor) return;
         if (this.creeps.some(c => c.fatigue > 0)) return;
+
+        // 扩展队形（cross/square3）：模板集结与八向推进
+        if (this.formation === 'cross' || this.formation === 'square3') {
+            this.moved = TeamAction.execMoveExtended(this, anchor);
+            return;
+        }
+
         const isQuad = TeamUtils.isQuad(this);
         const inSamaRoom = TeamUtils.inSameRoom(this);
         const hasOnEdge = TeamUtils.hasCreepOnEdge(this);
@@ -346,6 +354,12 @@ class Team {
     execAdjust(): void {
         if (this.moved) return;
         if (this.creeps.length < 3) return;
+        // 扩展队形：按攻击目标八向扇区微调朝向（cross 正/斜 = +/× 呈现切换）
+        if (this.formation === 'cross' || this.formation === 'square3') {
+            const focus = this['_targets']?.[0]?.pos;
+            if (focus) TeamAction.switchFormationPos(this, focus);
+            return;
+        }
         if (TeamUtils.checkToward(this)) return;
         this.moved = TeamAction.AdjustToward(this);
         if (this.moved) TeamVisual.drawMoveDirection(this)

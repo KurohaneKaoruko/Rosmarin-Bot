@@ -25,8 +25,8 @@ interface TeamMemory {
     name: string,
     time: number, // 创建时间
     status: 'ready' | 'attack' | 'flee' | 'avoid' | 'sleep'; // 状态
-    toward: '↑' | '←' | '→' | '↓',      // 朝向
-    formation: 'line' | 'quad',  // 队形
+    toward: '↑' | '↗' | '→' | '↘' | '↓' | '↙' | '←' | '↖',      // 朝向
+    formation: 'line' | 'quad' | 'cross' | 'square3',  // 队形
     moveMode: string;    // 移动模式
     homeRoom: string;    // 孵化房间
     targetRoom?: string,    // 目标房间
@@ -40,8 +40,8 @@ interface TeamMemory {
 interface Team {
     name: string;
     status: 'ready' | 'attack' | 'flee' | 'avoid' | 'sleep'; // 状态
-    toward: '↑' | '←' | '→' | '↓';    // 朝向
-    formation: 'line' | 'quad' | string;  // 队形
+    toward: '↑' | '↗' | '→' | '↘' | '↓' | '↙' | '←' | '↖';    // 朝向
+    formation: 'line' | 'quad' | 'cross' | 'square3' | string;  // 队形
     moveMode: string;    // 移动模式
     homeRoom: string;    // 孵化房间
     targetRoom: string;    // 目标房间
