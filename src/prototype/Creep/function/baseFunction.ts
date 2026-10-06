@@ -1,8 +1,8 @@
 /**
  * 一些基础的功能
  */
+import { inWhitelist } from '@/modules/utils';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
-import { inWhitelist } from '@/modules/shared/whitelist';
 
 type TakeTargetType = 'dropped' | 'structure' | 'ruin';
 type TakeTarget = { id: Id<any>; type: TakeTargetType };

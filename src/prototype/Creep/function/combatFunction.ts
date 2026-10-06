@@ -2,7 +2,7 @@
  * 战斗功能类
  * 提供战斗相关方法的原型扩展
  */
-import { inWhitelist } from '@/modules/shared/defenseUtils';
+import { inWhitelist } from '@/modules/utils';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 export default class CombatFunction extends Creep {
