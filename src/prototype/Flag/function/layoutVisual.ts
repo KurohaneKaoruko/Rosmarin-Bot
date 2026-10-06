@@ -8,10 +8,15 @@ export default class LayoutVisualFunction extends Flag {
         if (this.name !== 'layoutVisual') return false;
 
         const layoutMemory = getLayoutData(this.pos.roomName);
-        if (!layoutMemory || Object.keys(layoutMemory).length === 0) return false;
+        if (!layoutMemory || typeof layoutMemory !== 'object' || Object.keys(layoutMemory).length === 0) return false;
 
         const structMap: Record<string, any[]> = {};
-        for (const s in layoutMemory) structMap[s] = decompressBatch(layoutMemory[s]);
+        for (const s in layoutMemory) {
+            const values = (layoutMemory as any)[s];
+            if (!Array.isArray(values)) continue;
+            structMap[s] = decompressBatch(values);
+        }
+        if (Object.keys(structMap).length === 0) return false;
         LayoutVisual.showRoomStructures(this.pos.roomName, structMap);
         return true;
     }

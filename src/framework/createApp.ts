@@ -193,7 +193,7 @@ export const createApp = () => {
         initOK = true;
         if (Game.shard.name === 'sim') return;
         if (getHeartbeatTick() !== undefined) {
-            log(name, `<b>挂载完成。[距离上次挂载 ${getHeartbeatTick()} tick]</b>`);
+            log(name, `<b>挂载完成。[距离上次挂载 ${Game.time - getHeartbeatTick()} tick]</b>`);
         } else {
             log(name, `<b>挂载完成。</b>`);
         }
