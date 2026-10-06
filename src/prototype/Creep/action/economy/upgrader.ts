@@ -19,6 +19,9 @@ import { getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/r
 
 const RETIRE_UNBOOST_TIMEOUT = 100;
 
+/** upgrader 临时转建 ext 的 RCL 上界：房间 < 此值且有 ext 工地时 upgrader 优先造 ext（造完回归升级，其他建筑归 worker） */
+const UPGRADER_EXT_BUILD_MAX_LEVEL = 6;
+
 const isBodyBoosted = (creep: Creep) => creep.body.some((part) => !!part.boost);
 
 // 冲级催化：WORK 用升级催化（XGH2O 系），MOVE 用加速（XZHO2 系）——非强制，缺资源自动跳过
@@ -85,12 +88,35 @@ const borrowFromAdjacentUpgrader = (creep: Creep): boolean => {
     return true;
 };
 
+/** RCL 门槛内 upgrader 临时转建 ext：有 ext 工地则优先建造（其他建筑归 worker），造完自动回归升级。
+ *  返回 null = 不接管（等级到顶/无工地）。能量仍走控制器补给链，不脱离静态供能半径。 */
+const runExtensionBuild = (creep: Creep): WorkEvent | null => {
+    if (creep.room.level >= UPGRADER_EXT_BUILD_MAX_LEVEL) return null;
+    const extSites = creep.room.find(FIND_MY_CONSTRUCTION_SITES, {
+        filter: (s: ConstructionSite) => s.structureType === STRUCTURE_EXTENSION,
+    });
+    if (extSites.length === 0) return null;
+    if ((creep.store[RESOURCE_ENERGY] || 0) === 0) return WORK_EVENTS.TO_SOURCE;
+    const site = creep.pos.findClosestByPath(extSites) ?? creep.pos.findClosestByRange(extSites);
+    if (!site) return null;
+    // 转建期工位跟随 ext 工地（不能写控制器工位候选，否则与前往工地互相打架）
+    writeMoveWorkTileCandidates(creep, [{ pos: site.pos, range: 1 }]);
+    if (creep.build(site) === ERR_NOT_IN_RANGE) {
+        creep.moveTo(site.pos, { range: 1 });
+    }
+    return WORK_EVENTS.STAY;
+};
+
 const onTarget = (creep: Creep): WorkEvent => {
     if (!creep.moveHomeRoom()) return WORK_EVENTS.STAY;
     if (shouldRetire(creep)) {
         retire(creep);
         return WORK_EVENTS.STAY;
     }
+
+    // RCL 门槛内 ext 优先：升 RCL2+ 长期 ext 不足会导致 creep 体型小、升级慢——先建满 ext 再升级
+    const extEvent = runExtensionBuild(creep);
+    if (extEvent) return extEvent;
 
     // 建造期让位：基础结构工地存在时暂停开火（能量让给 builder，旗清后恢复）
     if (Game.time - ((creep.room.memory as any).buildingTick || 0) < 30) {
