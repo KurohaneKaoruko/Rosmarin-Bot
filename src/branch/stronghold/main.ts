@@ -26,10 +26,12 @@ registerOutMineIncomeProvider();    // 定编外矿收入 ← 外矿模块
 import { ClearModule } from '@/modules/ClearModule';
 import { MoveModule } from '@/modules/MoveModule';
 import { TeamModule } from '@/modules/TeamModule';
+import { StrongholdAnchorModule } from './team/anchor';
 const MODULE_MANIFEST = [
     ClearModule,
     MoveModule,
     TeamModule,
+    StrongholdAnchorModule,    // 指挥旗自动落位（要塞攻坚贴脸推进）
 ] as const;
 
 const App = createApp();
