@@ -1,4 +1,5 @@
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { raceEnergyMined } from '@/modules/shared/raceEnergy';
 
 type EnergySourceTarget = AnyStoreStructure | Resource<RESOURCE_ENERGY>;
 type WithdrawTarget = AnyStoreStructure | Resource | Ruin;
@@ -414,7 +415,12 @@ export default class WorkFunction extends Creep {
                 range: 1
             });
             return false;
-        } else return true;
+        }
+        // 冲级面板采样：源矿采集进账（矿物不计）
+        if (result === OK && (target as Source).energy !== undefined) {
+            raceEnergyMined(this.room.name, this.getActiveBodyparts(WORK) * HARVEST_POWER);
+        }
+        return true;
     }
     /**
      * 从指定结构中提取资源

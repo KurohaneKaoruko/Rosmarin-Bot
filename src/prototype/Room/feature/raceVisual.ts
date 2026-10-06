@@ -2,6 +2,7 @@ import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from "@/modules/shared/roomMode";
 import { getOutMineData } from "@/modules/shared/memory";
 import { isRacePanelEnabled } from "@/modules/shared/gameCapabilities";
+import { takeRaceEnergyMined } from "@/modules/shared/raceEnergy";
 import { RoleData } from "@/constant/CreepConstant";
 import {
     RUSH_SEGMENT_LEVELS,
@@ -41,6 +42,11 @@ type RaceMemory = {
     failedSegment?: number;
     /** 判废归因快照 */
     failSnapshot?: Record<string, unknown>;
+    /** 能量收支：采集进账累计（窗口差分用） */
+    eInAcc?: number;
+    eSpawnAcc?: number;
+    /** 能量采样环 {tick, 进账累计, 孵化花费累计, 全房存量, 工地进度和, 防御hits和, 升级累计} */
+    energySamples?: { t: number; eIn: number; eSpawn: number; store: number; sites: number; hits: number; cum: number }[];
 };
 
 const SAMPLE_STEP = 10;
@@ -67,6 +73,9 @@ const getRaceMem = (room: Room): RaceMemory => {
     mem.samples ??= [];
     mem.relayAccum ??= 0;
     mem.relaySamples ??= [];
+    mem.eInAcc ??= 0;
+    mem.eSpawnAcc ??= 0;
+    mem.energySamples ??= [];
     return mem;
 };
 
@@ -102,6 +111,9 @@ export default class RaceVisual extends Room {
             mem.levelRates = {};
             mem.bars = {};
             mem.samples = [];
+            mem.energySamples = [];
+            mem.eInAcc = 0;
+            mem.eSpawnAcc = 0;
             mem.segments = undefined;
             mem.failed = false;
             mem.failedSegment = undefined;
@@ -207,6 +219,50 @@ export default class RaceVisual extends Room {
         const dropPile = controller.pos.findInRange(FIND_DROPPED_RESOURCES, 2)
             .reduce((sum, d) => sum + d.amount, 0);
 
+        // ── 能量收支采样：进账=采集累加；消耗=升级+建造+孵化+维修；浪费=守恒差值（掉落/衰减） ──
+        mem.eInAcc = (mem.eInAcc || 0) + takeRaceEnergyMined(this.name);
+        let store = dropPile;
+        for (const s of this.find(FIND_STRUCTURES) as AnyStoreStructure[]) {
+            if (s.store) store += s.store[RESOURCE_ENERGY] || 0;
+        }
+        for (const creep of Object.values(Game.creeps)) {
+            if (creep.room.name === this.name) store += creep.store[RESOURCE_ENERGY] || 0;
+        }
+        let sitesProg = 0;
+        let hits = 0;
+        for (const s of this.find(FIND_MY_CONSTRUCTION_SITES)) sitesProg += s.progress;
+        for (const s of this.find(FIND_STRUCTURES) as AnyStructure[]) {
+            if (s.structureType === STRUCTURE_RAMPART || s.structureType === STRUCTURE_WALL) hits += s.hits;
+        }
+        const eSamples = mem.energySamples!;
+        if (eSamples.length === 0 || now - eSamples[eSamples.length - 1].t >= SAMPLE_STEP) {
+            eSamples.push({ t: now, eIn: mem.eInAcc || 0, eSpawn: mem.eSpawnAcc || 0, store, sites: sitesProg, hits, cum: cumulative });
+            while (eSamples.length > SAMPLE_KEEP) eSamples.shift();
+            mem.eInAcc = 0;
+            mem.eSpawnAcc = 0;
+        }
+        let inRate = 0;
+        let upRate = 0;
+        let buildRate = 0;
+        let spawnRate = 0;
+        let repairRate = 0;
+        let storeRate = 0;
+        let wasteRate = 0;
+        let outRate = 0;
+        if (eSamples.length >= 2) {
+            const a = eSamples[0];
+            const b = eSamples[eSamples.length - 1];
+            const dt = Math.max(1, b.t - a.t);
+            inRate = (b.eIn - a.eIn) / dt;
+            spawnRate = (b.eSpawn - a.eSpawn) / dt;
+            buildRate = (b.sites - a.sites) / dt;
+            upRate = (b.cum - a.cum) / dt;
+            repairRate = (b.hits - a.hits) / dt;
+            storeRate = (b.store - a.store) / dt;
+            outRate = upRate + buildRate + spawnRate + Math.max(0, repairRate);
+            wasteRate = Math.max(0, inRate - outRate - storeRate);
+        }
+
         // 远矿积压（有视野的托管房容器存量）
         let backlog = 0;
         const targets = getOutMineData()[this.name]?.energy || [];
@@ -272,6 +328,9 @@ export default class RaceVisual extends Room {
                 : `控制容器 缺位 → 丢落堆 ${fmtTick(dropPile)}`,
             cc ? (ccEnergy > 500 ? C.good : C.warn) : C.bad,
         );
+        push(`能量进账 ${inRate.toFixed(1)}/t  能量消耗 ${outRate.toFixed(1)}/t`, inRate >= outRate ? C.good : C.warn);
+        push(`└ 升 ${upRate.toFixed(1)} 建 ${buildRate.toFixed(1)} 孵 ${spawnRate.toFixed(1)} 修 ${Math.max(0, repairRate).toFixed(1)}`, C.text);
+        push(`能量浪费 ${wasteRate.toFixed(1)}/t（掉落/衰减）`, wasteRate > 2 ? C.bad : wasteRate > 0.5 ? C.warn : C.text);
         push(`升级火力 ${uWork}W  搬运工 ${ocTotal}`, C.text);
         push(`接力成交 ${relayRate.toFixed(2)}/t${relayRate < 0.2 ? ' ⚠' : ''}`, relayRate < 0.2 ? C.bad : C.good);
         push(`外矿采集 ${ohTotal} 只(在场${ohOnSite})`, ohOnSite < targets.length ? C.warn : C.good);
@@ -285,27 +344,6 @@ export default class RaceVisual extends Room {
             ? `孵化中 ${spawningInfo.name} 剩${spawningInfo.remainingTime}t`
             : `孵化空闲 | 队列: ${poolText}`,
         spawningInfo ? C.info : C.warn);
-
-        // 里程碑双列：只记达成 tick（段速看顶部速率行，避免行宽溢出重叠）
-        const milestones: Line[] = [];
-        for (let l = level; l >= 1; l--) {
-            if (!mem.levels[l]) continue;
-            const at = Math.max(0, mem.levels[l] - mem.baseline);
-            // 段耗时(累计总耗时)：该级升级所花时间(达到该级总用时)
-            // 上一级缺失（跳级/记录丢失）时段耗时记 0，避免 undefined 相减出 NaN
-            const prev = mem.levels[l - 1];
-            const seg = l > 1 && prev ? mem.levels[l] - prev : 0;
-            milestones.push({
-                text: `RCL${l} ${fmtTick(Math.max(0, seg))}(${fmtTick(at)})`,
-                color: l === level ? C.good : C.muted,
-                x: milestones.length % 2 === 0 ? 0.5 : 7.5,
-            });
-        }
-        for (let i = 0; i < milestones.length; i += 2) {
-            const row: Line[] = [milestones[i]];
-            if (milestones[i + 1]) row.push(milestones[i + 1]);
-            rows.push(row);
-        }
 
         const visual = this.visual;
         const rowH = 0.78;
