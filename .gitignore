@@ -4,6 +4,5 @@ node_modules/
 dist/
 target/
 test/
-attempt/
 openspec/
-AGENTS.md
+.dev/
