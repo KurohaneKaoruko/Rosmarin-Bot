@@ -1,29 +1,5 @@
 import { BASE_CONFIG } from '@/constant/BaseConstant';
 
-/** 签入原型
- * 为obj1添加obj2的原型方法
- * @param obj1 目标对象
- * @param obj2 源对象
- */
-export const assignPrototype = function(obj1: any, obj2: any) {
-    Object.getOwnPropertyNames(obj2.prototype).forEach(key => {
-        // 跳过 constructor，避免每个插件依次覆盖 obj1.prototype.constructor
-        if (key === 'constructor') return;
-
-        // 以"属性描述符"拷贝而不是"取值"拷贝：
-        // 直接读取 obj2.prototype[key] 会立即执行类访问器（getter），
-        // 例如 ObserveControl#observerQueue 内部访问 this.name，
-        // 而此时 this 是裸原型对象，在 xxscreeps 上会触发
-        // "Cannot read private member #t ..."（Room.name 由 schema overlay 私有缓冲支撑）。
-        // defineProperty 原样迁移 get/set，不会触发访问器。
-        Object.defineProperty(
-            obj1.prototype,
-            key,
-            Object.getOwnPropertyDescriptor(obj2.prototype, key)!
-        );
-    });
-};
-
 /** 日志输出
  * 输出日志到控制台, 统一格式
  * @param typeOrText 只有一个参数时表示文本；两个参数且第二个是 string 时第一个表示前缀类型

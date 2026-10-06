@@ -286,7 +286,7 @@ export default class BaseFunction extends RoomPosition {
         }
     }
 
-    /** 创建旗帜（借用 Room 原生实现 + 伪 this：引擎只依赖 this.name；无视野房可用） */
+    /** 创建旗帜（借用 Room 原生实现 + 伪 Room；无视野房可用） */
     createFlag(name: string, color1: ColorConstant = COLOR_WHITE, color2: ColorConstant = COLOR_WHITE) {
         return Room.prototype.createFlag.call({ name: this.roomName }, this.x, this.y, name, color1, color2);
     }
