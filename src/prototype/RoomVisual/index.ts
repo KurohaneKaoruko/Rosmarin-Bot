@@ -1,8 +1,7 @@
-import { assignPrototype } from "@/modules/utils"
+import { extend } from '../registry'
 import RoomVisualExtension from "./roomVisual"
 
-const plugins = [
-    RoomVisualExtension,
-]
-
-export default () => plugins.forEach(plugin => assignPrototype(RoomVisual, plugin))
+/** RoomVisual 原型扩展注册表 */
+export default () => {
+    extend(RoomVisual, RoomVisualExtension)
+}

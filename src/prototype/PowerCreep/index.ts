@@ -1,16 +1,13 @@
-import { assignPrototype } from "@/modules/utils"
+import { extend } from '../registry'
 import BaseFunction from "./function/baseFunction"
 import PowerCreepDoubleAction from "./function/doubleAction"
 import PowerCreepUsePower from "./function/usePower"
 import PowerCreepExecute from "./execute"
 
-
-const plugins = [
-    BaseFunction,
-    PowerCreepDoubleAction,
-    PowerCreepUsePower,
-    PowerCreepExecute
-]
-
-
-export default () => plugins.forEach(plugin => assignPrototype(PowerCreep, plugin))
+/** PowerCreep 原型扩展注册表（顺序即挂载顺序） */
+export default () => {
+    extend(PowerCreep, BaseFunction)
+    extend(PowerCreep, PowerCreepDoubleAction)
+    extend(PowerCreep, PowerCreepUsePower)
+    extend(PowerCreep, PowerCreepExecute)
+}

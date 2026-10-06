@@ -307,32 +307,6 @@ export default class BaseFunction extends Creep {
         return false;
     }
 
-    resolveSourceByPriority(source?: Source | null) {
-        let currentSource = source || this.getBoundSource();
-        if (!currentSource || currentSource.energy <= 0) {
-            delete this.memory.targetSourceId;
-            currentSource = null;
-        }
-
-        if (currentSource && !this.room.shouldYieldSourceByPriority(this, currentSource)) {
-            if (this.memory.targetSourceId !== currentSource.id) {
-                this.memory.targetSourceId = currentSource.id;
-            }
-            return currentSource;
-        }
-
-        if (currentSource) delete this.memory.targetSourceId;
-
-        const rebound = this.room.closestSource(this);
-        if (rebound) {
-            this.memory.targetSourceId = rebound.id;
-            return rebound;
-        }
-
-        if (currentSource) this.yieldSourcePosition(currentSource);
-        return null;
-    }
-
     isWhiteList() {
         return inWhitelist(this.owner.username);
     }

@@ -1,4 +1,4 @@
-import { assignPrototype } from "@/modules/utils"
+import { extend } from '../registry'
 import BaseFunction from "./function/baseFunction"
 import CacheFunction from "./function/cacheFunction"
 import MoveFunction from "./function/moveFuntion"
@@ -14,28 +14,23 @@ import ControllerFunction from "./function/controllerFunction"
 import CreepExecute from "./execute"
 
 /**
- * Creep 原型扩展插件列表。
+ * Creep 原型扩展注册表
  *
  * @remarks
- * 顺序即挂载顺序：基础能力 -> 行为能力 -> 执行器。
+ * 顺序即挂载顺序：基础设施 -> 行为扩展 -> 执行器
  */
-const plugins = [
-    BaseFunction,
-    CacheFunction,
-    MoveFunction,
-    BoostFunction,
-    WorkFunction,
-    SourceFunction,
-    DoubleAction,
-    CollectFunction,
-    CombatFunction,
-    BuildFunction,
-    HaulFunction,
-    ControllerFunction,
-    CreepExecute,
-]
-
-/**
- * 挂载全部 creep 原型扩展。
- */
-export default () => plugins.forEach(plugin => assignPrototype(Creep, plugin));
+export default () => {
+    extend(Creep, BaseFunction)
+    extend(Creep, CacheFunction)
+    extend(Creep, MoveFunction)
+    extend(Creep, BoostFunction)
+    extend(Creep, WorkFunction)
+    extend(Creep, SourceFunction)
+    extend(Creep, DoubleAction)
+    extend(Creep, CollectFunction)
+    extend(Creep, CombatFunction)
+    extend(Creep, BuildFunction)
+    extend(Creep, HaulFunction)
+    extend(Creep, ControllerFunction)
+    extend(Creep, CreepExecute)
+}

@@ -1,11 +1,11 @@
-import { assignPrototype } from "@/modules/utils"
+import { extend } from '../registry'
 import BaseFunction from "./function/baseFunction"
 import RoomDefense from "./feature/roomDefense"
 import OutMine from "./feature/outMine"
 
 import SpawnControl from "./structure/spawnControl"
-import TowerControl from "./structure/towerControl"
 import LabControl from "./structure/labControl"
+import TowerControl from "./structure/towerControl"
 import LinkControl from "./structure/linkControl"
 import TerminalControl from "./structure/terminalControl"
 import FactoryControl from "./structure/factoryControl"
@@ -32,47 +32,44 @@ import TransportMission, { TransportTaskGetter } from "./mission/updaters/transp
 
 import RoomExecute from "./execute"
 
-
-const plugins = [
-    BaseFunction,   // 基础函数
-    RoomDefense,    // 房间防御
-    OutMine,        // 外矿采集
-
-    SpawnControl,   // 孵化控制
-    LabControl,     // Lab控制
-    TowerControl,   // 塔防控制
-    LinkControl,    // Link控制
-    TerminalControl,    // Terminal控制
-    FactoryControl,     // Factory控制
-    PowerSpawnControl,  // PowerSpawn控制
-    NukerControl,       // Nuker控制
-    ObserveControl,     // Observer控制
-    
-    AutoMarket,     // 自动市场交易
-    AutoBuild,      // 自动建筑
-    AutoLab,        // 自动Lab合成
-    AutoFactory,    // 自动Factory生产
-    AutoPowerSpawn, // 自动PowerSpawn
-    RaceVisual,     // 冲级可视化
-
-    Mission,        // 任务模块
-    MissionPools,   // 任务池
-    TransportTaskGetter, // 获取 transport 任务
-    WorkTaskGetter, // 获取 build/repair/wall 任务
-    ManageTaskGetter, // 获取 terminal 任务
-    SpawnTaskGetter, // 获取孵化任务
-    MissionSubmit,  // 提交任务
-    SpawnMission,   // 孵化任务
-    ManageMission,  // 管理任务
-    WorkMission,    // 工作任务
-    MineMission,    // 采矿任务
-    BoostMission,   // 强化任务
-    TransportMission,   // 运输任务
-    
-
-    RoomExecute,    // 房间执行
-]
-
+/**
+ * Room 原型扩展注册表（顺序即挂载顺序）
+ */
 export default () => {
-    plugins.forEach(plugin => assignPrototype(Room, plugin))
+    extend(Room, BaseFunction)             // 基础工具
+    extend(Room, RoomDefense)              // 防御相关
+    extend(Room, OutMine)                  // 外矿采集
+
+    extend(Room, SpawnControl)             // 孵化控制
+    extend(Room, LabControl)               // Lab 控制
+    extend(Room, TowerControl)             // 塔类控制
+    extend(Room, LinkControl)              // Link 控制
+    extend(Room, TerminalControl)          // Terminal 控制
+    extend(Room, FactoryControl)           // Factory 控制
+    extend(Room, PowerSpawnControl)        // PowerSpawn 控制
+    extend(Room, NukerControl)             // Nuker 控制
+    extend(Room, ObserveControl)           // Observer 控制
+
+    extend(Room, AutoMarket)               // 自动市场行为
+    extend(Room, AutoBuild)                // 自动建造
+    extend(Room, AutoLab)                  // 自动 Lab 合成
+    extend(Room, AutoFactory)              // 自动 Factory 行为
+    extend(Room, AutoPowerSpawn)           // 自动 PowerSpawn
+    extend(Room, RaceVisual)               // 冲级可视化
+
+    extend(Room, Mission)                  // 任务模块
+    extend(Room, MissionPools)             // 任务池
+    extend(Room, TransportTaskGetter)      // 获取 transport 任务
+    extend(Room, WorkTaskGetter)           // 获取 build/repair/wall 任务
+    extend(Room, ManageTaskGetter)         // 获取 terminal 任务
+    extend(Room, SpawnTaskGetter)          // 获取孵化任务
+    extend(Room, MissionSubmit)            // 提交任务
+    extend(Room, SpawnMission)             // 孵化任务
+    extend(Room, ManageMission)            // 管理任务
+    extend(Room, WorkMission)              // 工作任务
+    extend(Room, MineMission)              // 采矿任务
+    extend(Room, BoostMission)             // 强化任务
+    extend(Room, TransportMission)         // 运输任务
+
+    extend(Room, RoomExecute)              // 房间执行
 }
