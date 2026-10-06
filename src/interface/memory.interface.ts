@@ -56,8 +56,6 @@ interface BotMemory {
     // 注：房间记忆不走本命名空间——`Room.memory` 是引擎原生通道，桥接 `Memory.rooms`。
     /** 统计内存（原 Memory.stats） */
     stats?: StatsMemory;
-    /** DD 跨玩家消息（原 Memory.dd） */
-    dd?: Record<string, any>;
     /** 心跳（原 Memory.lastinit） */
     lastinit?: number;
     /** 搓像素开关（原 Memory['GenPixel']） */

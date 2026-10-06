@@ -272,10 +272,6 @@ export function getStatsMemory(): StatsMemory {
 	return getRootSection('stats', () => ({}) as StatsMemory);
 }
 
-/** DD 跨玩家消息内存（原 Memory.dd；ddcomm 专用） */
-export function getDdMemory<T = Record<string, any>>(): T {
-	return getRootSection<T>('dd', () => ({}) as T);
-}
 
 /** 心跳（原 Memory.lastinit；createApp 挂载耗时统计） */
 export function getHeartbeatTick(): number | undefined {

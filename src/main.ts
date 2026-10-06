@@ -8,7 +8,6 @@ import { Statistics } from '@/modules/Statistics';
 import { ResourceManage } from '@/modules/ResourceManage';
 import { FunnelModule } from '@/modules/FunnelModule';
 import { TeamModule } from '@/modules/TeamModule';
-import { DDModule } from '@/modules/DDModule';
 import { NukeModule } from '@/modules/NukeModule';
 import { ExpandModule } from '@/modules/ExpandModule';
 import { InterShardModule } from '@/modules/InterShardModule';
@@ -40,7 +39,6 @@ App.on(FunnelModule);     // 跨房能量漏斗
 App.on(InterShardModule); // InterShardMemory 缓存与清理
 App.on(ExpandModule);     // 跨 shard 扩张
 App.on(NukeModule);       // 核弹打击
-App.on(DDModule);         // 消息模块
 App.on(ClearModule);      // 过期数据清理
 App.on(Statistics);       // 统计数据
 App.on(GeneratePixel);    // 搓像素
