@@ -35,8 +35,8 @@ export type TeamMemberConfig = {
 const PART = { A: ATTACK, W: WORK, R: RANGED_ATTACK, H: HEAL, T: TOUGH, M: MOVE } as const;
 const ROLE = { A: 'team-attack', W: 'team-dismantle', R: 'team-ranged', H: 'team-heal' } as const;
 
-/** 把体型名（如 `A10T15A15M10`）解析成成员配置 */
-const member = (name: string): TeamMemberConfig => {
+/** 把体型名（如 `A10T15A15M10`）解析成成员配置；分支表层定义自有模板复用同一语法 */
+export const member = (name: string): TeamMemberConfig => {
     const plain = name.endsWith('N');
     const spec = plain ? name.slice(0, -1) : name;
     const parts = spec.match(/[AWRHTM]\d+/g) ?? [];
@@ -239,3 +239,15 @@ export const TEAM_CONFIG: Record<string, TeamMemberConfig[]> = {
     /** 测试 */
     TEST: [member('A1M1N'), member('W1M1N'), member('R1M1N'), member('H1M1N')],
 };
+
+/** 分支表层注册的追加配置（键与静态表冲突时静态表优先） */
+const extraConfig: Record<string, TeamMemberConfig[]> = {};
+
+/** 注册追加队伍配置（供分支表层注入自有配置，如要塞服一体机小队） */
+export const registerTeamConfig = (entries: Record<string, TeamMemberConfig[]>): void => {
+    Object.assign(extraConfig, entries);
+};
+
+/** 取队伍配置：静态表优先，追加表兜底 */
+export const getTeamConfig = (key: string): TeamMemberConfig[] | undefined =>
+    TEAM_CONFIG[key] ?? extraConfig[key];

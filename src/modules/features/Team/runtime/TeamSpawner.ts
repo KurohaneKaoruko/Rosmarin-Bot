@@ -2,7 +2,7 @@ import { log } from "@/modules/utils";
 import { compressBodyConfig } from "@/modules/shared/compress";
 import { ensureTeamData, getTeamData, getTeamSpawnQueue } from "@/modules/shared/memory";
 import { isBoostResCheckEnabled } from "@/modules/shared/gameCapabilities";
-import { TEAM_CONFIG } from "../config/TeamConfig";
+import { getTeamConfig } from "../config/TeamConfig";
 
 /** 旗名解析出的孵化参数（各旗型解析器归一后的产出） */
 export type TeamSpawnSpec = {
@@ -146,7 +146,7 @@ export default class TeamSpawner {
      * 工作流程：
      * - `canSpawnNow`：检查目标房间 safeMode 与孵化间隔。
      * - 解析孵化房间并校验归属（ATK 缺主房视野时等待，不拆旗）。
-     * - 读取 `TEAM_CONFIG`（缺失则移除孵化旗）。
+     * - 读取小队配置 getTeamConfig（缺失则移除孵化旗）。
      * - 计算 boost 需求并检查资源充足（ATK 缺货只等待不拆旗）。
      * - 通过房间队列入队，避免同一房间并行下发多支队伍。
      * - 真正的孵化派发（boost 任务 / TeamData / SpawnMission / 计数更新）在队列出队时执行。
@@ -164,7 +164,7 @@ export default class TeamSpawner {
         }
         if (spec.keepOnMissingRoom && !spec.targetRoom) return;
 
-        const Team_Config = TEAM_CONFIG[spec.config];
+        const Team_Config = getTeamConfig(spec.config);
         if (!Team_Config) {
             console.log(`未设置小队配置.`);
             this.removeFlagAndMemory(flagName, flag, false);
@@ -268,7 +268,7 @@ export default class TeamSpawner {
         }
         if (spec.keepOnMissingRoom && !spec.targetRoom) return;
 
-        const Team_Config = TEAM_CONFIG[spec.config];
+        const Team_Config = getTeamConfig(spec.config);
         if (!Team_Config) {
             console.log(`未设置小队配置.`);
             this.removeFlagAndMemory(flagName, flag, false);
@@ -514,11 +514,11 @@ export default class TeamSpawner {
             targetRoom: flag.pos.roomName,
         });
         try {
+            // pos.createFlag 已重写，理论上无视野房可用
             const result = flag.pos.createFlag(`Team-${teamID}`, flag.color, flag.secondaryColor) as number;
-            // 部分引擎对无视野房间建旗必然失败（且无法迁移旗）：建不出就不建——
-            // 无旗队伍按 targetRoom 推进开打（GatherLine/execMove/chooseTargets 均有无旗锚点）
+            // 建不出就不建——无旗队伍按 targetRoom 推进开打（GatherLine/execMove/chooseTargets 均有无旗锚点）
         } catch (e) {
-            // 引擎抛异常口径：同样放弃建旗
+            // 引擎抛异常口径：放弃建旗
         }
     }
 

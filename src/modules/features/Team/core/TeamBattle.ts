@@ -131,7 +131,8 @@ export default class TeamBattle {
                 // 自己也有红球的话，打别人会造成反伤
                 maxCreepDamage += e._atk_damage * (selfHasAttack ? 2 : 1)
                 // TODO: 一格以内的蓝球，对面肯定 mass，需要根据小队人数算出更大的伤害
-                maxCreepDamage += (e._ra_damage || 0) * this.rangeNearDamageRate[creeps.length]
+                // >4 人队无专属档位，按 4 人口径取值（防 undefined 污染伤害评估）
+                maxCreepDamage += (e._ra_damage || 0) * (this.rangeNearDamageRate[creeps.length] ?? this.rangeNearDamageRate[4])
             })
 
             // 塔伤分布图
