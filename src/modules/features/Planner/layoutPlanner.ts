@@ -3,6 +3,7 @@ import { compress, compressBatch, decompress } from '@/modules/shared/compress';
 import LayoutVisual from '@/modules/features/Planner/utils/layoutVisual';
 import { autoPlanner } from '@/modules/features/Planner/dynamic/autoPlanner';
 import { autoPlanner63 } from '@/modules/features/Planner/dynamic/63Planner';
+import { MANOR_SPAWN_CHEBYSHEV } from '@/modules/features/Planner/dynamic/autoPlanner';
 import * as StaticPlanner from '@/modules/features/Planner/static';
 import { getCoreDepotPointFromLayout } from '@/modules/shared/coreDepot';
 import { getLayoutData, getRoomData } from '@/modules/shared/memory';
@@ -915,6 +916,39 @@ function pickDynamicPlanner(layoutType: string) {
 }
 
 /**
+ * 落地手置 spawn 的布局锚点：中心（=storage 位）取 spawn 沿最开阔方向偏移曼哈顿 3 格。
+ * 中心绝不能落在 spawn 本体（fixedCenter 直接成为 storage 位，会与已有 spawn 冲突）。
+ * spawn 贴边或四周不可建时返回 null，走原无锚流程。
+ */
+function deriveSpawnAnchorCenter(room: Room, sx: number, sy: number): LayoutCenter | null {
+    const terrain = room.getTerrain();
+    const buildable = (x: number, y: number): boolean =>
+        x >= 2 && x <= 47 && y >= 2 && y <= 47 && terrain.get(x, y) !== TERRAIN_MASK_WALL;
+    let best: LayoutCenter | null = null;
+    let bestScore = -1;
+    for (let dx = -3; dx <= 3; dx++) {
+        for (let dy = -3; dy <= 3; dy++) {
+            if (Math.abs(dx) + Math.abs(dy) !== 3) continue;
+            const x = sx + dx;
+            const y = sy + dy;
+            if (!buildable(x, y)) continue;
+            // 开阔度：候选点 5x5 窗口内可建格数，越多越适合当 storage 核心
+            let score = 0;
+            for (let wx = x - 2; wx <= x + 2; wx++) {
+                for (let wy = y - 2; wy <= y + 2; wy++) {
+                    if (buildable(wx, wy)) score++;
+                }
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                best = { x, y };
+            }
+        }
+    }
+    return best;
+}
+
+/**
  * 计算动态布局（含缓存）。
  * - 优先命中“最近一次缓存”（用于预览后立即 build）\n
  * - 其次命中“输入签名缓存”（用于批量/重复调用）\n
@@ -935,6 +969,14 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
     let flagCenter: LayoutCenter | null = null;
     if (PosFlag && PosFlag.pos.roomName === roomName) {
         flagCenter = { x: PosFlag.pos.x, y: PosFlag.pos.y };
+    }
+    // 落地手置 spawn：提取坐标供布局限幅与收编（computeManor 内以 spawn 为中心限幅并收编 spawn 位）。
+    // 中心不定死：不给 fixedCenter，枢纽点由规划器自然选址（可建筑质心 + storage 取最近 k>2 格），
+    // 仅通过限幅半径保证布局够得着 spawn 附近
+    let existSpawnPos: { x: number; y: number } | undefined;
+    if (layoutType !== '63auto') {
+        const landingSpawn = room.find(FIND_MY_SPAWNS)[0];
+        if (landingSpawn) existSpawnPos = { x: landingSpawn.pos.x, y: landingSpawn.pos.y };
     }
 
     const cached = getLastCachedByRoomLayout(roomName, layoutType);
@@ -971,7 +1013,7 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
     }
 
     const pointsSig = `${pc.x},${pc.y}|${pm.x},${pm.y}|${pa.x},${pa.y}|${pb.x},${pb.y}`;
-    const sigKey = makeDynamicSigKey(roomName, layoutType, pointsSig, flagCenter);
+    let sigKey = makeDynamicSigKey(roomName, layoutType, pointsSig, flagCenter);
     const sigCached = getCachedDynamicBySig(sigKey);
     if (sigCached) {
         log('LayoutPlanner', `命中缓存: dynamic(sig) ${roomName} ${layoutType} center(${sigCached.center.x},${sigCached.center.y})`);
@@ -987,7 +1029,38 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
 
     const planner = pickDynamicPlanner(layoutType);
     const computeManor = planner.ManagerPlanner.computeManor;
-    const roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], flagCenter);
+    // 锚定降级阶梯：紧凑 10 → 放宽 14 → 不限幅，逐级放宽仍保持 spawn 锚定；
+    // 全部失败才退回无锚流程（布局远离 spawn 的最后兜底），杜绝「稍偏即崩」的二值脆弱性
+    let roomStructsData = null;
+    if (flagCenter) {
+        // 旗模式：手动指定中心，精确钉死（不参与降级阶梯，失败按用户指定报错）
+        roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], flagCenter);
+        if (!roomStructsData) log('LayoutPlanner', `[锚定诊断] 旗指定中心无解 room=${roomName} center=${flagCenter.x},${flagCenter.y}`);
+    } else {
+        // spawn 锚定限幅降级阶梯：紧凑 10 → 放宽 14 → 不限幅；每级保持 spawn 收编，杜绝「稍偏即崩」
+        for (const [radius, gate] of [[10, 160], [10, 120], [14, 120], [0, 120]] as [number, number][]) {
+            roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], undefined, undefined, existSpawnPos, radius, gate);
+            if (roomStructsData) {
+                log('LayoutPlanner', `[锚定诊断] 成功 room=${roomName} radius=${radius === 0 ? '无限' : radius}`);
+                break;
+            }
+            log('LayoutPlanner', `[锚定诊断] 半径 ${radius === 0 ? '无限' : radius} 无解，降级重试 room=${roomName}`);
+        }
+    }
+    if (!roomStructsData) {
+        // 全阶梯无解：无锚无限幅兜底
+        log('LayoutPlanner', `[锚定诊断] 锚定失败，退回无锚流程 room=${roomName}`);
+        sigKey = makeDynamicSigKey(roomName, layoutType, pointsSig, null);
+        const fallbackCached = getCachedDynamicBySig(sigKey);
+        if (fallbackCached) {
+            return {
+                ...fallbackCached,
+                structMap: cloneStructMap(fallbackCached.structMap),
+                layoutMemory: cloneLayoutMemory(fallbackCached.layoutMemory)
+            };
+        }
+        roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb]);
+    }
     const normalized = normalizeDynamicPlannerResult(roomName, layoutType, roomStructsData);
     if (!normalized) return null;
 
@@ -1071,22 +1144,6 @@ export const LayoutPlanner = {
             // RCL<6 容器每源限一个（源容器存量计数，见下方放置过滤）
             const placedContainerPerSource = new Map<string, number>();
 
-            // 清理违规容器工地（参考实现同款唯一 cc 口径）：非源旁的容器工地，
-            // 控制器旁至多保留一个（RCL2-4 窗口内）——已放错的工地不会自愈，必须显式拆除
-            if (s === STRUCTURE_CONTAINER) {
-                let controllerSideKept = false;
-                for (const site of allSite) {
-                    if (site.structureType !== STRUCTURE_CONTAINER) continue;
-                    const nearSource = (room.source || []).some((src: Source) => src.pos.inRangeTo(site.pos, 2));
-                    if (nearSource) continue;
-                    const nearController = room.controller && site.pos.inRangeTo(room.controller.pos, 3);
-                    if (nearController && !controllerSideKept && room.level >= 2 && room.level <= 4) {
-                        controllerSideKept = true;
-                        continue;
-                    }
-                    site.remove();
-                }
-            }
             if (s === STRUCTURE_CONTAINER) {
                 for (const src of (room.source || []) as Source[]) {
                     const near = (room.container || []).filter((c) => c.pos.inRangeTo(src.pos, 2)).length;
@@ -1185,9 +1242,26 @@ export const LayoutPlanner = {
         const computeCpu = cpuDelta(computeStart);
         if (!computed) return ERR_NOT_FOUND;
         const writeStart = cpuNow();
-        const layoutMemory = getLayoutData(roomName) as any;
+        const layoutMap = getLayoutData() as any;
+        let layoutMemory = layoutMap[roomName] as any;
+        if (layoutMemory === null || typeof layoutMemory !== 'object') {
+            // 异态残留（如被外部工具写成字符串/基础类型）：整格重置，避免 delete 循环在原始类型上炸
+            layoutMemory = {};
+            layoutMap[roomName] = layoutMemory;
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
+        // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
+        const room = Game.rooms[roomName];
+        if (room) {
+            const layoutKeys = new Set<string>();
+            for (const [type, pts] of Object.entries(computed.structMap)) {
+                for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
+            }
+            for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
+                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+            }
+        }
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
         if (!opts?.quiet) {
@@ -1231,9 +1305,26 @@ export const LayoutPlanner = {
             rooms[roomName]['layout'] = 'auto';
             rooms[roomName]['center'] = computed.center;
         }
-        const layoutMemory = getLayoutData(roomName) as any;
+        const layoutMap = getLayoutData() as any;
+        let layoutMemory = layoutMap[roomName] as any;
+        if (layoutMemory === null || typeof layoutMemory !== 'object') {
+            // 异态残留（如被外部工具写成字符串/基础类型）：整格重置，避免 delete 循环在原始类型上炸
+            layoutMemory = {};
+            layoutMap[roomName] = layoutMemory;
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
+        // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
+        const room = Game.rooms[roomName];
+        if (room) {
+            const layoutKeys = new Set<string>();
+            for (const [type, pts] of Object.entries(computed.structMap)) {
+                for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
+            }
+            for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
+                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+            }
+        }
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
         if (!opts?.quiet) {
@@ -1320,9 +1411,26 @@ export const LayoutPlanner = {
             BotMemRooms[roomName]['layout'] = '63auto';
             BotMemRooms[roomName]['center'] = computed.center;
         }
-        const layoutMemory = getLayoutData(roomName) as any;
+        const layoutMap = getLayoutData() as any;
+        let layoutMemory = layoutMap[roomName] as any;
+        if (layoutMemory === null || typeof layoutMemory !== 'object') {
+            // 异态残留（如被外部工具写成字符串/基础类型）：整格重置，避免 delete 循环在原始类型上炸
+            layoutMemory = {};
+            layoutMap[roomName] = layoutMemory;
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
+        // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
+        const room = Game.rooms[roomName];
+        if (room) {
+            const layoutKeys = new Set<string>();
+            for (const [type, pts] of Object.entries(computed.structMap)) {
+                for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
+            }
+            for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
+                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+            }
+        }
         const writeCpu = cpuDelta(writeStart);
         const totalCpu = cpuDelta(totalStart);
         if (!opts?.quiet) {

@@ -33,6 +33,10 @@ declare const TERRAIN_MASK_WALL: number
 declare const TERRAIN_MASK_SWAMP: number
 
 const minPlaneCnt = 160;
+/** 锚定模式下布局以 spawn 为中心的最大切比雪夫半径：防止墙圈/manor 沿开阔地单向突出长条 */
+export const MANOR_SPAWN_CHEBYSHEV = 10;
+/** spawn 槽位环（相对布局中心的偶数 manhattan-4 偏移）：落地 spawn 吸附到其中一槽，中心随之定于 spawn-槽位 */
+const SPAWN_SLOT_OFFSETS = [[0, 4], [2, 2], [4, 0], [2, -2], [0, -4], [-2, -2], [-4, 0], [-2, 2]];
 
 let visited = new RoomArray();
 let roomWalkable = new RoomArray();
@@ -1189,8 +1193,13 @@ const ManagerPlanner = {
 	 * @param points [flagController,flagMineral,flagSourceA,flagSourceB]
 	 * @return result { roomName:roomName,storagePos:{x,y},labPos:{x,y},structMap:{ "rampart" : [[x1,y1],[x2,y2] ...] ...} }
 	 */
-	computeManor(roomName: string, points: PlannerPoint[], fixedCenter?: XY, blocked?: RoomArray) {
+	computeManor(roomName: string, points: PlannerPoint[], fixedCenter?: XY, blocked?: RoomArray, existSpawnPos?: XY, spawnRadius?: number, spawnMinPlaneCnt?: number) {
 		ManagerPlanner.init();
+		// 每次布局计算重置 POI 缓存：降级阶梯会连续多次运行本函数，失败路径 early-return
+		// 不经过 dismiss，objects 与 link/container 缓存都会按尝试次数翻倍累积（「link 围满枢纽」的根因）
+		roomObjectCache = new RoomArray().init();
+		objects = [];
+		const planeGate = spawnMinPlaneCnt ?? minPlaneCnt;
 		for (const p of points) {
 			if (p && p.roomName == roomName) objects.push(p);
 		}
@@ -1234,6 +1243,7 @@ const ManagerPlanner = {
 
 		let centerX = undefined;
 		let centerY = undefined;
+		let slotCenter = null;
 
 			let centerPos = fixedCenter;
 			if (!centerPos && Game.flags.storagePos && Game.flags.storagePos.pos.roomName == roomName) {
@@ -1242,10 +1252,13 @@ const ManagerPlanner = {
 			const centerRoot = centerPos ? unionFind.find(centerPos.x * 50 + centerPos.y) : undefined;
 			const candidateRoots = centerRoot != null && sizeMap[centerRoot] > 0 ? [centerRoot] : Object.keys(sizeMap);
 	
-			for (let i = 0; i < candidateRoots.length; i++) {
+			const manorRadius = spawnRadius === undefined ? MANOR_SPAWN_CHEBYSHEV : spawnRadius;
+		for (let i = 0; i < candidateRoots.length; i++) {
 				const posNum = Number(candidateRoots[i]);
 				// if(sizeMap[pos]<150)return
-				if (sizeMap[posNum] < minPlaneCnt) continue;
+				if (sizeMap[posNum] < planeGate) continue;
+				// 注：不做「spawn 与锚点同连通块」强约束——引擎按近墙脊线切平面，
+				// spawn 常落在锚点旁的小口袋块里，强同块会把锚定全部误杀（诊断日志实证）
 	
 					ManagerPlanner.getBlockPutAbleCnt(
 						roomWalkable,
@@ -1257,12 +1270,54 @@ const ManagerPlanner = {
 				allCacheMap,
 				rootMembers
 			);
-			const currentPutAbleList = putAbleCacheMap[posNum];
-			const allList = allCacheMap[posNum];
+			const currentPutAbleListCached = putAbleCacheMap[posNum];
+			const allListCached = allCacheMap[posNum];
+			// 锚定模式：以 spawn 为中心限幅（切比雪夫半径，降级阶梯逐级放宽），防止墙圈/manor
+			// 沿开阔地单向突出长条。只过滤本地副本，不动跨候选共享的缓存数组。
+			// 远离 spawn 的块经限幅后 putable 不足 minPlaneCnt 自然出局，块选择隐式偏向 spawn 侧
+			let currentPutAbleList = currentPutAbleListCached;
+			let allList = allListCached;
+			if (existSpawnPos && manorRadius > 0) {
+				const sx = existSpawnPos.x;
+				const sy = existSpawnPos.y;
+				const withinSpawnRadius = (e: { x: number; y: number }, radius: number) =>
+					Math.max(Math.abs(e.x - sx), Math.abs(e.y - sy)) <= radius;
+				// 结构/路网限幅 R；墙圈边界外扩 3 格（R+3）——敌方远程射程 3，
+				// 贴墙站立时到墙内最近建筑 ≥ 4 格，打不到
+				currentPutAbleList = currentPutAbleListCached.filter((e) => withinSpawnRadius(e, manorRadius));
+				allList = allListCached.filter((e) => withinSpawnRadius(e, manorRadius + 3));
+			}
 			const currentPutAbleLen = currentPutAbleList.length;
-			if (currentPutAbleLen < minPlaneCnt) continue;
+			if (currentPutAbleLen < planeGate) {
+				console.log(`[锚定诊断] 块 ${posNum} 限幅后 putable=${currentPutAbleLen} < 门槛 ${planeGate}，跳过`);
+				continue;
+			}
 
-			let hasCenterPos = !centerPos;
+			// spawn 槽位锚定：spawn 周边偶数环 8 点为候选布局中心，
+			// 取本块内评分最高（k 最大）的可建筑者为本块中心；无可用槽位中心则整块出局（他块/自然流程兜底）
+			slotCenter = null;
+			if (!centerPos && existSpawnPos) {
+				const putK = new Map();
+				for (let i = 0; i < currentPutAbleLen; i++) {
+					const e = currentPutAbleList[i];
+					putK.set(e.x * 50 + e.y, e.k);
+				}
+				let bestK = -1;
+				for (const [dx, dy] of SPAWN_SLOT_OFFSETS) {
+					const cx = existSpawnPos.x + dx;
+					const cy = existSpawnPos.y + dy;
+					const k = putK.get(cx * 50 + cy);
+					if (k !== undefined && k > bestK) {
+						bestK = k;
+						slotCenter = { x: cx, y: cy };
+					}
+				}
+				if (!slotCenter) {
+					console.log(`[锚定诊断] 块 ${posNum} 无可用槽位中心 (spawn ${existSpawnPos.x},${existSpawnPos.y})，出局`);
+					continue;
+				}
+			}
+
 			let sumX = 0;
 			let sumY = 0;
 			let gt1Cnt = 0;
@@ -1273,11 +1328,9 @@ const ManagerPlanner = {
 				const ey = e.y;
 				sumX += ex;
 				sumY += ey;
-				if (!hasCenterPos && ex == centerPos.x && ey == centerPos.y) hasCenterPos = true;
 				if (e.k > 1) gt1Cnt += 1;
 				if (e.k > 2) gt2List.push(e);
 			}
-			if (!hasCenterPos) continue;
 
 			const currentInnerPutAbleList = currentPutAbleList;
 
@@ -1338,15 +1391,17 @@ const ManagerPlanner = {
 				}
 				currentWallCnt = walls.length;
 				currentWalls = walls;
-				// 阈值检查：墙体数量过少或比例过高时跳过造墙方案
+				// 阈值检查：墙体数量过少或比例过高时跳过造墙方案。
+				// 锚定紧凑基地的墙圈/可建筑比天然偏高，阈值放宽到 0.5（非锚定维持 0.3）
 				const MIN_WALL_CNT = 12;
-				const MAX_WALL_RATIO = 0.3;
+				const MAX_WALL_RATIO = existSpawnPos ? 0.5 : 0.3;
 				const wallRatio = currentWallCnt / currentPutAbleLen;
 				if (currentWallCnt < MIN_WALL_CNT || wallRatio > MAX_WALL_RATIO) {
+					console.log(`[锚定诊断] 块 ${posNum} 墙圈不合格: walls=${currentWallCnt} putable=${currentPutAbleLen} ratio=${wallRatio.toFixed(2)}`);
 					currentWalls = null;
 				}
 			}
-			if (minPlaneCnt < currentPutAbleLen && wallCnt > currentWallCnt && currentWalls) {
+			if (planeGate < currentPutAbleLen && wallCnt > currentWallCnt && currentWalls) {
 				// putAbleList = currentPutAbleList;
 				innerPutAbleList = currentInnerPutAbleList;
 				wallCnt = currentWallCnt;
@@ -1355,6 +1410,9 @@ const ManagerPlanner = {
 				if (centerPos) {
 					centerX = centerPos.x;
 					centerY = centerPos.y;
+				} else if (slotCenter) {
+					centerX = slotCenter.x;
+					centerY = slotCenter.y;
 				} else {
 					centerX = sumX / currentPutAbleLen;
 					centerY = sumY / currentPutAbleLen;
@@ -1386,6 +1444,13 @@ const ManagerPlanner = {
 					rootMembers
 				);
 				innerPutAbleList = putAbleCacheMap[finalPos];
+				// 锚定模式下与主路径同口径限幅（fallback 重读的缓存数组同样过滤）
+				if (centerPos && existSpawnPos && manorRadius > 0) {
+					const sx = existSpawnPos.x;
+					const sy = existSpawnPos.y;
+					innerPutAbleList = innerPutAbleList.filter((e: { x: number; y: number }) =>
+						Math.max(Math.abs(e.x - sx), Math.abs(e.y - sy)) <= manorRadius);
+				}
 				if (centerPos) {
 					centerX = centerPos.x;
 					centerY = centerPos.y;
@@ -1408,8 +1473,16 @@ const ManagerPlanner = {
 
 		roomManor.init();
 		const finalAllCache = allCacheMap[finalPos];
-		for (let i = 0; i < finalAllCache.length; i++) {
-			const e = finalAllCache[i];
+		// 锚定模式下与 innerPutAbleList 同口径限幅（-1 背景区域同样收缩，墙圈带 +3 同步）
+		let boundedAllCache = finalAllCache;
+		if (centerPos && existSpawnPos && manorRadius > 0) {
+			const sx = existSpawnPos.x;
+			const sy = existSpawnPos.y;
+			boundedAllCache = finalAllCache.filter((e: { x: number; y: number }) =>
+				Math.max(Math.abs(e.x - sx), Math.abs(e.y - sy)) <= manorRadius + 3);
+		}
+		for (let i = 0; i < boundedAllCache.length; i++) {
+			const e = boundedAllCache[i];
 			roomManor.set(e.x, e.y, -1);
 		}
 		for (let i = 0; i < innerPutAbleList.length; i++) {
@@ -1439,6 +1512,12 @@ const ManagerPlanner = {
 			storageX = centerPos.x;
 			storageY = centerPos.y;
 		}
+		// 槽位模式：枢纽直接落定槽位中心——spawn 恰好位于中心环槽位上，
+		// storage/terminal/factory/link 围合仍以该点为中心
+		if (!centerPos && slotCenter) {
+			storageX = centerX;
+			storageY = centerY;
+		}
 
 		const manorArr = roomManor.arr as (number | string)[];
 		const labAnchor = findLabAnchorByTs(manorArr, storageX, storageY);
@@ -1462,6 +1541,13 @@ const ManagerPlanner = {
 				roadSet[idx] = 1;
 				structMap['road'].push([x, y]);
 			};
+
+			// 落地手置 spawn 占位：本体计入 spawn 编制首位；roadSet 标记使 POI 道路规划绕行该格
+			const existSpawn = existSpawnPos;
+			if (existSpawn) {
+				roadSet[existSpawn.x * 50 + existSpawn.y] = 1;
+				structMap['spawn'].push([existSpawn.x, existSpawn.y]);
+			}
 
 		// 资源点布局
 		structMap['link'] = roomObjectCache.link;
@@ -1664,11 +1750,36 @@ const ManagerPlanner = {
 		extensionPos = extensionPos.sort(cmpFunc);
 		const putList = [];
 		const structOrder = ['spawn', 'nuker', 'powerSpawn', 'tower', 'observer'];
+		// 落地手置 spawn 收编：本体已在上方占位为 spawn 首位，这里把该格从其余结构规划中剔除
+		// （撞上 lab/tower 等已规划位则移除原条目，下工地阶段按已有结构自然跳过）
+		if (existSpawn) {
+			const sx = existSpawn.x;
+			const sy = existSpawn.y;
+			for (const st in structMap) {
+				if (st === 'road' || st === 'spawn') continue;
+				const arr = structMap[st];
+				for (let i = arr.length - 1; i >= 0; i--) {
+					if (arr[i][0] === sx && arr[i][1] === sy) arr.splice(i, 1);
+				}
+			}
+			// 计划 spawn 与本体保持切比雪夫 ≥2（相邻格可、贴脸不可）
+			spawnPos = spawnPos.filter((e) => Math.max(Math.abs(e[0] - sx), Math.abs(e[1] - sy)) >= 2);
+			extensionPos = extensionPos.filter((e) => !(e[0] === sx && e[1] === sy));
+			putList.push([sx, sy, 'spawn']);
+		}
+		// 计划 spawn 相互之间、以及与本体之间均保距 ≥2（贪心：距离序先到先得，贴脸候选让位）
+		const spacedSpawnPos = [];
+		for (const cand of spawnPos) {
+			const clash = structMap['spawn'].some((s) => Math.max(Math.abs(s[0] - cand[0]), Math.abs(s[1] - cand[1])) < 2)
+				|| spacedSpawnPos.some((s) => Math.max(Math.abs(s[0] - cand[0]), Math.abs(s[1] - cand[1])) < 2);
+			if (!clash) spacedSpawnPos.push(cand);
+		}
+		spawnPos = spacedSpawnPos;
 		let spawnIdx = 0;
 		let extIdx = 0;
 		for (let si = 0; si < structOrder.length; si++) {
 			const struct = structOrder[si];
-			const cnt = CONTROLLER_STRUCTURES[struct][8];
+			const cnt = CONTROLLER_STRUCTURES[struct][8] - (struct === 'spawn' && existSpawn ? 1 : 0);
 			for (let i = 0; i < cnt; i++) {
 				const e = spawnIdx < spawnPos.length ? spawnPos[spawnIdx++] : extensionPos[extIdx++];
 				if (!e) continue;
