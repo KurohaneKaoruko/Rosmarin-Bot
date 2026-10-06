@@ -1,4 +1,4 @@
-// 连接 Screeps 控制台实时交互 (移植自 vscode-plugin-screeps-console)
+// 连接 Screeps 控制台实时交互
 // 登录数据与 submit 共用 .secret.json, 用法: pnpm console [服务器[@账号]]
 import { select, confirm } from '@inquirer/prompts';
 import readline from 'node:readline';
