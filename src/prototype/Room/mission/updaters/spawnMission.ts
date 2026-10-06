@@ -4,7 +4,7 @@ import { decompress, decompressBodyConfig } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
 import { estimateRoomEnergyIncome, getUpgradeWorkTarget, getRoomMode, isUpgraderSpawnUrgent, UPGRADE_URGENT_SPAWN_LEVEL, UPGRADE_NEEDED_TTD } from '@/modules/shared/roomWorkforce';
-import { buildRushBody } from '@/modules/shared/rushBody';
+import { buildRushBody } from '@/modules/shared/rush';
 import { isRoomProductionSecured, isRoomRemoteUnlocked } from '@/prototype/Room/function/productionGate';
 import { isEnergyCheckEnabled, isRaceCompat } from '@/modules/shared/gameCapabilities';
 

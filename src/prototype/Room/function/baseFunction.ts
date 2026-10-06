@@ -1,7 +1,7 @@
 import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { ROLES } from '@/constant/CreepConstant';
 import { RoleData, RoleLevelData } from '@/constant/CreepConstant';
-import { inWhitelist } from '@/modules/shared/whitelist';
+import { inWhitelist } from '@/modules/shared/defenseUtils';
 import { getRoomData, getStructData } from '@/modules/shared/memory';
 import { getCreepNumByAssignedRoom } from '@/modules/shared/creepTickIndex';
 

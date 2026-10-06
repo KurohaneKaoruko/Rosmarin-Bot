@@ -9,7 +9,7 @@
  */
 import { log } from '@/modules/utils';
 import { getFunnelCooldownMap } from '@/modules/shared/memory';
-import { getEnergyLevel, getStandardReserve } from '@/modules/shared/energyLevel';
+import { getEnergyLevel, getStandardReserve } from '@/modules/shared/energyLogistics';
 
 const FUNNEL_CHECK_INTERVAL = 20;
 const FUNNEL_EMERGENCY_LEVEL = 30;

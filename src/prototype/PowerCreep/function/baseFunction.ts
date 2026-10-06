@@ -1,4 +1,4 @@
-import { inWhitelist } from '@/modules/shared/whitelist';
+import { inWhitelist } from '@/modules/shared/defenseUtils';
 import { getStructData } from '@/modules/shared/memory';
 
 export default class BaseFunction extends PowerCreep {

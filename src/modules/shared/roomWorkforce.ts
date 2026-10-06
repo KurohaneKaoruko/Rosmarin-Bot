@@ -13,11 +13,11 @@
  * 本模块不依赖 CreepConstant（避免测试环境缺全局常量时模块加载失败），
  * 体型信息一律通过 room.GetRoleBodys / room.GenerateBodys 运行时获取。
  */
-import { getEnergyLevel } from '@/modules/shared/energyLevel';
+import { getEnergyLevel } from '@/modules/shared/energyLogistics';
 import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { decompress } from '@/modules/shared/compress';
-import { buildRushCarrierBody } from '@/modules/shared/rushBody';
+import { buildRushCarrierBody } from '@/modules/shared/rush';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
 import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';

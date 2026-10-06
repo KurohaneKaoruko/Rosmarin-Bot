@@ -1,6 +1,23 @@
 import { buildCombatProfile, estimateDismantlePower } from '@/modules/shared/combatCalc';
+import { getWhitelistIds } from '@/modules/shared/memory';
 
 export type DefenseRampartMode = 'melee' | 'ranged';
+
+/** 白名单缓存（按 tick 失效） */
+let cachedWhitelistTick = -1
+let cachedWhitelistSet: Set<string> = new Set()
+
+export const getWhitelistSet = (): Set<string> => {
+    if (cachedWhitelistTick === Game.time) return cachedWhitelistSet
+    cachedWhitelistTick = Game.time
+    cachedWhitelistSet = new Set<string>(getWhitelistIds())
+    return cachedWhitelistSet
+}
+
+export const inWhitelist = (username?: string): boolean => {
+    if (!username) return false
+    return getWhitelistSet().has(username)
+}
 
 /**
  * 为防御站位分配一个稳定的起始索引。

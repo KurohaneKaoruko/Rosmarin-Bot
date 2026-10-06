@@ -2,7 +2,7 @@ import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from "@/modules/shared/roomMode";
 import { getOutMineData } from "@/modules/shared/memory";
 import { isRacePanelEnabled } from "@/modules/shared/gameCapabilities";
-import { takeRaceEnergyMined } from "@/modules/shared/raceEnergy";
+import { takeRaceEnergyMined } from "@/modules/shared/rush";
 import { RoleData } from "@/constant/CreepConstant";
 import {
     RUSH_SEGMENT_LEVELS,
@@ -10,7 +10,7 @@ import {
     buildFailSnapshot,
     evaluateRaceSegments,
     SegmentStatus,
-} from "@/modules/shared/rushProgress";
+} from "@/modules/shared/rush";
 import { THRESHOLDS } from "@/constant/Thresholds";
 
 /** 各等级 → 下一级所需进度点兜底表（实测条优先，缺采样时使用） */

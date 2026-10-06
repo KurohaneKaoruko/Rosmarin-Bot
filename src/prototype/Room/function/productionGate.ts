@@ -4,7 +4,7 @@
  */
 import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from '@/modules/shared/roomWorkforce';
-import { buildRushBody } from '@/modules/shared/rushBody';
+import { buildRushBody } from '@/modules/shared/rush';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 // 单矿最大采集 work 上限

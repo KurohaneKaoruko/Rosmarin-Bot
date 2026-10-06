@@ -1,5 +1,5 @@
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { raceEnergyMined } from '@/modules/shared/raceEnergy';
+import { raceEnergyMined } from '@/modules/shared/rush';
 
 type EnergySourceTarget = AnyStoreStructure | Resource<RESOURCE_ENERGY>;
 type WithdrawTarget = AnyStoreStructure | Resource | Ruin;
