@@ -203,8 +203,9 @@ export default class SourceFunction extends Creep {
         if (this.pos.isEqualTo(pos)) score += 4;
 
         if (container) {
-            if (pos.inRangeTo(container.pos, 1)) score += 8;
-            if (pos.isEqualTo(container.pos)) score -= 6;
+            // racebot 口径：站上容器 = harvest 直落容器，最优工位；邻位次之
+            if (pos.isEqualTo(container.pos)) score += 12;
+            else if (pos.inRangeTo(container.pos, 1)) score += 4;
         }
 
         if (link && pos.inRangeTo(link.pos, 1)) score += 10;
@@ -225,12 +226,14 @@ export default class SourceFunction extends Creep {
         const sourceContainer = this.getNearbySourceContainer(1);
         const sourceLink = this.getNearbySourceLink(2);
 
-        // Once already standing on a valid harvest tile, avoid lateral churn.
+        // racebot 口径：容器已建则必站容器本体（harvest 直落脚下容器，零搬运/掉落损耗）；
+        // 容器缺席时才退而求其次：link 临位（有承接空间）或任意源旁格稳定站位
         if (this.pos.inRangeTo(source, 1)) {
-            if (sourceLink && this.pos.isNearTo(sourceLink) && sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
+            if (sourceContainer) {
+                if (this.pos.isEqualTo(sourceContainer.pos)) return true;
+            } else if (sourceLink && this.pos.isNearTo(sourceLink) && sourceLink.store.getFreeCapacity(RESOURCE_ENERGY) > 0) {
                 return true;
-            }
-            if (sourceContainer && this.pos.inRangeTo(sourceContainer, 1)) {
+            } else {
                 return true;
             }
         }

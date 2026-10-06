@@ -17,10 +17,10 @@ export const RoleData = {
     }, // 采集
     'carrier': {
         bodypart: [[CARRY, 3], [MOVE, 3]],
-        level: 3,
+        level: 4,
         code: 'C',
         executor: 'carrier',
-    }, // 通用搬运
+    }, // 通用搬运——严格排在 harvester 之后（同层级并列时按入队序会冒出搬运先于采集）
     'transporter': {
         bodypart: [[CARRY, 4], [MOVE, 2]],
         level: 2,

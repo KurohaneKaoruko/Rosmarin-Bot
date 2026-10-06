@@ -3,6 +3,8 @@
  * 开局序列（参考实现观察口径）：先矿工孵化到位、产出稳住，之后才放行升级/搬运扩张/外矿。
  */
 import { ROLES } from '@/constant/CreepConstant';
+import { getRoomMode } from '@/modules/shared/roomWorkforce';
+import { buildRushBody } from '@/modules/shared/rushBody';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 // 单矿最大采集 work 上限
@@ -56,7 +58,13 @@ export const getHarvesterTargetBySource = (room: Room): number => {
     let target = 0;
     const builtLevel = getBuiltRoomLevel(room);
     const allowMultiHarvesterPerSource = builtLevel <= 3;
-    const harvesterBody = room.GenerateBodys(room.GetRoleBodys(ROLES.harvester), ROLES.harvester);
+    // 定编口径必须与实际孵化体一致：rush 走 rushBody 现算（容量≥550 即 5W 满速体）。
+    // 按等级表 W2 低估单体会把每源上限算成 2-3 只，5W 采集工成对孵出压爆 10e/t 源速率
+    const rushBodyConfig = getRoomMode(room) === 'rush'
+        ? buildRushBody(ROLES.harvester, room.energyCapacityAvailable)
+        : null;
+    const bodyConfig = rushBodyConfig ?? room.GetRoleBodys(ROLES.harvester);
+    const harvesterBody = room.GenerateBodys(bodyConfig, ROLES.harvester);
     const workPerHarvester = Math.max(1, getWorkPartCount(harvesterBody));
     const maxByWorkCap = Math.max(1, Math.ceil(HARVESTER_MAX_WORK_PER_SOURCE / workPerHarvester));
     for (const source of room.source || []) {
