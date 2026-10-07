@@ -68,6 +68,8 @@ interface BotMemory {
     mode?: string;
     /** 漏斗冷却表（原 Memory.funnelCooldown） */
     funnelCooldown?: Record<string, number>;
+    /** 是否 MMO 官方服（按 shard 名缓存） */
+    isMMO?: boolean;
 }
 
 interface Memory {

@@ -18,6 +18,7 @@ import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/share
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { decompress } from '@/modules/shared/compress';
 import { buildRushCarrierBody } from '@/modules/shared/rush';
+import { clamp } from '@/modules/utils';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
 import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
@@ -187,8 +188,6 @@ const shrinkByStarved = (room: Room, demandWork: number): number => {
     if (starved > STARVED_SECOND_STAGE) shrunk = Math.round(shrunk * 0.75) - 1;
     return Math.max(Math.min(floorWork, demandWork), shrunk);
 };
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
 // ==================== 通用房间状态 ====================
 
