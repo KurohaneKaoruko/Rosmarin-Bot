@@ -1,4 +1,4 @@
-import { BehaviorTree, BtStatus, condition, fail, leaf, selector, sequence } from '@/framework/ai/behaviorTree';
+import { BehaviorTree, BtStatus, condition, fail, leaf, selector, sequence } from '@/core/ai/behaviorTree';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 
 type AioContext = {

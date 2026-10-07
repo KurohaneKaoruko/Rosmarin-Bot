@@ -2,8 +2,8 @@ import { compress } from '@/modules/shared/compress';
 import { getLayoutData } from '@/modules/shared/memory';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const getUpRepairTargetCache = (creep: Creep): Record<string, any> => {

@@ -2,9 +2,9 @@ import { MISSION_POOLS } from '@/constant/MissionConstant';
 import { compress, decompress } from '@/modules/shared/compress';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getRoomData } from '@/modules/shared/memory';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { MoveWorkTileCandidate, writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import {

@@ -1,7 +1,7 @@
 // 特殊规则服入口（要塞挑战：RCL8 锁定 / 无限能量 spawn / 无源房）
 // 只挂孵化 + 战斗 + 移动所需；经济/扩张/团队等模块不加载（tree-shake 出 bundle）
 // 环境兼容垫片（必须保持首位）
-import { createApp } from '@/framework/createApp';
+import { createApp } from '@/core/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
 

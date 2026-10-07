@@ -1,7 +1,7 @@
 import { ROLES } from '@/constant/CreepConstant';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { getWorkerUpgradeSlot, registerUpgraderStarve } from '@/modules/shared/roomWorkforce';
 
 /**

@@ -1,6 +1,6 @@
 import { MISSION_POOLS } from '@/constant/MissionConstant';
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 
 const TRANSPORT_SOURCE_MOVE_OPTS: MoveToOpts = {
     visualizePathStyle: { stroke: '#ffaa00' },

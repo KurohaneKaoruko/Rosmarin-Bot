@@ -1,4 +1,4 @@
-import { createApp } from '@/framework/createApp';
+import { createApp } from '@/core/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
 import { EventModule } from '@/modules/EventModule';

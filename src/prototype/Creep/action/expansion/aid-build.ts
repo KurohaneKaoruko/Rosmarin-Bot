@@ -2,10 +2,10 @@
 import { parseShardRoomName } from '@/modules/shared/shardRoom';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 import { THRESHOLDS } from '@/constant/Thresholds';
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { StateMachine } from '@/framework/ai/stateMachine';
-import { createFsmStorage, ensureFsmBucket } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
+import { StateMachine } from '@/core/ai/stateMachine';
+import { createFsmStorage, ensureFsmBucket } from '@/core/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';

@@ -1,8 +1,8 @@
 import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 // 迁移条件集中声明：采集满 -> 转交付，背包空 -> 转采集

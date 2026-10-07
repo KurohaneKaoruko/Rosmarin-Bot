@@ -1,6 +1,6 @@
 import { outSignConstant } from "@/constant/NameConstant";
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 
 /**
  * 外矿预定签名策略：

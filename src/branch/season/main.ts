@@ -1,5 +1,5 @@
 // 赛季服入口（占位）：赛季规则多变，先按官服全量挂载，规则明确后再裁剪
-import { createApp } from '@/framework/createApp';
+import { createApp } from '@/core/createApp';
 import { PrototypeExtension } from '@/prototype';
 import { ConsoleExtension } from '@/console';
 

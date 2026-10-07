@@ -14,11 +14,11 @@ import factory from './structure/factory';
 import powerSpawn from './structure/powerspawn';
 import nuker from './structure/nuker';
 import helps from './help'
-import { registerRoomAutoStartProvider } from '@/framework/runner/roomAutoStart';
+import { registerRoomAutoStartProvider } from '@/core/runner/roomAutoStart';
 import { mountQoS } from '@/modules/infra/qos';
 import { ensureEventApi } from '@/modules/infra/event';
 
-// console 侧向 framework 注入房间自动开局实现（消除 framework→console 反向依赖）
+// console 侧向 core 注入房间自动开局实现（消除 core→console 反向依赖）
 registerRoomAutoStartProvider({
     startFirstRoom(roomName) {
         room.room.start(roomName, undefined, { quiet: true });

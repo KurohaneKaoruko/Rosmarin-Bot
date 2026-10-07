@@ -1,7 +1,7 @@
 /**
- * 房间自动开局提供方（解耦倒置）：framework 的 RoomRunner 在首个己方房间落地时
+ * 房间自动开局提供方（解耦倒置）：core 的 RoomRunner 在首个己方房间落地时
  * 需要「开局」能力，但开局流程属 console（人机指令层）——此处只定义接口与注册点，
- * 实现由组合根的 console 扩展注册，消除 framework→console 反向依赖。
+ * 实现由组合根的 console 扩展注册，消除 core→console 反向依赖。
  */
 import type { RoomModeName } from '@/modules/shared/roomMode';
 

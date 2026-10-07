@@ -1,8 +1,8 @@
 import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 
 // 迁移条件集中声明：采满 -> 交付，空包 -> 继续采集
 const OUT_MINERAL_SWITCH = {

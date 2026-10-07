@@ -1,5 +1,5 @@
-import { createFsmStorage, createLayeredRunner } from '@/framework/ai/adapters';
-import { StateMachine } from '@/framework/ai/stateMachine';
+import { createFsmStorage, createLayeredRunner } from '@/core/ai/adapters';
+import { StateMachine } from '@/core/ai/stateMachine';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
 
 export const MINERAL_LAYERS = {

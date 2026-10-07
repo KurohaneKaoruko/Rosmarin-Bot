@@ -1,5 +1,5 @@
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
 
 function withdraw(creep: Creep) {
     if(!creep.memory['resource']) creep.memory['resource'] = RESOURCE_ENERGY;

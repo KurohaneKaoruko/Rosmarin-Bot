@@ -1,8 +1,8 @@
 import { ROLES } from '@/constant/CreepConstant';
 import { OUTMINE_CONFIG } from '@/constant/BaseConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
-import { runWorkLayer } from '@/framework/ai/adapters';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { runWorkLayer } from '@/core/ai/adapters';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 
 const onSource = (creep: Creep): WorkEvent => {
     creep.disableAttackNotificationsOnce();

@@ -1,7 +1,7 @@
 import { ROLES } from '@/constant/CreepConstant';
-import { runWorkLayer } from '@/framework/ai/adapters';
+import { runWorkLayer } from '@/core/ai/adapters';
 import { writeMoveWorkTileCandidates } from '@/modules/shared/moveWork';
-import { WORK_EVENTS, WorkEvent } from '@/framework/ai/workMachine';
+import { WORK_EVENTS, WorkEvent } from '@/core/ai/workMachine';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
 
 const BUILD_PRIORITY = [STRUCTURE_CONTAINER, STRUCTURE_ROAD] as StructureConstant[];
