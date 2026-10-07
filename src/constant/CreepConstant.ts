@@ -351,6 +351,27 @@ export const RoleData = {
         code: 'PR',
         executor: 'power-ranged',
     },
+
+    /* 跨分支共用角色：bodypart 与孵化由分支侧自行生成，此处仅提供命名 code */
+    'attacker': { bodypart: [], level: 12, code: 'A' }, // 通用近战
+    'blinky': { bodypart: [], level: 12, code: 'BL' }, // 远程风筝
+    'healer': { bodypart: [], level: 12, code: 'HL' }, // 通用治疗
+    'defender': { bodypart: [], level: 12, code: 'DF' }, // 房间防御
+    'quad': { bodypart: [], level: 12, code: 'Q' }, // 四人队成员
+    'colonist': { bodypart: [], level: 12, code: 'CO' }, // 殖民开拓
+    'porter': { bodypart: [], level: 12, code: 'P' }, // 按需补充搬运
+    'courier': { bodypart: [], level: 12, code: 'CR' }, // 资源请求派送
+    'picker': { bodypart: [], level: 12, code: 'PI' }, // 掉落捡拾
+    'puller': { bodypart: [], level: 12, code: 'PL' }, // 拉动协作
+    'digger': { bodypart: [], level: 12, code: 'DG' }, // 破墙开路
+    'tester': { bodypart: [], level: 12, code: 'TS' }, // 测试
+    'rampart-repairer': { bodypart: [], level: 12, code: 'RR' }, // 城墙维修
+    'nuke-repairer': { bodypart: [], level: 12, code: 'NR' }, // 核弹维修
+    'core-attacker': { bodypart: [], level: 12, code: 'CA' }, // Core 守卫清除
+    'mineral-hauler': { bodypart: [], level: 12, code: 'MH' }, // 矿物搬运
+    'keeper-killer': { bodypart: [], level: 12, code: 'KK' }, // Keeper 猎杀
+    'score-hunter': { bodypart: [], level: 12, code: 'SH' }, // 分数猎取
+    'out-repair': { bodypart: [], level: 12, code: 'ORE' }, // 外矿基建维修
 } satisfies Record<string, RoleDefinition>;
 
 export type RoleId = keyof typeof RoleData;
