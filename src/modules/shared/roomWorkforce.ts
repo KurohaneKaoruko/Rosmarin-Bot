@@ -558,8 +558,8 @@ export const getUpgradeWorkTarget = (room: Room): number => {
     const pileWork = Math.ceil(getDroppedPileEnergy(room) / 2000);
 
     // —— rush 冲级：火力 = clamp(净收入 × 乘数, 5W 底火, 容量)，乘数随 spawnBalance EMA 浮动
-    //    （参考实现原版口径：+1 物流闲置——无取货请求且有载货搬运 → 1.2 加码；
-    //    −1 升级工取能落空（starved） → 1.0 让孵化；EMA 50t 时间常数自然回摆）。
+    //    乘数修正：+1 物流闲置——无取货请求且有载货搬运 → 1.2 加码；
+    //    −1 升级工取能落空（starved） → 1.0 让孵化；EMA 50t 时间常数自然回摆。
     //    不做 cc 单点水位节流：cc 干涸时收缩升级工是反向反馈（升级工变少 →
     //    抽水更少 → cc 更空的死锁）；cc 供能不足由专线配额与手填闭环解决。
     if (getRoomMode(room) === 'rush') {
@@ -579,7 +579,7 @@ export const getUpgradeWorkTarget = (room: Room): number => {
         const alpha = 1 - Math.pow(2, -1 / 50);
         memAny.spawnBalanceEma = clamp((memAny.spawnBalanceEma ?? 0) * (1 - alpha) + target * alpha, -1, 1);
         const multiplier = Math.min(1.2, Math.max(1, memAny.spawnBalanceEma / 2 + 0.8));
-        // rush 冲级：用参考口径的净收入（扣除 miner/hauler 折旧与容器损耗）
+        // rush 冲级：用净收入口径（扣除 miner/hauler 折旧与容器损耗）
         // 替代毛收入估算，避免过度孵化升级工导致「火力虚高但实际产出低」
         const netIncome = getRoomNetIncome(room);
         const rushWork = Math.ceil((netIncome + pileAll / 2000) * multiplier);
@@ -704,7 +704,7 @@ export const getGeneratedRoleWorkPartCount = (room: Room, role: string): number 
 
 const getWorkerWorkPartCount = (room: Room) => getGeneratedRoleWorkPartCount(room, ROLES.worker);
 
-// builder 目标数的参考 work 基线
+// builder 目标数的 work 基线
 const WORKER_BUILD_REFERENCE_WORK = 3;
 
 const scaleWorkerConstructionTarget = (room: Room, baseTarget: number, maxTarget: number) => {
@@ -864,7 +864,7 @@ const getUpgradeSlotPool = (room: Room): RoomPosition[] => {
     const controller = room.controller;
     const inUpgradeRange = (pos: RoomPosition): boolean =>
         !controller || pos.inRangeTo(controller.pos, 3);
-    // 工位不挡搬运道（对齐参考实现洪泛口径的等价过滤）：
+    // 工位不挡搬运道（洪泛口径的等价过滤）：
     // 与 spawn 锚点的距离小于「锚点→cc 距离」的格位一律剔除——
     // cc 靠 spawn 一侧留给补给通道，升级工全部站在容器外侧
     const anchor = (room.spawn || [])[0]?.pos;
@@ -1210,7 +1210,7 @@ export const WORKER_FAMILY_ROLES = [ROLES.worker] as const;
 export const UPGRADE_SLOT_ROLES = [ROLES.worker, ROLES.upgrader] as const;
 
 // ==================== 房间净收入口径（verbatim 自 src/modules/rush/manageSource 迁移） ====================
-// rush 移植版模块删除（用户决定 2026-10-05）后，升级预算仍依赖此参考口径净收入
+// 升级预算依赖此净收入口径
 // （替代毛收入估算，636c7d0 调优基线）。除 source 路径距离缓存由进程内堆改为模块级 Map
 // （同进程生命周期语义）与 exports 收敛为模块私有外，逐行保持原实现。
 
@@ -1390,7 +1390,7 @@ const getSourceNumOpen = (room: Room, source: Source): number => {
 const NET_INCOME_SOURCE_DISTANCE = new Map<string, Record<string, number>>();
 
 /**
- * 房间净收入（参考口径公开 API）：
+ * 房间净收入（净收入口径公开 API）：
  * 逐 source 按 net = 速率 − miner 折旧 − hauler 折旧 − 容器损耗 累加。
  * 供升级预算等下游替代毛收入估算使用。
  */

@@ -27,7 +27,7 @@ export const getEnergyLevel = (room: Room): number => {
 };
 
 /**
- * 能量分配中枢（参考实现的集中物流核心：请求-匹配式分配）：
+ * 能量分配中枢（集中物流：请求-匹配式分配）：
  *
  * 每 tick 生成「能量需求表」——孵化线(spawn/ext)、塔、控制器容器、断供的静态升级工，
  * 各带优先级（ext/spawn=1 → tower=2 → 控制容器/升级工=5）；
@@ -35,7 +35,7 @@ export const getEnergyLevel = (room: Room): number => {
  * 被抢请求的容量回滚重分配。每个请求同一时刻只配一个搬运工——
  * 「全队涌向同一格」的拥挤在结构上不可能发生，不再需要任何补丁式上限。
  *
- * 断供升级工作为请求（priority 5）被手填，对应参考实现的待填名册机制——
+ * 断供升级工作为请求（priority 5）被手填，进入待填名册——
  * 开局不再依赖控制器容器存在（link > 丢落堆 > container 的 depot 链整体退役）。
  */
 
@@ -139,8 +139,7 @@ type MatchResult = {
 
 // 控制器专线配额：升级火力对口搬运数（2 × 升级W × 路程 / 50 = 所需 C 部件数，
 // 按 C4 微型件折算：每车 4 C）。
-// 保证升级端供能不被「离 spawn 更近的 ext 请求」吸干——对应参考实现的
-// 控制器专职搬运数口径（controllerNumCarry）。
+// 保证升级端供能不被「离 spawn 更近的 ext 请求」吸干——控制器专线按专职搬运数定编。
 
 /**
  * 控制器专线搬运配额：升级火力对口搬运数（2 × 升级W × 路程 / 50 = 所需 C 部件数，
@@ -180,7 +179,7 @@ const matchRequestsToSuppliers = (
     }
     const pointers = new Map<string, number>(phaseRequests.map(r => [r.id, 0]));
 
-    // 参考实现同款主循环：每个有余量的请求弹出最近候选；
+    // 主循环：每个有余量的请求弹出最近候选；
     // 候选已被分配时按「优先级高者/同级更近者」抢夺，被抢请求容量回滚
     for (;;) {
         const free = phaseRequests.filter(r => (remaining.get(r.id) || 0) > 0);
@@ -232,7 +231,7 @@ const splitRequestsByLine = (room: Room, allRequests: FillRequest[]): { dedicate
 /**
  * 第一阶段：控制器专线（cc + 断供升级工手填）× 最近配额内搬运工。
  * ext 请求离 spawn 近、优先级又高（1 > 5），单阶段贪心会让专线被吸干——
- * 参考实现用专职搬运数兜住升级端供能，这里以两阶段匹配等价实现。
+ * 两阶段匹配即专线配额的兜底实现。
  * 返回专线占用的搬运工 id（未用满配额的回流通用分配）。
  */
 const matchDedicatedPhase = (
