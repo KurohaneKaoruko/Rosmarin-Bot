@@ -1,4 +1,4 @@
-const colors = {
+export const colors = {
     white: '#ffffff',
     gray: '#555555',
     light: '#AAAAAA',
@@ -8,7 +8,14 @@ const colors = {
     dark: '#181818',
     outline: '#8FBB93',
     speechText: '#000000',
-    speechBackground: '#2ccf3b'
+    speechBackground: '#2ccf3b',
+    red: '#fe0000',
+    blue: '#001eff',
+    yellow: '#ffe700',
+    green: '#74ee15',
+    cyan: '#4deeea',
+    black: '#000000',
+    orange: '#FFA500',
 }
 
 const speechSize = 0.5
