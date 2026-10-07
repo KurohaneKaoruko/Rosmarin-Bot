@@ -8,6 +8,7 @@ import { getRoomData } from '@/modules/shared/memory';
 import { getRoomModeProfile } from '@/modules/shared/roomMode';
 import { isEnergyCheckEnabled } from '@/modules/shared/gameCapabilities';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { drawSpawnInfo } from '@/modules/shared/roomVisuals';
 const getRoomMode = (room: Room) => {
     return (getRoomData(room.name) as any)?.mode || (room.memory as any).mode || 'main';
 };
@@ -177,27 +178,7 @@ export default class SpawnControl extends Room {
     }
 
     VisualSpawnInfo() {
-        for (const spawn of this.spawn) {
-            if (!spawn.spawning) continue;
-
-            const creepMemory = Memory.creeps[spawn.spawning.name];
-            const role = creepMemory?.role;
-            if (!isRoleId(role)) {
-                spawn.spawning.cancel();
-                continue;
-            }
-            const code = RoleData[role].code;
-            this.visual.text(
-                `${code} 🕒${spawn.spawning.remainingTime}`,
-                spawn.pos.x,
-                spawn.pos.y,
-                { align: 'center',
-                  color: 'red',
-                  stroke: '#ffffff',
-                  strokeWidth: 0.05,
-                  font: 'bold 0.32 inter' }
-            );
-        }
+        drawSpawnInfo(this.spawn);
     }
 
     GetSpawnTaskData() {

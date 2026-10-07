@@ -1,8 +1,8 @@
 import { isWarMode } from '@/modules/shared/memory';
-import { CompoundColor } from '@/constant/ResourceConstant';
 import { ensureLabAB, getLabAB } from '@/modules/shared/labReservations';
 import { getStructData } from '@/modules/shared/memory';
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
+import { drawLabInfo } from '@/modules/shared/roomVisuals';
 
 export default class LabControl extends Room {
     LabWork() {
@@ -21,37 +21,7 @@ export default class LabControl extends Room {
     }
     
     VisualLabInfo() {
-        if (Game.cpu.bucket < 1000) return;
-        const { labA, labB } = getLabAB(this.name, this);
-        this.lab.forEach(lab => {
-            if (!lab.mineralType) return;
-            this.visual.text(lab.mineralType,
-                lab.pos.x, lab.pos.y,
-                { align: 'center',
-                  color: CompoundColor[lab.mineralType],
-                  stroke: '#2a2a2a',
-                  strokeWidth: 0.05,
-                  font: '0.24 inter' }
-            )
-        });
-        if (labA) {
-            this.visual.circle(labA.pos, {
-                radius: 0.42,
-                fill: 'transparent',
-                stroke: '#ff4fd8',
-                opacity: 0.7,
-                strokeWidth: 0.08
-            });
-        }
-        if (labB) {
-            this.visual.circle(labB.pos, {
-                radius: 0.42,
-                fill: 'transparent',
-                stroke: '#4fd8ff',
-                opacity: 0.7,
-                strokeWidth: 0.08
-            });
-        }
+        drawLabInfo(this.lab, this);
     }
 
     RunReaction() {

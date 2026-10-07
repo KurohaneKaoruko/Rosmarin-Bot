@@ -517,12 +517,6 @@ interface Room {
     ObserveCallbackTick(): void;
 
     /**
-     * 冲级面板
-     * @description rush 模式左下角逐 tick 渲染升级管线状态
-     */
-    raceVisual(): void;
-
-    /**
      * Observer 工作
      * @description 在 tick 结束时执行观察任务
      */

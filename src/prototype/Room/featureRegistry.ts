@@ -7,6 +7,7 @@
 import { isRoomTickAligned } from '@/modules/shared/roomPhase';
 import { getRoomMode } from '@/modules/shared/roomMode';
 import type { RoomModeProfile } from '@/modules/shared/roomMode';
+import { raceVisual } from '@/modules/shared/roomVisuals';
 import { RoadBuilder } from '@/modules/features/external/externalRoad';
 import { rushBoost, relocateOldSpawn } from '@/prototype/Room/function/rushSupport';
 
@@ -22,7 +23,7 @@ export const ROOM_FEATURES: readonly RoomFeature[] = [
     // ── pre：QoS 门之前（保命面） ──
     { id: 'energyState', phase: 'pre', run: (r) => r.updateEnergyState(false) },
     // 冲级面板（仅 rush 内部自判）：逐 tick 渲染，放 QoS 节流之前——面板不能有缺帧
-    { id: 'raceVisual', phase: 'pre', run: (r) => r.raceVisual() },
+    { id: 'raceVisual', phase: 'pre', run: (r) => raceVisual(r) },
     // 更新任务池
     { id: 'missionUpdate', phase: 'pre', run: (r) => r.MissionUpdate() },
     // 主动防御处理（叠加房间相位错峰，defenseInterval=1 时保持每 tick）

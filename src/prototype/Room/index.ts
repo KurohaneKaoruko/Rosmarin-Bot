@@ -18,7 +18,6 @@ import AutoBuild from "./feature/autoBuild"
 import AutoLab from "./feature/autoLab"
 import AutoFactory from "./feature/autoFactory"
 import AutoPowerSpawn from "./feature/autoPowerSpawn"
-import RaceVisual from "./feature/raceVisual"
 
 import Mission from "./mission"
 import MissionPools from "./mission/pool/MissionPools"
@@ -55,7 +54,6 @@ export default () => {
     extend(Room, AutoLab)                  // 自动 Lab 合成
     extend(Room, AutoFactory)              // 自动 Factory 行为
     extend(Room, AutoPowerSpawn)           // 自动 PowerSpawn
-    extend(Room, RaceVisual)               // 冲级可视化
 
     extend(Room, Mission)                  // 任务模块
     extend(Room, MissionPools)             // 任务池
