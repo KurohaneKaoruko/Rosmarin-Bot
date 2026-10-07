@@ -305,21 +305,21 @@ interface Room {
      * @returns 不在白名单中的敌方creep数组
      * @description 结果会缓存到当前tick，避免重复查找
      */
-    findEnemyCreeps(opts?: FilterOptions<FIND_HOSTILE_CREEPS>): Creep[];
+    findEnemyCreeps(opts?: FilterOptions<FindTypes[FIND_HOSTILE_CREEPS], Creep>): Creep[];
     
     /** 
      * 获取房间内的敌方PowerCreep
      * @param opts - 可选的过滤选项
      * @returns 不在白名单中的敌方PowerCreep数组
      */
-    findEnemyPowerCreeps(opts?: FilterOptions<FIND_HOSTILE_POWER_CREEPS>): PowerCreep[];
+    findEnemyPowerCreeps(opts?: FilterOptions<FindTypes[FIND_HOSTILE_POWER_CREEPS], PowerCreep>): PowerCreep[];
     
     /** 
      * 获取房间内的敌方建筑
      * @param opts - 可选的过滤选项
      * @returns 不在白名单中的敌方建筑数组
      */
-    findEnemyStructures(opts?: FilterOptions<FIND_HOSTILE_STRUCTURES>): AnyOwnedStructure[];
+    findEnemyStructures(opts?: FilterOptions<FindTypes[FIND_HOSTILE_STRUCTURES], AnyOwnedStructure>): AnyOwnedStructure[];
     
     /** 
      * 获取房间建筑
