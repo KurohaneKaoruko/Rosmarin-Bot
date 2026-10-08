@@ -720,45 +720,6 @@ export class ExternalMineState {
         return { sourceRoom: sourceRoomName, targetRoom: targetRoomName } as CreepMemory;
     }
 
-    static getTargetKeeperLairIds(targetRoom: Room): string[] {
-        if (typeof STRUCTURE_KEEPER_LAIR === 'undefined') return [];
-        let lairs: StructureKeeperLair[] = [];
-        try {
-            lairs = targetRoom.find(FIND_STRUCTURES, {
-                filter: (structure) => structure.structureType === STRUCTURE_KEEPER_LAIR,
-            }) as StructureKeeperLair[];
-        }
-        catch {
-            lairs = [];
-        }
-        if (lairs.length <= 0) return [];
-
-        const resources: { pos: RoomPosition }[] = [];
-        for (const source of getExternalMineTargetSources(targetRoom)) {
-            resources.push(source);
-        }
-        if (typeof FIND_MINERALS !== 'undefined') {
-            try {
-                const minerals = (targetRoom.find(FIND_MINERALS) || []) as Mineral[];
-                resources.push(...minerals);
-            }
-            catch { }
-        }
-        if (resources.length <= 0) return lairs.map((lair) => lair.id);
-
-        return lairs
-            .filter((lair) => resources.some((resource) => {
-                if (resource.pos && typeof resource.pos.inRangeTo === 'function') {
-                    return resource.pos.inRangeTo(lair.pos, 5);
-                }
-                if (lair.pos && typeof lair.pos.getRangeTo === 'function') {
-                    return lair.pos.getRangeTo(resource.pos) <= 5;
-                }
-                return false;
-            }))
-            .map((lair) => lair.id);
-    }
-
     // 外矿基础设施建造入口。
     // container 只要目标房有视野就优先尝试落地，不再受 secondary action 节流影响；
     // road 仍按 secondary action、等级与 BUILD_INTERVAL 节流，避免把高成本寻路/铺路放大到每 tick。
@@ -1950,9 +1911,7 @@ export class ExternalMineSpawner {
         const globalSpawning = this.getSpawningRoleNumByTargetGlobal(ROLES['out-attack'], targetRoom.name);
         if (globalActive + globalQueued + globalSpawning >= 1) return false;
 
-        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name) as CreepMemory & { keeperLairIds?: string[] };
-        const keeperLairIds = ExternalMineState.getTargetKeeperLairIds(targetRoom);
-        if (keeperLairIds.length > 0) memory.keeperLairIds = keeperLairIds;
+        const memory = ExternalMineState.createMemory(sourceRoom.name, targetRoom.name);
         sourceRoom.SpawnMissionAdd('OA', [], -1, ROLES['out-attack'], memory);
         return true;
     }

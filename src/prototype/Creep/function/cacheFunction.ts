@@ -28,6 +28,13 @@ const migrateLegacyCacheSection = (memory: CreepMemory, root: CreepCacheRoot, ke
     delete (memory as any)[legacyField];
 };
 
+// 确保角色私有命名空间存在：角色私有状态统一写 cache.role，不散落在 cache 根。
+const ensureRoleNamespace = (root: CreepCacheRoot) => {
+    if (root.role == null || typeof root.role !== 'object' || Array.isArray(root.role)) {
+        root.role = {};
+    }
+};
+
 // 统一 creep 缓存根：
 // 所有运行时代码都应只读写 memory.cache，旧 cacheSource/cacheTarget 只在这里做一次性兼容迁移。
 export const ensureMemoryCache = (memory: CreepMemory): CreepCacheRoot => {
@@ -37,6 +44,7 @@ export const ensureMemoryCache = (memory: CreepMemory): CreepCacheRoot => {
     for (const key of CACHE_SECTION_KEYS) {
         migrateLegacyCacheSection(memory, root, key);
     }
+    ensureRoleNamespace(root);
     return root;
 };
 
@@ -80,6 +88,17 @@ export default class CacheFunction extends Creep {
      */
     getCache(): CreepFlatCache {
         return ensureMemoryCache(this.memory) as CreepFlatCache;
+    }
+
+    /**
+     * 获取角色私有状态命名空间（`cache.role`）。
+     *
+     * @remarks
+     * 角色私有字段统一读写这里，不落在 cache 根或其他分节；
+     * 命名空间由 ensureMemoryCache 保证存在。
+     */
+    getRoleCache(): Record<string, any> {
+        return ensureMemoryCache(this.memory).role as Record<string, any>;
     }
 
     /**
@@ -160,6 +179,8 @@ export default class CacheFunction extends Creep {
      */
     validateCacheDepth(cache: CreepFlatCache = this.getCache()): boolean {
         for (const key in cache) {
+            // role 为受控嵌套命名空间（角色私有状态），不在扁平断言范围内
+            if (key === 'role') continue;
             const value = cache[key];
             if (value === null || value === undefined) continue;
             if (typeof value !== 'object') continue;

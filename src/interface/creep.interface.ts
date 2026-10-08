@@ -351,6 +351,14 @@ interface Creep {
     getCache(): CreepFlatCache;
 
     /**
+     * 获取角色私有状态命名空间（`cache.role`）。
+     *
+     * @remarks
+     * 角色私有字段统一读写这里；命名空间由 ensureMemoryCache 保证存在。
+     */
+    getRoleCache(): Record<string, any>;
+
+    /**
      * 清除由统一目标缓存辅助方法维护的目标字段。
      *
      * @remarks
@@ -960,6 +968,8 @@ interface CreepMemory {
         source?: { [key: string]: any };
         /** 兼容旧缓存后的 target 分区 */
         target?: { [key: string]: any };
+        /** 角色私有状态命名空间：角色私有字段统一写这里，禁止新增无命名空间的顶层临时字段 */
+        role?: { [key: string]: any };
         /** 缓存的路径 */
         path?: RoomPosition[];
         /** 其他缓存数据 */
