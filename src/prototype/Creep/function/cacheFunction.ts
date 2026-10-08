@@ -179,8 +179,8 @@ export default class CacheFunction extends Creep {
      */
     validateCacheDepth(cache: CreepFlatCache = this.getCache()): boolean {
         for (const key in cache) {
-            // role 为受控嵌套命名空间（角色私有状态），不在扁平断言范围内
-            if (key === 'role') continue;
+            // role/boost 为受控嵌套命名空间，不在扁平断言范围内
+            if (key === 'role' || key === 'boost') continue;
             const value = cache[key];
             if (value === null || value === undefined) continue;
             if (typeof value !== 'object') continue;

@@ -1,4 +1,5 @@
 import { ROLES } from '@/constant/CreepConstant';
+import { getBoostCache } from '@/prototype/Creep/function/boostFunction';
 
 
 const runLegacy = (creep: Creep) => {
@@ -6,17 +7,17 @@ const runLegacy = (creep: Creep) => {
 
     creep.memory.dontPullMe = !creep.room.my;
 
-    if (!creep.memory.boosted) {
+    if (!getBoostCache(creep.memory).boosted) {
         const boostmap = creep.memory['boostmap'];
         if (boostmap) {
             const must = !!creep.memory['mustBoost'];
             const result = creep.goBoost(boostmap, { must });
             if (result === OK) {
-                creep.memory.boosted = true;
+                getBoostCache(creep.memory).boosted = true;
             }
             return;
         }
-        creep.memory.boosted = true;
+        getBoostCache(creep.memory).boosted = true;
     }
 
     const targetPcName = creep.memory['targetPcName'] as string | undefined;
@@ -75,16 +76,16 @@ const runLegacy = (creep: Creep) => {
 
 const pc_heal = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
+        if (getBoostCache(creep.memory).boosted) return true;
         const boostmap = creep.memory['boostmap'];
         if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
             return true;
         }
         const must = !!creep.memory['mustBoost'];
         const result = creep.goBoost(boostmap, { must });
         const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
+        if (ok) getBoostCache(creep.memory).boosted = true;
         return ok;
     },
     run: runLegacy

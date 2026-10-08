@@ -34,14 +34,14 @@ import { powerAttack, powerHeal, powerRanged } from '../role/remote/power/power-
 import depositHarvest from '../role/remote/deposit/deposit-harvest';
 import depositTransfer from '../role/remote/deposit/deposit-transfer';
 import { depositAttack, depositRanged } from '../role/remote/deposit/deposit-combat';
-import combatHeal from '../role/combat/combatHeal';
+import { makeCombatHealHandler } from '../role/combat/combatHeal';
 import oneRanged from '../role/combat/one-ranged';
 import aio from '../role/combat/aio';
 import doubleAttack from '../role/combat/double-attack';
 import doubleDismantle from '../role/combat/double-dismantle';
 import pcHeal from '../role/combat/pc-heal';
 import { defend2Attack } from '../role/combat/defend-duo';
-import { EXECUTORS } from '@/constant/CreepConstant';
+import { EXECUTORS, ROLES } from '\@/constant/CreepConstant';
 import { defendAttack, defendRanged } from '../role/combat/defend-single';
 
 // 键统一引用 EXECUTORS 常量（派生自 RoleData[].executor），与孵化侧词表单一来源对齐
@@ -84,9 +84,11 @@ export const roleRegistry: Record<string, RoleHandler> = {
     [EXECUTORS['power-ranged']]: powerRanged,
     [EXECUTORS.reserver]: reserver,
     [EXECUTORS.aio]: aio,
-    // 治疗型角色统一执行器：out-2heal / deposit-heal / defend-2heal / double-heal
-    // 由 creep.memory.role 选策略，见 action/combat/combatHeal.ts
-    [EXECUTORS['combat-heal']]: combatHeal,
+    // 治疗型角色：策略在注册时按角色 id 预绑定，运行时零查表
+    [EXECUTORS['out-2heal']]: makeCombatHealHandler(ROLES['out-2heal']),
+    [EXECUTORS['deposit-heal']]: makeCombatHealHandler(ROLES['deposit-heal']),
+    [EXECUTORS['defend-2heal']]: makeCombatHealHandler(ROLES['defend-2heal']),
+    [EXECUTORS['double-heal']]: makeCombatHealHandler(ROLES['double-heal']),
     [EXECUTORS['double-attack']]: doubleAttack,
     [EXECUTORS['double-dismantle']]: doubleDismantle,
     [EXECUTORS['one-ranged']]: oneRanged,

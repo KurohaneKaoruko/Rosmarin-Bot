@@ -1,6 +1,7 @@
 import { WORK_EVENTS, WorkEvent } from '@/prototype/Creep/family/flow/workLayer';
 import { runWorkLayer } from '@/prototype/Creep/family/flow/workLayer';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { getBoostCache } from '@/prototype/Creep/function/boostFunction';
 
 type LogisticCache = {
     targetId?: Id<any>;
@@ -200,16 +201,16 @@ const onTarget = (creep: Creep): WorkEvent => {
 
 const logisticFunction = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
+        if (getBoostCache(creep.memory).boosted) return true;
         const boostmap = (creep.memory as any).boostmap;
         const finalBoostmap = boostmap === null ? null : (boostmap || { [CARRY]: ['XKH2O', 'KH2O', 'KH'] as MineralBoostConstant[] });
         if (!finalBoostmap || Object.keys(finalBoostmap).length === 0) {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
             return true;
         }
         const result = creep.goBoost(finalBoostmap);
         const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
+        if (ok) getBoostCache(creep.memory).boosted = true;
         return ok;
     },
     run: (creep) => {

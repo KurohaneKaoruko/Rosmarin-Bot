@@ -864,40 +864,10 @@ interface CreepMemory {
     sourceRoom?: string;
     
     /** 
-     * 当前状态
-     * @description 用于状态机切换，如'source'获取资源，'target'执行任务
-     */
-    state?: string;
-    
-    /** 
      * 是否正在工作
      * @description 简单的工作状态标记
      */
     working?: boolean;
-
-    /**
-     * 是否已完成准备流程
-     * @description 常用于 action 模式角色（如 harvester）的一次性初始化标记
-     */
-    ready?: boolean;
-
-    /** 
-     * 当前动作
-     * @description action 模式下的状态字段，不同角色会定义不同的动作集合
-     */
-    action?: string;
-    
-    /** 
-     * 是否已完成boost
-     * @description 标记creep是否已完成所有需要的boost
-     */
-    boosted?: boolean;
-    
-    /** 
-     * boost尝试次数
-     * @description 记录boost失败次数，超过阈值后放弃
-     */
-    boostAttempts?: number;
 
     /**
      * boost等级
@@ -970,6 +940,8 @@ interface CreepMemory {
         target?: { [key: string]: any };
         /** 角色私有状态命名空间：角色私有字段统一写这里，禁止新增无命名空间的顶层临时字段 */
         role?: { [key: string]: any };
+        /** boost 框架私有状态命名空间：boosted 标志与 lab/重试缓存，由 boostFunction 惰性创建 */
+        boost?: { [key: string]: any };
         /** 缓存的路径 */
         path?: RoomPosition[];
         /** 其他缓存数据 */

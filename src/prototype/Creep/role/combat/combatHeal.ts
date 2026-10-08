@@ -16,9 +16,8 @@ import {
  * 全是策略，不是逻辑。这四份实现原本各写一遍，改一处要改四处（且已经开始漂移：
  * 有的自愈是「只要受伤就治」，有的是「比搭档更惨才治」）。
  *
- * 分工用**角色 id 作为元数据**驱动：执行器不关心自己是被谁调用的，
- * 只按 `creep.memory.role` 查一次策略表。因此孵化侧完全不用动——
- * 角色 id 仍是原来的名字，只是不再各自绑一个执行器。
+ * 分工用**角色 id 作为元数据**驱动：`makeCombatHealHandler(role)` 按角色 id 预绑定策略，
+ * registry 为四个角色各注册一个处理器，运行时不再按 memory.role 查表分发。
  */
 
 /** 还没结上搭档时的兜底行为。 */
@@ -49,7 +48,7 @@ type CombatHealPolicy = {
     ensureBoosted?: boolean;
 };
 
-/** 按角色 id 分工：这是「一个执行器、四种角色」的唯一配置点。 */
+/** 按角色 id 分工：这是四种治疗角色的唯一配置点。 */
 const COMBAT_HEAL_POLICIES: Record<string, CombatHealPolicy> = {
     // 外矿双人队的治疗手：只要自己受伤就先自愈，其余治疗量给搭档
     [ROLES['out-2heal']]: {
@@ -151,23 +150,19 @@ const runCombatHeal = (creep: Creep, role: string, policy: CombatHealPolicy): vo
     runHealAndFollow(creep, partner, { selfHeal: policy.selfHeal });
 };
 
-const getPolicy = (creep: Creep): CombatHealPolicy | null => {
-    const role = creep.memory.role;
-    return role ? COMBAT_HEAL_POLICIES[role] ?? null : null;
+/**
+ * 按角色 id 构造治疗处理器：策略在注册时预绑定，运行时零查表。
+ */
+export const makeCombatHealHandler = (role: string) => {
+    const policy = COMBAT_HEAL_POLICIES[role];
+    return {
+        prepare: (creep: Creep) => {
+            if (!policy?.ensureBoosted) return true;
+            return creep.ensureBoosted(creep.memory['boostmap']);
+        },
+        run: (creep: Creep) => {
+            if (!policy) return;
+            runCombatHeal(creep, role, policy);
+        },
+    };
 };
-
-const combatHeal = {
-    prepare: (creep: Creep) => {
-        const policy = getPolicy(creep);
-        if (!policy?.ensureBoosted) return true;
-        return creep.ensureBoosted(creep.memory['boostmap']);
-    },
-    run: (creep: Creep) => {
-        const policy = getPolicy(creep);
-        if (!policy) return;
-        runCombatHeal(creep, creep.memory.role as string, policy);
-    },
-};
-
-export default combatHeal;
-export { COMBAT_HEAL_POLICIES };

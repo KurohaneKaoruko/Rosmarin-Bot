@@ -180,7 +180,7 @@ export const RoleData = {
         boostmap: { [TOUGH]: 'XGHO2', [HEAL]: 'XLHO2', [MOVE]: 'XZHO2' },
         level: 10,
         code: '2H',
-        executor: 'combat-heal',
+        executor: 'double-heal',
     },
 
     /* 四人队 */
@@ -217,7 +217,7 @@ export const RoleData = {
         level: 7,
         code: 'D2H',
         must: true,
-        executor: 'combat-heal',
+        executor: 'defend-2heal',
     },
 
     /* 外矿相关 */
@@ -261,7 +261,7 @@ export const RoleData = {
         bodypart: [],
         level: 8,
         code: 'O2H',
-        executor: 'combat-heal',
+        executor: 'out-2heal',
     },
     'out-invader': {
         bodypart: [],
@@ -311,7 +311,7 @@ export const RoleData = {
         bodypart: [[HEAL, 25], [MOVE, 25]],
         level: 8,
         code: 'DPH',
-        executor: 'combat-heal',
+        executor: 'deposit-heal',
     },
     'deposit-ranged': {
         bodypart: [[RANGED_ATTACK, 17], [MOVE, 25], [HEAL, 8]],

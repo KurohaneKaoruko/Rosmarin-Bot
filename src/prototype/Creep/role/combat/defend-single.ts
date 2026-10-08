@@ -6,6 +6,7 @@ import {
     scoreRampart,
     shouldSwitchDefenseRampart
 } from '@/modules/shared/defenseUtils';
+import { getBoostCache } from '@/prototype/Creep/function/boostFunction';
 
 const DEFENSE_RAMPART_LOCK_TTL = 25;
 const DEFEND_ATTACK_SWITCH_THRESHOLD = 2;
@@ -220,15 +221,15 @@ const getDefendRangedBoost = (creep: Creep) => {
 
 const defendAttack = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
+        if (getBoostCache(creep.memory).boosted) return true;
         const { must, boostmap } = getDefendAttackBoost(creep);
         if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
             return true;
         }
         const result = creep.goBoost(boostmap, { must });
         const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
+        if (ok) getBoostCache(creep.memory).boosted = true;
         return ok;
     },
     run: runDefendAttack
@@ -236,15 +237,15 @@ const defendAttack = {
 
 const defendRanged = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
+        if (getBoostCache(creep.memory).boosted) return true;
         const { must, boostmap } = getDefendRangedBoost(creep);
         if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
             return true;
         }
         const result = creep.goBoost(boostmap, { must });
         const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
+        if (ok) getBoostCache(creep.memory).boosted = true;
         return ok;
     },
     run: runDefendRanged

@@ -3,6 +3,7 @@ import { ROLES } from '@/constant/CreepConstant';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { resolveBoundPartner, runHealAndFollow, tryBindNearestPartner } from '@/prototype/Creep/function/boundPartner';
 import { ensureInTargetRoomForCombat, runRangedCombat } from '@/prototype/Creep/function/combatCore';
+import { getBoostCache } from '@/prototype/Creep/function/boostFunction';
 
 const noBindAction = (creep: Creep) => {
     const roomHostiles = getRoomTickCacheValue(creep.room, 'power_attack_room_hostiles', () =>
@@ -34,20 +35,20 @@ const noBindAction = (creep: Creep) => {
 const runPowerAttack = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
 
-    if (!creep.memory.boosted) {
+    if (!getBoostCache(creep.memory).boosted) {
         const boostLevel = creep.memory['boostLevel'];
         if (boostLevel === 1) {
-            creep.memory.boosted = creep.goBoost({
+            getBoostCache(creep.memory).boosted = creep.goBoost({
                 [ATTACK]: ['UH'],
                 [TOUGH]: ['GO']
             }, { must: true }) === OK;
         } else if (boostLevel === 2) {
-            creep.memory.boosted = creep.goBoost({
+            getBoostCache(creep.memory).boosted = creep.goBoost({
                 [ATTACK]: ['UH2O'],
                 [TOUGH]: ['GHO2']
             }, { must: true }) === OK;
         } else {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
         }
         return;
     }
@@ -140,12 +141,12 @@ const runPowerAttack = (creep: Creep) => {
 const runPowerHeal = (creep: Creep) => {
     creep.disableAttackNotificationsOnce();
 
-    if (!creep.memory.boosted) {
+    if (!getBoostCache(creep.memory).boosted) {
         const boostLevel = creep.memory['boostLevel'];
         if (boostLevel === 1) {
-            creep.memory.boosted = creep.goBoost({ [HEAL]: ['LO'] }, { must: true }) === OK;
+            getBoostCache(creep.memory).boosted = creep.goBoost({ [HEAL]: ['LO'] }, { must: true }) === OK;
         } else {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
         }
         return;
     }

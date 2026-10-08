@@ -1,4 +1,5 @@
 import { MISSION_POOLS } from '@/constant/MissionConstant';
+import { ensureMemoryCache } from './cacheFunction';
 import { ROLES } from '@/constant/CreepConstant';
 // ── 中央 boost 配置表（Tier 1 boost 管理统一）──────────────────
 // 角色 -> 部件 -> 候选 boost 资源（按优先级降级，前者不足自动用后者）。
@@ -23,6 +24,12 @@ export const ROLE_BOOST_CONFIGS: Record<string, Record<string, MineralBoostConst
     [ROLES['defend-2heal']]: { [TOUGH]: ['XGHO2', 'GHO2', 'GO'], [HEAL]: ['XLHO2', 'LHO2', 'LO'], [MOVE]: ['XZHO2', 'ZHO2', 'ZO'] },
 };
 
+// boost 框架私有状态命名空间（cache.boost）：惰性创建，非 boost 角色零开销
+export const getBoostCache = (memory: CreepMemory): Record<string, any> => {
+    const root = ensureMemoryCache(memory);
+    return (root.boost ??= {}) as Record<string, any>;
+};
+
 export default class BoostFunction extends Creep {
     /**
      * 确保 creep 完成 boost 的唯一入口。
@@ -36,15 +43,16 @@ export default class BoostFunction extends Creep {
         boostMap?: { [part: string]: MineralBoostConstant | MineralBoostConstant[] | string[] } | null,
         opts?: { must?: boolean }
     ): boolean {
-        if ((this.memory as any).boosted) return true;
+        const boostCache = getBoostCache(this.memory);
+        if (boostCache.boosted) return true;
         const map = boostMap ?? (this.memory as any).boostmap ?? ROLE_BOOST_CONFIGS[this.memory.role];
         if (!map || Object.keys(map).length === 0) {
-            (this.memory as any).boosted = true;
+            boostCache.boosted = true;
             return true;
         }
         const result = this.goBoost(map as any, { must: opts?.must === true });
         if (result === OK) {
-            (this.memory as any).boosted = true;
+            boostCache.boosted = true;
             return true;
         }
         return false;
@@ -58,6 +66,7 @@ export default class BoostFunction extends Creep {
      */
     goBoost(boostmap: { [part: string]: MineralBoostConstant | MineralBoostConstant[] }, opts: { must?: boolean } = {}) {
         const { must = false } = opts;
+        const boostCache = getBoostCache(this.memory);
 
         // Boost 期间允许被对穿，防止堵死 Lab 通道
         this.memory.dontPullMe = false;
@@ -98,14 +107,14 @@ export default class BoostFunction extends Creep {
 
         if (Object.keys(bodypart).length <= 0) {
             // 已完成，清理缓存
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
-            delete (this.memory as any).boostOptionalStartTime;
-            delete (this.memory as any).boostEnsureTime;
-            delete this.memory.boostAttempts;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
+            delete boostCache.boostOptionalStartTime;
+            delete boostCache.boostEnsureTime;
+            delete boostCache.boostAttempts;
             return 0;
         }
 
@@ -118,14 +127,14 @@ export default class BoostFunction extends Creep {
             if (hasEnough) continue;
 
             if (!must) {
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
-                delete (this.memory as any).boostTargetAccessible;
-                delete (this.memory as any).boostTargetFailCount;
-                delete (this.memory as any).boostOptionalStartTime;
-                delete (this.memory as any).boostEnsureTime;
-                delete this.memory.boostAttempts;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
+                delete boostCache.boostTargetAccessible;
+                delete boostCache.boostTargetFailCount;
+                delete boostCache.boostOptionalStartTime;
+                delete boostCache.boostEnsureTime;
+                delete boostCache.boostAttempts;
                 return 0; // 如果不是强制，资源不足直接算完成（放弃）
             }
             return -1;
@@ -147,38 +156,38 @@ export default class BoostFunction extends Creep {
         let targetPart: BodyPartConstant | null = null;
         
         // 尝试从缓存获取
-        if (this.memory.boostTargetId) {
-            const cachedLab = Game.getObjectById(this.memory.boostTargetId);
-            const cachedMineral = this.memory.boostTargetMineral as MineralBoostConstant | undefined;
-            const cachedPart = this.memory.boostTargetPart as BodyPartConstant | undefined;
+        if (boostCache.boostTargetId) {
+            const cachedLab = Game.getObjectById(boostCache.boostTargetId as Id<StructureLab>);
+            const cachedMineral = boostCache.boostTargetMineral as MineralBoostConstant | undefined;
+            const cachedPart = boostCache.boostTargetPart as BodyPartConstant | undefined;
 
             if (!cachedLab || !cachedMineral || !cachedPart) {
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
             } else if (!requiredMinerals.includes(cachedMineral)) {
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
             } else if (!bodypart[cachedPart]) {
                 // 该部件类型已经不需要强化了
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
             } else if (cachedLab.mineralType && cachedLab.mineralType !== cachedMineral) {
                 // Lab 已被填充为其他资源，缓存失效
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
             } else {
                 const reqMineral = bodypart[cachedPart] * 30;
                 const reqEnergy = bodypart[cachedPart] * 20;
                 if (!isLabReadyForBoost(cachedLab, cachedMineral as ResourceConstant, reqMineral, reqEnergy)) {
-                    delete this.memory.boostTargetId;
-                    delete this.memory.boostTargetMineral;
-                    delete this.memory.boostTargetPart;
-                    delete (this.memory as any).boostTargetAccessible;
-                    delete (this.memory as any).boostTargetFailCount;
+                    delete boostCache.boostTargetId;
+                    delete boostCache.boostTargetMineral;
+                    delete boostCache.boostTargetPart;
+                    delete boostCache.boostTargetAccessible;
+                    delete boostCache.boostTargetFailCount;
                 } else {
                     targetLab = cachedLab;
                     targetMineral = cachedMineral;
@@ -208,11 +217,11 @@ export default class BoostFunction extends Creep {
                     targetLab = lab;
                     targetMineral = mineral;
                     targetPart = partType;
-                    this.memory.boostTargetId = lab.id;
-                    this.memory.boostTargetMineral = mineral;
-                    this.memory.boostTargetPart = partType;
-                    delete (this.memory as any).boostTargetAccessible;
-                    delete (this.memory as any).boostTargetFailCount;
+                    boostCache.boostTargetId = lab.id;
+                    boostCache.boostTargetMineral = mineral;
+                    boostCache.boostTargetPart = partType;
+                    delete boostCache.boostTargetAccessible;
+                    delete boostCache.boostTargetFailCount;
                     break; // 找到一个就去
                 }
                 if (targetLab) break;
@@ -225,7 +234,7 @@ export default class BoostFunction extends Creep {
             const ownerId = this.memory['boostOwnerId'] || (teamID ? `Team-${teamID}` : this.name);
 
             const ensureInterval = 20;
-            const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
+            const lastEnsure = boostCache.boostEnsureTime as number | undefined;
             const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
 
             const boostPool = this.room.getAllMissionFromPool(MISSION_POOLS.boost) as any[] | undefined;
@@ -273,28 +282,28 @@ export default class BoostFunction extends Creep {
                 for (const m of missing) {
                     this.room.AssignBoostTask(m.mineral, m.amount, ownerId);
                 }
-                (this.memory as any).boostEnsureTime = Game.time;
+                boostCache.boostEnsureTime = Game.time;
             }
 
-            if (!this.memory.boostAttempts) this.memory.boostAttempts = 0;
-            this.memory.boostAttempts++;
+            if (!boostCache.boostAttempts) boostCache.boostAttempts = 0;
+            boostCache.boostAttempts++;
 
             // must=false：不直接当作完成。短暂等待 BoostMission 分配/补料后再放弃，避免“明明能 boost 却直接跳过”。 
             if (!must) {
-                const optStart = (this.memory as any).boostOptionalStartTime as number | undefined;
-                if (!optStart) (this.memory as any).boostOptionalStartTime = Game.time;
+                const optStart = boostCache.boostOptionalStartTime as number | undefined;
+                if (!optStart) boostCache.boostOptionalStartTime = Game.time;
                 const startTime = optStart || Game.time;
                 const giveUpAfter = 80; // 可选 boost 最多等待的 tick 数
 
                 if (Game.time - startTime >= giveUpAfter) {
-                    delete this.memory.boostTargetId;
-                    delete this.memory.boostTargetMineral;
-                    delete this.memory.boostTargetPart;
-                    delete (this.memory as any).boostTargetAccessible;
-                    delete (this.memory as any).boostTargetFailCount;
-                    delete (this.memory as any).boostOptionalStartTime;
-                    delete (this.memory as any).boostEnsureTime;
-                    delete this.memory.boostAttempts;
+                    delete boostCache.boostTargetId;
+                    delete boostCache.boostTargetMineral;
+                    delete boostCache.boostTargetPart;
+                    delete boostCache.boostTargetAccessible;
+                    delete boostCache.boostTargetFailCount;
+                    delete boostCache.boostOptionalStartTime;
+                    delete boostCache.boostEnsureTime;
+                    delete boostCache.boostAttempts;
                     return 0;
                 }
             }
@@ -302,21 +311,21 @@ export default class BoostFunction extends Creep {
         }
 
         // 已经找到目标 Lab，说明 boost 流程在推进，重置可选 boost 的等待计时
-        delete (this.memory as any).boostOptionalStartTime;
+        delete boostCache.boostOptionalStartTime;
 
         // 防御性处理：缓存的 lab 可能来自其他房间，且 moveTo(maxRooms:1) 会导致永远走不到
         if (targetLab.pos.roomName !== this.room.name) {
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetFailCount;
-            delete (this.memory as any).boostTargetAccessible;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetFailCount;
+            delete boostCache.boostTargetAccessible;
             return 1;
         }
 
         // 防御性处理：如果 lab 周围没有可站立的相邻格，则永远无法进行 boost
         // 只在首次选中该 lab 时计算一次，降低 CPU 开销
-        if ((this.memory as any).boostTargetAccessible !== true) {
+        if (boostCache.boostTargetAccessible !== true) {
             const terrain = this.room.getTerrain();
             let ok = false;
             for (let dx = -1; dx <= 1; dx++) {
@@ -342,20 +351,20 @@ export default class BoostFunction extends Creep {
                 if (ok) break;
             }
             if (!ok) {
-                delete this.memory.boostTargetId;
-                delete this.memory.boostTargetMineral;
-                delete this.memory.boostTargetPart;
-                delete (this.memory as any).boostTargetFailCount;
-                delete (this.memory as any).boostTargetAccessible;
+                delete boostCache.boostTargetId;
+                delete boostCache.boostTargetMineral;
+                delete boostCache.boostTargetPart;
+                delete boostCache.boostTargetFailCount;
+                delete boostCache.boostTargetAccessible;
                 return 1;
             }
-            (this.memory as any).boostTargetAccessible = true;
+            boostCache.boostTargetAccessible = true;
         }
 
         // 6. 强化与移动
         if (!this.pos.isNearTo(targetLab)) {
             if (this.room?.visual) {
-                const mineral = (targetMineral || (this.memory.boostTargetMineral as MineralBoostConstant | undefined)) as string | undefined;
+                const mineral = (targetMineral || (boostCache.boostTargetMineral as MineralBoostConstant | undefined)) as string | undefined;
                 const c = mineralToUlkzgColor(mineral);
                 this.room.visual.circle(targetLab.pos, { radius: 0.55, fill: 'transparent', stroke: c, strokeWidth: 0.07, opacity: 0.85 });
                 this.room.visual.line(this.pos, targetLab.pos, { color: c, width: 0.15, opacity: 0.9, lineStyle: 'dotted' });
@@ -375,35 +384,35 @@ export default class BoostFunction extends Creep {
             return 1;
         }
 
-        const mineral = (targetMineral || (this.memory.boostTargetMineral as MineralBoostConstant | undefined)) as MineralBoostConstant | undefined;
-        const partType = (targetPart || (this.memory.boostTargetPart as BodyPartConstant | undefined)) as BodyPartConstant | undefined;
+        const mineral = (targetMineral || (boostCache.boostTargetMineral as MineralBoostConstant | undefined)) as MineralBoostConstant | undefined;
+        const partType = (targetPart || (boostCache.boostTargetPart as BodyPartConstant | undefined)) as BodyPartConstant | undefined;
         if (!mineral || !partType) {
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
             return 1;
         }
 
         if (targetLab.mineralType && targetLab.mineralType !== mineral) {
             // Lab 被占用或资源被替换，清理缓存后重新选择
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
             return 1;
         }
 
         const needParts = this.body.filter(part => part.type === partType && !part.boost).length;
         if (needParts <= 0) {
             // 目标部件已经全部完成，清理缓存后下一 tick 继续评估
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
             return 1;
         }
         const boostAmount = needParts * 30;
@@ -418,12 +427,12 @@ export default class BoostFunction extends Creep {
             }
 
             // 强化成功，清除目标缓存，以便下一 tick 重新评估（可能需要去另一个 Lab，或者已经全部完成）
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostOptionalStartTime;
-            delete (this.memory as any).boostTargetFailCount;
-            delete (this.memory as any).boostTargetAccessible;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostOptionalStartTime;
+            delete boostCache.boostTargetFailCount;
+            delete boostCache.boostTargetAccessible;
             return 1; // 继续下一轮检查
         } else if (result === ERR_NOT_IN_RANGE) {
             // 理论上 isNearTo 已经检查了，但防止边界情况
@@ -432,13 +441,13 @@ export default class BoostFunction extends Creep {
         }
 
         // 失败处理：尽量避免“站在 lab 旁但长期不 boost”或“lab 未准备好就一直空转”
-        const failCount = ((this.memory as any).boostTargetFailCount as number | undefined) || 0;
-        (this.memory as any).boostTargetFailCount = failCount + 1;
+        const failCount = (boostCache.boostTargetFailCount as number | undefined) || 0;
+        boostCache.boostTargetFailCount = failCount + 1;
 
         if (result === ERR_NOT_ENOUGH_RESOURCES) {
             // 缺矿/缺能量：确保有对应的 boost 任务，驱动 BoostMission 去补矿/补能量
             const ensureInterval = 10;
-            const lastEnsure = (this.memory as any).boostEnsureTime as number | undefined;
+            const lastEnsure = boostCache.boostEnsureTime as number | undefined;
             const allowEnsure = !lastEnsure || Game.time - lastEnsure >= ensureInterval;
 
             if (must && allowEnsure) {
@@ -456,33 +465,33 @@ export default class BoostFunction extends Creep {
                 if (needEnsure > 0) {
                     this.room.AssignBoostTask(mineral, needEnsure, ownerId);
                 }
-                (this.memory as any).boostEnsureTime = Game.time;
+                boostCache.boostEnsureTime = Game.time;
             }
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
             return 1;
         }
 
         // 某些错误码不会自行恢复：清理缓存，下一 tick 重选目标
         if (result === ERR_INVALID_TARGET || result === ERR_NOT_FOUND) {
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetAccessible;
-            delete (this.memory as any).boostTargetFailCount;
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetAccessible;
+            delete boostCache.boostTargetFailCount;
             return 1;
         }
 
         // 长时间失败：尝试换一个 lab，避免卡死在同一个目标上
-        if ((this.memory as any).boostTargetFailCount >= 30) {
-            delete this.memory.boostTargetId;
-            delete this.memory.boostTargetMineral;
-            delete this.memory.boostTargetPart;
-            delete (this.memory as any).boostTargetFailCount;
-            delete (this.memory as any).boostTargetAccessible;
+        if (boostCache.boostTargetFailCount >= 30) {
+            delete boostCache.boostTargetId;
+            delete boostCache.boostTargetMineral;
+            delete boostCache.boostTargetPart;
+            delete boostCache.boostTargetFailCount;
+            delete boostCache.boostTargetAccessible;
         }
         return 1;
     }

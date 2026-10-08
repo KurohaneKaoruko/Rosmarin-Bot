@@ -1,4 +1,5 @@
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
+import { getBoostCache } from '@/prototype/Creep/function/boostFunction';
 
 const getCachedDoubleDismantleTarget = (creep: Creep): Structure | null => {
     const targetId = creep.memory['targetId'] as Id<Structure> | null | undefined;
@@ -157,18 +158,18 @@ const runLegacy = (creep: Creep) => {
 
 const double_dismantle = {
     prepare: (creep) => {
-        if (creep.memory.boosted) return true;
+        if (getBoostCache(creep.memory).boosted) return true;
         const boostmap = creep.memory['boostmap'] || {
             [TOUGH]: ['XGHO2', 'GHO2', 'GO'],
             [WORK]: ['XZH2O', 'ZH2O', 'ZH']
         };
         if (!boostmap || Object.keys(boostmap).length === 0) {
-            creep.memory.boosted = true;
+            getBoostCache(creep.memory).boosted = true;
             return true;
         }
         const result = creep.goBoost(boostmap);
         const ok = result === OK;
-        if (ok) creep.memory.boosted = true;
+        if (ok) getBoostCache(creep.memory).boosted = true;
         return ok;
     },
     run: runLegacy
