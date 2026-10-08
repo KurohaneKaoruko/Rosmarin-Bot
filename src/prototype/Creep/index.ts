@@ -11,7 +11,7 @@ import CombatFunction from "./function/combatFunction"
 import BuildFunction from "./function/buildFunction"
 import HaulFunction from "./function/haulFunction"
 import ControllerFunction from "./function/controllerFunction"
-import CreepExecute from "./execute"
+import CreepExecute from "./runtime/execute"
 
 /**
  * Creep 原型扩展注册表

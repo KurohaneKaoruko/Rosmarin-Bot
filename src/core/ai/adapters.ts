@@ -1,5 +1,4 @@
 import { LayeredStateMachine, StateMachine, StateId, EventId, GuardId, StepOptions, TransitionResult } from './stateMachine';
-import { WORK_EVENTS, WorkStateHandlers } from './workMachine';
 
 // 记忆适配器：读写到 creep.memory
 type MemoryStateStorage<S extends StateId> = {
@@ -57,61 +56,5 @@ export const createLayeredRunner = <Ctx>(
     return {
         machine,
         step: (ctx, options) => machine.step(ctx, options)
-    };
-};
-
-const WORK_LAYER_STATE = {
-    SOURCE: 'source',
-    TARGET: 'target'
-} as const;
-
-type WorkLayerState = typeof WORK_LAYER_STATE[keyof typeof WORK_LAYER_STATE];
-
-const getWorkLayerState = (creep: Creep): WorkLayerState =>
-    creep.memory.working ? WORK_LAYER_STATE.TARGET : WORK_LAYER_STATE.SOURCE;
-
-const setWorkLayerState = (creep: Creep, state: WorkLayerState) => {
-    creep.memory.working = state === WORK_LAYER_STATE.TARGET;
-};
-
-const runWorkLayerState = (
-    handlers: WorkStateHandlers,
-    creep: Creep,
-    state: WorkLayerState
-) => {
-    return state === WORK_LAYER_STATE.TARGET
-        ? handlers.onTarget(creep)
-        : handlers.onSource(creep);
-};
-
-const resolveNextWorkLayerState = (state: WorkLayerState, event: ReturnType<typeof runWorkLayerState>): WorkLayerState => {
-    if (event === WORK_EVENTS.TO_TARGET) return WORK_LAYER_STATE.TARGET;
-    if (event === WORK_EVENTS.TO_SOURCE) return WORK_LAYER_STATE.SOURCE;
-    return state;
-};
-
-// 旧 source/target 模式的快速迁移入口
-export const runWorkLayer = (
-    creep: Creep,
-    handlers: WorkStateHandlers,
-    options: { reenter?: boolean } = {}
-) => {
-    const from = getWorkLayerState(creep);
-    const event = runWorkLayerState(handlers, creep, from);
-    const to = resolveNextWorkLayerState(from, event);
-    const transitioned = to !== from;
-
-    if (transitioned) {
-        setWorkLayerState(creep, to);
-        if (options.reenter ?? true) {
-            runWorkLayerState(handlers, creep, to);
-        }
-    }
-
-    return {
-        transitioned,
-        from,
-        to,
-        event,
     };
 };
