@@ -255,7 +255,7 @@ const utf15UnpackBits = (str: string, depth: number | number[]): [number[], numb
     return [values, it];
 };
 
-/** utf15 编解码器：无符号整数（数组）↔ 紧凑 UTF-16 字符串（15 位/字符） */
+/** utf15 位流编解码器：无符号整数（数组）↔ 紧凑 UTF-16 字符串（15 位/字符） */
 export class Utf15Codec {
     private readonly meta: boolean;
     private readonly array: boolean;

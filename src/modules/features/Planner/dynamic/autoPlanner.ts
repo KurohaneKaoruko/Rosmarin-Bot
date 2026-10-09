@@ -1289,7 +1289,6 @@ const ManagerPlanner = {
 			}
 			const currentPutAbleLen = currentPutAbleList.length;
 			if (currentPutAbleLen < planeGate) {
-				console.log(`[锚定诊断] 块 ${posNum} 限幅后 putable=${currentPutAbleLen} < 门槛 ${planeGate}，跳过`);
 				continue;
 			}
 
@@ -1313,7 +1312,6 @@ const ManagerPlanner = {
 					}
 				}
 				if (!slotCenter) {
-					console.log(`[锚定诊断] 块 ${posNum} 无可用槽位中心 (spawn ${existSpawnPos.x},${existSpawnPos.y})，出局`);
 					continue;
 				}
 			}
@@ -1397,7 +1395,6 @@ const ManagerPlanner = {
 				const MAX_WALL_RATIO = existSpawnPos ? 0.5 : 0.3;
 				const wallRatio = currentWallCnt / currentPutAbleLen;
 				if (currentWallCnt < MIN_WALL_CNT || wallRatio > MAX_WALL_RATIO) {
-					console.log(`[锚定诊断] 块 ${posNum} 墙圈不合格: walls=${currentWallCnt} putable=${currentPutAbleLen} ratio=${wallRatio.toFixed(2)}`);
 					currentWalls = null;
 				}
 			}
