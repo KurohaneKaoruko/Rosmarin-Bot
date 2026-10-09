@@ -1,4 +1,5 @@
 // season8 控制台命令：开关 / 推挤目标 / 策略 / 安全冲刺 / 托管模式 / 报告。
+// 另挂 helpSeason8（共享 help.ts 不认识赛季命令，帮助文本随变体走）。
 import { ensureRoomData, getRoomData } from '@/modules/shared/memory';
 import { getSeason8Data } from './memory';
 import { getSectorLevel, getTickScore } from './scoring';
@@ -8,7 +9,7 @@ const POLICY_SET = new Set(['aggressive', 'balanced', 'safe']);
 
 const isRoomName = (roomName: string) => ROOM_NAME_REG.test(String(roomName || ''));
 
-export default {
+const season8Commands = {
     season8: {
         enable(roomName: string, on?: boolean) {
             if (!isRoomName(roomName)) return ERR_INVALID_ARGS;
@@ -114,5 +115,26 @@ export default {
 
             return OK;
         }
+    }
+};
+
+export default season8Commands;
+
+const HELP_TEXT = [
+    '🏁 Season8 冲分指令',
+    '',
+    'season8.enable(roomName, on?)：开关房间 Season8 调度',
+    'season8.target(roomName, targetRoom?)：设置/清除推进目标房间',
+    "season8.policy(roomName, 'aggressive'|'balanced'|'safe')：设置推进策略",
+    'season8.safeRush(roomName, on?)：开关 SafeMode 冲 RCL4 策略',
+    'season8.managedMode(roomName, on?)：开关 Season8 自动 mode 档位管理',
+    'season8.report(roomName?)：查看总分、CPU 档位、房间快照与计划状态',
+].join('\n');
+
+/** 在 ConsoleExtension 之后调用：挂 season8.* 命令与 helpSeason8（与共享 console/index.ts 同法）。 */
+export const mountSeason8Console = (): void => {
+    _.assign(global, season8Commands);
+    if (!(global as any).helpSeason8) {
+        (global as any).helpSeason8 = () => console.log(HELP_TEXT);
     }
 };

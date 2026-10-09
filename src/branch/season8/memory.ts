@@ -6,5 +6,8 @@ import { getBotMemory } from '@/modules/shared/memory';
 export function getSeason8Data(): any {
     const mem = getBotMemory() as any;
     mem.Season8Data ??= {};
+    mem.Season8Data.rooms ??= {};
+    mem.Season8Data.frontier ??= {};
+    mem.Season8Data.cpuBudget ??= { tick: 0, bucket: 0, used: 0, level: 'normal' };
     return mem.Season8Data;
 }
