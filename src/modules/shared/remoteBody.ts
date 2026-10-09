@@ -10,6 +10,11 @@ const WORK_COST = 100;
 const CARRY_COST = 50;
 const MOVE_COST = 50;
 
+/** 接力模式单程携带上限：小体型快周转（controller 等级 < 7） */
+export const RELAY_HAULER_CARRY_SIZE = 4;
+/** 直运模式单程携带上限（controller 等级 >= 7，基础设施成熟） */
+export const DIRECT_HAULER_CARRY_SIZE = 32;
+
 type BodyConfig = ((BodyPartConstant | number)[])[];
 
 export function buildRemoteMinerBody(

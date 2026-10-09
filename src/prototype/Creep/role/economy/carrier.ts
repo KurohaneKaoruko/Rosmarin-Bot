@@ -5,6 +5,7 @@
 import { ROLES } from '@/constant/CreepConstant';
 import { THRESHOLDS } from '@/constant/Thresholds';
 import { getAssignedEnergyTarget } from '@/modules/shared/energyLogistics';
+import { createPendingLedger, evaluateHeadOnSwap, expectedOutputDelta } from '@/modules/shared/haulerStrategy';
 
 // 源旁掉落捡取的最低数量：避免为个位数能量反复蹲点
 const SOURCE_DROP_PICKUP_MIN = 30;
@@ -25,7 +26,7 @@ const pickSourceLineByDemand = (creep: Creep): Source | null => {
     const roleCache = creep.getRoleCache();
     if (roleCache._loadLineId) {
         const locked = Game.getObjectById(roleCache._loadLineId as Id<Source>) as Source | null;
-        if (locked && sourceLinePending(creep.room, locked) > 0) return locked;
+        if (locked && sourceLinePendingFor(creep, creep.room, locked) > 0) return locked;
         roleCache._loadLineId = null;
     }
     const sources = (creep.room.source || []) as Source[];
@@ -34,7 +35,7 @@ const pickSourceLineByDemand = (creep: Creep): Source | null => {
     let best: Source | null = null;
     let bestPending = -1;
     for (const source of sources) {
-        const pending = sourceLinePending(creep.room, source);
+        const pending = sourceLinePendingFor(creep, creep.room, source);
         const closer = pending === bestPending && best !== null
             && creep.pos.getRangeTo(source.pos) < creep.pos.getRangeTo(best.pos);
         if (pending > bestPending || closer) {
@@ -42,8 +43,44 @@ const pickSourceLineByDemand = (creep: Creep): Source | null => {
             bestPending = pending;
         }
     }
-    if (best) roleCache._loadLineId = best.id;
+    pendingLedger.reserve(best.id, Game.time, creep.store.getCapacity(RESOURCE_ENERGY));
+    roleCache._loadLineId = best.id;
     return best;
+};
+
+// 预期产量记账（race 参考实现 pendingEnergy/getSourceExpectedEnergyDelta 口径）：
+// 认领即预扣容量，待运量计入途中持续产出——多 carrier 不扎堆，远线不误判枯竭
+const pendingLedger = createPendingLedger();
+
+// 源旁采集力（WORK×HARVEST_POWER）按 tick 记忆化：同 tick 多 carrier 选线共享
+let harvestPowerTick = -1;
+const harvestPowerBySource = new Map<Id<Source>, number>();
+const sourceHarvestPower = (room: Room, source: Source): number => {
+    if (harvestPowerTick !== Game.time) {
+        harvestPowerTick = Game.time;
+        harvestPowerBySource.clear();
+    }
+    const cached = harvestPowerBySource.get(source.id);
+    if (cached !== undefined) return cached;
+    let power = 0;
+    for (const c of source.pos.findInRange(FIND_MY_CREEPS, 1)) {
+        if ((c.memory as any).role !== ROLES.harvester) continue;
+        power += c.getActiveBodyparts(WORK) * HARVEST_POWER;
+    }
+    harvestPowerBySource.set(source.id, power);
+    return power;
+};
+
+/** 选线口径：净待运量（扣除本 tick 已预订）+ 途中预期产出增量 */
+const sourceLinePendingFor = (creep: Creep, room: Room, source: Source): number => {
+    const current = Math.max(0, sourceLinePending(room, source) - pendingLedger.reservedOf(source.id, Game.time));
+    const distance = creep.pos.getRangeTo(source.pos);
+    return current + expectedOutputDelta({
+        energy: source.energy,
+        harvestPower: sourceHarvestPower(room, source),
+        distance,
+        regenTime: source.ticksToRegeneration || ENERGY_REGEN_TIME,
+    });
 };
 
 /** 源线还有无可取能量：需求驱动选线下 = 任意源线有待运即可继续取（选线会自动流向堆积侧） */
@@ -59,17 +96,40 @@ const getUsableEnergyIn = (room: Room, source: Source): { container?: StructureC
 };
 
 // 顺路灌注：身边 ext/spawn（urgent 加 tower/powerSpawn）顺手补满（参考实现途经填充口径）
+// 目标清单按格按 tick 记忆化（race 参考实现 haulerExtCacheMap 口径），避免全房遍历
+let adjacentFillCacheTick = -1;
+const adjacentFillCache = new Map<string, Id<AnyStoreStructure>[]>();
+
+const adjacentFillTargets = (creep: Creep, urgentEnergy: boolean): AnyStoreStructure[] => {
+    if (adjacentFillCacheTick !== Game.time) {
+        adjacentFillCacheTick = Game.time;
+        adjacentFillCache.clear();
+    }
+
+    const key = `${urgentEnergy ? 'u' : 'n'}:${creep.room.name}:${creep.pos.x}:${creep.pos.y}`;
+    let ids = adjacentFillCache.get(key);
+    if (!ids) {
+        const targets = [
+            ...(creep.room.extension || []),
+            ...(creep.room.spawn || []),
+            ...(urgentEnergy ? (creep.room.tower || []) : []),
+        ] as AnyStoreStructure[];
+        ids = targets.filter(s => creep.pos.inRangeTo(s, 1)).map(s => s.id as Id<AnyStoreStructure>);
+        adjacentFillCache.set(key, ids);
+    }
+
+    const result: AnyStoreStructure[] = [];
+    for (const id of ids) {
+        const structure = Game.getObjectById(id);
+        if (structure && (structure.store.getFreeCapacity(RESOURCE_ENERGY) || 0) > 0) result.push(structure);
+    }
+    return result;
+};
+
 const fillAdjacentSpawnStructures = (creep: Creep, urgentEnergy: boolean): boolean => {
     if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) return false;
-    const targets = [
-        ...(creep.room.extension || []),
-        ...(creep.room.spawn || []),
-        ...(urgentEnergy ? (creep.room.tower || []) : []),
-    ] as AnyStoreStructure[];
-    for (const struct of targets) {
-        if (creep.pos.inRangeTo(struct, 1) && (struct.store.getFreeCapacity(RESOURCE_ENERGY) || 0) > 0) {
-            if (creep.transfer(struct, RESOURCE_ENERGY) === OK) return true;
-        }
+    for (const struct of adjacentFillTargets(creep, urgentEnergy)) {
+        if (creep.transfer(struct, RESOURCE_ENERGY) === OK) return true;
     }
     return false;
 };
@@ -273,10 +333,6 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     }
 
     const otherSupplying = (other.store[RESOURCE_ENERGY] || 0) > 0;
-    if (supplying === otherSupplying) {
-        // 双空：矿工占位 pull 已处理，其余无意义
-        return false;
-    }
 
     // 相向对穿判定：对方意图格 = 我的当前位置（正面对穿，参考实现 939-942 口径）
     const otherToward = otherSupplying
@@ -284,19 +340,44 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
         : pickSourceLineByDemand(other)?.pos ?? null;
     if (!otherToward) return false;
     const otherCoord = intendedCoordOf(other, otherToward);
-    if (otherCoord.x !== creep.pos.x || otherCoord.y !== creep.pos.y) return false;
+    const coordsInterlocked = otherCoord.x === creep.pos.x && otherCoord.y === creep.pos.y;
 
-    // 容量相等才能对穿换向；供方 TTL>50 才做半程交接
-    if (other.store.getCapacity(RESOURCE_ENERGY) !== creep.store.getCapacity(RESOURCE_ENERGY)) return false;
+    // 门槛判据（race 参考实现 getRelayTarget 口径）：相位相反 + 容量相等 + 供方 TTL>50
+    if (!evaluateHeadOnSwap({
+        supplying,
+        otherSupplying,
+        otherRetreat: !!otherMem.retreat,
+        otherRelayed: otherMem._relayed === Game.time,
+        selfRelayed: mem._relayed === Game.time,
+        coordsInterlocked,
+        capacityEqual: other.store.getCapacity(RESOURCE_ENERGY) === creep.store.getCapacity(RESOURCE_ENERGY),
+        supplierTtl: (supplying ? creep : other).ticksToLive || 1500,
+    })) return false;
+
     const supplier = supplying ? creep : other;
-    if ((supplier.ticksToLive || 1500) <= 50) return false;
     const fetcher = supplying ? other : creep;
-    if (supplier.transfer(fetcher, RESOURCE_ENERGY) === OK) {
-        mem._relayed = Game.time;
-        (otherMem as any)._relayed = Game.time;
-        return true;
-    }
-    return false;
+    if (supplier.transfer(fetcher, RESOURCE_ENERGY) !== OK) return false;
+
+    // 任务互换（race 参考实现 memory/heap 互换口径）：cache.role 整对象 + 协议字段
+    // 随属主走——双方原地接管对方任务（源线锁/目标分配），无需走完全程
+    const supplierCreep = supplying ? creep : other;
+    const fetcherCreep = supplying ? other : creep;
+    const supplierCache = supplierCreep.getRoleCache();
+    const fetcherCache = fetcherCreep.getRoleCache();
+    const supplierState = { ...supplierCache };
+    for (const key of Object.keys(supplierCache)) delete supplierCache[key];
+    Object.assign(supplierCache, fetcherCache);
+    for (const key of Object.keys(fetcherCache)) delete fetcherCache[key];
+    Object.assign(fetcherCache, supplierState);
+    const tmpToward = mem._toward ?? null;
+    mem._toward = otherMem._toward ?? null;
+    otherMem._toward = tmpToward;
+    const tmpAssign = mem._assign ?? null;
+    mem._assign = otherMem._assign ?? null;
+    otherMem._assign = tmpAssign;
+    mem._relayed = Game.time;
+    (otherMem as any)._relayed = Game.time;
+    return true;
 };
 
 const CarrierRole = {

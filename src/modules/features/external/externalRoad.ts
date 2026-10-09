@@ -2044,3 +2044,27 @@ export class RoadVisual {
         });
     }
 }
+
+
+// ===== 外矿搬运路程的道路覆盖（race 参考实现 enoughRoad 口径）=====
+
+/**
+ * 外矿搬运路程的道路覆盖率：已建路格 / 规划路格（仅有视野房间计入）。
+ *
+ * race 参考实现 constructRemotes 口径：覆盖率 >= 1/3（`constructedDistance / totalDistance >= 1/3`）
+ * 视为 `enoughRoad`，搬运工孵化才切换 2:1 路面体型；无路由数据或无视野时返回 0（保持 1:1 越野体）。
+ */
+export function getBuiltRoadCoverage(sourceRoom: string): number {
+    let built = 0;
+    let total = 0;
+    for (const targetRoom of RoadMemory.getRouteTargets(sourceRoom)) {
+        for (const pos of RoadMemory.getGroupPositions(sourceRoom, targetRoom)) {
+            const room = Game.rooms[pos.roomName];
+            if (!room) continue;
+            total += 1;
+            const structures = room.lookForAt(LOOK_STRUCTURES, pos.x, pos.y) as Structure[];
+            if (structures.some(s => s.structureType === STRUCTURE_ROAD)) built += 1;
+        }
+    }
+    return total > 0 ? built / total : 0;
+}

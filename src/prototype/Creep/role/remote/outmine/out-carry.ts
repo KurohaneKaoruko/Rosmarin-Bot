@@ -3,6 +3,7 @@ import { ExternalMineAnalysis, ExternalMineSourceStat } from '@/modules/features
 import { RoadMemory } from '@/modules/features/external/externalRoad';
 import { getAssignedEnergyTarget } from '@/modules/shared/energyLogistics';
 import { ensureMemoryCache } from '@/prototype/Creep/function/cacheFunction';
+import { selectCarryDeposit } from '@/modules/shared/haulerStrategy';
 
 // ==================== 口径 ====================
 
@@ -410,6 +411,41 @@ const syncOutCarryMode = (creep: Creep): OutCarryMode => {
     return mode;
 };
 
+// ==================== 危险撤退 ====================
+
+// 危险判定（race 参考实现 isDangerRoom 口径的保守等价）：
+// 非己方房间出现带攻击部件的敌对单位——情报体系就绪前先按视野实时判定
+const isDangerRoomForOutCarry = (creep: Creep): boolean => {
+    if (creep.room.my) return false;
+    const hostiles = creep.room.find(FIND_HOSTILE_CREEPS, {
+        filter: (h: Creep) => h.getActiveBodyparts(ATTACK) > 0 || h.getActiveBodyparts(RANGED_ATTACK) > 0,
+    }) as Creep[];
+    return hostiles.length > 0;
+};
+
+/** 撤退回母房：途中保留载货；抵达后清空相位/源绑定/目标缓存，交给母房交付流程消化 */
+const retreatToHome = (creep: Creep): boolean => {
+    const sourceRoom = creep.memory.sourceRoom;
+    if (!sourceRoom) return false;
+
+    if (creep.room.name !== sourceRoom || creep.pos.isRoomEdge()) {
+        if (!creep.pos.isRoomEdge() && moveAlongPlannedRoute(creep, sourceRoom)) return true;
+        moveOutCarryToRoom(creep, sourceRoom, { plainCost: 2, swampCost: 10 });
+        return true;
+    }
+
+    // 抵达母房：清空任务状态（race 参考实现：有货转交付、无货全清）
+    const cache = getOutCarryCache(creep);
+    cache.outCarryMode = creep.store.getUsedCapacity() > 0
+        ? OUT_CARRY_STRATEGIES.DELIVER
+        : OUT_CARRY_STRATEGIES.COLLECT;
+    delete getOutCarrySourceCache(creep).assignedSourceId;
+    delete getOutCarrySourceCache(creep).assignedSourceKey;
+    delete getOutCarryTargetCache(creep).targetId;
+    delete (creep.memory as any).retreat;
+    return false;
+};
+
 // ==================== 收集态 ====================
 
 // 源边落地能量：掉落取最大堆，无掉落再取墓碑存量
@@ -450,6 +486,14 @@ const runOutCarryCollect = (creep: Creep): void => {
     const site = resolveCollectSite(creep);
     if (!site) return;
     recordCollectBinding(creep, site.stat);
+
+    // keeper 源点：source keeper 在场（源旁 5 格）时等待，不进取货（race 参考实现口径）
+    if (typeof STRUCTURE_KEEPER_LAIR !== 'undefined' && site.sourcePos) {
+        const keepers = site.sourcePos.findInRange(FIND_HOSTILE_CREEPS, 5, {
+            filter: (h: any) => h.owner?.username === 'Source Keeper',
+        });
+        if (keepers.length > 0) return;
+    }
 
     // ① 源边落地能量优先
     if (collectLooseEnergy(creep, site.sourcePos)) return;
@@ -528,24 +572,21 @@ const fillAdjacentSpawnLine = (creep: Creep): boolean => {
     return false;
 };
 
-// 主仓选仓口径：terminal 缓冲线优先 → storage 留空线 → terminal 余位
+// 主仓选仓口径（race 参考实现 runHauler 卸货口径）：storage 优先承接主仓，
+// terminal 仅按止盈水位补线；都不可用时返回 null 走承接链
 const resolveCarryDepositTarget = (creep: Creep, carried: ResourceConstant): StructureTerminal | StructureStorage | null => {
     const terminal = creep.room.terminal;
     const storage = creep.room.storage;
 
-    if (
-        carried === RESOURCE_ENERGY &&
-        terminal &&
-        (terminal.store[RESOURCE_ENERGY] || 0) < OUT_CARRY_TERMINAL_ENERGY_LINE &&
-        terminal.store.getFreeCapacity() > 0
-    ) {
-        return terminal;
-    }
-
-    if (storage && storage.store.getFreeCapacity(carried) > OUT_CARRY_STORAGE_MIN_FREE) return storage;
-
-    if (terminal && terminal.store.getFreeCapacity(carried) > 0) return terminal;
-
+    const picked = selectCarryDeposit({
+        storageFree: storage ? (storage.store.getFreeCapacity(carried) || 0) : -1,
+        terminalEnergy: (terminal?.store[RESOURCE_ENERGY] || 0),
+        terminalFree: terminal ? (terminal.store.getFreeCapacity(carried) || 0) : 0,
+        storageMinFree: OUT_CARRY_STORAGE_MIN_FREE,
+        terminalEnergyLine: OUT_CARRY_TERMINAL_ENERGY_LINE,
+    });
+    if (picked === 'storage' && storage) return storage;
+    if (picked === 'terminal' && terminal) return terminal;
     return null;
 };
 
@@ -641,6 +682,8 @@ const runOutCarryDeliver = (creep: Creep): void => {
 const tryRelayHandoff = (creep: Creep): Creep | null => {
     const memAny = creep.memory as any;
     if (memAny.relayedTick === Game.time) return null;
+    // 撤退期不参与接力（race 参考实现 retreat 豁免口径）
+    if (memAny.retreat) return null;
     const betterMove = (global as any).BetterMove;
     if (!betterMove?.isSwapIntent) return null;
     const supplying = creep.store.getUsedCapacity() > 0;
@@ -648,6 +691,7 @@ const tryRelayHandoff = (creep: Creep): Creep | null => {
         filter: (c: Creep) =>
             c.id !== creep.id &&
             c.memory.role === ROLES['out-carry'] &&
+            !(c.memory as any).retreat &&
             (c.memory as any).relayedTick !== Game.time,
     }) as Creep[];
     for (const other of candidates) {
@@ -689,9 +733,19 @@ const runModeCycle = (creep: Creep): void => {
 };
 
 const outCarry = {
-    // 统一入口：空仓取 / 满载运 的粘滞两态 + 相向接力；修路与建造交给 out-build
+    // 统一入口：危险撤退优先于一切；空仓取 / 满载运 的粘滞两态 + 相向接力；
+    // 修路与建造交给 out-build
     run: function (creep: Creep): void {
         creep.memory.dontPullMe = false;
+        const mem = creep.memory as any;
+
+        // 危险撤退（race 参考实现口径）：撤退期间不参与接力，抵达母房后恢复常态
+        if (!mem.retreat && isDangerRoomForOutCarry(creep)) mem.retreat = true;
+        if (mem.retreat) {
+            retreatToHome(creep);
+            return;
+        }
+
         runWithRelay(creep);
     },
 };
