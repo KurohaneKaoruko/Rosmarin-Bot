@@ -94,6 +94,26 @@ export default class SpawnControl extends Room {
     }
 
     private trySpawnEmergencyUniversal(spawn: StructureSpawn, blockedRole = 'recovery', referenceCost = 300) {
+        // 应急孵化收窄（仅卡死场景介入，用户裁定口径）：三者同时成立才触发——
+        // ① spawn 满仓 ≥300（到顶不再变化）；② 场上没有可给 spawn 填充能量的搬运工，
+        // 或没有可供搬运的能量；③ 孵化队列中的关键 creep 在当前能量下孵化不出。
+        // 落地排队阶段（任务可孵/管线排队中）一律走正常孵化管线，不抢跑。
+        if (spawn.energy < spawn.energyCapacity) return false;
+
+        let hasFillableCarrier = false;
+        for (const c of Object.values(Game.creeps)) {
+            const m = (c.memory || {}) as any;
+            if (m.role !== ROLES.carrier || m.home !== this.name || c.spawning) continue;
+            if ((c.store[RESOURCE_ENERGY] || 0) > 0) { hasFillableCarrier = true; break; }
+        }
+        const haulableEnergy =
+            (Game.rooms[this.name]?.container || []).some(c => (c.store[RESOURCE_ENERGY] || 0) > 0) ||
+            ((Game.rooms[this.name]?.find(FIND_DROPPED_RESOURCES, {
+                filter: (r: Resource) => r.resourceType === RESOURCE_ENERGY,
+            }) || []) as Resource[]).length > 0;
+        if (hasFillableCarrier && haulableEnergy) return false;
+        if (referenceCost <= this.energyAvailable) return false;
+
         const creepNum = this.getCreepNum();
         const spawnMissionNum = this.getSpawnMissionNum() || {};
         const transporterNum = (creepNum[ROLES.transporter] || 0) + (spawnMissionNum[ROLES.transporter] || 0);
