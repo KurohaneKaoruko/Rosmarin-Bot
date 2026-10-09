@@ -61,6 +61,8 @@ type CachedLayout = {
 /** 缓存有效期（tick） */
 const CACHE_TTL = 50;
 
+import { getBuildMinLevel, getSkipBuildTypes } from '@/modules/shared/gameCapabilities';
+
 function cpuNow(): number {
     return Game.cpu.getUsed();
 }
@@ -1037,29 +1039,40 @@ function computeDynamic(roomName: string, layoutType: string): CachedLayout | nu
         roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], flagCenter);
         if (!roomStructsData) log('LayoutPlanner', `[锚定诊断] 旗指定中心无解 room=${roomName} center=${flagCenter.x},${flagCenter.y}`);
     } else {
-        // spawn 锚定限幅降级阶梯：紧凑 10 → 放宽 14 → 不限幅；每级保持 spawn 收编，杜绝「稍偏即崩」
-        for (const [radius, gate] of [[10, 160], [10, 120], [14, 120], [0, 120]] as [number, number][]) {
-            roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], undefined, undefined, existSpawnPos, radius, gate);
-            if (roomStructsData) {
-                log('LayoutPlanner', `[锚定诊断] 成功 room=${roomName} radius=${radius === 0 ? '无限' : radius}`);
-                break;
+        // spawn 锚定限幅降级阶梯：紧凑 10 → 放宽 14 → 不限幅，再逐级放低门槛——
+        // 每级保持 spawn 收编；全阶梯无解才退回无锚流程（最后兜底），杜绝「稍偏即崩」的二值脆弱性
+        if (flagCenter) {
+            // 旗模式：手动指定中心，精确钉死（不参与降级阶梯，失败按用户指定报错）
+            roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], flagCenter);
+            if (!roomStructsData) log('LayoutPlanner', `[锚定诊断] 旗指定中心无解 room=${roomName} center=${flagCenter.x},${flagCenter.y}`);
+        } else {
+            // spawn 锚定限幅降级阶梯：紧凑 10 → 放宽 14 → 不限幅，门槛 160 → 120 → 100 → 80 → 40 逐级放低
+            for (const [radius, gate] of [[10, 160], [10, 120], [14, 120], [0, 120], [0, 100], [0, 80], [0, 40]] as [number, number][]) {
+                roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], undefined, undefined, existSpawnPos, radius, gate);
+                if (roomStructsData) {
+                    log('LayoutPlanner', `[锚定诊断] 成功 room=${roomName} radius=${radius === 0 ? '无限' : radius} gate=${gate}`);
+                    break;
+                }
+                log('LayoutPlanner', `[锚定诊断] 半径 ${radius === 0 ? '无限' : radius} 门槛 ${gate} 无解，降级重试 room=${roomName}`);
             }
-            log('LayoutPlanner', `[锚定诊断] 半径 ${radius === 0 ? '无限' : radius} 无解，降级重试 room=${roomName}`);
         }
-    }
-    if (!roomStructsData) {
-        // 全阶梯无解：无锚无限幅兜底
-        log('LayoutPlanner', `[锚定诊断] 锚定失败，退回无锚流程 room=${roomName}`);
-        sigKey = makeDynamicSigKey(roomName, layoutType, pointsSig, null);
-        const fallbackCached = getCachedDynamicBySig(sigKey);
-        if (fallbackCached) {
-            return {
-                ...fallbackCached,
-                structMap: cloneStructMap(fallbackCached.structMap),
-                layoutMemory: cloneLayoutMemory(fallbackCached.layoutMemory)
-            };
+        if (!roomStructsData) {
+            // 全阶梯无解：无锚无限幅兜底（门槛同步降级，直至必有产出）
+            log('LayoutPlanner', `[锚定诊断] 锚定失败，退回无锚流程 room=${roomName}`);
+            sigKey = makeDynamicSigKey(roomName, layoutType, pointsSig, null);
+            const fallbackCached = getCachedDynamicBySig(sigKey);
+            if (fallbackCached) {
+                return {
+                    ...fallbackCached,
+                    structMap: cloneStructMap(fallbackCached.structMap),
+                    layoutMemory: cloneLayoutMemory(fallbackCached.layoutMemory)
+                };
+            }
+            for (const gate of [160, 120, 80, 40] as number[]) {
+                roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb], undefined, undefined, undefined, undefined, gate);
+                if (roomStructsData) break;
+            }
         }
-        roomStructsData = computeManor(pa.roomName, [pc, pm, pa, pb]);
     }
     const normalized = normalizeDynamicPlannerResult(roomName, layoutType, roomStructsData);
     if (!normalized) return null;
@@ -1121,9 +1134,14 @@ export const LayoutPlanner = {
 
         const maxSites = options?.maxSites;
         const cap = typeof maxSites === 'number' ? maxSites : (typeof MAX_CONSTRUCTION_SITES === 'number' ? MAX_CONSTRUCTION_SITES : 100);
+        // 能力闸：配置跳过的结构类型不放置（布局不受影响，已放工地自然消化）
+        // 'all'：完全不放工地（布局照常规划，已放工地不动）
+        const skipBuild = getSkipBuildTypes();
+        if (skipBuild.includes('all')) return 0;
+        const skipSet = skipBuild.length ? new Set(skipBuild) : null;
         const keys = only ? [only] : Object.keys(layoutMemory);
         const coreDepotKeys = keys.filter((structureType) => isCoreDepotStructure(structureType));
-        const regularKeys = keys.filter((structureType) => !isCoreDepotStructure(structureType));
+        const regularKeys = keys.filter((structureType) => !isCoreDepotStructure(structureType) && !skipSet?.has(structureType));
         regularKeys.sort((a, b) => (PLACEMENT_ORDER[a] ?? 7) - (PLACEMENT_ORDER[b] ?? 7));
         let budget = Math.max(0, cap - allSite.length);
 
@@ -1140,6 +1158,10 @@ export const LayoutPlanner = {
 
             const buildMax = (CONTROLLER_STRUCTURES as any)?.[s]?.[room.level] ?? 0;
             if (!buildMax) continue;
+
+            // 能力闸：配置了最低建造等级的类型，未达等级不放（布局照常，仅推迟放量）
+            const minLevel = getBuildMinLevel()[s];
+            if (minLevel !== undefined && room.level < minLevel) continue;
 
             // RCL<6 容器每源限一个（源容器存量计数，见下方放置过滤）
             const placedContainerPerSource = new Map<string, number>();
@@ -1249,6 +1271,16 @@ export const LayoutPlanner = {
             layoutMemory = {};
             layoutMap[roomName] = layoutMemory;
         }
+        // 旧布局点位快照（清理口径：只清「旧布局内有、新布局没有」的残留工地，
+        // 不碰功能性外部工地——外矿容器/道路等不在布局内，清了会断链）
+        const staleKeys = new Set<string>();
+        for (const [type, pts] of Object.entries(layoutMemory as any)) {
+            if (!Array.isArray(pts)) continue;
+            for (const p of pts as number[]) {
+                const [x, y] = decompress(p);
+                staleKeys.add(`${type}:${x},${y}`);
+            }
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
         // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
@@ -1259,7 +1291,8 @@ export const LayoutPlanner = {
                 for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
             }
             for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
-                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+                const staleKey = `${site.structureType}:${site.pos.x},${site.pos.y}`;
+                if (staleKeys.has(staleKey) && !layoutKeys.has(staleKey)) site.remove();
             }
         }
         const writeCpu = cpuDelta(writeStart);
@@ -1312,6 +1345,16 @@ export const LayoutPlanner = {
             layoutMemory = {};
             layoutMap[roomName] = layoutMemory;
         }
+        // 旧布局点位快照（清理口径：只清「旧布局内有、新布局没有」的残留工地，
+        // 不碰功能性外部工地——外矿容器/道路等不在布局内，清了会断链）
+        const staleKeys = new Set<string>();
+        for (const [type, pts] of Object.entries(layoutMemory as any)) {
+            if (!Array.isArray(pts)) continue;
+            for (const p of pts as number[]) {
+                const [x, y] = decompress(p);
+                staleKeys.add(`${type}:${x},${y}`);
+            }
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
         // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
@@ -1322,7 +1365,8 @@ export const LayoutPlanner = {
                 for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
             }
             for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
-                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+                const staleKey = `${site.structureType}:${site.pos.x},${site.pos.y}`;
+                if (staleKeys.has(staleKey) && !layoutKeys.has(staleKey)) site.remove();
             }
         }
         const writeCpu = cpuDelta(writeStart);
@@ -1418,6 +1462,16 @@ export const LayoutPlanner = {
             layoutMemory = {};
             layoutMap[roomName] = layoutMemory;
         }
+        // 旧布局点位快照（清理口径：只清「旧布局内有、新布局没有」的残留工地，
+        // 不碰功能性外部工地——外矿容器/道路等不在布局内，清了会断链）
+        const staleKeys = new Set<string>();
+        for (const [type, pts] of Object.entries(layoutMemory as any)) {
+            if (!Array.isArray(pts)) continue;
+            for (const p of pts as number[]) {
+                const [x, y] = decompress(p);
+                staleKeys.add(`${type}:${x},${y}`);
+            }
+        }
         for (const k in layoutMemory) delete layoutMemory[k];
         Object.assign(layoutMemory, computed.layoutMemory as any);
         // 布局重算后清理不属于新布局的工地：旧规划残留会永久占位（视觉污染 + 白吃建造预算）
@@ -1428,7 +1482,8 @@ export const LayoutPlanner = {
                 for (const [x, y] of pts as [number, number][]) layoutKeys.add(`${type}:${x},${y}`);
             }
             for (const site of room.find(FIND_MY_CONSTRUCTION_SITES)) {
-                if (!layoutKeys.has(`${site.structureType}:${site.pos.x},${site.pos.y}`)) site.remove();
+                const staleKey = `${site.structureType}:${site.pos.x},${site.pos.y}`;
+                if (staleKeys.has(staleKey) && !layoutKeys.has(staleKey)) site.remove();
             }
         }
         const writeCpu = cpuDelta(writeStart);
