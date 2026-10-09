@@ -15,6 +15,10 @@ export type ServerCaps = {
     boostResCheck: boolean;
     /** 孵化挂单入池/挑选时的能量闸（关闭时大体型直入池，可孵性交由引擎裁决） */
     energyCheck: boolean;
+    /** 不自动建造的结构类型（布局照常规划，仅放置时跳过；核心仓库 storage/terminal 不适用） */
+    skipBuildTypes: string[];
+    /** 结构类型 → 最低建造等级（达到前不放该类工地；未配置的类型按引擎口径） */
+    buildMinLevel: Record<string, number>;
     /** 房间默认档：非 auto 时替代「订阅档位」兜底（显式 room.mode 配置仍最优先） */
     defaultRoomMode: 'auto' | RoomModeName;
 };
@@ -24,6 +28,8 @@ const caps: ServerCaps = {
     racePanel: true,
     boostResCheck: true,
     energyCheck: true,
+    skipBuildTypes: [],
+    buildMinLevel: {},
     defaultRoomMode: 'auto',
 };
 
@@ -38,5 +44,9 @@ export const isRacePanelEnabled = (): boolean => caps.racePanel;
 export const isBoostResCheckEnabled = (): boolean => caps.boostResCheck;
 
 export const isEnergyCheckEnabled = (): boolean => caps.energyCheck;
+
+export const getSkipBuildTypes = (): readonly string[] => caps.skipBuildTypes;
+
+export const getBuildMinLevel = (): Readonly<Record<string, number>> => caps.buildMinLevel;
 
 export const getDefaultRoomMode = (): 'auto' | RoomModeName => caps.defaultRoomMode;

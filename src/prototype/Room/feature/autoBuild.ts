@@ -1,6 +1,7 @@
 import LayoutPlanner from "@/modules/features/Planner/layoutPlanner"
 import { getLayoutData, getRoomData } from "@/modules/shared/memory";
 import { getRoomMode } from "@/modules/shared/roomMode";
+import { getSkipBuildTypes } from "@/modules/shared/gameCapabilities";
 
 
 
@@ -39,6 +40,8 @@ export default class AutoBuild extends Room {
 
         // 关键建筑造rampart
         if (this.level < 7) return;
+        // 'all' 模式：完全不放工地（含关键建筑 rampart）
+        if (getSkipBuildTypes().includes('all')) return;
         const structures = this.getStructures() || [];
         for (const s of ['spawn', 'tower', 'storage', 'terminal', 'factory', 'lab', 'nuker', 'powerSpawn']) {
             let structs = structures.filter((o) => o.structureType == s);
