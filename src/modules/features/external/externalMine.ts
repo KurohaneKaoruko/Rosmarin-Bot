@@ -1646,10 +1646,10 @@ export class ExternalMineSpawner {
     // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
     private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = 12;
     private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = 13;
-    // rush 管线等级（对齐参考实现的孵化层序：分发/采集搬运 > 升级 > 建造）：
+    // rush 管线等级（孵化层序：分发/采集搬运 > 升级 > 建造）：
     // 收入链（矿工 OH + 搬运 OC）整体压在升级前面，升级压在建造前面。
     // 升级不饿死的保障不是层级，而是升级定编有界（=实测收入 + 底火）——
-    // 收入链先满、升级池封顶，谁也饿不死谁（参考实现同款自洽）。
+    // 收入链先满、升级池封顶，谁也饿不死谁（自洽闭环）。
     // 旧口径（升级 7 > 搬运 8）的震荡根源：升级单常态缺编 → 永远插队搬运 →
     // 搬运饿死 → 收入掉 → 升级定编跟着掉 → 同步崩（attempt 19/20 实测 RCL4@25k）。
     private static readonly OUTMINE_RUSH_HARVEST_LEVEL = 4;
@@ -1669,7 +1669,7 @@ export class ExternalMineSpawner {
     // - 采集工额度 = 单源定编（RCL≥4 每源 1 个，两源房正好 2），刚好排满不浪费；
     // - 搬运工额度是大头，压到 3 条，把它对 spawn 的占用摊到多个外矿房上。
     private static readonly OUTMINE_HARVEST_PENDING_CAP = 2;
-    // rush 接力口径：OH 是收入源头，挂单额度大于搬运（先矿后车，同参考实现的矿车顺序）
+    // rush 接力口径：OH 是收入源头，挂单额度大于搬运（先矿后车）
     private static readonly OUTMINE_HARVEST_PENDING_CAP_RUSH = 2;
     private static readonly OUTMINE_CARRY_PENDING_CAP = 3;
     // rush 接力车道（C4 微型件）的搬运挂单额度
@@ -1934,7 +1934,7 @@ export class ExternalMineSpawner {
         return true;
     }
 
-    // ── 外矿孵化容量准入（参考实现同款数学）──
+    // ── 外矿孵化容量准入──
     // 单位 = 身体部件数：B 件爬孵化耗 3B tick，每 spawn 每 1500t 窗口产 500×N 部件，
     // 即维持一只 B 件爬恰好消耗 B 单位/窗口。本地在编 + 本地排队单先扣预算，
     // 外矿（在编+排队+新单）占用不得超过剩余量：本地缺编时准入自动收缩为零，
@@ -1986,7 +1986,7 @@ export class ExternalMineSpawner {
             if (role.startsWith('out-') || role === ROLES.reserver) remoteUsed += parts;
             else localDemand += parts;
         }
-        // 本地源计划编成带距离因子（参考实现 computeSourceSpawnUsage 口径）：
+        // 本地源计划编成带距离因子：
         // 矿工补员率×路途折损 + 搬运吞吐×距离——源越远本地占预算越高，
         // harvester 在编部分由计划编成代表，不重复计入。
         // pathTime 钳制 60：同房源不可能超出（早期堵路/寻路抖动的坏采样会
@@ -2174,10 +2174,10 @@ export class ExternalMineSpawner {
         // 预算取当前可用能量（同采集工口径：贫困房也要出得起小搬运，能量回升
         // 每轮派单自动升回满配）。rush 例外：抽水造成的 LOW 不降级收入引擎，
         // 否则小体型搬运 → 同吞吐要更多只 → 队列更堵 → 更穷的螺旋。
-        // 接力定尺（对齐参考实现 RELAY_HAULER_CARRY_SIZE=4）：rush（lv<7 恒接力）
+        // 接力定尺（接力体型 CARRY 定尺 4）：rush（lv<7 恒接力）
         // 用微型件 [C4,M2]=200 容量——接力链靠相向交接让货物单 tick 前进两格，
         // 单位密度 > 单件容量；lv≥7 直运大件（maxCarry 16，来回整坑）。
-        // 体型按当前可用能量出（参考实现 haulerEnergyCapacity=room.energyAvailable），
+        // 体型按当前可用能量出（以 room.energyAvailable 为预算），
         // LOW/CRITICAL 时小件保底、能量回升自动升回满配（rush 抽水造成的 LOW 不降级）。
         const energyState = ExternalMineState.getEnergyState(sourceRoom);
         const carryRush = getRoomMode(sourceRoom) === 'rush';
@@ -2325,14 +2325,14 @@ export class ExternalMine {
     // 采集/搬运不设容量门槛（小体型自带 CARRY 也能有效产出，
     // 废体型与队列淹没已由「不缩水 + 采集优先级 12>13 + 在场产出闸」根治）；
     // 建造侧的门槛由 EXTERNAL_ROAD_CONFIG 的 RCL 限制承担。
-    // 不设能量状态硬门（参考实现同口径）：外矿规模由孵化容量准入预算统一约束
+    // 不设能量状态硬门：外矿规模由孵化容量准入预算统一约束
     //（本地计划编成含距离因子先扣，外矿占剩余量）——状态门会连搬运工一起拦死，
     // 收入管道断流反而把 CRITICAL 固化成贫困循环（实测 2.9 万能量搁置外房、家里饿死）。
     static runEnergy(room: Room, timing: ExternalMineTiming): void {
         const runState = ExternalMineState.getRunState(timing);
         if (!runState) return;
         // 控制器容器保活不受任何闸门限制：饥荒期恰恰是升级链最依赖容器的时刻
-        //（参考实现每 tick 无条件放工地，不吃能量状态门）
+        //（每 tick 无条件放工地，不吃能量状态门）
         RoadBuilder.ensureControllerContainer(room);
         // 解锁闩：本矿产出首次就绪才开外矿管线（参考 TASK_TYPES 序 OWNED_SOURCE 恒先于
         // REMOTE_SOURCE）。未解锁期挂单由 pruneRushRemoteMissions 清理；
@@ -2351,7 +2351,7 @@ export class ExternalMine {
 
         if (targetRooms.length <= 0) return;
 
-        // 目标房容量背包（参考实现 getActiveSources 口径）：按 value/weight 降序准入，
+        // 目标房容量背包：按 value/weight 降序准入，
         // 预算装不下的房本轮挂起——把产能集火到最优房的容器/路/接力链上养熟，
         // 而不是摊薄到一串半成品管线（每房都缺搬运、缺容器、接力密度不足）。
         // 300t 滞回：预算逐 tick 波动会让准入名单横跳，基建（路/容器）需要连续投入

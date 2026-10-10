@@ -222,7 +222,7 @@ export default class SpawnControl extends Room {
         }
 
         const cost = this.CalculateEnergy(bodypart);
-        // 不做容量钳制/缩容（参考实现 requestCreep 口径：任务原样排队，孵不孵引擎裁决）。
+        // 不做容量钳制/缩容（任务原样排队，孵不孵引擎裁决）。
         // 常规服体型生成 ≤ 容量，无影响；特殊规则服（无限能量 spawn）大体型按原样直孵
 
         if (!data.memory.cache) data.memory.cache = {};

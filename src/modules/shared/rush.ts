@@ -28,12 +28,12 @@ const PART_COST: Record<string, number> = {
 
 const partCost = (part: string): number => PART_COST[part] ?? 100;
 
-/** 全局常量兜底（桩环境可能缺全局；取值与参考实现一致） */
+/** 全局常量兜底（桩环境可能缺全局；） */
 const HARVEST_POWER_V = (): number => (typeof HARVEST_POWER === 'number' ? HARVEST_POWER : 2);
 const CARRY_CAPACITY_V = (): number => (typeof CARRY_CAPACITY === 'number' ? CARRY_CAPACITY : 50);
 const MAX_CREEP_SIZE_V = (): number => (typeof MAX_CREEP_SIZE === 'number' ? MAX_CREEP_SIZE : 50);
 
-/** 按参考实现的部件排布拼装（零计数分组省略） */
+/** 按部件排布拼装（零计数分组省略） */
 const assembleRushBody = (...groups: [BodyPartConstant, number][]): RushBody =>
     groups.filter(([, n]) => n > 0) as RushBody;
 
@@ -56,13 +56,13 @@ const maxHarvestWork = (): number => {
 export const RUSH_HARVESTER_MIN_BUDGET = 150;
 
 /**
- * harvester 体型（参考实现 getMinerBody 口径）：
+ * harvester 体型：
  * 1 MOVE 起步 → 预算内先堆 WORK（< 5 的低耗档且 < maxWork）→
  * 按 `move/work ≥ speed` 补 MOVE 消除移动疲劳（speed 默认 0.5，满速）→
  * `work ≥ 5` 后按 needCarry 补 CARRY 缓冲（4×work×HARVEST_POWER / CARRY_CAPACITY），
  * 非 needCarry 维持 1 个 CARRY 下限 → 最后受 maxWork 封顶。
  *
- * 排布沿用参考实现：WORK 组在前、收尾 1 个 WORK。
+ * 排布：WORK 组在前、收尾 1 个 WORK。
  */
 export const buildRushHarvesterBody = (
     budget: number,
@@ -141,14 +141,14 @@ export const buildRushCarrierBody = (budget: number): RushBody | null => {
 };
 
 /**
- * upgrader 体型（参考实现 getUpgraderBody 口径）：
+ * upgrader 体型：
  * 1W1C1M（200）起步 →
  * CARRY 增长门为**容量比** `(CARRY_CAPACITY×carry)/work < carryRatio`
  * （carryRatio 默认 1：升级期基本维持 1 个 CARRY 缓冲）→
  * MOVE 增长门 `work/move ≥ 4`（最多 4 WORK 拖 1 MOVE）→
  * 其余预算全部转 WORK → WORK 达 maxWork（升级缺口）即停。
  *
- * 排布沿用参考实现：WORK 组在前、收尾 1 个 WORK。
+ * 排布：WORK 组在前、收尾 1 个 WORK。
  */
 export const RUSH_UPGRADER_MIN_BUDGET = partCost('work') + partCost('carry') + partCost('move');
 
@@ -200,12 +200,12 @@ const WORKER_GROUP_COST = partCost('work') + partCost('carry') + partCost('move'
 export const RUSH_WORKER_MIN_BUDGET = WORKER_GROUP_COST;
 
 /**
- * worker 体型（参考实现 getBuilderBody 口径）：
+ * worker 体型：
  * 1W1C1M 起步 → 预算充足按 1:1:1 三件套整组扩展 →
  * 整组付不起时回退「WORK+MOVE」或「MOVE+CARRY」半组 →
  * 受 maxWork 与 MAX_CREEP_SIZE 约束。
  *
- * 排布沿用参考实现：WORK 组在前、收尾 WORK+MOVE。
+ * 排布：WORK 组在前、收尾 WORK+MOVE。
  */
 export const buildRushWorkerBody = (
     budget: number,

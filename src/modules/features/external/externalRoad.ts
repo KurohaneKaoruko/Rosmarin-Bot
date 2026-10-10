@@ -876,7 +876,7 @@ export class RoadBuilder {
     }
 
     /**
-     * 控制器容器保活（选址口径对齐参考实现）：
+     * 控制器容器保活：
      * - RCL2-4 专用窗口：该阶段升级链完全依赖容器补给；RCL5 起 controller link
      *   接管供能，仅在控制器 3 格内无 link 时兜底保活（容器烂掉 → 静态升级工
      *   失去补给点、搬运工失去直供目标）。
@@ -2046,12 +2046,12 @@ export class RoadVisual {
 }
 
 
-// ===== 外矿搬运路程的道路覆盖（race 参考实现 enoughRoad 口径）=====
+// ===== 外矿搬运路程的道路覆盖判据=====
 
 /**
  * 外矿搬运路程的道路覆盖率：已建路格 / 规划路格（仅有视野房间计入）。
  *
- * race 参考实现 constructRemotes 口径：覆盖率 >= 1/3（`constructedDistance / totalDistance >= 1/3`）
+ * 覆盖率判据：覆盖率 >= 1/3（`constructedDistance / totalDistance >= 1/3`）
  * 视为 `enoughRoad`，搬运工孵化才切换 2:1 路面体型；无路由数据或无视野时返回 0（保持 1:1 越野体）。
  */
 export function getBuiltRoadCoverage(sourceRoom: string): number {

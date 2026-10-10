@@ -505,9 +505,9 @@ export default class BaseFunction extends Room {
         let body: any[];
         const budget = energyBudget ?? this.energyCapacityAvailable;
 
-        // carrier 走搬运工动态体型（race 参考实现口径）：接力期 maxCarry 4 小体型快周转，
+        // carrier 走搬运工动态体型：接力期 maxCarry 4 小体型快周转，
         // lv7+ 直运期放开到 32；enoughRoad（外矿路程道路覆盖率 ≥ 1/3）才切 2:1 路面迭代，
-        // 否则 1:1 越野—— race 参考实现 constructRemotes 口径，非本房道路数量
+        // 否则 1:1 越野——判据为外矿路程的非本房道路数量
         if (role === ROLES.carrier) {
             const relay = this.level < 7;
             const forRoad = getBuiltRoadCoverage(this.name) >= 1 / 3;

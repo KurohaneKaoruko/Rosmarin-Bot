@@ -302,7 +302,7 @@ export default class ControllerFunction extends Creep {
         const link = this.getControllerLink(linkRange);
         if (link) candidates.push({ kind: 'link', target: link, energy: link.store[RESOURCE_ENERGY] || 0 });
 
-        // 掉落堆（参考实现 energyDepot #2 口径）：搬运工无投放目标时卸在控制器旁的
+        // 掉落堆：搬运工无投放目标时卸在控制器旁的
         // 能量堆是升级线的缓冲区，升级工走到堆边自取——吞吐与手填解耦
         const droppedAtController = this.pos.findInRange(FIND_DROPPED_RESOURCES, 2, {
             filter: (resource: Resource) =>

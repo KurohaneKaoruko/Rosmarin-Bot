@@ -200,7 +200,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
     [ROLES.worker]: (room: Room, current: number) => {
         if (isWarMode()) return false;
 
-        // 换班制（参考实现 manageBuild 口径）：基建工地存在 = worker 全员转建造
+        // 换班制：基建工地存在 = worker 全员转建造
         // （升级侧归零，升级由固定升级岗 upgrader 承担）；工地清零 = 全员转回升级。
         // worker 在两班之间整体切换，不做建造/升级同时配编的折中
         const building = (room.memory as any).building === true;
@@ -237,7 +237,7 @@ export const RoleSpawnCheck: Record<string, (room: Room, current: number) => boo
             );
             if (estimateRoomEnergyIncome(room) <= fieldWork) return false;
         }
-        // 升级岗不做产出就绪硬闸（参考实现口径：预算与孵化池优先级排序已足够——
+        // 升级岗不做产出就绪硬闸（预算与孵化池优先级排序已足够——
         // harvester 单等级恒高于 upgrader，采集补员自然插队；硬闸只会拖慢升级岗上线）
         const target = getUpgraderTarget(room);
         if (target <= 0) return false;
@@ -382,7 +382,7 @@ export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
     if (remote.length === 0) return 0;
     let removed = 0;
     // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）；
-    // 解锁闩未开（本矿产出首次就绪前）同样禁开——参考实现语义：本矿链饱和才轮到外矿。
+    // 解锁闩未开（本矿产出首次就绪前）同样禁开——本矿链饱和才轮到外矿。
     // 解锁后**永不清剿**：本矿波动时外矿替补排队等待、在场爬继续采，链不断。
     // 旧「RCL4 禁开」补丁针对的「买不起的外矿单卡死队列头」已被两层根治：
     // 外矿单 rush 期体型按当前能量现算 + 采集/搬运压到升级单同档

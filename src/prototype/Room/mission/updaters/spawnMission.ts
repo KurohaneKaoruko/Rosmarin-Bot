@@ -103,7 +103,7 @@ export default class SpawnMission extends Room {
         // 历史教训：deficit 涓流不感知在途挂单，cc 长期空置 + 孵化忙碌时
         // 每轮 +1 永不封口，曾单局灌出 172 条 carrier 挂单。
 
-        // 升级紧迫插队（对齐参考实现 UPGRADE_PRIORITY 语义）：
+        // 升级紧迫插队：
         // 实测收入超过在场升级火力（濒死个体不计）时，升级单插队到采集/搬运之前——
         // 收入涨火力涨的自适应闭环；控制器临近降级时无条件最优先（PREVENT_DOWNGRADE）。
         const roleOrder = Object.keys(RoleSpawnCheck);
@@ -157,7 +157,7 @@ export default class SpawnMission extends Room {
             const budget = role === ROLES.harvester && this.level <= 3
                 ? this.energyCapacityAvailable
                 : this.energyAvailable;
-            // 升级工按缺口封顶（参考实现 upgraderMaxWork 口径，carryRatio=1）；
+            // 升级工按缺口封顶（carryRatio=1）；
             // harvester 走默认 maxWork（单矿再生上限）/needCarry=false（rush 低 RCL 无源链）；
             // carrier 收口到 GetRoleBodys 的搬运动态体型口径（见 buildRushSpawnBody）
             const rushBody = buildRushSpawnBody(this, role, budget);
@@ -169,14 +169,14 @@ export default class SpawnMission extends Room {
             body = buildUpgraderBodyConfig(this.energyCapacityAvailable, getUpgradeWorkTarget(this));
         }
         // 缺口门：WORK 缺口×2 都填不满一个身位时不发单（防小缺口反复孵化空转）。
-        // 降级风险豁免（参考实现同口径）：upgradeNeeded 时再小的缺口也孵
+        // 降级风险豁免：upgradeNeeded 时再小的缺口也孵
         if (role === ROLES.upgrader && Array.isArray(body)) {
             const bodyWork = body.reduce((sum, [part, n]) => sum + (part === WORK ? Number(n) : 0), 0);
             const deficit = Math.max(0, getUpgradeWorkTarget(this) - adjusted);
             const upgradeNeeded = (this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD;
             if (!upgradeNeeded && deficit * 2 < bodyWork) return;
         }
-        // 升级任务分层（参考实现同口径）：降级风险 → L5 预防降级（先于 worker L8）；
+        // 升级任务分层：降级风险 → L5 预防降级（先于 worker L8）；
         // 加急（水位/收入口径） → L10 插到外矿流水线之前；常规 → L7
         const level = role === ROLES.upgrader
             ? ((this.controller?.ticksToDowngrade ?? 0) < UPGRADE_NEEDED_TTD
@@ -337,7 +337,7 @@ export class SpawnTaskGetter extends Room {
         // rush 期本矿四职按当前可用能量现算体型（rushBody 容量现算）：
         // 固定满档体型会被建造/搬运的常态抽取压死——能量落在「够小体、不够大体」的区间时，
         // 动态角色（升级工）连续孵化而固定角色（采集工）永远付不起，滚成只孵一职的死循环。
-        // 参考实现口径：无稳定收入时矿工体型按当前能量取（getMinerBody 的 income 口径）。
+        // 无稳定收入时矿工体型按当前能量取（income 口径）。
         // 外矿角色不在此处理：无等级表（GetRoleBodys 会返回空 → Infinity），
         // 其体型由派单侧每轮重铺时按预算现算（externalMine 的 buildRemoteMinerBody 口径）
         if (RUSH_BODY_ROLES.has(role) && getRoomMode(this) === 'rush') {
@@ -349,7 +349,7 @@ export class SpawnTaskGetter extends Room {
         // 空 body 任务是动态体型，必须实时计算能耗；否则 energy=0 会错误抢占队首。
         if (!hasFixedBody) {
             const state = this.memory.energyState || this.updateEnergyState?.(false);
-            // rush 期外矿角色恒按当前能量缩（参考实现 haulerBody = energyAvailable 口径）：
+            // rush 期外矿角色恒按当前能量缩（hauler 体型按 energyAvailable 口径）：
             // 外矿单在 L9 等待位上不会卡本矿层，缩体型让外矿在 RCL2-3 就能以小队进场供能
             const allowBudgetSpawn =
                 ((state === 'LOW' || state === 'CRITICAL') &&

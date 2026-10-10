@@ -1,4 +1,4 @@
-// 家内能量搬运（参考实现 hauler 口径的整体移植）：
+// 家内能量搬运：
 // 一只搬运工绑定一条源线，空载回我方容器取满（满载纪律：容器不足一车则在容器旁
 // 捡散落并等待，不四处找货），满载按能量中枢的请求配送（spawn/ext/tower/cc/断供升级工，
 // 两阶段匹配 + 专线回流）。无请求时持能原地待命——搬运工永远在两点之间，不自主游荡。
@@ -22,7 +22,7 @@ const sourceLinePending = (room: Room, source: Source): number => {
     return (container?.store[RESOURCE_ENERGY] || 0) + drops.reduce((sum, r) => sum + r.amount, 0);
 };
 
-/** 已锁定的取货线（race 参考实现 heap.targetEnergyDeposit 粘滞口径）：
+/** 已锁定的取货线（粘滞认领）：
  *  线还有待运能量就守住，线干了才解锁重选。 */
 export const lockedSourceLine = (creep: Creep): Source | null => {
     const roleCache = creep.getRoleCache();
@@ -36,7 +36,7 @@ export const lockedSourceLine = (creep: Creep): Source | null => {
     return null;
 };
 
-/** 选线（需求驱动，参考实现 matchHaulers 口径）：按待运量取最大者，同量就近。
+/** 选线（需求驱动）：按待运量取最大者，同量就近。
  *  已锁定线优先（粘滞，不逐 tick 重选）；无锁或锁线干涸时按待运量选并锁至取满——
  *  旧「名字 hash 永久绑线」在批量孵化的名字序列上 hash 相关，整批同线，
  *  另一源容器/掉落无人搬、能量烂地。 */
@@ -63,7 +63,7 @@ export const pickSourceLineByDemand = (creep: Creep): Source | null => {
     return best;
 };
 
-// 预期产量记账（race 参考实现 pendingEnergy/getSourceExpectedEnergyDelta 口径）：
+// 预期产量记账（在途运量先行记账）：
 // 认领即预扣容量，待运量计入途中持续产出——多 carrier 不扎堆，远线不误判枯竭
 const pendingLedger = createPendingLedger();
 
@@ -110,8 +110,8 @@ const getUsableEnergyIn = (room: Room, source: Source): { container?: StructureC
     return { container, drops };
 };
 
-// 顺路灌注：身边 ext/spawn（urgent 加 tower/powerSpawn）顺手补满（参考实现途经填充口径）
-// 目标清单按格按 tick 记忆化（race 参考实现 haulerExtCacheMap 口径），避免全房遍历
+// 顺路灌注：身边 ext/spawn（urgent 加 tower/powerSpawn）顺手补满（途经填充口径）
+// 目标清单按格按 tick 记忆化，避免全房遍历
 let adjacentFillCacheTick = -1;
 const adjacentFillCache = new Map<string, Id<AnyStoreStructure>[]>();
 
@@ -159,7 +159,7 @@ const findTimeLimitedDeposit = (creep: Creep): Tombstone | Ruin | null => {
     return all.length ? creep.pos.findClosestByRange(all) : null;
 };
 
-/** 交付目标粘滞（race 参考实现 heap.targetRequest 口径 / 外矿搬运 resolveStickyDeliveryTarget 同法）：
+/** 交付目标粘滞（整趟一次选定，持证跨 tick 有效）：
  *  整趟一次选定，只有目标消失或装满才重新认领——
  *  旧口径每 tick 重跑中枢匹配，等距候选/水位浮动会让搬运工反复改目标，来回走路空耗。 */
 export const resolveDeliveryTarget = (creep: Creep): AnyStoreStructure | Creep | null => {
@@ -175,7 +175,7 @@ export const resolveDeliveryTarget = (creep: Creep): AnyStoreStructure | Creep |
     return fresh;
 };
 
-/** 释放交付占领：卸空、目标装满后调用，下次交付再认领（race 参考实现 delete targetRequest 口径） */
+/** 释放交付占领：卸空、目标装满后调用，下次交付再认领（占领记录直接删除，不设过期） */
 export const clearDeliveryTarget = (creep: Creep): void => {
     delete creep.getRoleCache()._deliverTarget;
 };
@@ -252,7 +252,7 @@ export const runCarrierFetch = (creep: Creep): boolean => {
 // ── 送货（载能）：按能量中枢匹配的请求配送。返回 true = 已送空，转取货 ──
 /** 送货（导出供测试）：无认领时溢流沉淀到控制器旁 */
 export const runCarrierDeliver = (creep: Creep, urgentEnergy: boolean): boolean => {
-    // 持有非能量资源：就地丢掉（能量专线不捎带杂物，参考实现 returnAll 口径）
+    // 持有非能量资源：就地丢掉（能量专线不捎带杂物）
     for (const resourceType of Object.keys(creep.store) as ResourceConstant[]) {
         if (resourceType !== RESOURCE_ENERGY && (creep.store[resourceType] || 0) > 0) {
             creep.drop(resourceType);
@@ -320,10 +320,10 @@ export const runCarrierDeliver = (creep: Creep, urgentEnergy: boolean): boolean 
 // 紧急模式：spawn/塔告急时顺路灌注放开 tower
 const shouldUseUrgentEnergyMode = (creep: Creep): boolean => creep.room.CheckSpawnAndTower();
 
-// 接力开关（参考实现 shouldRelay 口径）：lv<7 恒接力，lv7+ 直运
+// 接力开关：lv<7 恒接力，lv7+ 直运
 const shouldRelayRoom = (room: Room): boolean => room.controller !== undefined && room.controller.level < 7;
 
-// 意图坐标（参考实现 trafficManager.getIntendedCoord 的等价口径）：
+// 意图坐标（对穿匹配用意图格）：
 // 本 tick 朝目标方向要踏入的相邻格
 const intendedCoordOf = (creep: Creep, toward: { x: number; y: number }): { x: number; y: number } => {
     const dx = Math.sign(toward.x - creep.pos.x);
@@ -331,7 +331,7 @@ const intendedCoordOf = (creep: Creep, toward: { x: number; y: number }): { x: n
     return { x: creep.pos.x + dx, y: creep.pos.y + dy };
 };
 
-// 接力交接（参考实现 getRelayTarget 整体移植）：
+// 接力交接：
 // 意图格上依次检查——空车的墓碑/掉落顺手收、矿工 pull 搭车、
 // 相向对穿的同容量搬运工（对方意图格 = 我的位置）→ 供方 transfer 给需方，双方调头。
 // 供方 TTL≤50 不接力（快死的能量不做半程交接）；_relayed 防同 tick 往复。
@@ -344,7 +344,7 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     const supplying = (creep.store[RESOURCE_ENERGY] || 0) > 0;
     const coord = intendedCoordOf(creep, toward);
 
-    // 途中拾取：空车意图格上的墓碑/掉落顺手收（参考实现 904-917 口径）
+    // 途中拾取：空车意图格上的墓碑/掉落顺手收
     if (!supplying) {
         const tomb = creep.room.lookForAt(LOOK_TOMBSTONES, coord.x, coord.y)[0] as Tombstone | undefined;
         if (tomb && (tomb.store[RESOURCE_ENERGY] || 0) > 0 && creep.pos.isNearTo(coord.x, coord.y)) {
@@ -374,7 +374,7 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
 
     const otherSupplying = (other.store[RESOURCE_ENERGY] || 0) > 0;
 
-    // 相向对穿判定：对方意图格 = 我的当前位置（正面对穿，参考实现 939-942 口径）
+    // 相向对穿判定：对方意图格 = 我的当前位置（正面对穿）
     const otherToward = otherSupplying
         ? ((otherMem._toward as { x: number; y: number } | undefined) ?? null)
         : pickSourceLineByDemand(other)?.pos ?? null;
@@ -382,7 +382,7 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     const otherCoord = intendedCoordOf(other, otherToward);
     const coordsInterlocked = otherCoord.x === creep.pos.x && otherCoord.y === creep.pos.y;
 
-    // 门槛判据（race 参考实现 getRelayTarget 口径）：相位相反 + 容量相等 + 供方 TTL>50
+    // 门槛判据：相位相反 + 容量相等 + 供方 TTL>50
     if (!evaluateHeadOnSwap({
         supplying,
         otherSupplying,
@@ -398,7 +398,7 @@ const tryRelayHandoff = (creep: Creep, toward: { x: number; y: number } | null):
     const fetcher = supplying ? other : creep;
     if (supplier.transfer(fetcher, RESOURCE_ENERGY) !== OK) return false;
 
-    // 任务互换（race 参考实现 memory/heap 互换口径）：cache.role 整对象 + 协议字段
+    // 任务互换（memory/heap 整对象互换）：cache.role 整对象 + 协议字段
     // 随属主走——双方原地接管对方任务（源线锁/目标分配），无需走完全程
     const supplierCreep = supplying ? creep : other;
     const fetcherCreep = supplying ? other : creep;
@@ -832,7 +832,7 @@ const syncOutCarryMode = (creep: Creep): OutCarryMode => {
 
 // ==================== 危险撤退 ====================
 
-// 危险判定（race 参考实现 isDangerRoom 口径的保守等价）：
+// 危险判定（保守等价口径）：
 // 非己方房间出现带攻击部件的敌对单位——情报体系就绪前先按视野实时判定
 const isDangerRoomForOutCarry = (creep: Creep): boolean => {
     if (creep.room.my) return false;
@@ -853,7 +853,7 @@ const retreatToHome = (creep: Creep): boolean => {
         return true;
     }
 
-    // 抵达母房：清空任务状态（race 参考实现：有货转交付、无货全清）
+    // 抵达母房：清空任务状态（有货转交付、无货全清）
     const cache = getOutCarryCache(creep);
     cache.outCarryMode = creep.store.getUsedCapacity() > 0
         ? OUT_CARRY_STRATEGIES.DELIVER
@@ -906,7 +906,7 @@ const runOutCarryCollect = (creep: Creep): void => {
     if (!site) return;
     recordCollectBinding(creep, site.stat);
 
-    // keeper 源点：source keeper 在场（源旁 5 格）时等待，不进取货（race 参考实现口径）
+    // keeper 源点：source keeper 在场（源旁 5 格）时等待，不进取货
     if (typeof STRUCTURE_KEEPER_LAIR !== 'undefined' && site.sourcePos) {
         const keepers = site.sourcePos.findInRange(FIND_HOSTILE_CREEPS, 5, {
             filter: (h: any) => h.owner?.username === 'Source Keeper',
@@ -991,7 +991,7 @@ const fillAdjacentSpawnLine = (creep: Creep): boolean => {
     return false;
 };
 
-// 主仓选仓口径（race 参考实现 runHauler 卸货口径）：storage 优先承接主仓，
+// 主仓选仓口径：storage 优先承接主仓，
 // terminal 仅按止盈水位补线；都不可用时返回 null 走承接链
 const resolveCarryDepositTarget = (creep: Creep, carried: ResourceConstant): StructureTerminal | StructureStorage | null => {
     const terminal = creep.room.terminal;
@@ -1101,7 +1101,7 @@ const runOutCarryDeliver = (creep: Creep): void => {
 const tryOutCarryRelayHandoff = (creep: Creep): Creep | null => {
     const memAny = creep.memory as any;
     if (memAny.relayedTick === Game.time) return null;
-    // 撤退期不参与接力（race 参考实现 retreat 豁免口径）
+    // 撤退期不参与接力
     if (memAny.retreat) return null;
     const betterMove = (global as any).BetterMove;
     if (!betterMove?.isSwapIntent) return null;

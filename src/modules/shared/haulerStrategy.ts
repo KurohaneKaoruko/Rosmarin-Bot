@@ -1,5 +1,5 @@
 /**
- * 搬运工策略数学（race 参考实现 matchHauler/getSourceExpectedEnergyDelta/getRelayTarget 口径）。
+ * 搬运工策略数学（配对/预期产量/接力判据纯函数）。
  *
  * 纯函数与按 tick 分代的预订账本，无游戏全局依赖，可独立单测。
  */
@@ -53,7 +53,7 @@ export const createPendingLedger = () => {
 };
 
 /**
- * 卸货止盈选择（race 参考实现 runHauler 卸货口径）：storage 优先承接主仓，
+ * 卸货止盈选择：storage 优先承接主仓，
  * terminal 仅按止盈水位补线（能量低于水位且有空位）；两者皆不可用返回 null 走承接链。
  */
 export const selectCarryDeposit = (input: {
@@ -69,7 +69,7 @@ export const selectCarryDeposit = (input: {
 };
 
 /**
- * 相向对穿互换判据（race 参考实现 getRelayTarget 门槛口径）。
+ * 相向对穿互换判据。
  *
  * 全部条件满足才允许对穿能量移交：双方相位相反、均未在本 tick 接力过/撤退中、
  * 意图格互指（对方要踏进的格 = 我的位置）、容量相等、供方 TTL > 50（快死的能量不做半程交接）。

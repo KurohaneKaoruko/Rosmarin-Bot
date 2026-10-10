@@ -64,7 +64,7 @@ export const syncUpgraderMoveWork = (creep: Creep) => {
     writeMoveWorkTileCandidates(creep, []);
 };
 
-/** 邻位借能（对齐参考实现口径）：cc 空了才借、只向「比自己更贴 cc」的有货邻居借、
+/** 邻位借能：cc 空了才借、只向「比自己更贴 cc」的有货邻居借、
  *  借出方打 tick 标记防同 tick 多头索取——能量沿内圈→外圈单向流动，不回弹不多跳 */
 const borrowFromAdjacentUpgrader = (creep: Creep): boolean => {
     if ((creep.store[RESOURCE_ENERGY] || 0) > 0) return false;

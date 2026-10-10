@@ -268,9 +268,23 @@ const matchRoom = (room: Room, suppliers: Creep[]): MatchResult => {
     const remaining = new Map<string, number>(allRequests.map(r => [r.id, r.amount]));
     const assigned = new Map<string, FillRequest>();
 
+    // 在途认领先落账：持证在送的搬运工按其交付目标锁定配对并扣减需求，
+    // 贪心阶段只补剩余缺口——杜绝多只奔向同一将满目标（运量先行扣除口径）
+    const claimed = new Set<string>();
+    for (const supplier of suppliers) {
+        const cachedId = (supplier.getRoleCache?.() as any)?._deliverTarget as string | undefined;
+        if (!cachedId) continue;
+        const request = allRequests.find(r => r.id === cachedId);
+        if (!request || (remaining.get(request.id) || 0) <= 0) continue;
+        assigned.set(supplier.id, request);
+        remaining.set(request.id, Math.max(0, (remaining.get(request.id) || 0) - (supplier.store[RESOURCE_ENERGY] || 0)));
+        claimed.add(supplier.id);
+    }
+
+    const free = suppliers.filter(s => !claimed.has(s.id));
     const { dedicatedRequests, generalRequests } = splitRequestsByLine(room, allRequests);
-    const dedicatedUsed = matchDedicatedPhase(room, dedicatedRequests, suppliers, assigned, remaining);
-    matchGeneralPhase(generalRequests.length ? generalRequests : allRequests, suppliers, assigned, remaining, dedicatedUsed);
+    const dedicatedUsed = matchDedicatedPhase(room, dedicatedRequests, free, assigned, remaining);
+    matchGeneralPhase(generalRequests.length ? generalRequests : allRequests, free, assigned, remaining, dedicatedUsed);
 
     return { assignment: assigned };
 };

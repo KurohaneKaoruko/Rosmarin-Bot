@@ -1,6 +1,6 @@
 /**
  * 生产阶段门：产出就绪 / 外矿解锁判定（自 spawnRules 迁出，供孵化规则与外矿模块共用）。
- * 开局序列（参考实现观察口径）：先矿工孵化到位、产出稳住，之后才放行升级/搬运扩张/外矿。
+ * 开局序列：先矿工孵化到位、产出稳住，之后才放行升级/搬运扩张/外矿。
  */
 import { ROLES } from '@/constant/CreepConstant';
 import { getRoomMode } from '@/modules/shared/roomWorkforce';
@@ -90,7 +90,7 @@ export const isRoomProductionSecured = (room: Room): boolean => {
 
 /**
  * 外矿解锁闩：本矿产出就绪即置位，永不清除。
- * 参考实现语义的落地——开启前外矿单不出（本矿链没饱和轮不到外矿），
+ * 语义落地——开启前外矿单不出（本矿链没饱和轮不到外矿），
  * 解锁后永不清剿（外矿替补在本矿崩坏时排队等待，在场爬继续采，链不断）。
  */
 export const isRoomRemoteUnlocked = (room: Room): boolean => {

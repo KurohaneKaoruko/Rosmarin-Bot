@@ -183,8 +183,8 @@ export default class TowerControl extends Room {
         if (healTarget.length > 0) {
             // 战力单位优先
             const attackerCreeps = healTarget.filter(c => c?.body &&
-                c.body.some((bodyPart: BodyPartConstant) => 
-                    bodyPart == ATTACK || bodyPart == RANGED_ATTACK));
+                c.body.some((bodyPart) =>
+                    bodyPart.type === ATTACK || bodyPart.type === RANGED_ATTACK));
             if (attackerCreeps.length > 0) {
                 this.tower.forEach(tower => {
                     let index = Math.floor(Math.random() * attackerCreeps.length);

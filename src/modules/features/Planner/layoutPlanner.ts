@@ -1124,7 +1124,7 @@ export const LayoutPlanner = {
         const only = options?.structType;
         const allSite = room.find(FIND_CONSTRUCTION_SITES);
 
-        // 建造放置优先级（参考实现 BUILD_PRIORITY 口径）：功能建筑靠前，road 垫底——
+        // 建造放置优先级：功能建筑靠前，road 垫底——
         // 开局产能优先转化为 ext/容器（容量与物流先起来），道路网随后补
         const PLACEMENT_ORDER: Record<string, number> = {
             spawn: 0, tower: 1, storage: 2, terminal: 3, extension: 4,
@@ -1190,7 +1190,7 @@ export const LayoutPlanner = {
                 const [x, y] = decompress(p);
                 if (x < 0 || x > 49 || y < 0 || y > 49) continue;
                 const Pos = new RoomPosition(x, y, room.name);
-                // 容器选址（参考实现容器集合 = 源容器×N + cc×1）：
+                // 容器选址（容器集合 = 源容器×N + cc×1）：
                 // - 源容器：每源限一，任意等级
                 // - 控制器旁 cc：仅 RCL2-4 窗口放一个（升级能量缓冲），RCL5+ link
                 //   接管后退役；评分选址由 ensureControllerContainer 负责，布局点位不重复放

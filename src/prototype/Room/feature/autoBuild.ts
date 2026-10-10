@@ -14,8 +14,6 @@ export default class AutoBuild extends Room {
         // 没有能量产出源的房间，工地永远无人完工，只会白占 CPU 与掉落衰减
         if (!(this.source || []).length) return;
 
-        if (Game.time % 100 !== (this.memory['index']||0)) return;
-
         // 开启了自动建造, 且有布局Memory, 则自动建筑
         const memory = getRoomData()[this.name];
         const layoutMemory = getLayoutData(this.name);
@@ -31,15 +29,22 @@ export default class AutoBuild extends Room {
 
         if (memory && memory.autobuild && layoutMemory &&
             Object.keys(layoutMemory).length) {
-            // RCL1 不放任何建筑（参考实现开局口径）：200 点升级量的关键窗口期，
+            // RCL1 不放任何建筑（开局口径）：200 点升级量的关键窗口期，
             // 产能全额直供升级线（worker 无工地即换班升级），RCL2 起再铺基建
+            // 工地按等级变化立即放置；平时在途工地低于稳定线即补足（取代每 100 tick 一批节拍）
             if (this.level >= 2) {
-                LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });
+                const levelChanged = memory.buildLevel !== undefined && memory.buildLevel !== this.level;
+                const siteCount = (this.find(FIND_CONSTRUCTION_SITES) || []).length;
+                if (levelChanged || siteCount < 5) {
+                    LayoutPlanner.plannerCreateSite(this, layoutMemory, { maxSites: 10 });
+                }
             }
         }
+        if (memory) memory.buildLevel = this.level;
 
-        // 关键建筑造rampart
+        // 关键建筑造rampart（低频巡检保留，节拍错峰）
         if (this.level < 7) return;
+        if (Game.time % 100 !== (this.memory['index'] || 0)) return;
         // 'all' 模式：完全不放工地（含关键建筑 rampart）
         if (getSkipBuildTypes().includes('all')) return;
         const structures = this.getStructures() || [];

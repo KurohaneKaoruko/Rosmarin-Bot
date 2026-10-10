@@ -216,6 +216,12 @@ interface RoomControlMemory {
     autobuild?: boolean;
 
     /**
+     * 已铺工地时的控制器等级
+     * @description autoBuild 用于检测等级变化立即补铺新档工地
+     */
+    buildLevel?: number;
+
+    /**
      * Power 采集开关
      * @description 是否启用过道 PowerBank 采集
      * @default false

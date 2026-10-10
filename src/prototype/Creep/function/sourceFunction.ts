@@ -203,7 +203,7 @@ export default class SourceFunction extends Creep {
         if (this.pos.isEqualTo(pos)) score += 4;
 
         if (container) {
-            // racebot 口径：站上容器 = harvest 直落容器，最优工位；邻位次之
+            // 站位口径：站上容器 = harvest 直落容器，最优工位；邻位次之
             if (pos.isEqualTo(container.pos)) score += 12;
             else if (pos.inRangeTo(container.pos, 1)) score += 4;
         }
@@ -226,7 +226,7 @@ export default class SourceFunction extends Creep {
         const sourceContainer = this.getNearbySourceContainer(1);
         const sourceLink = this.getNearbySourceLink(2);
 
-        // racebot 口径：容器已建则必站容器本体（harvest 直落脚下容器，零搬运/掉落损耗）；
+        // 站位口径：容器已建则必站容器本体（harvest 直落脚下容器，零搬运/掉落损耗）；
         // 容器缺席时才退而求其次：link 临位（有承接空间）或任意源旁格稳定站位
         if (this.pos.inRangeTo(source, 1)) {
             if (sourceContainer) {

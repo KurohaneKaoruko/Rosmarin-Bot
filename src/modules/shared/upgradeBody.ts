@@ -2,7 +2,7 @@ import { buildRushUpgraderBody } from '@/modules/shared/rush';
 
 /**
  * 升级工体型生成（非 rush 路径）。
- * 算法与冲级期共用同一实现（`buildRushUpgraderBody`，参考实现 getUpgraderBody 口径），
+ * 算法与冲级期共用同一实现（`buildRushUpgraderBody`），
  * 避免两条升级工体格口径各自漂移：
  * - 基础 1W1C1M（200）起步；
  * - CARRY 增长门为容量比 `(CARRY_CAPACITY×carry)/work < carryRatio`；
