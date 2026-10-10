@@ -320,10 +320,10 @@ function gatherRoomLive(room: Room) {
         for (const name in Game.creeps) {
             const c = Game.creeps[name];
             const role = c.memory?.role;
-            if (role !== ROLES['out-harvest'] && role !== ROLES['out-carry']) continue;
+            if (role !== ROLES.harvester && role !== ROLES.carrier) continue;
             if (c.memory?.sourceRoom !== room.name) continue;
             if (!outList.includes(c.memory?.targetRoom || '')) continue;
-            if (role === ROLES['out-harvest']) outHarvest += 1;
+            if (role === ROLES.harvester) outHarvest += 1;
             else outCarry += 1;
         }
     }

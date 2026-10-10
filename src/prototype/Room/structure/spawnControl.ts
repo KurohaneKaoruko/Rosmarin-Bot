@@ -19,7 +19,7 @@ const getEnergyState = (room: Room) =>
 // 仅这些角色允许在低能量时按当前可用能量降级体型。
 // worker 不降级：W1 建造力（5 hits/t）只有满编的一半，
 // 订单等满编身体即可。
-// out-harvest / out-carry **不在其列**：远程体型由 remoteBody 生成器精心设计
+// 外矿工作位（carrier/harvester 远端分身）**不在其列**：远程体型由 remoteBody 生成器精心设计
 // （采集工自带 CARRY 自补），按旧分档表缩水会产出零 CARRY 的废体型——
 // 采集工 harvest 永远 ERR_FULL、白占编制。孵不起就排队等能量：
 // 它们的队列优先级(level 12)天然让位于本地角色(worker 8)，本地编制吃满后

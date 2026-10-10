@@ -125,7 +125,7 @@ const collectSuppliers = (room: Room): Creep[] => {
     for (const creep of Object.values(Game.creeps)) {
         if (creep.room.name !== room.name || creep.spawning) continue;
         const role = creep.memory?.role;
-        if (role !== ROLES.carrier && role !== ROLES['out-carry']) continue;
+        if (role !== ROLES.carrier) continue;
         if ((creep.store[RESOURCE_ENERGY] || 0) <= 0) continue;
         suppliers.push(creep);
     }

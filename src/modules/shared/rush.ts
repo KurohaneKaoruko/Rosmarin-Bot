@@ -28,6 +28,15 @@ const PART_COST: Record<string, number> = {
 
 const partCost = (part: string): number => PART_COST[part] ?? 100;
 
+/** 全局常量兜底（桩环境可能缺全局；取值与参考实现一致） */
+const HARVEST_POWER_V = (): number => (typeof HARVEST_POWER === 'number' ? HARVEST_POWER : 2);
+const CARRY_CAPACITY_V = (): number => (typeof CARRY_CAPACITY === 'number' ? CARRY_CAPACITY : 50);
+const MAX_CREEP_SIZE_V = (): number => (typeof MAX_CREEP_SIZE === 'number' ? MAX_CREEP_SIZE : 50);
+
+/** 按参考实现的部件排布拼装（零计数分组省略） */
+const assembleRushBody = (...groups: [BodyPartConstant, number][]): RushBody =>
+    groups.filter(([, n]) => n > 0) as RushBody;
+
 export type RushBody = ((BodyPartConstant | number)[])[];
 
 const bodyCost = (body: RushBody): number =>
@@ -46,11 +55,70 @@ const maxHarvestWork = (): number => {
 /** harvester 最低孵化预算：[W1,M1] = 150 */
 export const RUSH_HARVESTER_MIN_BUDGET = 150;
 
-export const buildRushHarvesterBody = (budget: number): RushBody | null => {
+/**
+ * harvester 体型（参考实现 getMinerBody 口径）：
+ * 1 MOVE 起步 → 预算内先堆 WORK（< 5 的低耗档且 < maxWork）→
+ * 按 `move/work ≥ speed` 补 MOVE 消除移动疲劳（speed 默认 0.5，满速）→
+ * `work ≥ 5` 后按 needCarry 补 CARRY 缓冲（4×work×HARVEST_POWER / CARRY_CAPACITY），
+ * 非 needCarry 维持 1 个 CARRY 下限 → 最后受 maxWork 封顶。
+ *
+ * 排布沿用参考实现：WORK 组在前、收尾 1 个 WORK。
+ */
+export const buildRushHarvesterBody = (
+    budget: number,
+    options: { maxWork?: number; needCarry?: boolean; speed?: number } = {},
+): RushBody | null => {
+    const { maxWork, needCarry = false, speed = 0.5 } = options;
     if (budget < RUSH_HARVESTER_MIN_BUDGET) return null;
-    const cap = maxHarvestWork();
-    const work = Math.max(1, Math.min(cap, Math.floor((budget - partCost('move')) / partCost('work'))));
-    return [[WORK, work], [MOVE, 1]];
+    const cap = maxWork ?? maxHarvestWork();
+
+    let cost = 0;
+    let work = 0;
+    let move = 0;
+    let carry = 0;
+
+    move += 1;
+    cost += partCost('move');
+    if (needCarry) {
+        carry += 1;
+        cost += partCost('carry');
+    }
+
+    while (cost < budget && work + move + carry < MAX_CREEP_SIZE_V()) {
+        if (work < 5 && work < cap && budget >= cost + partCost('work')) {
+            work += 1;
+            cost += partCost('work');
+            continue;
+        }
+
+        if ((move === 0 || move / work < speed) && budget >= cost + partCost('move')) {
+            move += 1;
+            cost += partCost('move');
+            continue;
+        }
+
+        const desiredCarry = needCarry
+            ? Math.ceil((4 * work * HARVEST_POWER_V()) / CARRY_CAPACITY_V())
+            : 1;
+
+        if (work >= 5 && carry < desiredCarry && budget >= cost + partCost('carry')) {
+            carry += 1;
+            cost += partCost('carry');
+            continue;
+        }
+
+        if (cap && work >= cap) break;
+
+        if (budget >= cost + partCost('work')) {
+            work += 1;
+            cost += partCost('work');
+            continue;
+        }
+
+        break;
+    }
+
+    return assembleRushBody([WORK, work - 1], [CARRY, carry], [MOVE, move], [WORK, 1]);
 };
 
 /** carrier 路面组大小：[C,C,M] = 150 */
@@ -60,6 +128,12 @@ export const RUSH_CARRIER_MIN_BUDGET = CARRIER_GROUP_COST;
 /** carrier 组数上限（防极端高容量折出超编） */
 const CARRIER_MAX_GROUPS = 12;
 
+/**
+ * @deprecated 已被 `GetRoleBodys` 的搬运动态体型特例取代（接力期 `maxCarry 4` 小体型快周转、
+ * lv7+ 直运放开 32、`forRoad` 按路网覆盖率）——rush 孵化落点与搬运编制公式均已收口到那条口径
+ * （见 `spawnMission.buildRushSpawnBody` / `roomWorkforce.getRushCarrierCarryParts`）。
+ * 本函数与 `buildRushBody` 的 carrier 分支仅作历史保留，待收官批次（B6）核对无消费者后删除。
+ */
 export const buildRushCarrierBody = (budget: number): RushBody | null => {
     if (budget < RUSH_CARRIER_MIN_BUDGET) return null;
     const groups = Math.min(CARRIER_MAX_GROUPS, Math.floor(budget / CARRIER_GROUP_COST));
@@ -67,39 +141,142 @@ export const buildRushCarrierBody = (budget: number): RushBody | null => {
 };
 
 /**
- * upgrader 体型（rush）：
- * 1 档 CARRY 随预算上浮到 4；WORK 按余量堆；
- * 预算不足时下探到 [W1,C1,M1]（200）；再低返回 null。
+ * upgrader 体型（参考实现 getUpgraderBody 口径）：
+ * 1W1C1M（200）起步 →
+ * CARRY 增长门为**容量比** `(CARRY_CAPACITY×carry)/work < carryRatio`
+ * （carryRatio 默认 1：升级期基本维持 1 个 CARRY 缓冲）→
+ * MOVE 增长门 `work/move ≥ 4`（最多 4 WORK 拖 1 MOVE）→
+ * 其余预算全部转 WORK → WORK 达 maxWork（升级缺口）即停。
+ *
+ * 排布沿用参考实现：WORK 组在前、收尾 1 个 WORK。
  */
 export const RUSH_UPGRADER_MIN_BUDGET = partCost('work') + partCost('carry') + partCost('move');
 
-export const buildRushUpgraderBody = (budget: number): RushBody | null => {
+export const buildRushUpgraderBody = (
+    budget: number,
+    options: { maxWork?: number; carryRatio?: number } = {},
+): RushBody | null => {
+    const { maxWork, carryRatio = 1 } = options;
     if (budget < RUSH_UPGRADER_MIN_BUDGET) return null;
-    // C:W = 1:1（冲级期手填口径）：单次手填的能量缓冲与 WORK 数对齐，拉长手填间隔
-    const work = Math.max(1, Math.floor((budget - partCost('move')) / (partCost('work') + partCost('carry'))));
-    return [[WORK, work], [CARRY, work], [MOVE, 1]];
+
+    const maxParts = MAX_CREEP_SIZE_V();
+    let cost = partCost('work') + partCost('carry') + partCost('move');
+    let work = 1;
+    let move = 1;
+    let carry = 1;
+
+    while (budget > cost) {
+        if ((CARRY_CAPACITY_V() * carry) / work < carryRatio && budget >= cost + partCost('carry')) {
+            if (work + move + carry + 1 > maxParts) break;
+            carry += 1;
+            cost += partCost('carry');
+            continue;
+        }
+
+        if ((move === 0 || work / move >= 4) && budget >= cost + partCost('move')) {
+            if (work + move + carry + 1 > maxParts) break;
+            move += 1;
+            cost += partCost('move');
+            continue;
+        }
+
+        if (maxWork && work >= maxWork) break;
+
+        if (budget >= cost + partCost('work')) {
+            if (work + move + carry + 1 > maxParts) break;
+            work += 1;
+            cost += partCost('work');
+            continue;
+        }
+
+        break;
+    }
+
+    return assembleRushBody([WORK, work - 1], [CARRY, carry], [MOVE, move], [WORK, 1]);
 };
 
-/** worker 路面组：[W,C,M] = 200 */
+/** worker（建造/维修兼升级）最低孵化预算：[W1,C1,M1] = 200 */
 const WORKER_GROUP_COST = partCost('work') + partCost('carry') + partCost('move');
-/** worker 最低孵化预算 */
 export const RUSH_WORKER_MIN_BUDGET = WORKER_GROUP_COST;
-/** worker WORK 上限（建造/维修够用，建造主力地位让给搬运供给节奏） */
-const WORKER_MAX_WORK = 6;
 
-export const buildRushWorkerBody = (budget: number): RushBody | null => {
+/**
+ * worker 体型（参考实现 getBuilderBody 口径）：
+ * 1W1C1M 起步 → 预算充足按 1:1:1 三件套整组扩展 →
+ * 整组付不起时回退「WORK+MOVE」或「MOVE+CARRY」半组 →
+ * 受 maxWork 与 MAX_CREEP_SIZE 约束。
+ *
+ * 排布沿用参考实现：WORK 组在前、收尾 WORK+MOVE。
+ */
+export const buildRushWorkerBody = (
+    budget: number,
+    options: { maxWork?: number } = {},
+): RushBody | null => {
+    const { maxWork } = options;
     if (budget < RUSH_WORKER_MIN_BUDGET) return null;
-    const work = Math.max(1, Math.min(WORKER_MAX_WORK, Math.floor(budget / WORKER_GROUP_COST)));
-    return [[WORK, work], [CARRY, work], [MOVE, work]];
+
+    const moveCost = partCost('move');
+    const workCost = partCost('work');
+    const carryCost = partCost('carry');
+    const totalCost = moveCost + workCost + carryCost;
+    const maxParts = MAX_CREEP_SIZE_V();
+
+    let work = 1;
+    let move = 1;
+    let carry = 1;
+    let energy = budget - totalCost;
+
+    while (energy >= moveCost && work + move + carry + 2 <= maxParts) {
+        if (maxWork && work >= maxWork) break;
+
+        if (energy >= totalCost && work + move + carry + 3 <= maxParts) {
+            work += 1;
+            move += 1;
+            carry += 1;
+            energy -= totalCost;
+            continue;
+        }
+
+        if (energy >= workCost + moveCost) {
+            work += 1;
+            move += 1;
+            energy -= workCost + moveCost;
+            continue;
+        }
+
+        if (energy >= moveCost + carryCost) {
+            move += 1;
+            carry += 1;
+            energy -= moveCost + carryCost;
+            continue;
+        }
+
+        break;
+    }
+
+    return assembleRushBody([WORK, work - 1], [CARRY, carry], [MOVE, move - 1], [WORK, 1], [MOVE, 1]);
+};
+
+/** 体型生成参数：按角色消费（harvester：maxWork/needCarry/speed；upgrader：maxWork/carryRatio；worker：maxWork） */
+export type RushBodyOptions = {
+    maxWork?: number;
+    needCarry?: boolean;
+    speed?: number;
+    carryRatio?: number;
 };
 
 /** rush 各经济角色的容量现算体型统一入口（不在册角色返回 null 走原路径） */
-export const buildRushBody = (role: string, budget: number): RushBody | null => {
+export const buildRushBody = (role: string, budget: number, options: RushBodyOptions = {}): RushBody | null => {
     switch (role) {
-        case ROLES.harvester: return buildRushHarvesterBody(budget);
+        case ROLES.harvester:
+            return buildRushHarvesterBody(budget, {
+                maxWork: options.maxWork,
+                needCarry: options.needCarry,
+                speed: options.speed,
+            });
         case ROLES.carrier: return buildRushCarrierBody(budget);
-        case ROLES.upgrader: return buildRushUpgraderBody(budget);
-        case ROLES.worker: return buildRushWorkerBody(budget);
+        case ROLES.upgrader:
+            return buildRushUpgraderBody(budget, { maxWork: options.maxWork, carryRatio: options.carryRatio });
+        case ROLES.worker: return buildRushWorkerBody(budget, { maxWork: options.maxWork });
         default: return null;
     }
 };

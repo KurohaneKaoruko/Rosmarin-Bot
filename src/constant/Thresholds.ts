@@ -27,7 +27,7 @@ export const THRESHOLDS = {
         EMERGENCY_ENERGY_THRESHOLD: 1000,
         BODY_REDUCTION_THRESHOLD: 1000,
         // 是否允许 spawn 因等待更高优先级任务的能量而空转。
-        // 关掉时执行器会兜底选「任意可负担任务」——廉价任务（reserver/out-carry 缩水体）
+        // 关掉时执行器会兜底选「任意可负担任务」——廉价任务（reserver/外矿缩水体）
         // 会持续把能量压在昂贵任务的成本线下，最高优先级被无限饿死（race 实测：6 只
         // upgrader 任务在池、extension 永远到不了 800，升级吞吐归零）。
         ALLOW_WAIT_FOR_PRIORITY_ENERGY: true,
@@ -81,9 +81,9 @@ export const THRESHOLDS = {
         SEGMENT_TARGETS: {
             2: { achieve: 500, pass: 1000 },
             3: { achieve: 3000, pass: 5000 },
-            4: { achieve: 10000 },
-            5: { achieve: 20000 },
-            6: { achieve: 40000 },
+            4: { achieve: 5000, pass: 10000 },
+            5: { achieve: 15000, pass: 20000 },
+            6: { achieve: 30000, pass: 40000 },
         },
     },
 } as const;

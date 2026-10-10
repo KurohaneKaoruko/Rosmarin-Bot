@@ -17,7 +17,6 @@ import { getEnergyLevel } from '@/modules/shared/energyLogistics';
 import { getRoomModeProfile, getRoomMode, isHighLikeMode } from '@/modules/shared/roomMode';
 import { getRoomTickCacheValue } from '@/modules/shared/roomTickCache';
 import { decompress } from '@/modules/shared/compress';
-import { buildRushCarrierBody } from '@/modules/shared/rush';
 import { clamp } from '@/modules/utils';
 import { getRoomData, getOutMineData } from '@/modules/shared/memory';
 import { ROLES } from '@/constant/CreepConstant';
@@ -425,7 +424,7 @@ export const estimateRoomEnergyIncome = (room: Room): number => {
             income += Math.max(0, remoteIncome);
         } else {
             const creepNum = (room as any).getCreepNum?.() || {};
-            income += Math.min(20, (creepNum[ROLES['out-harvest']] || 0) * 5);
+            income += Math.min(20, (creepNum[ROLES.harvester] || 0) * 5);
         }
         return income;
     });
@@ -596,6 +595,28 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 // ==================== rush 搬运编制 ====================
 
 /**
+ * rush carrier 人均 CARRY 部件数——与孵化侧**同一口径**（`GetRoleBodys` 的搬运动态体型特例：
+ * 接力期 `maxCarry 4`、lv7+ 直运 32、`forRoad` 按路网覆盖率）。
+ *
+ * @remarks
+ * 用运行时探测（`room.GetRoleBodys` / `GenerateBodys`）而非直接 import 功能层模块，
+ * 保持本模块零游戏依赖（桩环境 / 未初始化房间返回 0 → 调用方回退固定定编表）。
+ */
+const getRushCarrierCarryParts = (room: Room): number => {
+    if (typeof (room as any).GetRoleBodys !== 'function' ||
+        typeof (room as any).GenerateBodys !== 'function') {
+        return 0;
+    }
+    const config = (room as any).GetRoleBodys(ROLES.carrier, undefined, room.energyCapacityAvailable || 0);
+    const body = (room as any).GenerateBodys(config, ROLES.carrier) as BodyPartConstant[];
+    let carry = 0;
+    for (const part of body || []) {
+        if (part === CARRY) carry += 1;
+    }
+    return carry;
+};
+
+/**
  * rush 期搬运工编制目标（运力公式）：
  * 运力需求（CARRY 部件）= Σ(单矿净产速率 × 往返路程 × 2) / 50，
  * 路程用换班实测的 `sourceTiming.pathTime`（spawn→source 路长近似 source→交付点），
@@ -605,8 +626,9 @@ export const getUpgradeWorkTarget = (room: Room): number => {
 export const getRushCarrierTarget = (room: Room): number => {
     const timing = (room.memory as any).sourceTiming;
     if (!timing) return 0;
-    const body = buildRushCarrierBody(room.energyCapacityAvailable || 0);
-    const carryPerCarrier = body ? Number(body[0][1]) : 0;
+    // carrier 体型与孵化侧同一口径（`GetRoleBodys` 的搬运动态体型特例）：
+    // 接力期小体型快周转 → 人均 CARRY 变小、只数相应变多
+    const carryPerCarrier = getRushCarrierCarryParts(room);
     if (carryPerCarrier <= 0) return 0;
     const perSourceCap = getSourceEnergyPerTick();
     const harvesters = typeof room.find === 'function'
@@ -643,7 +665,7 @@ export const getRushCarrierTarget = (room: Room): number => {
 // level 链：加急层(10) 优先于 外矿流水线(12)、低于 worker(8)——
 // 建造仍优先于加急升级，与「BUILD > UPGRADE_PRIORITY > REMOTE_SOURCE > UPGRADE」对齐。
 // 升级孵化加急（富余能量快速消化）。
-// level 7：必须压过外矿管线（out-harvest 换班 5 除外——那是真实维护）才能兑现「加急」。
+// level 7：必须压过外矿管线（外矿换班 5 除外——那是真实维护）才能兑现「加急」。
 // 曾经设为 10，语义是压过旧外矿层（12/13）；外矿管线提到 6/9 后，10 反而垫底，
 // 升级任务被 L5/L9 维护单永久堵死（race 实测：容器满 1 万、地上 2.3 万腐烂、uWork=0）。
 export const UPGRADE_URGENT_SPAWN_LEVEL = 7;

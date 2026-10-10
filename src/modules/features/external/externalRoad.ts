@@ -879,7 +879,7 @@ export class RoadBuilder {
      * 控制器容器保活（选址口径对齐参考实现）：
      * - RCL2-4 专用窗口：该阶段升级链完全依赖容器补给；RCL5 起 controller link
      *   接管供能，仅在控制器 3 格内无 link 时兜底保活（容器烂掉 → 静态升级工
-     *   失去补给点、out-carry 失去直供目标）。
+     *   失去补给点、搬运工失去直供目标）。
      * - 选址评分 = 相邻可升级站位数×4 − 距 spawn 距离（参考口径）：
      *   站位 = 邻格内非墙、无结构/工地（road 不可站）、仍在控制器 range 3 的格子，
      *   保证静态升级工有驻位；次选靠近 spawn 缩短搬运。
@@ -992,7 +992,7 @@ export class RoadBuilder {
 
         // 外矿基础设施统一由 externalRoad 模块管理：
         // 道路工地与 source/mineral 的 container 工地都在这里集中创建，
-        // 避免再由 out-harvest / out-mineral 在运行时临时落地工地。
+        // 避免再由外矿采集/挖矿在运行时临时落地工地。
         const containerAnchors = this.resolveContainerAnchors(sourceRoom, targetRoom, pathsToUse);
         if (pathsToUse.size === 0) {
             // 路径完全失败时无法铺 road，但 container 仍可退化到“资源点邻接保底落点”。

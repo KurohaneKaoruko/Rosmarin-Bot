@@ -1,4 +1,4 @@
 import './compat';
-const bot = require('./racebot/main');
+const bot = require('./bot/main');
 export const loop = bot.loop;
 

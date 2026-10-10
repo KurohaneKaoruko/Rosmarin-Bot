@@ -27,7 +27,7 @@ const getMyCreepsByRoleByRoom = (() => {
 })();
 
 const LEGACY_SHARED_SOURCE_ROLE_SET = new Set<string>([ROLES.worker, ROLES.upgrader, ROLES.universal, ROLES['aid-upgrade']]);
-const STRICT_SOURCE_ROLE_SET = new Set<string>([ROLES.harvester, ROLES['out-harvest']]);
+const STRICT_SOURCE_ROLE_SET = new Set<string>([ROLES.harvester]);
 const SOURCE_PRIORITY_MAP = {
     harvester: 0,
     universal: 1,
@@ -595,16 +595,6 @@ export default class BaseFunction extends Room {
                 if (move) body_list = AddList(body_list, 1, MOVE)
                 carry--; move--;
             }
-            break;
-        case ROLES['out-carry']:
-            if (tough) body_list = AddList(body_list, tough, TOUGH)
-            let carryCount = Math.min(Math.floor(carry/2), move);
-            for (let i = 0; i < carryCount; i++) {
-                body_list = AddList(body_list, 2, CARRY)
-                body_list = AddList(body_list, 1, MOVE)
-            }
-            if (carry-carryCount*2) body_list = AddList(body_list, carry-carryCount*2, CARRY);
-            if (move-carryCount) body_list = AddList(body_list, move-carryCount, MOVE);
             break;
         case ROLES['out-defend']:
             if (tough) body_list = AddList(body_list, tough, TOUGH)

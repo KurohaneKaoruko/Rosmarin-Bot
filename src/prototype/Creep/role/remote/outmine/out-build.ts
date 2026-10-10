@@ -398,7 +398,7 @@ const runRepairPhase = (creep: Creep, source: Source | null): boolean => {
     return OUT_BUILD_SWITCH.TO_SOURCE(creep);
 };
 
-// 无工作时的采集协助卸载：source 容器有空位 > 相邻 out-carry 顺手递 > 满载就地掉落。
+// 无工作时的采集协助卸载：source 容器有空位 > 相邻外矿搬运工顺手递 > 满载就地掉落。
 // 让 out-build 在没有建造/维修工作时跟采集工一起产出，而不是塞满背包站桩。
 const deliverAssistHarvest = (creep: Creep, source: Source): boolean => {
     if (creep.store.getUsedCapacity(RESOURCE_ENERGY) <= 0) return false;
@@ -419,10 +419,10 @@ const deliverAssistHarvest = (creep: Creep, source: Source): boolean => {
         return true;
     }
 
-    // 2) 相邻且有空位的 out-carry：顺手递（接力链直接消化）
+    // 2) 相邻且有空位的外矿搬运工：顺手递（接力链直接消化）
     const carriers = creep.pos.findInRange(FIND_MY_CREEPS, 1, {
         filter: (c: Creep) =>
-            c.memory.role === ROLES['out-carry'] &&
+            c.memory.role === ROLES.carrier &&
             c.store.getFreeCapacity(RESOURCE_ENERGY) > 0
     }) as Creep[];
     if (carriers.length > 0) {
@@ -483,7 +483,7 @@ const runBuildPhase = (creep: Creep): boolean => {
     }
 
     // 没有建造/维修工作：跟采集工一起做采集——
-    // 满载先卸（source 容器 / out-carry / 掉落），其余时间回源相位继续采
+    // 满载先卸（source 容器 / 外矿搬运工 / 掉落），其余时间回源相位继续采
     if (source && deliverAssistHarvest(creep, source)) {
         return OUT_BUILD_SWITCH.TO_SOURCE(creep);
     }

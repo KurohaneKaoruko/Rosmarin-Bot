@@ -260,10 +260,10 @@ export function raceVisual(room: Room): void {
     let ohOnSite = 0;
     for (const creep of Object.values(Game.creeps)) {
         const role = creep.memory?.role;
-        if (role === ROLES['out-carry']) {
+        if (role === ROLES.carrier) {
             ocTotal++;
             if ((creep.memory as any).relayedTick === now) relayThisTick++;
-        } else if (role === ROLES['out-harvest']) {
+        } else if (role === ROLES.harvester) {
             ohTotal++;
             if (creep.pos.roomName === (creep.memory as any).targetRoom) ohOnSite++;
         } else if (role === ROLES.upgrader) {

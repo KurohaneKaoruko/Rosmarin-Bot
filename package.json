@@ -9,7 +9,7 @@
     "push": "node ./scripts/submit.js",
     "push:official": "cross-env DEST=screeps.com@Kaoruko rolldown -c",
     "push:season": "cross-env DEST=screeps.com/season@Kaoruko rolldown -c",
-    "push:local": "cross-env DEST=local rolldown -c",
+    "push:local": "cross-env VARIANT=local DEST=local rolldown -c",
     "lint": "eslint .",
     "test": "vitest run",
     "commit": "git add . && git-cz",

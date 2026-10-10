@@ -10,8 +10,8 @@ import { ROLES } from '@/constant/CreepConstant';
 // 外矿采集工 / 搬运工的角色集合。
 // 两者分别设额度：采集工定编小（单源 1 个）且是搬运的前置，绝不能被搬运队列堵住；
 // 搬运工体型最大、孵化最久，才是真正需要限流的一方。
-export const OUTMINE_HARVEST_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES['out-harvest']]);
-export const OUTMINE_CARRY_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES['out-carry']]);
+export const OUTMINE_HARVEST_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES.harvester]);
+export const OUTMINE_CARRY_ROLE_SET: ReadonlySet<string> = new Set<string>([ROLES.carrier]);
 // 并集：用于「本房整体挂了多少外矿经济任务」的派单排序。
 export const OUTMINE_PENDING_ECONOMY_ROLE_SET: ReadonlySet<string> = new Set([
     ...OUTMINE_HARVEST_ROLE_SET,

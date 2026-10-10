@@ -126,8 +126,8 @@ export class ExternalMineState {
     private static readonly REMOTE_QUEUE_ROLE_SET: ReadonlySet<string> = new Set([
         ROLES['scout'],
         ROLES['reserver'],
-        ROLES['out-harvest'],
-        ROLES['out-carry'],
+        ROLES.harvester,
+        ROLES.carrier,
         ROLES['out-build'],
         ROLES['out-mineral'],
         ROLES['out-attack'],
@@ -801,8 +801,8 @@ export type ExternalMineCarryPlan = {
 };
 
 const EXTERNAL_MINE_ANALYSIS = {
-    OUT_CARRY_ROLE_SET: new Set<string>([ROLES[ROLES['out-carry']]]),
-    OUT_HARVEST_ROLE_SET: new Set<string>([ROLES[ROLES['out-harvest']]]),
+    OUT_CARRY_ROLE_SET: new Set<string>([ROLES.carrier]),
+    OUT_HARVEST_ROLE_SET: new Set<string>([ROLES.harvester]),
     SOURCE_CONTAINER_REPAIR_LOSS:
         (typeof REPAIR_COST === 'number' && typeof CONTAINER_DECAY === 'number' && typeof CONTAINER_DECAY_TIME === 'number')
             ? (REPAIR_COST * CONTAINER_DECAY) / CONTAINER_DECAY_TIME
@@ -1243,7 +1243,7 @@ export class ExternalMineAnalysis {
                 const creep = Game.creeps[name];
                 const memory = creep?.memory as any;
                 if (!memory) continue;
-                if (memory.role !== ROLES[ROLES[ROLES['out-carry']]]) continue;
+                if (memory.role !== ROLES.carrier || !memory.targetRoom) continue;
                 if (memory.sourceRoom !== sourceRoom.name) continue;
                 const targetRoom = memory.targetRoom;
                 if (!targetRoom) continue;
@@ -1256,7 +1256,7 @@ export class ExternalMineAnalysis {
     }
 
     // 每 tick 每源房缓存一次：有「在场产出采集工」的目标房集合。
-    // 在场产出 = 本源房的 out-harvest 物理位于其目标房 + 有 WORK（能采）
+    // 在场产出 = 本源房孵的外矿采集爬物理位于其目标房 + 有 WORK（能采）
     // + 有 CARRY（能装；零 CARRY 的废体型 harvest 永远 ERR_FULL，不算产出）。
     // 在途/孵化中的采集工不算——到场前没有产出。
     // 供搬运派送的「在场产出闸」与重平衡的候选过滤共用。
@@ -1266,7 +1266,7 @@ export class ExternalMineAnalysis {
             for (const name in Game.creeps) {
                 const creep = Game.creeps[name];
                 const memory = creep?.memory as any;
-                if (!memory || memory.role !== ROLES[ROLES[ROLES['out-harvest']]]) continue;
+                if (!memory || memory.role !== ROLES.harvester || !memory.targetRoom) continue;
                 if (memory.sourceRoom !== sourceRoom.name) continue;
                 if (creep.spawning) continue;
                 const targetRoomName = memory.targetRoom;
@@ -1353,7 +1353,7 @@ export class ExternalMineAnalysis {
             const creep = Game.creeps[name];
             const memory = creep?.memory as any;
             if (!memory) continue;
-            if (memory.role !== ROLES[ROLES[ROLES['out-carry']]]) continue;
+            if (memory.role !== ROLES.carrier || !memory.targetRoom) continue;
             if (memory.sourceRoom !== sourceRoomName) continue;
             if (memory.targetRoom !== targetRoomName) continue;
             // 濒死返程的搬运工这趟交完就退休，不再计入运力
@@ -1391,7 +1391,7 @@ export class ExternalMineAnalysis {
                     let harvesters = 0;
                     for (const creep of Object.values(Game.creeps || {})) {
                         if (!creep?.my) continue;
-                        if (creep.memory?.role !== ROLES[ROLES[ROLES['out-harvest']]]) continue;
+                        if (creep.memory?.role !== ROLES.harvester || !creep.memory.targetRoom) continue;
                         if (creep.memory.sourceRoom !== sourceRoom.name) continue;
                         if (creep.memory.targetRoom !== roomName) continue;
                         harvesters++;
@@ -1526,7 +1526,7 @@ class ExternalMineMath {
     // 计算外矿采集者的 WORK 数量，支持 upbody（固定高配）或读取配置。
     static getOutHarvesterWorkParts(sourceRoom: Room, upbody?: boolean): number {
         if (upbody) return 16;
-        const body = sourceRoom.GetRoleBodys(ROLES[ROLES[ROLES['out-harvest']]]);
+        const body = buildRemoteMinerBody(sourceRoom.energyCapacityAvailable, 5, true);
         if (!Array.isArray(body) || body.length === 0) return 1;
 
         let workParts = 0;
@@ -1539,13 +1539,12 @@ class ExternalMineMath {
         return Math.max(1, workParts);
     }
 
-    // 根据体型配置估算 out-carry 的单体承载能力。
+    // 根据体型配置估算外矿搬运的单体承载能力。
     static getOutCarryCapacity(sourceRoom: Room): number {
         // 接力车道（rush）：C4 微型件口径，定编按 200 容量/件折算——
         // 定编必须与实际孵出的体型一致，否则车队目标会被低估 4-6 倍
         if (getRoomMode(sourceRoom) === 'rush') return 200;
-        const modeBody = this.getModeLimitedBodyConfig(sourceRoom, ROLES['out-carry']);
-        const body = modeBody || sourceRoom.GetRoleBodys(ROLES[ROLES[ROLES['out-carry']]]);
+        const body = buildHaulerBodyConfig(sourceRoom.energyCapacityAvailable, { forRoad: true, maxCarry: 16 });
         if (Array.isArray(body) && body.length > 0) {
             let carryParts = 0;
             for (const part of body as ((BodyPartConstant | number)[])[]) {
@@ -1629,15 +1628,15 @@ export class ExternalMineSpawner {
     // 这里的 harvest/carry 只用于角色对齐与阅读参考，不再直接作为入队等级。
     private static readonly PRIORITY = {
         reserver: RoleData[ROLES.reserver].level,
-        harvest: RoleData[ROLES[ROLES['out-harvest']]].level,
-        carry: RoleData[ROLES[ROLES['out-carry']]].level,
+        harvest: 12,
+        carry: 13,
         scout: RoleData[ROLES.scout].level,
         build: RoleData[ROLES[ROLES['out-build']]].level,
         mineral: RoleData[ROLES[ROLES['out-mineral']]].level,
     } as const;
 
     // 采集与搬运的孵化层级：采集(12) 严格优先于搬运(13)，两者都直接读角色配置
-    // （CreepConstant 里 out-harvest.level / out-carry.level 是唯一事实源）。
+    // （词表删键后固化为字面量：采集 12 / 搬运 13，仅作挂单排序口径）。
     // 曾经同层排队（先采后运、谁缺谁先补），但搬运定编（3-4/房）远大于采集定编（1-2/房），
     // 同层先到先孵会让存量搬运任务排在采集补位前面——采集工全灭的房补不上人，
     // 而搬运闸又因为「有排队中的采集工」继续派搬运，形成循环饥饿
@@ -1645,8 +1644,8 @@ export class ExternalMineSpawner {
     // 分层语义：任何缺采集的房先把采集补上（12 压过所有搬运）；
     // 有采集在岗的房不存在竞争中的采集任务，其搬运不会被别房的采集饿死。
     // 搬运的「在场产出闸」（carry）与之配套：没有在场采集工的房根本不派搬运。
-    private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = RoleData[ROLES[ROLES['out-harvest']]].level;
-    private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = RoleData[ROLES[ROLES['out-carry']]].level;
+    private static readonly OUTMINE_HARVEST_PIPELINE_LEVEL = 12;
+    private static readonly OUTMINE_CARRY_PIPELINE_LEVEL = 13;
     // rush 管线等级（对齐参考实现的孵化层序：分发/采集搬运 > 升级 > 建造）：
     // 收入链（矿工 OH + 搬运 OC）整体压在升级前面，升级压在建造前面。
     // 升级不饿死的保障不是层级，而是升级定编有界（=实测收入 + 底火）——
@@ -1852,7 +1851,7 @@ export class ExternalMineSpawner {
         let count = 0;
         for (const creepName in Game.creeps) {
             const creep = Game.creeps[creepName];
-            if (!creep || creep.memory?.role !== ROLES[ROLES[ROLES['out-harvest']]]) continue;
+            if (!creep || creep.memory?.role !== ROLES.harvester || !creep.memory.targetRoom) continue;
             if (creep.memory?.targetRoom !== targetRoomName) continue;
             if (!this.isSameSourceRoom(creep.memory?.sourceRoom, sourceRoom.name)) continue;
             if ((creep.ticksToLive ?? 0) <= minUsefulTtl) continue;
@@ -1868,7 +1867,7 @@ export class ExternalMineSpawner {
         let count = 0;
         for (const creepName in Game.creeps) {
             const creep = Game.creeps[creepName];
-            if (!creep || creep.memory?.role !== ROLES[ROLES[ROLES['out-harvest']]]) continue;
+            if (!creep || creep.memory?.role !== ROLES.harvester || !creep.memory.targetRoom) continue;
             if (creep.memory?.targetRoom !== targetRoomName) continue;
             count++;
         }
@@ -2101,8 +2100,8 @@ export class ExternalMineSpawner {
         // 不再按 sourceRoom 各自算一遍，避免多个源房叠加超孵化。
         // spawnInAdvance：快死的采集者不计入覆盖——接替者提前孵化，外矿不断档
         const globalEffective = this.getEffectiveOutHarvesterNum(sourceRoom, targetRoomName);
-        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal(ROLES['out-harvest'], targetRoomName);
-        const globalSpawning = this.getSpawningRoleNumByTargetGlobal(ROLES['out-harvest'], targetRoomName);
+        const globalQueued = this.getQueuedSpawnRoleNumByTargetGlobal(ROLES.harvester, targetRoomName);
+        const globalSpawning = this.getSpawningRoleNumByTargetGlobal(ROLES.harvester, targetRoomName);
         if (globalEffective + globalQueued + globalSpawning >= targetNum) return false;
         // 工位闸用「所有存活 + 排队 + 孵化中」：换班排除只服务于定编覆盖，不作用于工位上限
         if (slotCap !== null && slotCap > 0) {
@@ -2125,7 +2124,7 @@ export class ExternalMineSpawner {
             ? (getRoomMode(sourceRoom) === 'rush' ? this.OUTMINE_RUSH_CARRY_LEVEL : this.OUTMINE_REPLACEMENT_LEVEL)
             : rushPipelineLevel;
         if (upbody) {
-            return this.addEconomyMission(sourceRoom, 'OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, ROLES['out-harvest'], memory);
+            return this.addEconomyMission(sourceRoom, 'OH', [[WORK, 16], [CARRY, 6], [MOVE, 8]], replaceLevel, ROLES.harvester, memory);
         } else {
             // 体型按当前预算最大化（WORK 优先补到 5、move 保持 0.5 机动比、
             // 自带 1 CARRY 自补）——LOW/CRITICAL 时预算取当前可用能量（
@@ -2144,11 +2143,11 @@ export class ExternalMineSpawner {
             // perSource=ceil(5/4)=2 超编挖）：掉落由外矿车队收取，
             // 550 恰好 [W5,M1] 满效 10e/t，每源 1 只定编
             const body = buildRemoteMinerBody(energyBudget, 5, !rushMode);
-            return this.addEconomyMission(sourceRoom, 'OH', body, replaceLevel, ROLES['out-harvest'], memory);
+            return this.addEconomyMission(sourceRoom, 'OH', body, replaceLevel, ROLES.harvester, memory);
         }
     }
 
-    // 外矿运输者：只孵 out-carry（旧 out-car 角色已退役删除）。
+    // 外矿运输者：以 carrier 角色孵化，走外矿工作位分支。
     static carry(sourceRoom: Room, targetRoom: Room, num: number): boolean {
         // 决策轨迹：拒绝原因进环形缓冲，诊断采样读取（定位搬运断供）
         const trace = (reason: string): false => {
@@ -2167,10 +2166,10 @@ export class ExternalMineSpawner {
         }
 
         const creepByTargetRoom = getCreepByTargetRoom(targetRoom.name);
-        const outerCarry = (creepByTargetRoom[ROLES[ROLES['out-carry']]] || [])
+        const outerCarry = (creepByTargetRoom[ROLES.carrier] || [])
             .filter((c: any) => c.sourceRoom === sourceRoom.name).length;
 
-        const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, ROLES['out-carry'], targetRoom.name);
+        const spawnCarryNum = this.getQueuedSpawnRoleNumByTarget(sourceRoom, ROLES.carrier, targetRoom.name);
         // 体型按当前预算最大化 CARRY（走路段 [C,C,M] 整组扩展）——LOW/CRITICAL 时
         // 预算取当前可用能量（同采集工口径：贫困房也要出得起小搬运，能量回升
         // 每轮派单自动升回满配）。rush 例外：抽水造成的 LOW 不降级收入引擎，
@@ -2200,7 +2199,7 @@ export class ExternalMineSpawner {
                 ? this.OUTMINE_RUSH_CARRY_FAMINE_LEVEL
                 : this.OUTMINE_RUSH_CARRY_LEVEL)
             : this.OUTMINE_CARRY_PIPELINE_LEVEL;
-            const admitted = this.addEconomyMission(sourceRoom, 'OC', carryBody, carryLevel, ROLES['out-carry'], ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
+            const admitted = this.addEconomyMission(sourceRoom, 'OC', carryBody, carryLevel, ROLES.carrier, ExternalMineState.createMemory(sourceRoom.name, targetRoom.name));
             return admitted ? true : trace('budget');
         }
 

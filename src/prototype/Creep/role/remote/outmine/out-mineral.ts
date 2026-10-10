@@ -11,12 +11,12 @@ const OUT_MINERAL_SWITCH = {
     TO_SOURCE: (creep: Creep) => creep.store.getUsedCapacity() === 0
 } as const;
 
-// 尝试交给附近 out-carry
+// 尝试交给附近外矿搬运工
 const transferToNearbyCarrier = (creep: Creep): boolean => {
     const res = Object.keys(creep.store)[0] as ResourceConstant;
     const carriers = getRoomTickCacheValue(creep.room, 'out_mineral_carriers', () =>
         creep.room.find(FIND_MY_CREEPS, {
-            filter: (c) => c.memory.role === ROLES['out-carry']
+            filter: (c) => c.memory.role === ROLES.carrier
         }) as Creep[]
     );
     const nearbyCarrier = carriers.find((c) =>

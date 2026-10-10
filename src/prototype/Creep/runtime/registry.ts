@@ -22,8 +22,6 @@ import upUpgrade from '../role/support/up-upgrade';
 import upRepair from '../role/support/up-repair';
 import dismantle from '../role/support/dismantle';
 import scout from '../role/support/scout';
-import outHarvest from '../role/remote/outmine/out-harvest';
-import outCarry from '../role/remote/outmine/out-carry';
 import outBuild from '../role/remote/outmine/out-build';
 import reserver from '../role/remote/outmine/reserver';
 import { outAttack, outDefend, outInvader, outRanged } from '../role/remote/outmine/out-combat';
@@ -72,9 +70,7 @@ export const roleRegistry: Record<string, RoleHandler> = {
     [EXECUTORS['out-2attack']]: out2Attack,
     [EXECUTORS['out-attack']]: outAttack,
     [EXECUTORS['out-build']]: outBuild,
-    [EXECUTORS['out-carry']]: outCarry,
     [EXECUTORS['out-defend']]: outDefend,
-    [EXECUTORS['out-harvest']]: outHarvest,
     [EXECUTORS['out-invader']]: outInvader,
     [EXECUTORS['out-mineral']]: outMineral,
     [EXECUTORS['out-ranged']]: outRanged,

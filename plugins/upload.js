@@ -27,14 +27,14 @@ function toSingleLine(text) {
     return String(text ?? '').replace(/\s+/g, ' ').trim();
 }
 
-function formatScreepsUploadError(err, { endpoint, branch, usingToken, payloadBytes = 0 }) {
+function formatScreepsUploadError(err, { endpoint, branch, usingToken, payloadBytes = 0, stage = '' }) {
     const status = getErrorStatus(err);
     const code = getErrorCode(err);
     const message = toSingleLine(err?.message ?? err);
     const lower = message.toLowerCase();
 
     const parts = [];
-    parts.push(`Screeps 上传失败：${endpoint} (branch: ${branch})`);
+    parts.push(`Screeps 上传失败${stage ? `（阶段：${stage}）` : ''}：${endpoint} (branch: ${branch})`);
 
     const meta = [];
     if (status) meta.push(`HTTP ${status}`);
@@ -45,12 +45,20 @@ function formatScreepsUploadError(err, { endpoint, branch, usingToken, payloadBy
     const hints = [];
     const networkCodes = new Set(['ENOTFOUND', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'EAI_AGAIN', 'EHOSTUNREACH', 'ENETUNREACH']);
     if (code && networkCodes.has(String(code))) {
-        hints.push('无法连接服务器：检查网络/代理/hostname/port/protocol/path');
+        hints.push(`连不上服务器（${code}）：确认私服已经启动，再核对 hostname / port / protocol / path`);
     }
-    // screeps-api 会把带状态码的原始错误重抛成 new Error(res.data)，状态码丢失；
-    // 空消息且无状态码时，最常见的是请求体超过服务器限制被掐断 (body-parser 413 只回状态码不带 body)。
-    if (!status && !message && payloadBytes > 2 * 1024 * 1024) {
-        hints.push(`载荷 ${(payloadBytes / 1024 / 1024).toFixed(2)}MB 超过服务器请求体限制（实测 >3~4MB 会被掐断）；带上 sourcemap 后上传体必然变大，需调高私服的 body 上限`);
+    // screeps-api 会把带状态码的原始错误重抛成 new Error(res.data)，状态码丢失。
+    // 「无状态码 + 空消息」不等于「载荷超限」：它只说明服务器确实回了响应，但响应体是空的。
+    // xxscreeps 的兜底中间件把端点内任何异常统一改写成 HTTP 500 + 空 body，
+    // 同时在私服控制台打一行 `Unhandled error. Endpoint: …` —— 排障要从那一行开始。
+    if (!status && !message) {
+        hints.push('服务器回了空响应体：xxscreeps 兜底中间件会把端点异常改写成 HTTP 500 + 空 body，私服控制台会打 `Unhandled error. Endpoint: …` —— 先看那一行，再判断是否需要动载荷');
+    }
+    // 体积提示只在「确实在上传代码这一步」且体积真的接近上限时才给。
+    // xxscreeps 默认值（dist/backend/server.js 的 koa-bodyparser jsonLimit、endpoints/user/code.js 的 kCodeSizeLimit）：
+    // 请求体上限 8MB、单分支代码总量上限 5MB。
+    if (stage === '上传代码' && payloadBytes > 4 * 1024 * 1024) {
+        hints.push(`载荷 ${(payloadBytes / 1024 / 1024).toFixed(2)}MB 偏大（xxscreeps 默认 body 上限 8MB / 单分支代码上限 5MB）：可先用 SOURCE_MAP=0 去掉 main.js.map 再传，或调高私服上限`);
     }
     if (status === 401 || status === 403 || lower.includes('unauthorized') || lower.includes('forbidden') || lower.includes('invalid token') || lower.includes('token')) {
         hints.push(usingToken ? '认证失败：token 可能失效/无权限，请重新生成 token' : '认证失败：账号密码可能错误，建议改用 token');
@@ -144,17 +152,39 @@ export function collectDir(baseDir) {
 const resolveBranch = (branch) => (branch === 'auto' ? git.branch() : (branch || 'main'));
 
 // 分支不存在时先克隆一个空分支, 再上传
-async function runUpload(api, branch, code) {
+async function runUpload(api, branch, code, onStage = () => {}) {
+    onStage('拉取分支列表');
     const data = await api.raw.user.branches();
     if (!data || !Array.isArray(data.list)) {
         throw new Error(`branches() 返回异常: ${toSingleLine(JSON.stringify(data)).slice(0, 200)}`);
     }
     const branches = data.list.map((b) => b.branch);
     if (branches.includes(branch)) {
+        onStage('上传代码');
         await api.code.set(branch, code);
     }
     else {
+        onStage('创建分支');
         await api.raw.user.cloneBranch('', branch, code);
+    }
+}
+
+// 上传前探活：私服没启动时，后续请求只会拿到含糊的连接错误或空响应，
+// 先明确报「服务器无响应」，免得把「服务器没开」误诊成「载荷超限」。
+// UPLOAD_PREFLIGHT=0 可跳过（极少数不提供 /api/version 的环境）。
+async function assertServerReachable(api, endpoint) {
+    if (process.env.UPLOAD_PREFLIGHT === '0') return;
+    const nudge = '本地私服没在运行？先把它启动起来再重试';
+    let res;
+    try {
+        res = await api.http.get('/api/version', { timeout: 8000, validateStatus: () => true });
+    } catch (err) {
+        const detail = [getErrorCode(err), toSingleLine(err?.message ?? err)].filter(Boolean).join(' ');
+        throw new Error(`服务器无响应：${endpoint} —— ${detail || '连接失败'}；${nudge}`);
+    }
+    if (!res || res.status >= 500) {
+        const body = toSingleLine(typeof res?.data === 'string' ? res.data : JSON.stringify(res?.data ?? '')).slice(0, 200);
+        throw new Error(`服务器无响应：${endpoint} —— HTTP ${res?.status ?? '?'} ${body || '(空响应体)'}；${nudge}`);
     }
 }
 
@@ -173,16 +203,21 @@ export async function uploadCode(config, code) {
         sum + (typeof item === 'string' ? Buffer.byteLength(item) : Math.ceil(item.binary.length * 0.75))
     ), 0);
 
+    let stage = '探活';
     try {
         console.log(`[submit] 阶段 2/2: 上传 -> ${endpoint} (分支 ${branch}, 载荷 ${(payloadBytes / 1024 / 1024).toFixed(2)}MB${hasSourceMap ? ', 含 main.js.map' : ''})`);
+        await assertServerReachable(api, endpoint);
+        stage = '认证';
         // 账密配置总是重新登录: 私服会轮换 token, 固定 token 过期会导致 Not Authorized
         if (config.email && config.password) {
             await api.auth();
         } else if (!config.token) {
             throw new Error('配置缺少 token 或 email/password，无法认证');
         }
-        await runUpload(api, branch, code);
+        await runUpload(api, branch, code, (next) => {
+            stage = next;
+        });
     } catch (err) {
-        throw new Error(formatScreepsUploadError(err, { endpoint, branch, usingToken, payloadBytes }));
+        throw new Error(formatScreepsUploadError(err, { endpoint, branch, usingToken, payloadBytes, stage }));
     }
 }

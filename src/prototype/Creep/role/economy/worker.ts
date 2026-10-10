@@ -64,7 +64,8 @@ const isEarlyRushEnabled = (room: Room) => {
     return mode === 'rush';
 }
 
-const getBuildSitePriority = (room: Room, site: ConstructionSite) => {
+// 导出供单测锁定工地优先级口径（纯函数，无副作用；race 依赖闭包不消费 worker 角色）
+export const getBuildSitePriority = (room: Room, site: ConstructionSite) => {
     const remaining = Math.max(0, site.progressTotal - site.progress);
     const remainingBucket = Math.min(90, Math.floor(remaining / 500));
 

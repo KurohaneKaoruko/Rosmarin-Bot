@@ -22,7 +22,7 @@ import {
     RoleSpawnCheck,
     getDowngradeUniversalSpawnMissing,
     getMyConstructionSites,
-    REMOTE_POOL_ROLES,
+    isRemotePoolTask,
     type SpawnCheckContext,
 } from './spawnRules';
 
@@ -38,6 +38,33 @@ export {
     pruneRushRemoteMissions,
     effectiveSpawnLevel,
 } from './spawnRules';
+
+/**
+ * rush 期体型现算（两个孵化落点统一入口）。
+ *
+ * - carrier：收口到 `GetRoleBodys` 的搬运动态体型特例——接力期 `maxCarry 4` 小体型快周转、
+ *   lv7+ 直运放开 32、`forRoad` 按**建成的搬运路网覆盖率 ≥ 1/3**。与常规路径**同一口径**，
+ *   消除「rush 走 `[C×2g, M×g]` 无上限组、绕开 hauler 口径」的双轨。
+ * - harvester / upgrader / worker：走 rush 容量现算生成器（upgrader 传升级缺口与 carryRatio）。
+ *
+ * @returns 体型配置；null = 当前预算不足最小体型（调用方跳过，不发单）
+ */
+const buildRushSpawnBody = (
+    room: Room,
+    role: RoleId,
+    budget: number,
+): ((BodyPartConstant | number)[])[] | null => {
+    if (role === ROLES.carrier) {
+        const body = (room as any).GetRoleBodys?.(ROLES.carrier, undefined, budget) as
+            ((BodyPartConstant | number)[])[] | undefined;
+        return Array.isArray(body) && body.length > 0 ? body : null;
+    }
+    return buildRushBody(
+        role,
+        budget,
+        role === ROLES.upgrader ? { maxWork: getUpgradeWorkTarget(room), carryRatio: 1 } : {},
+    );
+};
 
 export default class SpawnMission extends Room {
     /**
@@ -130,7 +157,10 @@ export default class SpawnMission extends Room {
             const budget = role === ROLES.harvester && this.level <= 3
                 ? this.energyCapacityAvailable
                 : this.energyAvailable;
-            const rushBody = buildRushBody(role, budget);
+            // 升级工按缺口封顶（参考实现 upgraderMaxWork 口径，carryRatio=1）；
+            // harvester 走默认 maxWork（单矿再生上限）/needCarry=false（rush 低 RCL 无源链）；
+            // carrier 收口到 GetRoleBodys 的搬运动态体型口径（见 buildRushSpawnBody）
+            const rushBody = buildRushSpawnBody(this, role, budget);
             // 预算不足最小体型：本轮不发单（空 body 会落到动态取表，且让后续统计踩空）
             if (!rushBody) return;
             body = rushBody as any;
@@ -311,7 +341,7 @@ export class SpawnTaskGetter extends Room {
         // 外矿角色不在此处理：无等级表（GetRoleBodys 会返回空 → Infinity），
         // 其体型由派单侧每轮重铺时按预算现算（externalMine 的 buildRemoteMinerBody 口径）
         if (RUSH_BODY_ROLES.has(role) && getRoomMode(this) === 'rush') {
-            body = (buildRushBody(role, energyAvailable) ?? '') as any;
+            body = (buildRushSpawnBody(this, role, energyAvailable) ?? '') as any;
         }
         const hasFixedBody = (typeof body === 'string' && !!body) || (Array.isArray(body) && body.length > 0);
         let requiredEnergy = Number(data.energy || 0);
@@ -325,7 +355,7 @@ export class SpawnTaskGetter extends Room {
                 ((state === 'LOW' || state === 'CRITICAL') &&
                 SPAWN_GETTER_BUDGET_ROLES.has(role)) ||
                 (role === ROLES.worker && getMyConstructionSites(this).length > 0) ||
-                (getRoomMode(this) === 'rush' && REMOTE_POOL_ROLES.has(role));
+                (getRoomMode(this) === 'rush' && isRemotePoolTask(task));
             const budget = allowBudgetSpawn ? energyAvailable : undefined;
             body = this.GetRoleBodys(role, data.upbody, budget);
             const bodypart = this.GenerateBodys(body as any[], role);
@@ -363,7 +393,7 @@ export class SpawnTaskGetter extends Room {
             if (phantomAt && Game.time < phantomAt) continue;
             if (bootstrapHarvesterOnly) {
                 const taskRole = getSpawnTaskRole(task.data as SpawnTask);
-                if (REMOTE_POOL_ROLES.has(taskRole as string)) {
+                if (isRemotePoolTask(task)) {
                     // 外矿线：解锁闩未开前不出（本矿链饱和才轮到外矿），解锁后永不拦
                     if (!isRoomRemoteUnlocked(this)) continue;
                 } else if (taskRole !== ROLES.harvester && taskRole !== ROLES.upgrader && taskRole !== ROLES.universal) {
@@ -383,13 +413,16 @@ export class SpawnTaskGetter extends Room {
         const picked = pickSpawnMission(selection, pickOptions);
         if (!picked) return null;
 
-        // 收入链连跑保险：外矿 8 房的 OH/OC 挂单每轮重铺（L4/L5 常驻海），
+        // 收入链连跑保险：外矿 8 房的采集/搬运挂单每轮重铺（L4/L5 常驻海），
         // 升级单（L7）在严格优先级下永远轮不到——attempt 22 实测 RCL2 冻结 2k+ tick。
         // 连续 2 只收入链孵化后，升级单强制插队一次：收入链占 2/3 节拍，升级保 1/3，
         // 有界让位、双向不饿死（升级单不存在/孵不起时收入链照常连跑）。
         const memAny = this.memory as any;
-        const pickedRole = (picked.data as any)?.memory?.role;
-        if (picked.level >= 4 && picked.level <= 6 && (pickedRole === ROLES['out-harvest'] || pickedRole === ROLES['out-carry'])) {
+        const pickedMem = (picked.data as any)?.memory;
+        const pickedRole = pickedMem?.role;
+        const isRemoteEconomy = !!pickedMem?.sourceRoom && !!pickedMem?.targetRoom
+            && (pickedRole === ROLES.harvester || pickedRole === ROLES.carrier);
+        if (picked.level >= 4 && picked.level <= 6 && isRemoteEconomy) {
             memAny.incomeChainRun = (memAny.incomeChainRun || 0) + 1;
         } else {
             memAny.incomeChainRun = 0;

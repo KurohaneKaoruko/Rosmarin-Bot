@@ -345,9 +345,16 @@ export const shouldSpawnRole = (
 
 // ==================== rush 外矿受控让位 ====================
 
-// 外矿链挂单角色（含预订）
-const REMOTE_POOL_ROLES: ReadonlySet<string> = new Set([ROLES['out-harvest'], ROLES['out-carry'], ROLES['out-build'], ROLES['out-defend'], ROLES.reserver]);
+// 外矿链挂单角色（含预订）；carrier/harvester 不入集合——家内同角色，经 isRemotePoolTask 双字段判别
+const REMOTE_POOL_ROLES: ReadonlySet<string> = new Set([ROLES['out-build'], ROLES['out-defend'], ROLES.reserver]);
 export { REMOTE_POOL_ROLES };
+// 外矿任务判别：固定外矿角色直判；合并角色以 sourceRoom+targetRoom 双字段标识远端工作位
+const isRemotePoolTask = (task: Task): boolean => {
+    const memory = (task.data as any)?.memory || {};
+    if (REMOTE_POOL_ROLES.has(memory.role || '')) return true;
+    return !!(memory.sourceRoom && memory.targetRoom);
+};
+export { isRemotePoolTask };
 /** rush 期外矿挂单池上限（防孵化池灌爆事故复发） */
 export const RUSH_REMOTE_POOL_CAP = 6;
 /**
@@ -371,7 +378,7 @@ export const RUSH_REMOTE_ECONOMY_LEVEL_FLOOR = 7;
  * @returns 清除的挂单数
  */
 export const pruneRushRemoteMissions = (room: Room, pool: Task[]): number => {
-    const remote = (pool || []).filter(t => REMOTE_POOL_ROLES.has((t.data as any)?.memory?.role || ''));
+    const remote = (pool || []).filter(isRemotePoolTask);
     if (remote.length === 0) return 0;
     let removed = 0;
     // 阶段门：RCL1 禁开（spawn 只有 300 容量，任何外矿体型都挤占本矿）；
@@ -406,10 +413,10 @@ export const effectiveSpawnLevel = (room: Room, task: Task): number => {
     // reserver 豁免让位：预定决定外矿 source 容量（有预定 3000 / 无 1500），是收入倍增器；
     // 每房仅 1 只不会灌池，压到 L9 会在孵化繁忙期永久饿死（与 reserve 提级 L6 的设计冲突）
     if (role === ROLES.reserver) return task.level;
-    if (!REMOTE_POOL_ROLES.has(role)) return task.level;
+    if (!isRemotePoolTask(task)) return task.level;
     // 参考 TASK_TYPES 序：REMOTE_SOURCE 仅高于普通 UPGRADE——经济外矿压到升级单同档，
     // 本矿采集 L3/搬运 L4/worker L5 恒先于外矿；预算准入与每房挂单上限继续防灌池
-    if (role === ROLES['out-harvest'] || role === ROLES['out-carry']) {
+    if (role === ROLES.harvester || role === ROLES.carrier) {
         return Math.max(task.level, RUSH_REMOTE_ECONOMY_LEVEL_FLOOR);
     }
     return Math.max(task.level, RUSH_REMOTE_LEVEL_FLOOR);
